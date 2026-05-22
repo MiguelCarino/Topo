@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serverless Network Diagrammer & IP Validator</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        .grid-bg {
+            background-color: #ffffff;
+            background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        /* Scrollbar styling for sidebar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans h-screen flex flex-col overflow-hidden">
+
+    <header class="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shadow-md shrink-0 z-20">
+        <div class="flex items-center gap-3">
+            <span class="text-2xl">🌐</span>
+            <div>
+                <h1 class="text-xl font-bold tracking-tight">NetTopology Designer</h1>
+                <p class="text-xs text-slate-400">Client-side only • URL state persistent</p>
+            </div>
+        </div>
+        <div class="flex gap-2">
+            <button id="exportImageBtn" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded text-sm font-medium transition shadow-sm flex items-center gap-2">
+                <span>🖼️</span> Export PNG
+            </button>
+            <button id="copyUrlBtn" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded text-sm font-medium transition shadow-sm flex items-center gap-2">
+                <span>🔗</span> Share Link
+            </button>
+            <button id="clearCanvasBtn" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2 rounded text-sm font-medium transition">
+                Clear
+            </button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden relative">
+        
+        <aside class="w-80 bg-white border-r border-gray-200 flex flex-col shrink-0 shadow-sm z-10 h-full">
+            
+            <div class="p-4 border-b border-gray-100 bg-slate-50/50">
+                <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">1. Action Mode</h2>
+                <div class="flex rounded-md shadow-xs bg-gray-200 p-1">
+                    <button id="modeDrag" class="flex-1 text-center py-1.5 text-xs font-medium rounded bg-white text-gray-900 shadow-xs cursor-pointer">
+                        🖐️ Drag Nodes
+                    </button>
+                    <button id="modeLink" class="flex-1 text-center py-1.5 text-xs font-medium rounded text-gray-600 hover:text-gray-900 cursor-pointer">
+                        🔌 Link Ports
+                    </button>
+                </div>
+            </div>
+
+            <div class="p-4 border-b border-gray-100 flex-1 overflow-y-auto">
+                <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">2. Add Components</h2>
+                <div class="grid grid-cols-2 gap-2" id="nodePalette">
+                    <button data-type="cloud" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
+                        <span class="text-2xl mb-1">☁️</span> <span class="text-[11px] font-medium text-gray-700">Cloud</span>
+                    </button>
+                    <button data-type="router" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
+                        <span class="text-2xl mb-1">⎔</span> <span class="text-[11px] font-medium text-gray-700">Router</span>
+                    </button>
+                    <button data-type="firewall" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
+                        <span class="text-2xl mb-1">🧱</span> <span class="text-[11px] font-medium text-gray-700">Firewall</span>
+                    </button>
+                    <button data-type="switch" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
+                        <span class="text-2xl mb-1">☴</span> <span class="text-[11px] font-medium text-gray-700">Switch</span>
+                    </button>
+                    <button data-type="server" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
+                        <span class="text-2xl mb-1">🖥️</span> <span class="text-[11px] font-medium text-gray-700">Server</span>
+                    </button>
+                    <button data-type="pc" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
+                        <span class="text-2xl mb-1">💻</span> <span class="text-[11px] font-medium text-gray-700">Workstation</span>
+                    </button>
+                    
+                    <button data-type="iot" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
+                        <span class="text-2xl mb-1">📡</span> <span class="text-[11px] font-medium text-gray-700">IoT Device</span>
+                    </button>
+                    <button data-type="phoneswitch" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
+                        <span class="text-2xl mb-1">☎️</span> <span class="text-[11px] font-medium text-gray-700">Phone Switch</span>
+                    </button>
+                    <button data-type="console" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
+                        <span class="text-2xl mb-1">⌨️</span> <span class="text-[11px] font-medium text-gray-700">Console</span>
+                    </button>
+                    <button data-type="tv" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
+                        <span class="text-2xl mb-1">📺</span> <span class="text-[11px] font-medium text-gray-700">Smart TV / Signage</span>
+                    </button>
+                    <button data-type="dicom" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
+                        <span class="text-2xl mb-1">🏥</span> <span class="text-[11px] font-medium text-gray-700">DICOM / PACS</span>
+                    </button>
+                    <button data-type="printer" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
+                        <span class="text-2xl mb-1">🖨️</span> <span class="text-[11px] font-medium text-gray-700">Printer</span>
+                    </button>
+                    <button data-type="custom" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer col-span-2">
+                        <span class="text-2xl mb-1">📦</span> <span class="text-[11px] font-medium text-gray-700">Custom Node</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-gray-100 bg-white">
+                <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">3. Properties</h2>
+                
+                <div id="noSelectionPane" class="text-center py-4 text-gray-400 text-xs">
+                    Select a component to edit.
+                </div>
+
+                <div id="propertiesPane" class="hidden flex-col gap-3">
+                    <div>
+                        <label class="block text-[11px] font-medium text-gray-500 mb-1">Component Name</label>
+                        <input type="text" id="propName" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-medium text-gray-500 mb-1">IPv4 Address / CIDR</label>
+                        <input type="text" id="propIp" placeholder="e.g. 192.168.1.10/24" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm font-mono focus:outline-blue-500">
+                        <div id="ipFeedback" class="mt-1 text-[10px] font-medium hidden"></div>
+                    </div>
+                    <div class="pt-1 flex gap-2">
+                        <button id="deleteElementBtn" class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-1.5 rounded text-xs font-medium transition">
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="flex-1 relative overflow-hidden bg-gray-50 grid-bg" id="canvasContainer">
+            <svg id="networkCanvas" class="w-full h-full absolute inset-0 select-none cursor-grab active:cursor-grabbing"></svg>
+        </main>
+        
+        <div id="conflictAlert" class="absolute top-4 right-4 bg-amber-50 border border-amber-300 rounded-lg p-3 shadow-md max-w-sm hidden z-20 animate-fade-in">
+            <div class="flex gap-2">
+                <span class="text-amber-500 font-bold text-lg">⚠️</span>
+                <div>
+                    <h4 class="text-xs font-bold text-amber-900">Network Topology Conflict</h4>
+                    <p id="conflictMsg" class="text-[11px] text-amber-700 mt-0.5 leading-relaxed"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const state = {
+            nodes: [], links: [], selectedId: null, selectedType: null, mode: 'drag', linkSourceId: null, draggedNode: null, dragOffset: { x: 0, y: 0 }
+        };
+
+        const icons = {
+            cloud: '☁️', router: '⎔', firewall: '🧱', switch: '☴', server: '🖥️', pc: '💻',
+            iot: '📡', phoneswitch: '☎️', console: '⌨️', tv: '📺', dicom: '🏥', printer: '🖨️', custom: '📦'
+        };
+
+        const canvas = document.getElementById('networkCanvas');
+        const propertiesPane = document.getElementById('propertiesPane');
+        const noSelectionPane = document.getElementById('noSelectionPane');
+        const propName = document.getElementById('propName');
+        const propIp = document.getElementById('propIp');
+        const ipFeedback = document.getElementById('ipFeedback');
+        const conflictAlert = document.getElementById('conflictAlert');
+        const conflictMsg = document.getElementById('conflictMsg');
+
+        const defaultState = {
+            nodes: [
+                { id: "n1", type: "cloud", name: "Public Internet", x: 250, y: 80, ip: "" },
+                { id: "n2", type: "firewall", name: "Edge Firewall", x: 250, y: 190, ip: "10.0.0.1/24" },
+                { id: "n3", type: "switch", name: "Core Switch", x: 250, y: 310, ip: "" },
+                { id: "n4", type: "server", name: "App Server", x: 100, y: 450, ip: "10.0.0.10/24" },
+                { id: "n5", type: "pc", name: "Workstation", x: 250, y: 450, ip: "10.0.0.20/24" },
+                { id: "n6", type: "dicom", name: "MRI Scanner", x: 400, y: 450, ip: "10.0.0.30/24" },
+                { id: "n7", type: "iot", name: "HVAC Sensor", x: 550, y: 450, ip: "10.0.0.40/24" }
+            ],
+            links: [
+                { id: "l1", source: "n1", target: "n2" }, { id: "l2", source: "n2", target: "n3" },
+                { id: "l3", source: "n3", target: "n4" }, { id: "l4", source: "n3", target: "n5" },
+                { id: "l5", source: "n3", target: "n6" }, { id: "l6", source: "n3", target: "n7" }
+            ]
+        };
+
+        // Network Validation & IP Parsing
+        function parseCIDR(cidr) {
+            if (!cidr || !cidr.includes('/')) return null;
+            const parts = cidr.trim().split('/');
+            if (parts.length !== 2) return null;
+            
+            const ipStr = parts[0];
+            const maskStr = parts[1];
+            const mask = parseInt(maskStr, 10);
+            if (isNaN(mask) || mask < 0 || mask > 32) return null;
+
+            const ipOctets = ipStr.split('.');
+            if (ipOctets.length !== 4) return null;
+            
+            let ipNum = 0;
+            for (let i = 0; i < 4; i++) {
+                const octet = parseInt(ipOctets[i], 10);
+                if (isNaN(octet) || octet < 0 || octet > 255) return null;
+                ipNum = (ipNum << 8) + octet;
+            }
+
+            const netmask = mask === 0 ? 0 : (~0 << (32 - mask));
+            const network = ipNum & netmask;
+            return { ipNum, mask, network, ipStr };
+        }
+
+        function validateNetworkTopology() {
+            conflictAlert.classList.add('hidden');
+            let foundConflict = false;
+            const ipMap = {};
+            state.nodes.forEach(n => {
+                if (!n.ip) return;
+                const parsed = parseCIDR(n.ip);
+                if (!parsed) return;
+                
+                if (ipMap[parsed.ipStr]) {
+                    ipMap[parsed.ipStr].push(n.name);
+                    foundConflict = true;
+                    conflictMsg.innerText = `IP Conflict: [${parsed.ipStr}] is duplicated on nodes: ${ipMap[parsed.ipStr].join(', ')}.`;
+                    conflictAlert.classList.remove('hidden');
+                } else {
+                    ipMap[parsed.ipStr] = [n.name];
+                }
+            });
+
+            if (foundConflict) return;
+
+            for (let link of state.links) {
+                const nodeA = state.nodes.find(n => n.id === link.source);
+                const nodeB = state.nodes.find(n => n.id === link.target);
+                if (!nodeA || !nodeB || !nodeA.ip || !nodeB.ip || nodeA.type === 'switch' || nodeB.type === 'switch') continue;
+
+                const parseA = parseCIDR(nodeA.ip);
+                const parseB = parseCIDR(nodeB.ip);
+
+                if (parseA && parseB && (parseA.network !== parseB.network || parseA.mask !== parseB.mask)) {
+                    conflictMsg.innerText = `Subnet Mismatch: "${nodeA.name}" and "${nodeB.name}" are linked but sit on different subnets.`;
+                    conflictAlert.classList.remove('hidden');
+                    break;
+                }
+            }
+        }
+
+        // Serialization
+        function saveStateToUrl() {
+            try {
+                const encoded = btoa(encodeURIComponent(JSON.stringify({ nodes: state.nodes, links: state.links })));
+                window.history.replaceState(null, '', '#' + encoded);
+            } catch (err) { console.error("Serialization failed", err); }
+        }
+
+        function loadStateFromUrl() {
+            const hash = window.location.hash.substring(1);
+            if (!hash) {
+                state.nodes = JSON.parse(JSON.stringify(defaultState.nodes));
+                state.links = JSON.parse(JSON.stringify(defaultState.links));
+                return;
+            }
+            try {
+                const parsed = JSON.parse(decodeURIComponent(atob(hash)));
+                state.nodes = parsed.nodes || [];
+                state.links = parsed.links || [];
+            } catch (e) {
+                state.nodes = JSON.parse(JSON.stringify(defaultState.nodes));
+                state.links = JSON.parse(JSON.stringify(defaultState.links));
+            }
+        }
+
+        // Canvas Rendering
+        function renderCanvas() {
+            canvas.innerHTML = '';
+            
+            // Draw Links
+            state.links.forEach(link => {
+                const sourceNode = state.nodes.find(n => n.id === link.source);
+                const targetNode = state.nodes.find(n => n.id === link.target);
+                if (!sourceNode || !targetNode) return;
+
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', sourceNode.x); line.setAttribute('y1', sourceNode.y);
+                line.setAttribute('x2', targetNode.x); line.setAttribute('y2', targetNode.y);
+                
+                const isSelected = state.selectedId === link.id && state.selectedType === 'link';
+                line.setAttribute('stroke', isSelected ? '#3b82f6' : '#64748b');
+                line.setAttribute('stroke-width', isSelected ? '4' : '2.5');
+                line.setAttribute('class', 'cursor-pointer transition-all');
+                
+                line.addEventListener('click', (e) => { e.stopPropagation(); selectElement(link.id, 'link'); });
+                canvas.appendChild(line);
+            });
+
+            // Draw Nodes
+            state.nodes.forEach(node => {
+                const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                group.setAttribute('transform', `translate(${node.x}, ${node.y})`);
+                group.setAttribute('class', 'cursor-pointer');
+
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', '-30'); rect.setAttribute('y', '-30');
+                rect.setAttribute('width', '60'); rect.setAttribute('height', '60');
+                rect.setAttribute('rx', '8');
+                
+                const isSelected = state.selectedId === node.id && state.selectedType === 'node';
+                rect.setAttribute('fill', isSelected ? '#eff6ff' : '#ffffff');
+                rect.setAttribute('stroke', isSelected ? '#3b82f6' : '#cbd5e1');
+                rect.setAttribute('stroke-width', isSelected ? '2.5' : '1.5');
+                group.appendChild(rect);
+
+                const textIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                textIcon.setAttribute('text-anchor', 'middle');
+                textIcon.setAttribute('y', '8');
+                textIcon.setAttribute('font-size', '24');
+                textIcon.textContent = icons[node.type] || '📦';
+                group.appendChild(textIcon);
+
+                const textLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                textLabel.setAttribute('text-anchor', 'middle');
+                textLabel.setAttribute('y', '46');
+                textLabel.setAttribute('font-size', '12');
+                textLabel.setAttribute('font-weight', '600');
+                textLabel.setAttribute('fill', '#1e293b');
+                textLabel.textContent = node.name;
+                group.appendChild(textLabel);
+
+                if (node.ip) {
+                    const textIp = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    textIp.setAttribute('text-anchor', 'middle');
+                    textIp.setAttribute('y', '60');
+                    textIp.setAttribute('font-size', '10');
+                    textIp.setAttribute('font-family', 'monospace');
+                    textIp.setAttribute('fill', '#64748b');
+                    textIp.textContent = node.ip;
+                    group.appendChild(textIp);
+                }
+
+                group.addEventListener('mousedown', (e) => handleNodeMouseDown(e, node));
+                group.addEventListener('click', (e) => handleNodeClick(e, node));
+                canvas.appendChild(group);
+            });
+
+            validateNetworkTopology();
+        }
+
+        // Image Export Engine
+        function exportCanvasToPng() {
+            // 1. Serialize SVG
+            const serializer = new XMLSerializer();
+            let svgString = serializer.serializeToString(canvas);
+            
+            // Fix namespaces for reliable rendering
+            if (!svgString.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)) {
+                svgString = svgString.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+            }
+            if (!svgString.match(/^<svg[^>]+"http\:\/\/www\.w3\.org\/1999\/xlink"/)) {
+                svgString = svgString.replace(/^<svg/, '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
+            }
+
+            // Include grid background dynamically via a <rect> if needed, or fill context later.
+            svgString = '<?xml version="1.0" standalone="no"?>\r\n' + svgString;
+            
+            // 2. Convert to Data URL
+            const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgString);
+            
+            // 3. Draw on offscreen canvas
+            const img = new Image();
+            img.onload = function() {
+                const tempCanvas = document.createElement("canvas");
+                const rect = canvas.getBoundingClientRect();
+                
+                // Add padding and find bounds to crop perfectly (or just use viewport bounds)
+                tempCanvas.width = rect.width;
+                tempCanvas.height = rect.height;
+                const ctx = tempCanvas.getContext("2d");
+                
+                // Draw background grid (matching CSS)
+                ctx.fillStyle = "#ffffff";
+                ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+                
+                // Draw SVG Image
+                ctx.drawImage(img, 0, 0);
+                
+                // 4. Download
+                const pngUrl = tempCanvas.toDataURL("image/png");
+                const downloadLink = document.createElement("a");
+                downloadLink.href = pngUrl;
+                downloadLink.download = "network-topology.png";
+                document.body.appendChild(downloadLink);
+                downloadLink.click();
+                document.body.removeChild(downloadLink);
+            };
+            img.src = url;
+        }
+
+        // Interaction Handling
+        function handleNodeMouseDown(e, node) {
+            if (state.mode !== 'drag') return;
+            e.stopPropagation();
+            state.draggedNode = node;
+            const rect = canvas.getBoundingClientRect();
+            state.dragOffset.x = e.clientX - rect.left - node.x;
+            state.dragOffset.y = e.clientY - rect.top - node.y;
+        }
+
+        function handleNodeClick(e, node) {
+            e.stopPropagation();
+            if (state.mode === 'link') {
+                if (!state.linkSourceId) {
+                    state.linkSourceId = node.id;
+                    propIp.value = "Select target component...";
+                } else {
+                    if (state.linkSourceId !== node.id) {
+                        const duplicate = state.links.some(l => 
+                            (l.source === state.linkSourceId && l.target === node.id) ||
+                            (l.source === node.id && l.target === state.linkSourceId)
+                        );
+                        if (!duplicate) {
+                            state.links.push({ id: 'l_' + Date.now(), source: state.linkSourceId, target: node.id });
+                            saveStateToUrl(); renderCanvas();
+                        }
+                    }
+                    state.linkSourceId = null;
+                }
+            } else {
+                selectElement(node.id, 'node');
+            }
+        }
+
+        function selectElement(id, type) {
+            state.selectedId = id; state.selectedType = type;
+            if (!id) {
+                propertiesPane.classList.add('hidden');
+                noSelectionPane.style.display = "block";
+                return;
+            }
+            noSelectionPane.style.display = "none";
+            propertiesPane.classList.remove('hidden'); propertiesPane.classList.add('flex');
+
+            if (type === 'node') {
+                const node = state.nodes.find(n => n.id === id);
+                propName.value = node.name; propIp.value = node.ip || '';
+                propName.disabled = false; propIp.disabled = false;
+                validateIpInput(node.ip || '');
+            } else if (type === 'link') {
+                const link = state.links.find(l => l.id === id);
+                const sourceNode = state.nodes.find(n => n.id === link.source);
+                const targetNode = state.nodes.find(n => n.id === link.target);
+                propName.value = `${sourceNode.name} ↔ ${targetNode.name}`;
+                propIp.value = "Direct Connection";
+                propName.disabled = true; propIp.disabled = true;
+                ipFeedback.classList.add('hidden');
+            }
+            renderCanvas();
+        }
+
+        function validateIpInput(val) {
+            if (!val.trim()) { ipFeedback.classList.add('hidden'); return true; }
+            const res = parseCIDR(val);
+            ipFeedback.classList.remove('hidden');
+            if (!res) {
+                ipFeedback.className = "mt-1 text-[10px] font-medium text-red-500";
+                ipFeedback.innerText = "❌ Invalid format (e.g., 10.0.0.1/24)";
+            } else {
+                ipFeedback.className = "mt-1 text-[10px] font-medium text-green-600";
+                ipFeedback.innerText = `✓ Valid IP. Subnet: /${res.mask}`;
+            }
+        }
+
+        // Global Listeners
+        window.addEventListener('mousemove', (e) => {
+            if (!state.draggedNode) return;
+            const rect = canvas.getBoundingClientRect();
+            state.draggedNode.x = Math.max(40, Math.min(rect.width - 40, e.clientX - rect.left - state.dragOffset.x));
+            state.draggedNode.y = Math.max(40, Math.min(rect.height - 40, e.clientY - rect.top - state.dragOffset.y));
+            renderCanvas();
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (state.draggedNode) { state.draggedNode = null; saveStateToUrl(); }
+        });
+
+        canvas.addEventListener('click', () => { state.linkSourceId = null; selectElement(null, null); });
+
+        // Build Elements
+        document.querySelectorAll('.palette-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const type = btn.getAttribute('data-type');
+                const newNode = {
+                    id: 'n_' + Date.now(), type: type,
+                    name: `New ${type.charAt(0).toUpperCase() + type.slice(1)}`,
+                    x: 100 + Math.random() * 50, y: 100 + Math.random() * 50, ip: ''
+                };
+                state.nodes.push(newNode);
+                saveStateToUrl(); renderCanvas(); selectElement(newNode.id, 'node');
+            });
+        });
+
+        propName.addEventListener('input', () => {
+            if (state.selectedId && state.selectedType === 'node') {
+                const node = state.nodes.find(n => n.id === state.selectedId);
+                node.name = propName.value; saveStateToUrl(); renderCanvas();
+            }
+        });
+
+        propIp.addEventListener('input', () => {
+            if (state.selectedId && state.selectedType === 'node') {
+                const node = state.nodes.find(n => n.id === state.selectedId);
+                node.ip = propIp.value; validateIpInput(propIp.value); saveStateToUrl(); renderCanvas();
+            }
+        });
+
+        // Action Buttons
+        document.getElementById('exportImageBtn').addEventListener('click', exportCanvasToPng);
+
+        document.getElementById('deleteElementBtn').addEventListener('click', () => {
+            if (!state.selectedId) return;
+            if (state.selectedType === 'node') {
+                state.nodes = state.nodes.filter(n => n.id !== state.selectedId);
+                state.links = state.links.filter(l => l.source !== state.selectedId && l.target !== state.selectedId);
+            } else { state.links = state.links.filter(l => l.id !== state.selectedId); }
+            saveStateToUrl(); selectElement(null, null); renderCanvas();
+        });
+
+        document.getElementById('clearCanvasBtn').addEventListener('click', () => {
+            if(confirm("Clear this network configuration?")) {
+                state.nodes = []; state.links = [];
+                saveStateToUrl(); selectElement(null, null); renderCanvas();
+            }
+        });
+
+        document.getElementById('copyUrlBtn').addEventListener('click', () => {
+            navigator.clipboard.writeText(window.location.href).then(() => {
+                alert("Topology state encoded into URL and copied to clipboard!");
+            });
+        });
+
+        const modeDragBtn = document.getElementById('modeDrag');
+        const modeLinkBtn = document.getElementById('modeLink');
+
+        modeDragBtn.addEventListener('click', () => {
+            state.mode = 'drag'; state.linkSourceId = null;
+            modeDragBtn.className = "flex-1 text-center py-1.5 text-xs font-medium rounded bg-white text-gray-900 shadow-xs cursor-pointer";
+            modeLinkBtn.className = "flex-1 text-center py-1.5 text-xs font-medium rounded text-gray-600 hover:text-gray-900 cursor-pointer";
+        });
+
+        modeLinkBtn.addEventListener('click', () => {
+            state.mode = 'link';
+            modeLinkBtn.className = "flex-1 text-center py-1.5 text-xs font-medium rounded bg-white text-gray-900 shadow-xs cursor-pointer";
+            modeDragBtn.className = "flex-1 text-center py-1.5 text-xs font-medium rounded text-gray-600 hover:text-gray-900 cursor-pointer";
+        });
+
+        window.addEventListener('popstate', () => { loadStateFromUrl(); renderCanvas(); });
+
+        loadStateFromUrl(); renderCanvas();
+    </script>
+</body>
+</html>
