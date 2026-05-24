@@ -3,141 +3,209 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Serverless Network Diagrammer & IP Validator</title>
+    <title>Advanced Network Diagrammer</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ipaddr.js/2.1.0/ipaddr.min.js"></script>
     <style>
-        .grid-bg {
-            background-color: #ffffff;
-            background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
-            background-size: 20px 20px;
-        }
-        /* Scrollbar styling for sidebar */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        
+        .grid-bg {
+            background-color: #f8fafc;
+            background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+        }
     </style>
 </head>
-<body class="bg-gray-100 font-sans h-screen flex flex-col overflow-hidden">
+<body class="bg-gray-100 font-sans h-screen flex flex-col overflow-hidden text-slate-800">
 
-    <header class="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shadow-md shrink-0 z-20">
+    <!-- Header -->
+    <header class="bg-slate-900 text-white px-6 py-3 flex justify-between items-center shadow-md z-20 shrink-0">
         <div class="flex items-center gap-3">
             <span class="text-2xl">🌐</span>
             <div>
-                <h1 class="text-xl font-bold tracking-tight">NetTopology Designer</h1>
-                <p class="text-xs text-slate-400">Client-side only • URL state persistent</p>
+                <h1 class="text-lg font-bold tracking-tight">NetTopology Pro</h1>
+                <p class="text-[10px] text-slate-400">IPv4/IPv6 • Subnet validation • URL persistent</p>
             </div>
         </div>
-        <div class="flex gap-2">
-            <button id="exportImageBtn" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded text-sm font-medium transition shadow-sm flex items-center gap-2">
+        
+        <div class="flex items-center gap-4">
+            <label class="flex items-center gap-2 cursor-pointer text-sm font-medium text-slate-300 hover:text-white transition">
+                <input type="checkbox" id="toggleConflicts" checked class="rounded bg-slate-800 border-slate-600 accent-blue-500 w-4 h-4">
+                Live Validation
+            </label>
+            <div class="w-px h-6 bg-slate-700"></div>
+            <button id="exportImageBtn" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded text-xs font-medium transition flex items-center gap-2">
                 <span>🖼️</span> Export PNG
             </button>
-            <button id="copyUrlBtn" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded text-sm font-medium transition shadow-sm flex items-center gap-2">
+            <button id="copyUrlBtn" class="bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded text-xs font-medium transition flex items-center gap-2">
                 <span>🔗</span> Share Link
             </button>
-            <button id="clearCanvasBtn" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2 rounded text-sm font-medium transition">
+            <button id="clearCanvasBtn" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-xs font-medium transition">
                 Clear
             </button>
         </div>
     </header>
 
+    <!-- Main Workspace -->
     <div class="flex flex-1 overflow-hidden relative">
         
-        <aside class="w-80 bg-white border-r border-gray-200 flex flex-col shrink-0 shadow-sm z-10 h-full">
+        <!-- Sidebar -->
+        <aside class="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-sm z-10 h-full">
             
-            <div class="p-4 border-b border-gray-100 bg-slate-50/50">
-                <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">1. Action Mode</h2>
-                <div class="flex rounded-md shadow-xs bg-gray-200 p-1">
-                    <button id="modeDrag" class="flex-1 text-center py-1.5 text-xs font-medium rounded bg-white text-gray-900 shadow-xs cursor-pointer">
-                        🖐️ Drag Nodes
+            <!-- Mode Toggle -->
+            <div class="p-4 border-b border-slate-100 bg-slate-50/50">
+                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">1. Action Mode</h2>
+                <div class="flex rounded shadow-sm bg-slate-200 p-1">
+                    <button id="modeDrag" class="flex-1 text-center py-1 text-xs font-medium rounded bg-white text-slate-900 shadow-sm transition">
+                        🖐️ Drag
                     </button>
-                    <button id="modeLink" class="flex-1 text-center py-1.5 text-xs font-medium rounded text-gray-600 hover:text-gray-900 cursor-pointer">
-                        🔌 Link Ports
+                    <button id="modeLink" class="flex-1 text-center py-1 text-xs font-medium rounded text-slate-600 hover:text-slate-900 transition">
+                        🔌 Link
                     </button>
                 </div>
             </div>
 
-            <div class="p-4 border-b border-gray-100 flex-1 overflow-y-auto">
-                <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">2. Add Components</h2>
+            <!-- Node Palette -->
+            <div class="p-4 border-b border-slate-100 flex-1 overflow-y-auto">
+                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">2. Library</h2>
                 <div class="grid grid-cols-2 gap-2" id="nodePalette">
-                    <button data-type="cloud" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
-                        <span class="text-2xl mb-1">☁️</span> <span class="text-[11px] font-medium text-gray-700">Cloud</span>
+                    <button data-type="cloud" class="palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer">
+                        <span class="text-xl">☁️</span> <span class="text-[10px] font-medium mt-1">Cloud</span>
                     </button>
-                    <button data-type="router" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
-                        <span class="text-2xl mb-1">⎔</span> <span class="text-[11px] font-medium text-gray-700">Router</span>
+                    <button data-type="router" class="palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer">
+                        <span class="text-xl">⎔</span> <span class="text-[10px] font-medium mt-1">Router</span>
                     </button>
-                    <button data-type="firewall" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
-                        <span class="text-2xl mb-1">🧱</span> <span class="text-[11px] font-medium text-gray-700">Firewall</span>
+                    <button data-type="firewall" class="palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer">
+                        <span class="text-xl">🧱</span> <span class="text-[10px] font-medium mt-1">Firewall</span>
                     </button>
-                    <button data-type="switch" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
-                        <span class="text-2xl mb-1">☴</span> <span class="text-[11px] font-medium text-gray-700">Switch</span>
+                    <button data-type="switch" class="palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer">
+                        <span class="text-xl">☴</span> <span class="text-[10px] font-medium mt-1">Switch</span>
                     </button>
-                    <button data-type="server" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
-                        <span class="text-2xl mb-1">🖥️</span> <span class="text-[11px] font-medium text-gray-700">Server</span>
+                    <button data-type="server" class="palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer">
+                        <span class="text-xl">🖥️</span> <span class="text-[10px] font-medium mt-1">Server</span>
                     </button>
-                    <button data-type="pc" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
-                        <span class="text-2xl mb-1">💻</span> <span class="text-[11px] font-medium text-gray-700">Workstation</span>
+                    <button data-type="pc" class="palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer">
+                        <span class="text-xl">💻</span> <span class="text-[10px] font-medium mt-1">Workstation</span>
                     </button>
-                    
-                    <button data-type="iot" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
-                        <span class="text-2xl mb-1">📡</span> <span class="text-[11px] font-medium text-gray-700">IoT Device</span>
+                    <button data-type="iot" class="palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer">
+                        <span class="text-xl">📡</span> <span class="text-[10px] font-medium mt-1">IoT Device</span>
                     </button>
-                    <button data-type="phoneswitch" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
-                        <span class="text-2xl mb-1">☎️</span> <span class="text-[11px] font-medium text-gray-700">Phone Switch</span>
+                    <button data-type="dicom" class="palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer">
+                        <span class="text-xl">🏥</span> <span class="text-[10px] font-medium mt-1">Medical/DICOM</span>
                     </button>
-                    <button data-type="console" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
-                        <span class="text-2xl mb-1">⌨️</span> <span class="text-[11px] font-medium text-gray-700">Console</span>
-                    </button>
-                    <button data-type="tv" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
-                        <span class="text-2xl mb-1">📺</span> <span class="text-[11px] font-medium text-gray-700">Smart TV / Signage</span>
-                    </button>
-                    <button data-type="dicom" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
-                        <span class="text-2xl mb-1">🏥</span> <span class="text-[11px] font-medium text-gray-700">DICOM / PACS</span>
-                    </button>
-                    <button data-type="printer" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer">
-                        <span class="text-2xl mb-1">🖨️</span> <span class="text-[11px] font-medium text-gray-700">Printer</span>
-                    </button>
-                    <button data-type="custom" class="palette-item flex flex-col items-center p-3 bg-slate-50 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer col-span-2">
-                        <span class="text-2xl mb-1">📦</span> <span class="text-[11px] font-medium text-gray-700">Custom Node</span>
+                    <button data-type="custom" class="palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer col-span-2">
+                        <span class="text-xl">📦</span> <span class="text-[10px] font-medium mt-1">Custom Node</span>
                     </button>
                 </div>
             </div>
 
-            <div class="p-4 border-t border-gray-100 bg-white">
-                <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">3. Properties</h2>
+            <!-- Properties Panel -->
+            <div class="p-4 border-t border-slate-100 bg-white flex flex-col shrink-0 h-[60%] overflow-y-auto">
+                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">3. Configuration</h2>
                 
-                <div id="noSelectionPane" class="text-center py-4 text-gray-400 text-xs">
-                    Select a component to edit.
+                <div id="noSelectionPane" class="text-center py-4 text-slate-400 text-xs italic">
+                    Select a node or link to edit.
                 </div>
 
-                <div id="propertiesPane" class="hidden flex-col gap-3">
+                <div id="propertiesPane" class="hidden flex-col gap-3 pb-6">
                     <div>
-                        <label class="block text-[11px] font-medium text-gray-500 mb-1">Component Name</label>
-                        <input type="text" id="propName" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-blue-500">
+                        <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Name</label>
+                        <input type="text" id="propName" class="w-full border border-slate-300 rounded px-2 py-1 text-sm focus:outline-blue-500">
                     </div>
-                    <div>
-                        <label class="block text-[11px] font-medium text-gray-500 mb-1">IPv4 Address / CIDR</label>
-                        <input type="text" id="propIp" placeholder="e.g. 192.168.1.10/24" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm font-mono focus:outline-blue-500">
-                        <div id="ipFeedback" class="mt-1 text-[10px] font-medium hidden"></div>
+                    
+                    <div id="nodeOnlyProps">
+                        <!-- Primary Networking: IP alongside Subnet & Ports -->
+                        <div class="grid grid-cols-2 gap-3 mb-3">
+                            <div>
+                                <div class="flex justify-between items-end mb-1">
+                                    <label class="block text-[10px] font-bold text-slate-500 uppercase">IPs (CIDR)</label>
+                                    <button id="addIpBtn" class="text-[10px] text-blue-600 hover:underline font-bold">+ IP</button>
+                                </div>
+                                <div id="ipListContainer" class="flex flex-col gap-2">
+                                    <!-- Injected via JS -->
+                                </div>
+                            </div>
+                            <div class="flex flex-col gap-2">
+                                <div>
+                                    <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Subnet Mask</label>
+                                    <input type="text" id="propMask" placeholder="255.255.255.0" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Port(s)</label>
+                                    <input type="text" id="propPorts" placeholder="80, 443" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Routing -->
+                        <div class="grid grid-cols-2 gap-2 mb-3">
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Gateway</label>
+                                <input type="text" id="propGw" placeholder="e.g. 10.0.0.1" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">DNS</label>
+                                <input type="text" id="propDns" placeholder="e.g. 8.8.8.8" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500">
+                            </div>
+                        </div>
+
+                        <!-- Advanced Tags -->
+                        <div class="grid grid-cols-2 gap-2 mb-2 pt-2 border-t border-slate-100">
+                            <div class="col-span-2">
+                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">OS</label>
+                                <input type="text" id="propOs" list="osDatalist" placeholder="Linux / Windows / IOS" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500">
+                                <datalist id="osDatalist"></datalist>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">SSH Ver</label>
+                                <input type="text" id="propSsh" placeholder="OpenSSH 8.9" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Cert</label>
+                                <input type="text" id="propCert" placeholder="RSA Exp 2026" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Info / Notes</label>
+                            <textarea id="propNotes" rows="3" placeholder="Relevant configuration notes..." class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500"></textarea>
+                        </div>
                     </div>
-                    <div class="pt-1 flex gap-2">
-                        <button id="deleteElementBtn" class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-1.5 rounded text-xs font-medium transition">
-                            Delete
+
+                    <div class="pt-2 border-t border-slate-100 mt-auto">
+                        <button id="deleteElementBtn" class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-1.5 rounded text-xs font-bold transition flex justify-center items-center gap-1">
+                            <span>🗑️</span> Delete Selected
                         </button>
                     </div>
                 </div>
             </div>
         </aside>
 
-        <main class="flex-1 relative overflow-hidden bg-gray-50 grid-bg" id="canvasContainer">
-            <svg id="networkCanvas" class="w-full h-full absolute inset-0 select-none cursor-grab active:cursor-grabbing"></svg>
+        <!-- Canvas Area -->
+        <main class="flex-1 relative overflow-hidden grid-bg" id="canvasContainer">
+            <div class="absolute bottom-4 right-4 z-10 flex flex-col bg-white rounded shadow-md border border-slate-200 text-slate-600">
+                <button id="zoomInBtn" class="p-2 hover:bg-slate-100 border-b border-slate-200" title="Zoom In">➕</button>
+                <button id="zoomResetBtn" class="p-2 hover:bg-slate-100 border-b border-slate-200 font-bold text-xs" title="Reset View">1:1</button>
+                <button id="zoomOutBtn" class="p-2 hover:bg-slate-100" title="Zoom Out">➖</button>
+            </div>
+            <div class="absolute bottom-4 left-4 z-10 text-[10px] text-slate-500 bg-white/80 px-2 py-1 rounded shadow-sm">
+                Pan: Middle-Click Drag | Zoom: Scroll | Delete: Del | Deselect: Esc
+            </div>
+
+            <!-- SVG Canvas -->
+            <svg id="networkCanvas" class="w-full h-full absolute inset-0 select-none">
+                <g id="workspace"></g>
+            </svg>
         </main>
         
-        <div id="conflictAlert" class="absolute top-4 right-4 bg-amber-50 border border-amber-300 rounded-lg p-3 shadow-md max-w-sm hidden z-20 animate-fade-in">
+        <!-- Conflict Alert Overlay -->
+        <div id="conflictAlert" class="absolute top-4 right-4 bg-amber-50 border-l-4 border-amber-500 rounded p-3 shadow-lg max-w-md hidden z-20 transition-all">
             <div class="flex gap-2">
                 <span class="text-amber-500 font-bold text-lg">⚠️</span>
-                <div>
-                    <h4 class="text-xs font-bold text-amber-900">Network Topology Conflict</h4>
-                    <p id="conflictMsg" class="text-[11px] text-amber-700 mt-0.5 leading-relaxed"></p>
+                <div class="flex-1">
+                    <h4 class="text-xs font-bold text-amber-900 uppercase">Validation Alerts</h4>
+                    <ul id="conflictMsgList" class="text-[11px] text-amber-800 mt-1 list-disc pl-3 space-y-1"></ul>
                 </div>
             </div>
         </div>
@@ -145,413 +213,515 @@
 
     <script>
         const state = {
-            nodes: [], links: [], selectedId: null, selectedType: null, mode: 'drag', linkSourceId: null, draggedNode: null, dragOffset: { x: 0, y: 0 }
+            nodes: [], links: [],
+            selectedId: null, selectedType: null,
+            mode: 'drag', 
+            linkSourceId: null,
+            settings: { showConflicts: true },
+            camera: { x: 0, y: 0, zoom: 1 }
         };
+
+        const GRID_SNAP = 20;
 
         const icons = {
-            cloud: '☁️', router: '⎔', firewall: '🧱', switch: '☴', server: '🖥️', pc: '💻',
-            iot: '📡', phoneswitch: '☎️', console: '⌨️', tv: '📺', dicom: '🏥', printer: '🖨️', custom: '📦'
+            cloud: '☁️', router: '⎔', firewall: '🧱', switch: '☴', server: '🖥️', pc: '💻', iot: '📡', dicom: '🏥', custom: '📦'
         };
 
+        const initialDataDefaults = {
+            cloud: { os: 'Cloud-Native', ports: '80, 443' },
+            router: { os: 'Cisco IOS', ports: '22, 179' },
+            firewall: { os: 'pfSense', ports: '443, 22' },
+            switch: { os: 'SwitchOS', ports: '22' },
+            server: { os: 'Linux Ubuntu', ports: '80, 443, 22' },
+            pc: { os: 'Windows 11', ports: '' },
+            iot: { os: 'FreeRTOS', ports: '1883' },
+            dicom: { os: 'Windows Embedded', ports: '104, 443' },
+            custom: { os: '', ports: '' }
+        };
+
+        // DOM Elements
+        const canvasContainer = document.getElementById('canvasContainer');
         const canvas = document.getElementById('networkCanvas');
+        const workspace = document.getElementById('workspace');
         const propertiesPane = document.getElementById('propertiesPane');
         const noSelectionPane = document.getElementById('noSelectionPane');
-        const propName = document.getElementById('propName');
-        const propIp = document.getElementById('propIp');
-        const ipFeedback = document.getElementById('ipFeedback');
+        const nodeOnlyProps = document.getElementById('nodeOnlyProps');
+        const ipListContainer = document.getElementById('ipListContainer');
         const conflictAlert = document.getElementById('conflictAlert');
-        const conflictMsg = document.getElementById('conflictMsg');
+        const conflictMsgList = document.getElementById('conflictMsgList');
+        const osDatalist = document.getElementById('osDatalist');
 
-        const defaultState = {
-            nodes: [
-                { id: "n1", type: "cloud", name: "Public Internet", x: 250, y: 80, ip: "" },
-                { id: "n2", type: "firewall", name: "Edge Firewall", x: 250, y: 190, ip: "10.0.0.1/24" },
-                { id: "n3", type: "switch", name: "Core Switch", x: 250, y: 310, ip: "" },
-                { id: "n4", type: "server", name: "App Server", x: 100, y: 450, ip: "10.0.0.10/24" },
-                { id: "n5", type: "pc", name: "Workstation", x: 250, y: 450, ip: "10.0.0.20/24" },
-                { id: "n6", type: "dicom", name: "MRI Scanner", x: 400, y: 450, ip: "10.0.0.30/24" },
-                { id: "n7", type: "iot", name: "HVAC Sensor", x: 550, y: 450, ip: "10.0.0.40/24" }
-            ],
-            links: [
-                { id: "l1", source: "n1", target: "n2" }, { id: "l2", source: "n2", target: "n3" },
-                { id: "l3", source: "n3", target: "n4" }, { id: "l4", source: "n3", target: "n5" },
-                { id: "l5", source: "n3", target: "n6" }, { id: "l6", source: "n3", target: "n7" }
-            ]
-        };
+        // Interaction state
+        let isDraggingCanvas = false;
+        let isDraggingNode = false;
+        let draggedNode = null;
+        let dragOffset = { x: 0, y: 0 };
+        let lastMouse = { x: 0, y: 0 };
 
-        // Network Validation & IP Parsing
-        function parseCIDR(cidr) {
-            if (!cidr || !cidr.includes('/')) return null;
-            const parts = cidr.trim().split('/');
-            if (parts.length !== 2) return null;
-            
-            const ipStr = parts[0];
-            const maskStr = parts[1];
-            const mask = parseInt(maskStr, 10);
-            if (isNaN(mask) || mask < 0 || mask > 32) return null;
-
-            const ipOctets = ipStr.split('.');
-            if (ipOctets.length !== 4) return null;
-            
-            let ipNum = 0;
-            for (let i = 0; i < 4; i++) {
-                const octet = parseInt(ipOctets[i], 10);
-                if (isNaN(octet) || octet < 0 || octet > 255) return null;
-                ipNum = (ipNum << 8) + octet;
-            }
-
-            const netmask = mask === 0 ? 0 : (~0 << (32 - mask));
-            const network = ipNum & netmask;
-            return { ipNum, mask, network, ipStr };
-        }
-
-        function validateNetworkTopology() {
-            conflictAlert.classList.add('hidden');
-            let foundConflict = false;
-            const ipMap = {};
-            state.nodes.forEach(n => {
-                if (!n.ip) return;
-                const parsed = parseCIDR(n.ip);
-                if (!parsed) return;
-                
-                if (ipMap[parsed.ipStr]) {
-                    ipMap[parsed.ipStr].push(n.name);
-                    foundConflict = true;
-                    conflictMsg.innerText = `IP Conflict: [${parsed.ipStr}] is duplicated on nodes: ${ipMap[parsed.ipStr].join(', ')}.`;
-                    conflictAlert.classList.remove('hidden');
-                } else {
-                    ipMap[parsed.ipStr] = [n.name];
-                }
-            });
-
-            if (foundConflict) return;
-
-            for (let link of state.links) {
-                const nodeA = state.nodes.find(n => n.id === link.source);
-                const nodeB = state.nodes.find(n => n.id === link.target);
-                if (!nodeA || !nodeB || !nodeA.ip || !nodeB.ip || nodeA.type === 'switch' || nodeB.type === 'switch') continue;
-
-                const parseA = parseCIDR(nodeA.ip);
-                const parseB = parseCIDR(nodeB.ip);
-
-                if (parseA && parseB && (parseA.network !== parseB.network || parseA.mask !== parseB.mask)) {
-                    conflictMsg.innerText = `Subnet Mismatch: "${nodeA.name}" and "${nodeB.name}" are linked but sit on different subnets.`;
-                    conflictAlert.classList.remove('hidden');
-                    break;
-                }
-            }
-        }
-
-        // Serialization
-        function saveStateToUrl() {
+        function parseValidCIDR(cidrStr) {
             try {
-                const encoded = btoa(encodeURIComponent(JSON.stringify({ nodes: state.nodes, links: state.links })));
-                window.history.replaceState(null, '', '#' + encoded);
-            } catch (err) { console.error("Serialization failed", err); }
+                if (!cidrStr.includes('/')) return null;
+                const [ipStr, prefix] = cidrStr.split('/');
+                const ip = ipaddr.parse(ipStr);
+                const cidr = ipaddr.parseCIDR(cidrStr);
+                return { ip, prefix: parseInt(prefix, 10), kind: ip.kind(), cidrObj: cidr };
+            } catch (e) { return null; }
         }
 
-        function loadStateFromUrl() {
-            const hash = window.location.hash.substring(1);
-            if (!hash) {
-                state.nodes = JSON.parse(JSON.stringify(defaultState.nodes));
-                state.links = JSON.parse(JSON.stringify(defaultState.links));
+        function validateTopology() {
+            if (!state.settings.showConflicts) {
+                conflictAlert.classList.add('hidden');
                 return;
             }
-            try {
-                const parsed = JSON.parse(decodeURIComponent(atob(hash)));
-                state.nodes = parsed.nodes || [];
-                state.links = parsed.links || [];
-            } catch (e) {
-                state.nodes = JSON.parse(JSON.stringify(defaultState.nodes));
-                state.links = JSON.parse(JSON.stringify(defaultState.links));
+            const errors = [];
+            const ipMap = {};
+            
+            state.nodes.forEach(n => {
+                (n.ips || []).forEach(ipStr => {
+                    const parsed = parseValidCIDR(ipStr);
+                    if (parsed) {
+                        const cleanIP = parsed.ip.toString();
+                        if (ipMap[cleanIP]) ipMap[cleanIP].push(n.name);
+                        else ipMap[cleanIP] = [n.name];
+                    }
+                });
+            });
+            Object.entries(ipMap).forEach(([ip, names]) => {
+                if (names.length > 1) errors.push(`IP Conflict: ${ip} is assigned to ${names.join(' and ')}.`);
+            });
+
+            state.nodes.forEach(n => {
+                const validIPs = (n.ips || []).map(parseValidCIDR).filter(i => i !== null);
+                if (n.gw && validIPs.length > 0) {
+                    try {
+                        const gwIp = ipaddr.parse(n.gw);
+                        const gwReachable = validIPs.some(local => gwIp.match(local.cidrObj));
+                        if (!gwReachable) errors.push(`${n.name}: Gateway ${n.gw} is unreachable (not on any assigned subnet).`);
+                    } catch (e) { errors.push(`${n.name}: Invalid Gateway format.`); }
+                }
+                if (n.dns && validIPs.length > 0) {
+                    try {
+                        const dnsIp = ipaddr.parse(n.dns);
+                        const isLocal = validIPs.some(local => dnsIp.match(local.cidrObj));
+                        if (!isLocal && !n.gw) errors.push(`${n.name}: DNS ${n.dns} is external, but no default Gateway is configured.`);
+                    } catch (e) { errors.push(`${n.name}: Invalid DNS format.`); }
+                }
+            });
+
+            state.links.forEach(link => {
+                const a = state.nodes.find(x => x.id === link.source);
+                const b = state.nodes.find(x => x.id === link.target);
+                if (!a || !b || a.type === 'switch' || b.type === 'switch' || a.type === 'cloud' || b.type === 'cloud') return;
+
+                const ipsA = (a.ips || []).map(parseValidCIDR).filter(i => i !== null);
+                const ipsB = (b.ips || []).map(parseValidCIDR).filter(i => i !== null);
+
+                if (ipsA.length > 0 && ipsB.length > 0) {
+                    let hasMatchingSubnet = false;
+                    for (let ipA of ipsA) {
+                        for (let ipB of ipsB) {
+                            if (ipA.kind === ipB.kind && ipA.ip.match(ipB.cidrObj) && ipB.ip.match(ipA.cidrObj)) {
+                                hasMatchingSubnet = true; break;
+                            }
+                        }
+                    }
+                    if (!hasMatchingSubnet) errors.push(`Subnet Mismatch: Direct link between ${a.name} & ${b.name} lacks a shared subnet.`);
+                }
+            });
+
+            if (errors.length > 0) {
+                conflictMsgList.innerHTML = errors.map(e => `<li>${e}</li>`).join('');
+                conflictAlert.classList.remove('hidden');
+            } else {
+                conflictAlert.classList.add('hidden');
             }
         }
 
-        // Canvas Rendering
-        function renderCanvas() {
-            canvas.innerHTML = '';
+        function updateOSDatalist() {
+            const osSet = new Set();
+            state.nodes.forEach(n => {
+                if (n.os && n.os.trim() !== '') osSet.add(n.os.trim());
+            });
+            osDatalist.innerHTML = '';
+            osSet.forEach(os => {
+                const opt = document.createElement('option');
+                opt.value = os;
+                osDatalist.appendChild(opt);
+            });
+        }
+
+        function applyCamera() {
+            workspace.setAttribute('transform', `translate(${state.camera.x}, ${state.camera.y}) scale(${state.camera.zoom})`);
+            const bgSize = GRID_SNAP * state.camera.zoom;
+            canvasContainer.style.backgroundSize = `${bgSize}px ${bgSize}px`;
+            canvasContainer.style.backgroundPosition = `${state.camera.x}px ${state.camera.y}px`;
+        }
+
+        function renderCanvasOnly() {
+            workspace.innerHTML = '';
             
-            // Draw Links
             state.links.forEach(link => {
-                const sourceNode = state.nodes.find(n => n.id === link.source);
-                const targetNode = state.nodes.find(n => n.id === link.target);
-                if (!sourceNode || !targetNode) return;
+                const src = state.nodes.find(n => n.id === link.source);
+                const tgt = state.nodes.find(n => n.id === link.target);
+                if (!src || !tgt) return;
 
                 const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                line.setAttribute('x1', sourceNode.x); line.setAttribute('y1', sourceNode.y);
-                line.setAttribute('x2', targetNode.x); line.setAttribute('y2', targetNode.y);
+                line.setAttribute('x1', src.x); line.setAttribute('y1', src.y);
+                line.setAttribute('x2', tgt.x); line.setAttribute('y2', tgt.y);
                 
-                const isSelected = state.selectedId === link.id && state.selectedType === 'link';
-                line.setAttribute('stroke', isSelected ? '#3b82f6' : '#64748b');
-                line.setAttribute('stroke-width', isSelected ? '4' : '2.5');
-                line.setAttribute('class', 'cursor-pointer transition-all');
-                
-                line.addEventListener('click', (e) => { e.stopPropagation(); selectElement(link.id, 'link'); });
-                canvas.appendChild(line);
+                const isSel = state.selectedId === link.id && state.selectedType === 'link';
+                line.setAttribute('stroke', isSel ? '#3b82f6' : '#94a3b8');
+                line.setAttribute('stroke-width', isSel ? '4' : '2.5');
+                line.setAttribute('class', 'cursor-pointer transition-colors');
+                line.addEventListener('mousedown', (e) => { e.stopPropagation(); select(link.id, 'link'); });
+                workspace.appendChild(line);
             });
 
-            // Draw Nodes
             state.nodes.forEach(node => {
-                const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-                group.setAttribute('transform', `translate(${node.x}, ${node.y})`);
-                group.setAttribute('class', 'cursor-pointer');
+                const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                g.setAttribute('transform', `translate(${node.x}, ${node.y})`);
+                g.setAttribute('class', state.mode === 'drag' ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair');
 
                 const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
                 rect.setAttribute('x', '-30'); rect.setAttribute('y', '-30');
                 rect.setAttribute('width', '60'); rect.setAttribute('height', '60');
                 rect.setAttribute('rx', '8');
                 
-                const isSelected = state.selectedId === node.id && state.selectedType === 'node';
-                rect.setAttribute('fill', isSelected ? '#eff6ff' : '#ffffff');
-                rect.setAttribute('stroke', isSelected ? '#3b82f6' : '#cbd5e1');
-                rect.setAttribute('stroke-width', isSelected ? '2.5' : '1.5');
-                group.appendChild(rect);
+                const isSel = state.selectedId === node.id && state.selectedType === 'node';
+                rect.setAttribute('fill', isSel ? '#eff6ff' : '#ffffff');
+                rect.setAttribute('stroke', isSel ? '#3b82f6' : '#cbd5e1');
+                rect.setAttribute('stroke-width', isSel ? '2.5' : '1.5');
+                rect.style.transition = 'all 0.1s ease';
+                g.appendChild(rect);
 
-                const textIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                textIcon.setAttribute('text-anchor', 'middle');
-                textIcon.setAttribute('y', '8');
-                textIcon.setAttribute('font-size', '24');
-                textIcon.textContent = icons[node.type] || '📦';
-                group.appendChild(textIcon);
+                const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                icon.setAttribute('text-anchor', 'middle'); icon.setAttribute('y', '8');
+                icon.setAttribute('font-size', '24');
+                icon.textContent = icons[node.type] || '📦';
+                icon.style.pointerEvents = 'none';
+                g.appendChild(icon);
 
-                const textLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                textLabel.setAttribute('text-anchor', 'middle');
-                textLabel.setAttribute('y', '46');
-                textLabel.setAttribute('font-size', '12');
-                textLabel.setAttribute('font-weight', '600');
-                textLabel.setAttribute('fill', '#1e293b');
-                textLabel.textContent = node.name;
-                group.appendChild(textLabel);
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                label.setAttribute('text-anchor', 'middle'); label.setAttribute('y', '46');
+                label.setAttribute('font-size', '11'); label.setAttribute('font-weight', '600');
+                label.setAttribute('fill', '#334155');
+                label.textContent = node.name;
+                label.style.pointerEvents = 'none';
+                g.appendChild(label);
 
-                if (node.ip) {
-                    const textIp = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    textIp.setAttribute('text-anchor', 'middle');
-                    textIp.setAttribute('y', '60');
-                    textIp.setAttribute('font-size', '10');
-                    textIp.setAttribute('font-family', 'monospace');
-                    textIp.setAttribute('fill', '#64748b');
-                    textIp.textContent = node.ip;
-                    group.appendChild(textIp);
+                if (node.ips && node.ips.length > 0 && node.ips[0].trim() !== "") {
+                    const ipLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    ipLabel.setAttribute('text-anchor', 'middle'); ipLabel.setAttribute('y', '58');
+                    ipLabel.setAttribute('font-size', '9'); ipLabel.setAttribute('font-family', 'monospace');
+                    ipLabel.setAttribute('fill', '#64748b');
+                    ipLabel.textContent = node.ips[0] + (node.ips.length > 1 ? ` (+${node.ips.length-1})` : '');
+                    ipLabel.style.pointerEvents = 'none';
+                    g.appendChild(ipLabel);
                 }
 
-                group.addEventListener('mousedown', (e) => handleNodeMouseDown(e, node));
-                group.addEventListener('click', (e) => handleNodeClick(e, node));
-                canvas.appendChild(group);
-            });
-
-            validateNetworkTopology();
-        }
-
-        // Image Export Engine
-        function exportCanvasToPng() {
-            // 1. Serialize SVG
-            const serializer = new XMLSerializer();
-            let svgString = serializer.serializeToString(canvas);
-            
-            // Fix namespaces for reliable rendering
-            if (!svgString.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)) {
-                svgString = svgString.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
-            }
-            if (!svgString.match(/^<svg[^>]+"http\:\/\/www\.w3\.org\/1999\/xlink"/)) {
-                svgString = svgString.replace(/^<svg/, '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
-            }
-
-            // Include grid background dynamically via a <rect> if needed, or fill context later.
-            svgString = '<?xml version="1.0" standalone="no"?>\r\n' + svgString;
-            
-            // 2. Convert to Data URL
-            const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgString);
-            
-            // 3. Draw on offscreen canvas
-            const img = new Image();
-            img.onload = function() {
-                const tempCanvas = document.createElement("canvas");
-                const rect = canvas.getBoundingClientRect();
-                
-                // Add padding and find bounds to crop perfectly (or just use viewport bounds)
-                tempCanvas.width = rect.width;
-                tempCanvas.height = rect.height;
-                const ctx = tempCanvas.getContext("2d");
-                
-                // Draw background grid (matching CSS)
-                ctx.fillStyle = "#ffffff";
-                ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-                
-                // Draw SVG Image
-                ctx.drawImage(img, 0, 0);
-                
-                // 4. Download
-                const pngUrl = tempCanvas.toDataURL("image/png");
-                const downloadLink = document.createElement("a");
-                downloadLink.href = pngUrl;
-                downloadLink.download = "network-topology.png";
-                document.body.appendChild(downloadLink);
-                downloadLink.click();
-                document.body.removeChild(downloadLink);
-            };
-            img.src = url;
-        }
-
-        // Interaction Handling
-        function handleNodeMouseDown(e, node) {
-            if (state.mode !== 'drag') return;
-            e.stopPropagation();
-            state.draggedNode = node;
-            const rect = canvas.getBoundingClientRect();
-            state.dragOffset.x = e.clientX - rect.left - node.x;
-            state.dragOffset.y = e.clientY - rect.top - node.y;
-        }
-
-        function handleNodeClick(e, node) {
-            e.stopPropagation();
-            if (state.mode === 'link') {
-                if (!state.linkSourceId) {
-                    state.linkSourceId = node.id;
-                    propIp.value = "Select target component...";
-                } else {
-                    if (state.linkSourceId !== node.id) {
-                        const duplicate = state.links.some(l => 
-                            (l.source === state.linkSourceId && l.target === node.id) ||
-                            (l.source === node.id && l.target === state.linkSourceId)
-                        );
-                        if (!duplicate) {
-                            state.links.push({ id: 'l_' + Date.now(), source: state.linkSourceId, target: node.id });
-                            saveStateToUrl(); renderCanvas();
+                g.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    if (state.mode === 'drag') {
+                        isDraggingNode = true; draggedNode = node;
+                        const pt = getWorkspacePoint(e.clientX, e.clientY);
+                        dragOffset.x = pt.x - node.x; dragOffset.y = pt.y - node.y;
+                        select(node.id, 'node');
+                    } else if (state.mode === 'link') {
+                        if (!state.linkSourceId) state.linkSourceId = node.id;
+                        else {
+                            if (state.linkSourceId !== node.id) {
+                                const dup = state.links.find(l => 
+                                    (l.source === state.linkSourceId && l.target === node.id) || 
+                                    (l.source === node.id && l.target === state.linkSourceId));
+                                if (!dup) state.links.push({ id: 'l_' + Date.now(), source: state.linkSourceId, target: node.id });
+                            }
+                            state.linkSourceId = null;
+                            save(); renderCanvasOnly();
                         }
                     }
-                    state.linkSourceId = null;
-                }
-            } else {
-                selectElement(node.id, 'node');
-            }
+                });
+                workspace.appendChild(g);
+            });
+
+            validateTopology();
         }
 
-        function selectElement(id, type) {
+        function renderSidebarIPs(node) {
+            ipListContainer.innerHTML = '';
+            node.ips = node.ips || [];
+            
+            if (node.ips.length === 0) {
+                ipListContainer.innerHTML = `<span class="text-[10px] text-slate-400 italic">No IPs configured.</span>`;
+            }
+
+            node.ips.forEach((ip, index) => {
+                const div = document.createElement('div');
+                div.className = "flex items-center gap-1";
+                
+                const input = document.createElement('input');
+                input.type = 'text'; input.value = ip;
+                input.placeholder = "CIDR";
+                input.className = "flex-1 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500 w-full";
+                
+                const parsed = parseValidCIDR(ip);
+                if (ip.trim() !== '' && !parsed) input.classList.add('border-red-400', 'bg-red-50');
+                
+                input.addEventListener('input', (e) => {
+                    node.ips[index] = e.target.value;
+                    const isValid = parseValidCIDR(node.ips[index]);
+                    if (node.ips[index].trim() !== '' && !isValid) {
+                        input.classList.add('border-red-400', 'bg-red-50');
+                    } else {
+                        input.classList.remove('border-red-400', 'bg-red-50');
+                    }
+                    save(); renderCanvasOnly();
+                });
+
+                const delBtn = document.createElement('button');
+                delBtn.innerHTML = '✖';
+                delBtn.className = "text-slate-400 hover:text-red-500 px-1";
+                delBtn.onclick = () => {
+                    node.ips.splice(index, 1);
+                    save(); renderCanvasOnly(); renderSidebarIPs(node);
+                };
+
+                div.appendChild(input); div.appendChild(delBtn);
+                ipListContainer.appendChild(div);
+            });
+        }
+
+        function select(id, type) {
             state.selectedId = id; state.selectedType = type;
+            state.linkSourceId = null; 
+            
             if (!id) {
                 propertiesPane.classList.add('hidden');
-                noSelectionPane.style.display = "block";
+                noSelectionPane.classList.remove('hidden');
+                renderCanvasOnly();
                 return;
             }
-            noSelectionPane.style.display = "none";
+
+            noSelectionPane.classList.add('hidden');
             propertiesPane.classList.remove('hidden'); propertiesPane.classList.add('flex');
 
             if (type === 'node') {
-                const node = state.nodes.find(n => n.id === id);
-                propName.value = node.name; propIp.value = node.ip || '';
-                propName.disabled = false; propIp.disabled = false;
-                validateIpInput(node.ip || '');
-            } else if (type === 'link') {
-                const link = state.links.find(l => l.id === id);
-                const sourceNode = state.nodes.find(n => n.id === link.source);
-                const targetNode = state.nodes.find(n => n.id === link.target);
-                propName.value = `${sourceNode.name} ↔ ${targetNode.name}`;
-                propIp.value = "Direct Connection";
-                propName.disabled = true; propIp.disabled = true;
-                ipFeedback.classList.add('hidden');
-            }
-            renderCanvas();
-        }
-
-        function validateIpInput(val) {
-            if (!val.trim()) { ipFeedback.classList.add('hidden'); return true; }
-            const res = parseCIDR(val);
-            ipFeedback.classList.remove('hidden');
-            if (!res) {
-                ipFeedback.className = "mt-1 text-[10px] font-medium text-red-500";
-                ipFeedback.innerText = "❌ Invalid format (e.g., 10.0.0.1/24)";
+                const n = state.nodes.find(x => x.id === id);
+                document.getElementById('propName').value = n.name || '';
+                document.getElementById('propName').disabled = false;
+                document.getElementById('propGw').value = n.gw || '';
+                document.getElementById('propDns').value = n.dns || '';
+                document.getElementById('propOs').value = n.os || '';
+                document.getElementById('propMask').value = n.mask || '255.255.255.0';
+                document.getElementById('propPorts').value = n.ports || '';
+                document.getElementById('propSsh').value = n.ssh || '';
+                document.getElementById('propCert').value = n.cert || '';
+                document.getElementById('propNotes').value = n.notes || '';
+                
+                nodeOnlyProps.classList.remove('hidden');
+                renderSidebarIPs(n);
             } else {
-                ipFeedback.className = "mt-1 text-[10px] font-medium text-green-600";
-                ipFeedback.innerText = `✓ Valid IP. Subnet: /${res.mask}`;
+                const l = state.links.find(x => x.id === id);
+                const a = state.nodes.find(x => x.id === l.source);
+                const b = state.nodes.find(x => x.id === l.target);
+                document.getElementById('propName').value = `${a.name} ↔ ${b.name}`; 
+                document.getElementById('propName').disabled = true;
+                nodeOnlyProps.classList.add('hidden');
             }
+            renderCanvasOnly();
         }
 
-        // Global Listeners
-        window.addEventListener('mousemove', (e) => {
-            if (!state.draggedNode) return;
-            const rect = canvas.getBoundingClientRect();
-            state.draggedNode.x = Math.max(40, Math.min(rect.width - 40, e.clientX - rect.left - state.dragOffset.x));
-            state.draggedNode.y = Math.max(40, Math.min(rect.height - 40, e.clientY - rect.top - state.dragOffset.y));
-            renderCanvas();
-        });
-
-        window.addEventListener('mouseup', () => {
-            if (state.draggedNode) { state.draggedNode = null; saveStateToUrl(); }
-        });
-
-        canvas.addEventListener('click', () => { state.linkSourceId = null; selectElement(null, null); });
-
-        // Build Elements
-        document.querySelectorAll('.palette-item').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const type = btn.getAttribute('data-type');
-                const newNode = {
-                    id: 'n_' + Date.now(), type: type,
-                    name: `New ${type.charAt(0).toUpperCase() + type.slice(1)}`,
-                    x: 100 + Math.random() * 50, y: 100 + Math.random() * 50, ip: ''
-                };
-                state.nodes.push(newNode);
-                saveStateToUrl(); renderCanvas(); selectElement(newNode.id, 'node');
-            });
-        });
-
-        propName.addEventListener('input', () => {
-            if (state.selectedId && state.selectedType === 'node') {
-                const node = state.nodes.find(n => n.id === state.selectedId);
-                node.name = propName.value; saveStateToUrl(); renderCanvas();
-            }
-        });
-
-        propIp.addEventListener('input', () => {
-            if (state.selectedId && state.selectedType === 'node') {
-                const node = state.nodes.find(n => n.id === state.selectedId);
-                node.ip = propIp.value; validateIpInput(propIp.value); saveStateToUrl(); renderCanvas();
-            }
-        });
-
-        // Action Buttons
-        document.getElementById('exportImageBtn').addEventListener('click', exportCanvasToPng);
-
-        document.getElementById('deleteElementBtn').addEventListener('click', () => {
+        function deleteSelected() {
             if (!state.selectedId) return;
             if (state.selectedType === 'node') {
                 state.nodes = state.nodes.filter(n => n.id !== state.selectedId);
                 state.links = state.links.filter(l => l.source !== state.selectedId && l.target !== state.selectedId);
-            } else { state.links = state.links.filter(l => l.id !== state.selectedId); }
-            saveStateToUrl(); selectElement(null, null); renderCanvas();
-        });
+            } else {
+                state.links = state.links.filter(l => l.id !== state.selectedId);
+            }
+            select(null, null); save(); renderCanvasOnly();
+        }
 
-        document.getElementById('clearCanvasBtn').addEventListener('click', () => {
-            if(confirm("Clear this network configuration?")) {
-                state.nodes = []; state.links = [];
-                saveStateToUrl(); selectElement(null, null); renderCanvas();
+        // Global Handlers
+        function getWorkspacePoint(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: (clientX - rect.left - state.camera.x) / state.camera.zoom,
+                y: (clientY - rect.top - state.camera.y) / state.camera.zoom
+            };
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 1 || e.button === 0) {
+                isDraggingCanvas = true; lastMouse = { x: e.clientX, y: e.clientY };
+                if(e.button === 0 && !isDraggingNode) select(null, null);
             }
         });
 
-        document.getElementById('copyUrlBtn').addEventListener('click', () => {
-            navigator.clipboard.writeText(window.location.href).then(() => {
-                alert("Topology state encoded into URL and copied to clipboard!");
+        window.addEventListener('mousemove', (e) => {
+            if (isDraggingCanvas && !isDraggingNode) {
+                state.camera.x += (e.clientX - lastMouse.x);
+                state.camera.y += (e.clientY - lastMouse.y);
+                lastMouse = { x: e.clientX, y: e.clientY };
+                applyCamera();
+            } else if (isDraggingNode && draggedNode) {
+                const pt = getWorkspacePoint(e.clientX, e.clientY);
+                draggedNode.x = Math.round((pt.x - dragOffset.x) / GRID_SNAP) * GRID_SNAP;
+                draggedNode.y = Math.round((pt.y - dragOffset.y) / GRID_SNAP) * GRID_SNAP;
+                renderCanvasOnly();
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDraggingCanvas = false;
+            if (isDraggingNode) { isDraggingNode = false; draggedNode = null; save(); }
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left; const mouseY = e.clientY - rect.top;
+            const newZoom = Math.min(Math.max(0.2, state.camera.zoom * Math.exp(-e.deltaY * 0.001)), 5);
+            state.camera.x = mouseX - (mouseX - state.camera.x) * (newZoom / state.camera.zoom);
+            state.camera.y = mouseY - (mouseY - state.camera.y) * (newZoom / state.camera.zoom);
+            state.camera.zoom = newZoom;
+            applyCamera();
+        }, { passive: false });
+
+        window.addEventListener('keydown', (e) => {
+            const activeTag = document.activeElement.tagName;
+            if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+            if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
+            if (e.key === 'Escape') select(null, null);
+        });
+
+        // Serialization
+        function save() {
+            try {
+                const cleanNodes = state.nodes.map(n => ({
+                    id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, 
+                    ips: n.ips.filter(i => i.trim() !== ''), 
+                    gw: n.gw, dns: n.dns, os: n.os, mask: n.mask, ports: n.ports, ssh: n.ssh, cert: n.cert, notes: n.notes
+                }));
+                const payload = JSON.stringify({ nodes: cleanNodes, links: state.links });
+                window.history.replaceState(null, '', '#' + btoa(encodeURIComponent(payload)));
+                updateOSDatalist();
+            } catch (err) { console.error(err); }
+        }
+
+        function load() {
+            const hash = window.location.hash.substring(1);
+            if (!hash) {
+                state.nodes = [
+                    { id: "n1", type: "router", name: "Core Router", x: 400, y: 160, ips: ["10.0.0.1/24", "2001:db8::1/64"], os: 'Cisco IOS', mask: '255.255.255.0', ports: '22' },
+                    { id: "n2", type: "switch", name: "Switch", x: 400, y: 280, ips: [], os: 'SwitchOS', mask: '255.255.255.0' },
+                    { id: "n3", type: "server", name: "Database", x: 260, y: 400, ips: ["10.0.0.10/24"], gw: "10.0.0.1", os: "Linux Ubuntu", mask: '255.255.255.0', ports: '3306, 22' },
+                    { id: "n4", type: "pc", name: "Client", x: 540, y: 400, ips: ["10.0.0.50/24"], gw: "10.0.0.1", os: "Windows 11", mask: '255.255.255.0' }
+                ];
+                state.links = [{ id: "l1", source: "n1", target: "n2" }, { id: "l2", source: "n2", target: "n3" }, { id: "l3", source: "n2", target: "n4" }];
+                updateOSDatalist();
+                return;
+            }
+            try {
+                const parsed = JSON.parse(decodeURIComponent(atob(hash)));
+                state.nodes = (parsed.nodes || []).map(n => { n.ips = n.ips || []; return n; });
+                state.links = parsed.links || [];
+                updateOSDatalist();
+            } catch (e) { console.error("Load err", e); }
+        }
+
+        // UI Bindings
+        document.querySelectorAll('.palette-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const type = btn.getAttribute('data-type');
+                const rect = canvas.getBoundingClientRect();
+                let spawnX = (rect.width / 2 - state.camera.x) / state.camera.zoom;
+                let spawnY = (rect.height / 2 - state.camera.y) / state.camera.zoom;
+                const offset = (state.nodes.length % 6) * 20;
+                spawnX = Math.round((spawnX + offset) / GRID_SNAP) * GRID_SNAP;
+                spawnY = Math.round((spawnY + offset) / GRID_SNAP) * GRID_SNAP;
+
+                const defaults = initialDataDefaults[type] || { os: '', ports: '' };
+
+                const newNode = {
+                    id: 'n_' + Date.now(), type: type, name: `New ${type.charAt(0).toUpperCase() + type.slice(1)}`,
+                    x: spawnX, y: spawnY, ips: [], gw: '', dns: '', 
+                    os: defaults.os, mask: '255.255.255.0', ports: defaults.ports, ssh: '', cert: '', notes: ''
+                };
+                state.nodes.push(newNode);
+                select(newNode.id, 'node'); save(); renderCanvasOnly();
             });
         });
 
-        const modeDragBtn = document.getElementById('modeDrag');
-        const modeLinkBtn = document.getElementById('modeLink');
+        document.getElementById('toggleConflicts').addEventListener('change', (e) => { state.settings.showConflicts = e.target.checked; validateTopology(); });
 
-        modeDragBtn.addEventListener('click', () => {
+        const mDrag = document.getElementById('modeDrag');
+        const mLink = document.getElementById('modeLink');
+        mDrag.onclick = () => {
             state.mode = 'drag'; state.linkSourceId = null;
-            modeDragBtn.className = "flex-1 text-center py-1.5 text-xs font-medium rounded bg-white text-gray-900 shadow-xs cursor-pointer";
-            modeLinkBtn.className = "flex-1 text-center py-1.5 text-xs font-medium rounded text-gray-600 hover:text-gray-900 cursor-pointer";
+            mDrag.className = "flex-1 text-center py-1 text-xs font-medium rounded bg-white text-slate-900 shadow-sm transition";
+            mLink.className = "flex-1 text-center py-1 text-xs font-medium rounded text-slate-600 hover:text-slate-900 transition";
+            renderCanvasOnly();
+        };
+        mLink.onclick = () => {
+            state.mode = 'link'; select(null, null);
+            mLink.className = "flex-1 text-center py-1 text-xs font-medium rounded bg-white text-slate-900 shadow-sm transition";
+            mDrag.className = "flex-1 text-center py-1 text-xs font-medium rounded text-slate-600 hover:text-slate-900 transition";
+            renderCanvasOnly();
+        };
+
+        ['Name', 'Gw', 'Dns', 'Os', 'Mask', 'Ports', 'Ssh', 'Cert', 'Notes'].forEach(key => {
+            document.getElementById('prop' + key).addEventListener('input', (e) => {
+                if (state.selectedId && state.selectedType === 'node') {
+                    state.nodes.find(n => n.id === state.selectedId)[key.toLowerCase()] = e.target.value;
+                    save(); renderCanvasOnly();
+                }
+            });
         });
 
-        modeLinkBtn.addEventListener('click', () => {
-            state.mode = 'link';
-            modeLinkBtn.className = "flex-1 text-center py-1.5 text-xs font-medium rounded bg-white text-gray-900 shadow-xs cursor-pointer";
-            modeDragBtn.className = "flex-1 text-center py-1.5 text-xs font-medium rounded text-gray-600 hover:text-gray-900 cursor-pointer";
-        });
+        document.getElementById('addIpBtn').onclick = () => {
+            if (state.selectedId && state.selectedType === 'node') {
+                const n = state.nodes.find(n => n.id === state.selectedId);
+                n.ips.push('');
+                renderSidebarIPs(n); save(); renderCanvasOnly();
+            }
+        };
+        
+        document.getElementById('deleteElementBtn').onclick = deleteSelected;
+        document.getElementById('zoomInBtn').onclick = () => { state.camera.zoom = Math.min(5, state.camera.zoom * 1.2); applyCamera(); };
+        document.getElementById('zoomOutBtn').onclick = () => { state.camera.zoom = Math.max(0.2, state.camera.zoom / 1.2); applyCamera(); };
+        document.getElementById('zoomResetBtn').onclick = () => { state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera(); };
+        document.getElementById('clearCanvasBtn').onclick = () => { if(confirm("Clear canvas?")) { state.nodes = []; state.links = []; save(); select(null,null); } };
+        document.getElementById('copyUrlBtn').onclick = () => { navigator.clipboard.writeText(window.location.href).then(() => alert("URL Copied!")); };
 
-        window.addEventListener('popstate', () => { loadStateFromUrl(); renderCanvas(); });
+        document.getElementById('exportImageBtn').onclick = () => {
+            const svgString = new XMLSerializer().serializeToString(canvas);
+            const blob = new Blob([svgString], {type: "image/svg+xml;charset=utf-8"});
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+            img.onload = () => {
+                const tCanvas = document.createElement("canvas");
+                const rect = canvas.getBoundingClientRect();
+                tCanvas.width = rect.width; tCanvas.height = rect.height;
+                const ctx = tCanvas.getContext("2d");
+                ctx.fillStyle = "#f8fafc"; ctx.fillRect(0,0, tCanvas.width, tCanvas.height);
+                ctx.fillStyle = "#cbd5e1";
+                const bgSize = GRID_SNAP * state.camera.zoom;
+                for(let x = state.camera.x % bgSize; x < tCanvas.width; x += bgSize) {
+                    for(let y = state.camera.y % bgSize; y < tCanvas.height; y += bgSize) {
+                        ctx.beginPath(); ctx.arc(x, y, 1, 0, Math.PI*2); ctx.fill();
+                    }
+                }
+                ctx.drawImage(img, 0, 0);
+                const a = document.createElement("a");
+                a.href = tCanvas.toDataURL("image/png"); a.download = "network.png"; a.click();
+                URL.revokeObjectURL(url);
+            };
+            img.src = url;
+        };
 
-        loadStateFromUrl(); renderCanvas();
+        window.addEventListener('popstate', () => { load(); renderCanvasOnly(); });
+        load(); applyCamera(); renderCanvasOnly();
+
     </script>
 </body>
 </html>
