@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NetTopology Pro</title>
+    <title>NetTopology Editor</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ipaddr.js/2.1.0/ipaddr.min.js"></script>
     <style>
@@ -19,6 +19,13 @@
 
         @keyframes dash { to { stroke-dashoffset: -20; } }
         .animate-flow { stroke-dasharray: 6 4; animation: dash 0.5s linear infinite; }
+        
+        @keyframes pulse-glow { 
+            0%, 100% { filter: drop-shadow(0 0 4px #f97316); stroke: #ea580c; } 
+            50% { filter: drop-shadow(0 0 12px #fb923c); stroke: #f97316; } 
+        }
+        .linking-glow rect { animation: pulse-glow 1.5s infinite ease-in-out; stroke-width: 3px !important; }
+
         .fade-inactive { opacity: 0.25; filter: grayscale(100%); transition: opacity 0.3s, filter 0.3s; }
         .zone-bubble { transition: all 0.2s ease-out; pointer-events: none; }
     </style>
@@ -28,30 +35,27 @@
     <header class="bg-slate-900 text-white px-6 py-3 flex justify-between items-center shadow-md z-20 shrink-0">
         <div class="flex items-center gap-3">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-400">
-                <rect x="2" y="2" width="20" height="8" rx="2" />
-                <rect x="2" y="14" width="20" height="8" rx="2" />
-                <line x1="6" y1="6" x2="6.01" y2="6" />
-                <line x1="6" y1="18" x2="6.01" y2="18" />
+                <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" />
+                <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
             </svg>
             <div>
-                <h1 class="text-lg font-bold tracking-tight">NetTopology Pro</h1>
-                <p class="text-[10px] text-slate-400">Auto-Subnets • L2/L3 Routing • Validation</p>
+                <h1 class="text-lg font-bold tracking-tight">NetTopology Editor</h1>
+                <p class="text-[10px] text-slate-400">L2/L3 Interface Simulation Engine</p>
             </div>
         </div>
 
         <div class="flex items-center gap-3">
-            <label class="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-amber-400 hover:text-amber-300 transition" title="Trace reachable network paths from the selected node">
-                <input type="checkbox" id="toggleTrace" class="rounded bg-slate-800 border-slate-600 accent-amber-500 w-4 h-4" />
-                🔍 Reachability Trace
-            </label>
-            <span id="traceStatus" class="text-[10px] text-slate-400 min-w-[150px]">Trace off</span>
+            
+            <div class="flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded border border-slate-600">
+                <label class="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-amber-400 hover:text-amber-300 transition" title="Trace reachable network paths from the selected node">
+                    <input type="checkbox" id="toggleTrace" class="rounded bg-slate-800 border-slate-600 accent-amber-500 w-4 h-4" />
+                    🔍 Trace
+                </label>
+                <div class="w-px h-4 bg-slate-600 mx-1"></div>
+                <input type="text" id="tracePort" placeholder="Port (e.g. 443)" class="w-24 bg-transparent text-xs text-white placeholder-slate-400 focus:outline-none focus:text-amber-300" title="Leave blank for pure IP reachability">
+            </div>
 
-            <div class="w-px h-5 bg-slate-700 mx-1"></div>
-
-            <label class="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-slate-300 hover:text-white transition">
-                <input type="checkbox" id="toggleConflicts" checked class="rounded bg-slate-800 border-slate-600 accent-blue-500 w-4 h-4" />
-                Live Validation
-            </label>
+            <span id="traceStatus" class="text-[10px] text-slate-400 min-w-[120px] ml-2">Trace off</span>
 
             <div class="w-px h-5 bg-slate-700 mx-1"></div>
 
@@ -89,86 +93,101 @@
 
     <div class="flex flex-1 overflow-hidden relative">
         <aside class="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-sm z-10 h-full">
-            <div class="p-4 border-b border-slate-100 bg-slate-50/50">
-                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">1. Action Mode</h2>
-                <div class="flex rounded shadow-sm bg-slate-200 p-1">
-                    <button id="modeDrag" class="flex-1 text-center py-1 text-xs font-medium rounded bg-white text-slate-900 shadow-sm transition">🖐️ Drag</button>
-                    <button id="modeLink" class="flex-1 text-center py-1 text-xs font-medium rounded text-slate-600 hover:text-slate-900 transition">🔌 Link</button>
+            
+            <div class="p-4 border-b border-slate-100 bg-slate-50">
+                <h2 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">How to Use</h2>
+                <ul class="text-[10px] text-slate-600 space-y-1.5 font-medium">
+                    <li>🖱️ <span class="font-bold text-slate-800">Single Click:</span> Select a node/link to edit.</li>
+                    <li>✋ <span class="font-bold text-slate-800">Drag:</span> Move nodes or pan the canvas.</li>
+                    <li>⚡ <span class="font-bold text-orange-600">Double Click:</span> Enter Link Mode. Click another node to connect. <span class="text-slate-400 font-normal border border-slate-200 px-1 rounded shadow-sm bg-white">Esc</span> cancels.</li>
+                </ul>
+            </div>
+
+            <div class="p-4 border-b border-slate-100 flex-1 overflow-y-auto min-h-[200px]">
+                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Hardware Library</h2>
+                <div class="grid grid-cols-3 gap-2" id="nodePalette"></div>
+            </div>
+
+            <div class="p-4 border-t border-slate-100 bg-white flex flex-col shrink-0 h-[50%] overflow-y-auto relative">
+                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Configuration</h2>
+                <div class="p-4 border-t border-slate-100 bg-slate-50">
+                    <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filter Canvas</h2>
+                    <input type="text" id="canvasFilter" placeholder="Search by name or IP..." class="w-full border border-slate-300 rounded px-2 py-1.5 text-xs focus:outline-blue-500" />
                 </div>
-                <p id="modeHelp" class="text-[10px] text-slate-400 mt-2">Drag mode: move nodes or pan the canvas.</p>
-            </div>
-
-            <div class="p-4 border-b border-slate-100 flex-1 overflow-y-auto">
-                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">2. Library</h2>
-                <div class="grid grid-cols-4 gap-2" id="nodePalette"></div>
-            </div>
-
-            <div class="p-4 border-t border-slate-100 bg-white flex flex-col shrink-0 h-[60%] overflow-y-auto">
-                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">3. Configuration</h2>
-                <div id="noSelectionPane" class="text-center py-4 text-slate-400 text-xs italic">Select a node or link to edit.</div>
+                
+                <div id="noSelectionPane" class="text-center py-8 text-slate-400 text-xs italic">Select a node or link to configure.</div>
 
                 <div id="propertiesPane" class="hidden flex-col gap-3 pb-6">
                     <div>
                         <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Name</label>
-                        <input type="text" id="propName" class="w-full border border-slate-300 rounded px-2 py-1 text-sm focus:outline-blue-500" />
+                        <input type="text" id="propName" class="w-full border border-slate-300 rounded px-2 py-1 text-sm font-bold focus:outline-blue-500" />
                     </div>
 
-                    <div id="nodeNetworkProps">
-                        <div class="mb-3">
+                    <div id="linkProps" class="hidden pt-2 border-t border-slate-100">
+                        <label class="block text-[10px] font-bold text-indigo-600 mb-1 uppercase">VM Attachment Type</label>
+                        <select id="propAttachment" class="w-full border border-indigo-300 bg-indigo-50 rounded px-2 py-1 text-xs focus:outline-indigo-500">
+                            <option value="bridged">Bridged (Routed by Host)</option>
+                            <option value="passthrough">PCI Passthrough (Direct L2)</option>
+                        </select>
+                        <p class="text-[9px] text-slate-400 mt-1 leading-tight">Passthrough bypasses the host OS, connecting the VM directly to the physical switch logic.</p>
+                    </div>
+
+                    <div id="nodeNetworkProps" class="space-y-3">
+                        <div>
                             <div class="flex justify-between items-end mb-1">
-                                <label class="block text-[10px] font-bold text-slate-500 uppercase">IP Addresses (CIDR)</label>
-                                <button id="addIpBtn" class="text-[10px] text-blue-600 hover:underline font-bold">+ Add IP</button>
+                                <label class="block text-[10px] font-bold text-slate-500 uppercase">Interfaces (Port & IP)</label>
+                                <button id="addIfaceBtn" class="text-[10px] text-blue-600 hover:underline font-bold">+ Add Interface</button>
                             </div>
-                            <div id="ipListContainer" class="flex flex-col gap-2"></div>
+                            <div id="ifaceListContainer" class="flex flex-col gap-2"></div>
+                            <p class="text-[9px] text-slate-400 mt-1 leading-tight">Unassigned switches act as L2 Backplanes.</p>
                         </div>
 
-                        <div class="grid grid-cols-2 gap-2 mb-3">
-                            <div class="col-span-2">
-                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Validation Profile</label>
-                                <select id="propZone" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500 bg-slate-50">
-                                    <option value="lan">Standard (Warn missing GW)</option>
-                                    <option value="isolated">Isolated (Ignore GW warnings)</option>
-                                </select>
-                            </div>
+                        <div class="grid grid-cols-2 gap-2">
                             <div>
                                 <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Gateway</label>
                                 <input type="text" id="propGw" placeholder="e.g. 10.0.0.1" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500" />
                             </div>
                             <div>
                                 <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">DNS</label>
-                                <input type="text" id="propDns" placeholder="e.g. 8.8.8.8" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500" />
+                                <input type="text" id="propDns" placeholder="8.8.8.8" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500" />
                             </div>
                             <div class="col-span-2">
-                                <button id="jumpGwBtn" class="w-full hidden bg-slate-700 hover:bg-slate-600 text-white py-1.5 rounded text-xs font-bold transition flex justify-center items-center gap-1 mt-1">
-                                    ⏭️ Jump to Gateway
-                                </button>
+                                <button id="jumpGwBtn" class="w-full hidden bg-slate-700 hover:bg-slate-600 text-white py-1 rounded text-[10px] font-bold transition">⏭️ Jump to Gateway</button>
                             </div>
                         </div>
                     </div>
 
-                    <div id="nodeGeneralProps">
-                        <div class="grid grid-cols-2 gap-2 mb-2 pt-2 border-t border-slate-100">
-                            <div class="col-span-2">
-                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">OS</label>
+                    <div id="nodeGeneralProps" class="pt-3 border-t border-slate-100">
+                        <div class="grid grid-cols-2 gap-2 mb-2">
+                            <div class="col-span-1">
+                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">OS / Firmware</label>
                                 <input type="text" id="propOs" list="osDatalist" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500" />
                                 <datalist id="osDatalist"></datalist>
                             </div>
-                            <div class="col-span-2">
-                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Port(s)</label>
+                            <div class="col-span-1">
+                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase" title="Blank = All ports open">Allowed Ports</label>
                                 <input type="text" id="propPorts" placeholder="80, 443" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500" />
                             </div>
                         </div>
-                        <div class="mb-3">
-                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Notes</label>
-                            <textarea id="propNotes" rows="3" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500"></textarea>
-                        </div>
-                    </div>
-
-                    <div class="pt-2 border-t border-slate-100 mt-auto">
-                        <button id="deleteElementBtn" class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-1.5 rounded text-xs font-bold transition flex justify-center items-center gap-1">
-                            Delete Selected
-                        </button>
-                    </div>
+                                <div class="mb-3">
+                                    <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Notes</label>
+                                    <textarea id="propNotes" rows="2" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500"></textarea>
+                                </div>
+                            </div>
+                        
+                            <div id="nodeDiagnosticsPanel" class="hidden pt-3 border-t border-slate-100">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Node Diagnostics</h3>
+                                    <span id="nodeDiagnosticsSummary" class="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold">Idle</span>
+                                </div>
+                                <div id="nodeDiagnosticsBody" class="space-y-1.5 text-[10px]"></div>
+                            </div>
+                        
+                            <div class="pt-2 mt-auto">
+                                <button id="deleteElementBtn" class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-1.5 rounded text-xs font-bold transition flex justify-center items-center gap-1">
+                                    Delete Selected
+                                </button>
+                            </div>
                 </div>
             </div>
         </aside>
@@ -179,29 +198,27 @@
                 <button id="zoomResetBtn" class="p-2 hover:bg-slate-100 border-b border-slate-200 font-bold text-xs" title="Reset">1:1</button>
                 <button id="zoomOutBtn" class="p-2 hover:bg-slate-100" title="Zoom Out">➖</button>
             </div>
-            <div class="absolute bottom-4 left-4 z-10 text-[10px] text-slate-500 bg-white/80 px-2 py-1 rounded shadow-sm">
-                Pan: Middle-Click Drag or Empty-Canvas Drag | Zoom: Scroll | Delete: Del | Deselect: Esc
-            </div>
-            <svg id="networkCanvas" class="w-full h-full absolute inset-0 select-none" xmlns="http://www.w3.org/2000/svg">
+            
+            <svg id="networkCanvas" class="w-full h-full absolute inset-0 select-none cursor-grab active:cursor-grabbing" xmlns="http://www.w3.org/2000/svg">
                 <g id="workspace">
                     <g id="layer-zones"></g>
                     <g id="layer-links"></g>
                     <g id="layer-nodes"></g>
                 </g>
             </svg>
-        </main>
+            </main>
 
-        <div id="conflictAlert" class="absolute top-4 right-4 bg-amber-50 border-l-4 border-amber-500 rounded p-3 shadow-lg max-w-md hidden z-20 transition-all pointer-events-none">
-            <div class="flex gap-2">
-                <span class="text-amber-500 font-bold text-lg">⚠️</span>
-                <div class="flex-1">
-                    <h4 class="text-xs font-bold text-amber-900 uppercase">Validation Alerts</h4>
-                    <ul id="conflictMsgList" class="text-[11px] text-amber-800 mt-1 list-disc pl-3 space-y-1"></ul>
+            <div id="conflictAlert" class="absolute top-4 right-4 bg-amber-50 border-l-4 border-amber-500 rounded p-3 shadow-lg max-w-md hidden z-20 transition-all pointer-events-none">
+                <div class="flex gap-2">
+                    <span class="text-amber-500 font-bold text-lg">⚠️</span>
+                    <div class="flex-1">
+                        <h4 class="text-xs font-bold text-amber-900 uppercase">Validation Alerts</h4>
+                        <ul id="conflictMsgList" class="text-[11px] text-amber-800 mt-1 list-disc pl-3 space-y-1"></ul>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div id="aboutModal" class="fixed inset-0 bg-slate-900/60 hidden flex items-center justify-center z-50 transition-opacity">
+            <div id="aboutModal" class="fixed inset-0 bg-slate-900/60 hidden flex items-center justify-center z-50 transition-opacity">
             <div class="bg-white rounded-lg shadow-2xl p-8 w-80 text-center relative">
                 <button id="closeAboutBtn" class="absolute top-3 right-4 text-slate-400 hover:text-slate-800 font-bold text-lg">✕</button>
                 <div class="mx-auto bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mb-4">
@@ -209,7 +226,7 @@
                         <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
                     </svg>
                 </div>
-                <h2 class="text-xl font-extrabold text-slate-800 tracking-tight">NetTopology Pro</h2>
+                <h2 class="text-xl font-extrabold text-slate-800 tracking-tight">NetTopology Pro v2</h2>
                 <p class="text-xs text-slate-500 mb-6 uppercase tracking-widest">Built by Miguel Cariño</p>
                 <div class="flex flex-col gap-3">
                     <a href="https://linkedin.com/" target="_blank" class="block w-full bg-blue-600 text-white py-2 rounded-md text-sm font-medium hover:bg-blue-500 transition shadow-sm">LinkedIn Profile</a>
@@ -222,8 +239,8 @@
 
     <script>
         const state = {
-            nodes: [], links: [], selectedId: null, selectedType: null, mode: 'drag', linkSourceId: null,
-            settings: { showConflicts: true, traceMode: false },
+            nodes: [], links: [], selectedId: null, selectedType: null, linkSourceId: null,
+            settings: { traceMode: false },
             camera: { x: 0, y: 0, zoom: 1 }
         };
 
@@ -253,25 +270,34 @@
             { type: 'dicom', name: 'DICOM' }, { type: 'custom', name: 'Custom Node' }
         ];
 
-        const isDumbDevice = (type) => ['switch', 'ap'].includes(type);
+        // Architecture Helpers
+        const isDumbDevice = (node) => ['switch', 'ap'].includes(node.type) && getValidIps(node).length === 0;
         const isRoutingDevice = (type) => ['router', 'firewall', 'cloud'].includes(type);
+        
+        function isPrivateIP(ipObj) {
+            if (ipObj.kind() !== 'ipv4') return false;
+            const octets = ipObj.octets;
+            if (octets[0] === 10) return true;
+            if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) return true;
+            if (octets[0] === 192 && octets[1] === 168) return true;
+            return false;
+        }
 
         const initialDataDefaults = {
-            cloud: { os: 'ISP / Cloud Network', ports: '80, 443', ips: ['8.8.8.8/32', '1.1.1.1/32'] },
-            router: { os: 'Edge Gateway / Modem', ports: '22, 80, 443', ips: ['192.168.1.1/24', '1.1.1.1/32'], dns: '8.8.8.8' },
-            firewall: { os: 'pfSense', ports: '443, 22', ips: ['10.0.0.1/24'], dns: '1.1.1.1' },
-            switch: { os: 'SwitchOS', ports: '', ips: [] },
-            server: { os: 'Linux Ubuntu', ports: '80, 443, 22', ips: ['192.168.1.10/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
-            vm: { os: 'Linux Ubuntu', ports: '22', ips: ['192.168.1.11/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
-            pc: { os: 'Windows 11', ports: '', ips: ['192.168.1.50/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
-            ap: { os: 'UniFi', ports: '', ips: [] },
-            iot: { os: 'FreeRTOS', ports: '1883', ips: ['192.168.1.100/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
-            printer: { os: 'Firmware', ports: '9100', ips: ['192.168.1.80/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
-            camera: { os: 'Firmware', ports: '554, 80', ips: ['192.168.1.90/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
-            dicom: { os: 'Windows Embedded', ports: '104, 443', zone: 'isolated', ips: ['192.168.100.10/24'] },
-            custom: { os: '', ports: '', ips: ['10.0.0.50/24'] }
+            cloud: { os: 'ISP', interfaces: [{ id: 'i1', name: 'wan0', ip: '8.8.8.8/32' }] },
+            router: { os: 'Edge Gateway', gw: '0.0.0.0', dns: '8.8.8.8', ports: '22', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.1/24' }] },
+            firewall: { os: 'pfSense', dns: '1.1.1.1', ports: '443, 22', interfaces: [{ id: 'i1', name: 'igb0', ip: '10.0.0.1/24' }] },
+            switch: { os: 'SwitchOS', interfaces: [] }, // Empty interfaces = Dumb switch (backplane)
+            server: { os: 'Ubuntu OS', gw: '192.168.1.1', dns: '8.8.8.8', ports: '80, 443, 22', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.10/24' }] },
+            vm: { os: 'Ubuntu VM', gw: '192.168.1.1', dns: '8.8.8.8', ports: '22', interfaces: [{ id: 'i1', name: 'vnet0', ip: '192.168.1.11/24' }] },
+            pc: { os: 'Windows 11', gw: '192.168.1.1', dns: '8.8.8.8', ports: '80, 443', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.50/24' }] },
+            ap: { os: 'UniFi', interfaces: [] },
+            iot: { os: 'FreeRTOS', gw: '192.168.1.1', dns: '8.8.8.8', ports: '1883', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.100/24' }] },
+            printer: { os: 'Firmware', gw: '192.168.1.1', ports: '9100', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.80/24' }] },
+            camera: { os: 'Firmware', gw: '192.168.1.1', ports: '554', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.90/24' }] }
         };
 
+        // Templates Data (Converted to Interface format via Normalizer)
         const templatesData = {
             house: {
                 nodes: [
@@ -305,12 +331,12 @@
                     { id: 'd1', type: 'cloud', name: 'Internet Backbone', x: 400, y: 50, ips: [] },
                     { id: 'd2', type: 'firewall', name: 'Edge FW (DMZ)', x: 400, y: 150, ips: ['172.16.1.1/24'], dns: '1.1.1.1' },
                     { id: 'd3', type: 'switch', name: 'DMZ Switch', x: 400, y: 250, ips: [] },
-                    { id: 'd4', type: 'vm', name: 'Web Node 1', x: 300, y: 350, ips: ['172.16.1.10/24'], gw: '172.16.1.1' },
-                    { id: 'd5', type: 'vm', name: 'Web Node 2', x: 500, y: 350, ips: ['172.16.1.11/24'], gw: '172.16.1.1' },
+                    { id: 'd4', type: 'vm', name: 'Web Node 1', x: 300, y: 350, ips: ['172.16.1.10/24'], gw: '172.16.1.1', ports: '80, 443' },
+                    { id: 'd5', type: 'vm', name: 'Web Node 2', x: 500, y: 350, ips: ['172.16.1.11/24'], gw: '172.16.1.1', ports: '80, 443' },
                     { id: 'd6', type: 'firewall', name: 'Internal FW', x: 400, y: 450, ips: ['172.16.2.1/24'], gw: '172.16.1.1' },
                     { id: 'd7', type: 'switch', name: 'Database Switch', x: 400, y: 550, ips: [] },
-                    { id: 'd8', type: 'server', name: 'DB Master', x: 300, y: 650, ips: ['172.16.2.10/24'], gw: '172.16.2.1' },
-                    { id: 'd9', type: 'server', name: 'DB Replica', x: 500, y: 650, ips: ['172.16.2.11/24'], gw: '172.16.2.1' }
+                    { id: 'd8', type: 'server', name: 'DB Master', x: 300, y: 650, ips: ['172.16.2.10/24'], gw: '172.16.2.1', ports: '3306' },
+                    { id: 'd9', type: 'server', name: 'DB Replica', x: 500, y: 650, ips: ['172.16.2.11/24'], gw: '172.16.2.1', ports: '3306' }
                 ],
                 links: [{ id: 'dl1', source: 'd1', target: 'd2' }, { id: 'dl2', source: 'd2', target: 'd3' }, { id: 'dl3', source: 'd3', target: 'd4' }, { id: 'dl4', source: 'd3', target: 'd5' }, { id: 'dl5', source: 'd3', target: 'd6' }, { id: 'dl6', source: 'd6', target: 'd7' }, { id: 'dl7', source: 'd7', target: 'd8' }, { id: 'dl8', source: 'd7', target: 'd9' }]
             },
@@ -324,9 +350,9 @@
                     { id: 'hp6', type: 'pc', name: 'Nurse Desk', x: 250, y: 450, ips: ['10.10.10.50/24'], gw: '10.10.10.1' },
                     { id: 'hp7', type: 'printer', name: 'Records Print', x: 350, y: 450, ips: ['10.10.10.80/24'], gw: '10.10.10.1' },
                     { id: 'hp8', type: 'switch', name: 'Medical SW', x: 550, y: 350, ips: [] },
-                    { id: 'hp9', type: 'dicom', name: 'PACS Archive', x: 450, y: 450, ips: ['192.168.100.10/24'], zone: 'isolated' },
-                    { id: 'hp10', type: 'dicom', name: 'MRI Scanner', x: 550, y: 450, ips: ['192.168.100.11/24'], zone: 'isolated' },
-                    { id: 'hp11', type: 'iot', name: 'Vitals Mon', x: 650, y: 450, ips: ['192.168.100.52/24'], zone: 'isolated' }
+                    { id: 'hp9', type: 'dicom', name: 'PACS Archive', x: 450, y: 450, ips: ['192.168.100.10/24'] },
+                    { id: 'hp10', type: 'dicom', name: 'MRI Scanner', x: 550, y: 450, ips: ['192.168.100.11/24'] },
+                    { id: 'hp11', type: 'iot', name: 'Vitals Mon', x: 650, y: 450, ips: ['192.168.100.52/24'], gw: '192.168.100.1' }
                 ],
                 links: [{ id: 'hpl1', source: 'hp1', target: 'hp2' }, { id: 'hpl2', source: 'hp2', target: 'hp3' }, { id: 'hpl3', source: 'hp3', target: 'hp4' }, { id: 'hpl4', source: 'hp3', target: 'hp8' }, { id: 'hpl5', source: 'hp4', target: 'hp5' }, { id: 'hpl6', source: 'hp4', target: 'hp6' }, { id: 'hpl7', source: 'hp4', target: 'hp7' }, { id: 'hpl8', source: 'hp8', target: 'hp9' }, { id: 'hpl9', source: 'hp8', target: 'hp10' }, { id: 'hpl10', source: 'hp8', target: 'hp11' }]
             },
@@ -380,40 +406,29 @@
                     { id: 's2', type: 'router', name: 'Gateway', x: 400, y: 150, ips: ['10.0.0.1/24'] },
                     { id: 's3', type: 'switch', name: '10G Switch', x: 400, y: 250, ips: [] },
                     { id: 's4', type: 'server', name: 'NAS Storage', x: 200, y: 350, ips: ['10.0.0.10/24'], gw: '10.0.0.1' },
-                    { id: 's5', type: 'pc', name: 'Edit Bay 1', x: 350, y: 350, ips: ['10.0.0.50/24'], gw: '10.0.0.1' },
-                    { id: 's6', type: 'pc', name: 'Edit Bay 2', x: 450, y: 350, ips: ['10.0.0.51/24'], gw: '10.0.0.1' },
-                    { id: 's7', type: 'camera', name: 'Studio Cam A', x: 550, y: 350, ips: ['10.0.0.90/24'], gw: '10.0.0.1' },
-                    { id: 's8', type: 'camera', name: 'Studio Cam B', x: 650, y: 350, ips: ['10.0.0.91/24'], gw: '10.0.0.1' }
+                    { id: 's5', type: 'vm', name: 'Render Node (Passthrough)', x: 100, y: 450, ips: ['10.0.0.11/24'], gw: '10.0.0.1' },
+                    { id: 's6', type: 'pc', name: 'Edit Bay 1', x: 350, y: 350, ips: ['10.0.0.50/24'], gw: '10.0.0.1' },
+                    { id: 's7', type: 'pc', name: 'Edit Bay 2', x: 450, y: 350, ips: ['10.0.0.51/24'], gw: '10.0.0.1' },
+                    { id: 's8', type: 'camera', name: 'Studio Cam A', x: 550, y: 350, ips: ['10.0.0.90/24'], gw: '10.0.0.1' },
+                    { id: 's9', type: 'camera', name: 'Studio Cam B', x: 650, y: 350, ips: ['10.0.0.91/24'], gw: '10.0.0.1' }
                 ],
-                links: [{ id: 'sl1', source: 's1', target: 's2' }, { id: 'sl2', source: 's2', target: 's3' }, { id: 'sl3', source: 's3', target: 's4' }, { id: 'sl4', source: 's3', target: 's5' }, { id: 'sl5', source: 's3', target: 's6' }, { id: 'sl6', source: 's3', target: 's7' }, { id: 'sl7', source: 's3', target: 's8' }]
+                links: [{ id: 'sl1', source: 's1', target: 's2' }, { id: 'sl2', source: 's2', target: 's3' }, { id: 'sl3', source: 's3', target: 's4' }, { id: 'sl_pass', source: 's4', target: 's5', attachment: 'passthrough' }, { id: 'sl4', source: 's3', target: 's6' }, { id: 'sl5', source: 's3', target: 's7' }, { id: 'sl6', source: 's3', target: 's8' }, { id: 'sl7', source: 's3', target: 's9' }]
             }
         };
 
-        const lZones = document.getElementById('layer-zones');
-        const lLinks = document.getElementById('layer-links');
-        const lNodes = document.getElementById('layer-nodes');
-
-        let isDraggingCanvas = false;
-        let isDraggingNode = false;
-        let draggedNode = null;
-        let dragOffset = { x: 0, y: 0 };
-        let lastMouse = { x: 0, y: 0 };
+        const lZones = document.getElementById('layer-zones'), lLinks = document.getElementById('layer-links'), lNodes = document.getElementById('layer-nodes');
+        let isDraggingCanvas = false, isDraggingNode = false, draggedNode = null, dragOffset = { x: 0, y: 0 }, lastMouse = { x: 0, y: 0 };
 
         const paletteContainer = document.getElementById('nodePalette');
         paletteDefs.forEach((d) => {
             const btn = document.createElement('button');
             btn.className = 'palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer';
-            btn.innerHTML = `
-                <svg viewBox="0 0 24 24" width="22" height="22" stroke="#1e293b" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[d.type]}</svg>
-                <span class="text-[10px] font-medium mt-1">${d.name}</span>
-            `;
+            btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="#1e293b" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[d.type]}</svg><span class="text-[9px] font-medium mt-1 uppercase text-center leading-tight">${d.name}</span>`;
             btn.onclick = () => spawnNode(d.type);
             paletteContainer.appendChild(btn);
         });
 
-        function cloneData(data) {
-            return JSON.parse(JSON.stringify(data));
-        }
+        function cloneData(data) { return JSON.parse(JSON.stringify(data)); }
 
         function escapeHtml(value) {
             return String(value ?? '')
@@ -424,70 +439,504 @@
                 .replaceAll("'", '&#039;');
         }
 
-        function getNode(id) {
-            return state.nodes.find((n) => n.id === id) || null;
-        }
+        function getNode(id) { return state.nodes.find((n) => n.id === id) || null; }
+        function getLink(id) { return state.links.find((l) => l.id === id) || null; }
 
-        function getLink(id) {
-            return state.links.find((l) => l.id === id) || null;
-        }
-
-        function getValidIps(node) {
-            return (node.ips || []).map(parseValidCIDR).filter(Boolean);
-        }
-
-        function parseValidCIDR(cidrStr) {
+        function findNodeByIp(ipString) {
+            const clean = String(ipString || '').trim();
+            if (!clean) return null;
+        
             try {
-                if (!cidrStr || !cidrStr.includes('/')) return null;
-
-                const [ipStr, prefixStr] = cidrStr.split('/');
-                const prefix = Number.parseInt(prefixStr, 10);
-                const ip = ipaddr.parse(ipStr.trim());
-
-                if (Number.isNaN(prefix)) return null;
-                if (ip.kind() === 'ipv4' && (prefix < 0 || prefix > 32)) return null;
-                if (ip.kind() === 'ipv6' && (prefix < 0 || prefix > 128)) return null;
-
-                const cidrObj = ipaddr.parseCIDR(`${ip.toString()}/${prefix}`);
-                let networkStr = `${ip.toString()}/${prefix}`;
-
-                if (ip.kind() === 'ipv4') {
-                    const octets = ip.octets;
-                    const ipNum = ((octets[0] << 24) >>> 0) | (octets[1] << 16) | (octets[2] << 8) | octets[3];
-                    const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
-                    const netNum = (ipNum & mask) >>> 0;
-                    const netIpv4 = [
-                        (netNum >>> 24) & 255,
-                        (netNum >>> 16) & 255,
-                        (netNum >>> 8) & 255,
-                        netNum & 255
-                    ].join('.');
-                    networkStr = `${netIpv4}/${prefix}`;
-                }
-
-                return { ip, prefix, kind: ip.kind(), cidrObj, networkStr };
+                const targetIp = ipaddr.parse(clean).toString();
+                return state.nodes.find((node) =>
+                    getValidIps(node).some((ipData) => ipData.ip.toString() === targetIp)
+                ) || null;
             } catch (e) {
                 return null;
             }
         }
 
+        function parseDnsList(value) {
+            return String(value || '')
+                .split(',')
+                .map((item) => item.trim())
+                .filter(Boolean);
+        }
+        
+        function getValidIps(node) {
+            if (!node || !node.interfaces) return [];
+            return node.interfaces.map(iface => parseValidCIDR(iface.ip)).filter(Boolean);
+        }
+
+        function parseValidCIDR(cidrStr) {
+            try {
+                if (!cidrStr || !cidrStr.includes('/')) return null;
+                const [ipStr, prefixStr] = cidrStr.split('/');
+                const prefix = Number.parseInt(prefixStr, 10);
+                const ip = ipaddr.parse(ipStr.trim());
+                if (Number.isNaN(prefix)) return null;
+                if (ip.kind() === 'ipv4' && (prefix < 0 || prefix > 32)) return null;
+                if (ip.kind() === 'ipv6' && (prefix < 0 || prefix > 128)) return null;
+                const cidrObj = ipaddr.parseCIDR(`${ip.toString()}/${prefix}`);
+                let networkStr = `${ip.toString()}/${prefix}`;
+                if (ip.kind() === 'ipv4') {
+                    const octets = ip.octets;
+                    const ipNum = ((octets[0] << 24) >>> 0) | (octets[1] << 16) | (octets[2] << 8) | octets[3];
+                    const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+                    const netNum = (ipNum & mask) >>> 0;
+                    networkStr = `${[(netNum >>> 24) & 255, (netNum >>> 16) & 255, (netNum >>> 8) & 255, netNum & 255].join('.')}/${prefix}`;
+                }
+                return { ip, prefix, kind: ip.kind(), cidrObj, networkStr, isPrivate: isPrivateIP(ip) };
+            } catch (e) { return null; }
+        }
+
+        function normalizePortToken(token) {
+            const aliases = {
+                http: '80',
+                https: '443',
+                ssh: '22',
+                dns: '53',
+                rdp: '3389',
+                smb: '445',
+                ldap: '389',
+                ldaps: '636',
+                mysql: '3306',
+                postgres: '5432',
+                postgresql: '5432',
+                dicom: '104',
+                dicomweb: '443',
+                pacs: '11112',
+                hl7: '2575',
+                mqtt: '1883',
+                rtsp: '554',
+                ipp: '631',
+                jetdirect: '9100'
+            };
+        
+            let raw = String(token || '').trim().toLowerCase();
+            if (!raw) return [];
+        
+            let proto = null;
+        
+            if (raw.includes('/')) {
+                const parts = raw.split('/');
+                if (parts.length === 2) {
+                    proto = parts[0].trim();
+                    raw = parts[1].trim();
+                }
+            }
+        
+            if (aliases[raw]) raw = aliases[raw];
+        
+            // Special case: DICOM commonly uses both 104 and 11112.
+            if (String(token || '').trim().toLowerCase() === 'dicom') {
+                return [
+                    { proto, start: 104, end: 104, label: '104' },
+                    { proto, start: 11112, end: 11112, label: '11112' }
+                ];
+            }
+        
+            if (raw.includes('-')) {
+                const [startRaw, endRaw] = raw.split('-');
+                const start = Number.parseInt(startRaw, 10);
+                const end = Number.parseInt(endRaw, 10);
+            
+                if (Number.isInteger(start) && Number.isInteger(end) && start > 0 && end >= start && end <= 65535) {
+                    return [{ proto, start, end, label: `${start}-${end}` }];
+                }
+            }
+        
+            const port = Number.parseInt(raw, 10);
+            if (Number.isInteger(port) && port > 0 && port <= 65535) {
+                return [{ proto, start: port, end: port, label: String(port) }];
+            }
+        
+            return [];
+        }
+
+        function parsePortExpression(value) {
+            return String(value || '')
+                .split(',')
+                .map((token) => normalizePortToken(token))
+                .flat();
+        }
+
+        function portEntriesMatch(queryEntry, allowedEntry) {
+            if (!queryEntry || !allowedEntry) return false;
+        
+            if (queryEntry.proto && allowedEntry.proto && queryEntry.proto !== allowedEntry.proto) {
+                return false;
+            }
+        
+            return queryEntry.start >= allowedEntry.start && queryEntry.start <= allowedEntry.end;
+        }
+
+        function acceptsPort(node, portQuery) {
+            return getPortStatus(node, portQuery).ok;
+        }
+
+        function getPortStatus(node, portQuery) {
+            const query = String(portQuery || '').trim();
+        
+            if (!query) {
+                return {
+                    ok: true,
+                    level: 'info',
+                    text: 'No trace port requested.'
+                };
+            }
+        
+            const queryPorts = parsePortExpression(query);
+        
+            if (!queryPorts.length) {
+                return {
+                    ok: false,
+                    level: 'bad',
+                    text: `Invalid trace port: ${query}`
+                };
+            }
+        
+            if (!node || isDumbDevice(node) || isRoutingDevice(node.type)) {
+                return {
+                    ok: true,
+                    level: 'info',
+                    text: 'Transit device; service port is not evaluated as an endpoint.'
+                };
+            }
+        
+            if (!node.ports || node.ports.trim() === '') {
+                return {
+                    ok: true,
+                    level: 'warn',
+                    text: 'No allowed ports defined; treating as open.'
+                };
+            }
+        
+            const allowedPorts = parsePortExpression(node.ports);
+        
+            if (!allowedPorts.length) {
+                return {
+                    ok: false,
+                    level: 'bad',
+                    text: `Allowed Ports field is invalid: ${node.ports}`
+                };
+            }
+        
+            const match = queryPorts.some((queryEntry) =>
+                allowedPorts.some((allowedEntry) => portEntriesMatch(queryEntry, allowedEntry))
+            );
+        
+            return {
+                ok: match,
+                level: match ? 'good' : 'bad',
+                text: match
+                    ? `Port ${query} is allowed by this node.`
+                    : `Port ${query} is not listed in this node's Allowed Ports.`
+            };
+        }
+
+        function calculateBaseReachability(startNodeId) {
+            const traceInput = document.getElementById('tracePort');
+            const oldTracePort = traceInput ? traceInput.value : '';
+
+            if (traceInput) traceInput.value = '';
+
+            const result = calculateReachability(startNodeId);
+
+            if (traceInput) traceInput.value = oldTracePort;
+
+            return result;
+        }
+
+        function canReachNode(sourceNode, targetNode) {
+            if (!sourceNode || !targetNode) return false;
+            if (sourceNode.id === targetNode.id) return true;
+        
+            const reach = calculateBaseReachability(sourceNode.id);
+            return reach.reachableNodes.has(targetNode.id);
+        }
+
+        function canReachCloud(sourceNode) {
+            if (!sourceNode) return false;
+        
+            const reach = calculateBaseReachability(sourceNode.id);
+            return state.nodes.some((node) => node.type === 'cloud' && reach.reachableNodes.has(node.id));
+        }
+
+        function getStatusClasses(level) {
+            if (level === 'good') return 'bg-emerald-50 border-emerald-200 text-emerald-700';
+            if (level === 'bad') return 'bg-red-50 border-red-200 text-red-700';
+            if (level === 'warn') return 'bg-amber-50 border-amber-200 text-amber-700';
+            return 'bg-slate-50 border-slate-200 text-slate-600';
+        }
+
+        function diagnosticRow(label, level, text) {
+            const icon = level === 'good' ? '✅' : level === 'bad' ? '❌' : level === 'warn' ? '⚠️' : 'ℹ️';
+        
+            return `
+                <div class="border rounded px-2 py-1 ${getStatusClasses(level)}">
+                    <div class="flex justify-between gap-2">
+                        <span class="font-bold">${escapeHtml(label)}</span>
+                        <span>${icon}</span>
+                    </div>
+                    <div class="text-[9px] leading-snug mt-0.5">${escapeHtml(text)}</div>
+                </div>
+            `;
+        }
+
+        function evaluateInterfaces(node) {
+            if (isDumbDevice(node)) {
+                return {
+                    level: 'info',
+                    text: 'No interfaces assigned. This node is acting as an L2 backplane.'
+                };
+            }
+        
+            if (!node.interfaces || !node.interfaces.length) {
+                return {
+                    level: 'warn',
+                    text: 'No interfaces configured.'
+                };
+            }
+        
+            const invalid = node.interfaces.filter((iface) => iface.ip && !parseValidCIDR(iface.ip));
+        
+            if (invalid.length) {
+                return {
+                    level: 'bad',
+                    text: `Invalid CIDR on: ${invalid.map((i) => i.name || 'interface').join(', ')}`
+                };
+            }
+        
+            const valid = getValidIps(node);
+        
+            if (!valid.length) {
+                return {
+                    level: 'warn',
+                    text: 'Interfaces exist, but none has a valid CIDR IP.'
+                };
+            }
+        
+            return {
+                level: 'good',
+                text: `${valid.length} valid interface${valid.length === 1 ? '' : 's'} configured.`
+            };
+        }
+
+        function evaluateGateway(node) {
+            if (isDumbDevice(node)) {
+                return {
+                    level: 'info',
+                    text: 'L2 backplane nodes do not require a gateway.'
+                };
+            }
+        
+            if (!node.gw || !node.gw.trim()) {
+                return {
+                    level: 'warn',
+                    text: 'No gateway configured.'
+                };
+            }
+        
+            const gw = node.gw.trim();
+        
+            if (gw === '0.0.0.0') {
+                const cloudOk = canReachCloud(node);
+            
+                return {
+                    level: cloudOk ? 'good' : 'info',
+                    text: cloudOk
+                        ? 'Default route placeholder configured; cloud/internet node is reachable.'
+                        : 'Default route placeholder configured.'
+                };
+            }
+        
+            try {
+                ipaddr.parse(gw);
+            } catch (e) {
+                return {
+                    level: 'bad',
+                    text: `Invalid gateway IP: ${gw}`
+                };
+            }
+        
+            const gatewayNode = findNodeByIp(gw);
+        
+            if (!gatewayNode) {
+                return {
+                    level: 'bad',
+                    text: `Gateway ${gw} was not found on any node/interface.`
+                };
+            }
+        
+            const reachable = canReachNode(node, gatewayNode);
+        
+            return {
+                level: reachable ? 'good' : 'bad',
+                text: reachable
+                    ? `Gateway ${gw} found on ${gatewayNode.name} and is reachable.`
+                    : `Gateway ${gw} exists on ${gatewayNode.name}, but is not reachable from this node.`
+            };
+        }
+
+        function evaluateDns(node) {
+            if (isDumbDevice(node)) {
+                return {
+                    level: 'info',
+                    text: 'L2 backplane nodes do not require DNS.'
+                };
+            }
+        
+            const dnsList = parseDnsList(node.dns);
+        
+            if (!dnsList.length) {
+                return {
+                    level: 'warn',
+                    text: 'No DNS server configured.'
+                };
+            }
+        
+            const results = dnsList.map((dnsIp) => {
+                let parsed;
+            
+                try {
+                    parsed = ipaddr.parse(dnsIp);
+                } catch (e) {
+                    return {
+                        level: 'bad',
+                        text: `${dnsIp}: invalid DNS IP.`
+                    };
+                }
+            
+                const dnsNode = findNodeByIp(dnsIp);
+            
+                if (dnsNode) {
+                    const reachable = canReachNode(node, dnsNode);
+                    const dnsPort = getPortStatus(dnsNode, '53');
+                
+                    if (reachable && dnsPort.ok) {
+                        return {
+                            level: 'good',
+                            text: `${dnsIp}: found on ${dnsNode.name}, reachable, DNS port OK.`
+                        };
+                    }
+                
+                    if (!reachable) {
+                        return {
+                            level: 'bad',
+                            text: `${dnsIp}: found on ${dnsNode.name}, but not reachable.`
+                        };
+                    }
+                
+                    return {
+                        level: 'bad',
+                        text: `${dnsIp}: reachable, but DNS port 53 appears closed.`
+                    };
+                }
+            
+                if (isPrivateIP(parsed)) {
+                    return {
+                        level: 'bad',
+                        text: `${dnsIp}: private DNS server not found in topology.`
+                    };
+                }
+            
+                const cloudOk = canReachCloud(node);
+            
+                return {
+                    level: cloudOk ? 'good' : 'warn',
+                    text: cloudOk
+                        ? `${dnsIp}: public DNS; cloud/internet path appears reachable.`
+                        : `${dnsIp}: public DNS, but no cloud/internet path was found.`
+                };
+            });
+        
+            const worst = results.some((r) => r.level === 'bad')
+                ? 'bad'
+                : results.some((r) => r.level === 'warn')
+                    ? 'warn'
+                    : 'good';
+        
+            return {
+                level: worst,
+                text: results.map((r) => r.text).join(' ')
+            };
+        }
+
+        function evaluateTracePort(node) {
+            const tracePort = document.getElementById('tracePort')?.value?.trim() || '';
+        
+            if (!tracePort) {
+                return {
+                    level: 'info',
+                    text: 'No trace port entered. Trace is evaluating IP reachability only.'
+                };
+            }
+        
+            return getPortStatus(node, tracePort);
+        }
+
+        function renderNodeDiagnostics(node) {
+            const panel = document.getElementById('nodeDiagnosticsPanel');
+            const body = document.getElementById('nodeDiagnosticsBody');
+            const summary = document.getElementById('nodeDiagnosticsSummary');
+        
+            if (!panel || !body || !summary) return;
+        
+            if (!node || state.selectedType !== 'node') {
+                panel.classList.add('hidden');
+                body.innerHTML = '';
+                summary.textContent = 'Idle';
+                summary.className = 'text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold';
+                return;
+            }
+        
+            const checks = [
+                ['Interfaces', evaluateInterfaces(node)],
+                ['Gateway', evaluateGateway(node)],
+                ['DNS', evaluateDns(node)],
+                ['Trace Port', evaluateTracePort(node)]
+            ];
+        
+            const hasBad = checks.some(([, result]) => result.level === 'bad');
+            const hasWarn = checks.some(([, result]) => result.level === 'warn');
+        
+            const overall = hasBad ? 'Issues' : hasWarn ? 'Warnings' : 'OK';
+        
+            summary.textContent = overall;
+            summary.className = hasBad
+                ? 'text-[9px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold'
+                : hasWarn
+                    ? 'text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold'
+                    : 'text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold';
+        
+            body.innerHTML = checks
+                .map(([label, result]) => diagnosticRow(label, result.level, result.text))
+                .join('');
+        
+            panel.classList.remove('hidden');
+        }
+
+        function refreshSelectedNodeDiagnostics() {
+            if (!state.selectedId || state.selectedType !== 'node') {
+                renderNodeDiagnostics(null);
+                return;
+            }
+        
+            renderNodeDiagnostics(getNode(state.selectedId));
+        }
         function calculateReachability(startNodeId) {
             const start = getNode(startNodeId);
             if (!start) return { reachableNodes: new Set(), reachableLinks: new Set() };
 
-            const reachableNodes = new Set([startNodeId]);
-            const reachableLinks = new Set();
-            const queue = [startNodeId];
-            const processed = new Set();
+            const reachableNodes = new Set([startNodeId]), reachableLinks = new Set(), queue = [startNodeId], processed = new Set();
+            const targetPort = document.getElementById('tracePort').value.trim();
 
             function shareSubnet(a, b) {
                 if (!a || !b) return false;
                 if (a.type === 'cloud' || b.type === 'cloud') return true;
-
-                const ipsA = getValidIps(a);
-                const ipsB = getValidIps(b);
+                const ipsA = getValidIps(a), ipsB = getValidIps(b);
                 if (!ipsA.length || !ipsB.length) return false;
-
                 return ipsA.some((ia) => ipsB.some((ib) => ia.kind === ib.kind && ia.networkStr === ib.networkStr));
             }
 
@@ -495,21 +944,15 @@
                 if (!client || !possibleGateway) return false;
                 if (possibleGateway.type === 'cloud') return true;
                 if (!client.gw) return false;
-
                 try {
                     const gwIp = ipaddr.parse(client.gw.trim());
                     return getValidIps(possibleGateway).some((ib) => ib.ip.toString() === gwIp.toString());
-                } catch (e) {
-                    return false;
-                }
+                } catch (e) { return false; }
             }
 
+            // Enhanced L2 Traverse (Supports Dumb Switches & VM Passthrough)
             function getL2Domain(originId) {
-                const nodes = new Set([originId]);
-                const links = new Set();
-                const l2Queue = [originId];
-                const l2Processed = new Set();
-
+                const nodes = new Set([originId]), links = new Set(), l2Queue = [originId], l2Processed = new Set();
                 while (l2Queue.length) {
                     const currentId = l2Queue.shift();
                     if (l2Processed.has(currentId)) continue;
@@ -517,212 +960,192 @@
 
                     const adjacentLinks = state.links.filter((l) => l.source === currentId || l.target === currentId);
                     for (const link of adjacentLinks) {
-                        const nextId = link.source === currentId ? link.target : link.source;
-                        const nextNode = getNode(nextId);
+                        const nextId = link.source === currentId ? link.target : link.source, nextNode = getNode(nextId);
                         if (!nextNode) continue;
 
-                        if (isDumbDevice(nextNode.type) && !nodes.has(nextId)) {
-                            nodes.add(nextId);
-                            links.add(link.id);
-                            l2Queue.push(nextId);
+                        // Traverse if it's a dumb switch, OR if it's a passthrough link (treats the host like a dumb switch for this path)
+                        if (isDumbDevice(nextNode) || link.attachment === 'passthrough') {
+                            if (!nodes.has(nextId)) {
+                                nodes.add(nextId); links.add(link.id); l2Queue.push(nextId);
+                            }
                         }
                     }
                 }
-
                 return { nodes, links };
             }
 
-            function seedFromDumbDevice(dumbId) {
-                const l2 = getL2Domain(dumbId);
-                l2.nodes.forEach((id) => reachableNodes.add(id));
-                l2.links.forEach((id) => reachableLinks.add(id));
-
+            if (isDumbDevice(start)) {
+                const l2 = getL2Domain(startNodeId);
+                l2.nodes.forEach((id) => reachableNodes.add(id)); l2.links.forEach((id) => reachableLinks.add(id));
                 l2.nodes.forEach((l2id) => {
                     state.links.filter((l) => l.source === l2id || l.target === l2id).forEach((link) => {
-                        const neighborId = link.source === l2id ? link.target : link.source;
-                        const neighbor = getNode(neighborId);
-                        if (!neighbor || isDumbDevice(neighbor.type)) return;
-                        reachableNodes.add(neighborId);
-                        reachableLinks.add(link.id);
-                        queue.push(neighborId);
+                        const neighborId = link.source === l2id ? link.target : link.source, neighbor = getNode(neighborId);
+                        if (!neighbor || isDumbDevice(neighbor)) return;
+                        reachableNodes.add(neighborId); reachableLinks.add(link.id); queue.push(neighborId);
                     });
                 });
-            }
-
-            if (isDumbDevice(start.type)) {
-                seedFromDumbDevice(startNodeId);
             }
 
             while (queue.length) {
                 const currentId = queue.shift();
                 if (processed.has(currentId)) continue;
                 processed.add(currentId);
-
                 const currentNode = getNode(currentId);
                 if (!currentNode) continue;
 
                 const l2 = getL2Domain(currentId);
-                l2.nodes.forEach((id) => reachableNodes.add(id));
-                l2.links.forEach((id) => reachableLinks.add(id));
+                l2.nodes.forEach((id) => reachableNodes.add(id)); l2.links.forEach((id) => reachableLinks.add(id));
 
-                const candidateDevices = new Set();
-                const candidateLinks = new Map();
-
+                const candidateDevices = new Set(), candidateLinks = new Map();
                 l2.nodes.forEach((l2id) => {
                     state.links.filter((l) => l.source === l2id || l.target === l2id).forEach((link) => {
-                        const neighborId = link.source === l2id ? link.target : link.source;
-                        const neighbor = getNode(neighborId);
-                        if (!neighbor || isDumbDevice(neighbor.type)) return;
-                        candidateDevices.add(neighborId);
-                        candidateLinks.set(neighborId, link.id);
+                        const neighborId = link.source === l2id ? link.target : link.source, neighbor = getNode(neighborId);
+                        if (!neighbor || isDumbDevice(neighbor)) return;
+                        candidateDevices.add(neighborId); candidateLinks.set(neighborId, link.id);
                     });
                 });
 
                 candidateDevices.forEach((deviceId) => {
                     if (deviceId === currentId) return;
-
                     const device = getNode(deviceId);
                     if (!device) return;
 
                     if (shareSubnet(currentNode, device)) {
                         reachableNodes.add(deviceId);
                         if (candidateLinks.has(deviceId)) reachableLinks.add(candidateLinks.get(deviceId));
-
-                        const currentCanRoute = isRoutingDevice(currentNode.type);
-                        const deviceCanRoute = isRoutingDevice(device.type);
+                        
+                        const currentCanRoute = isRoutingDevice(currentNode.type), deviceCanRoute = isRoutingDevice(device.type);
                         const viaGateway = isGateway(currentNode, device) || isGateway(device, currentNode);
-
-                        if (deviceCanRoute && (viaGateway || currentCanRoute)) {
-                            queue.push(deviceId);
-                        }
+                        
+                        if (deviceCanRoute && (viaGateway || currentCanRoute)) queue.push(deviceId);
                     }
                 });
+            }
+
+            // Port Filtering pass on final reachable nodes AND links
+            if (targetPort !== '') {
+                const filteredNodes = new Set();
+                const filteredLinks = new Set();
+                
+                reachableNodes.forEach(id => {
+                    const node = getNode(id);
+                    if (isRoutingDevice(node.type) || isDumbDevice(node) || id === startNodeId || acceptsPort(node, targetPort)) {
+                        filteredNodes.add(id);
+                    }
+                });
+
+                // Only highlight links that connect to permitted nodes
+                reachableLinks.forEach(linkId => {
+                    const link = getLink(linkId);
+                    if (filteredNodes.has(link.source) && filteredNodes.has(link.target)) {
+                        filteredLinks.add(linkId);
+                    }
+                });
+                return { reachableNodes: filteredNodes, reachableLinks: filteredLinks };
             }
 
             return { reachableNodes, reachableLinks };
         }
 
-        function validateTopology() {
+        function updateTraceStatus(reach) {
+                const el = document.getElementById('traceStatus'); if (!el) return;
+                if (!state.settings.traceMode) { el.textContent = 'Trace off'; el.className = 'text-[10px] text-slate-400 min-w-[120px] ml-2'; return; }
+                if (!state.selectedId || state.selectedType !== 'node') { el.textContent = 'Select a node'; el.className = 'text-[10px] text-amber-300 min-w-[120px] ml-2'; return; }
+                
+                let count = 0;
+                if (reach) {
+                    reach.reachableNodes.forEach(id => { if(!isDumbDevice(getNode(id)) && id !== state.selectedId) count++; });
+                }
+                el.textContent = `Path to ${count} devices`; el.className = 'text-[10px] text-amber-300 min-w-[120px] ml-2 font-bold';
+            }
+        
+            function validateTopology() {
             const alertBox = document.getElementById('conflictAlert');
             const msgList = document.getElementById('conflictMsgList');
-
-            if (!state.settings.showConflicts) {
-                alertBox.classList.add('hidden');
-                return;
-            }
-
             const errors = [];
             const ipMap = {};
-
+                
             state.nodes.forEach((node) => {
                 getValidIps(node).forEach((parsed) => {
                     const ip = parsed.ip.toString();
                     if (!ipMap[ip]) ipMap[ip] = [];
                     ipMap[ip].push(node.name || node.id);
                 });
-
-                if (node.zone !== 'isolated' && !isDumbDevice(node.type)) {
+            
+                if (!isDumbDevice(node) && node.gw) {
                     const validIPs = getValidIps(node);
-
-                    if (node.gw && validIPs.length) {
+                    if (validIPs.length > 0) {
                         try {
                             const gwIp = ipaddr.parse(node.gw.trim());
                             const gatewayOnLocalSubnet = validIPs.some((local) => gwIp.match(local.cidrObj));
-                            if (!gatewayOnLocalSubnet) {
-                                errors.push(`${node.name}: Gateway ${node.gw} is not on a local subnet.`);
-                            }
-                        } catch (e) {
-                            errors.push(`${node.name}: Invalid gateway value.`);
-                        }
+                            if (!gatewayOnLocalSubnet) errors.push(`${node.name}: Gateway ${node.gw} is unreachable.`);
+                        } catch (e) { errors.push(`${node.name}: Invalid gateway format.`); }
                     }
                 }
             });
-
+        
             Object.entries(ipMap).forEach(([ip, names]) => {
-                if (names.length > 1) {
-                    errors.push(`IP Conflict: ${ip} on ${names.join(', ')}.`);
-                }
+                if (names.length > 1) errors.push(`IP Conflict: ${ip} shared by ${names.join(', ')}.`);
             });
-
+        
             if (errors.length) {
                 msgList.innerHTML = errors.map((e) => `<li>${escapeHtml(e)}</li>`).join('');
+                function cloneData(data) { return JSON.parse(JSON.stringify(data)); }
+
+                function escapeHtml(value) {
+                    return String(value ?? '')
+                        .replaceAll('&', '&amp;')
+                        .replaceAll('<', '&lt;')
+                        .replaceAll('>', '&gt;')
+                        .replaceAll('"', '&quot;')
+                        .replaceAll("'", '&#039;');
+                }
+
+                function getNode(id) { return state.nodes.find((n) => n.id === id) || null; }
                 alertBox.classList.remove('hidden');
             } else {
                 alertBox.classList.add('hidden');
             }
         }
 
-        function updateTraceStatus(reach) {
-            const el = document.getElementById('traceStatus');
-            if (!el) return;
-
-            if (!state.settings.traceMode) {
-                el.textContent = 'Trace off';
-                el.className = 'text-[10px] text-slate-400 min-w-[150px]';
-                return;
-            }
-
-            if (!state.selectedId || state.selectedType !== 'node') {
-                el.textContent = 'Trace on: select a node';
-                el.className = 'text-[10px] text-amber-300 min-w-[150px]';
-                return;
-            }
-
-            const node = getNode(state.selectedId);
-            const count = reach ? Math.max(0, reach.reachableNodes.size - 1) : 0;
-            el.textContent = `From ${node?.name || 'node'}: ${count} reachable`;
-            el.className = 'text-[10px] text-amber-300 min-w-[150px]';
-        }
 
         function renderCanvasOnly() {
-            lZones.innerHTML = '';
-            lLinks.innerHTML = '';
-            lNodes.innerHTML = '';
+            lZones.innerHTML = ''; lLinks.innerHTML = ''; lNodes.innerHTML = '';
+            document.getElementById('networkCanvas').className = `w-full h-full absolute inset-0 select-none ${state.linkSourceId ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`;
 
+            // 1. Render Zone Bubbles (Only Private IPs, skipping clouds)
             const subnets = {};
-            state.nodes.forEach((node) => {
-                getValidIps(node).forEach((ipData) => {
-                    const subnet = ipData.networkStr;
-                    if (!subnets[subnet]) subnets[subnet] = [];
-                    subnets[subnet].push(node);
-                });
+            state.nodes.forEach((node) => { 
+                if (node.type === 'cloud') return; // Suppress cloud public zones
+                getValidIps(node).forEach((ipData) => { 
+                    if (!ipData.isPrivate) return; // Suppress public IPs
+                    const subnet = ipData.networkStr; 
+                    if (!subnets[subnet]) subnets[subnet] = []; 
+                    subnets[subnet].push(node); 
+                }); 
             });
 
             let labelOffsets = {}; 
-
             Object.entries(subnets).forEach(([subnet, nodes]) => {
                 if (!nodes.length) return;
-
-                let minX = Infinity;
-                let minY = Infinity;
-                let maxX = -Infinity;
-                let maxY = -Infinity;
-
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
                 nodes.forEach((node) => {
-                    minX = Math.min(minX, node.x);
-                    minY = Math.min(minY, node.y);
-                    maxX = Math.max(maxX, node.x);
-                    maxY = Math.max(maxY, node.y);
+                    minX = Math.min(minX, node.x); minY = Math.min(minY, node.y);
+                    maxX = Math.max(maxX, node.x); maxY = Math.max(maxY, node.y);
                 });
 
-                const padX = 45;
-                const padTop = 45;
-                const padBottom = 80;
+                const padX = 45, padTop = 45, padBottom = 80;
                 const hue = Array.from(subnet).reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
 
                 const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
                 g.setAttribute('class', 'zone-bubble');
 
                 const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                rect.setAttribute('x', minX - padX);
-                rect.setAttribute('y', minY - padTop);
-                rect.setAttribute('width', maxX - minX + padX * 2);
-                rect.setAttribute('height', maxY - minY + padTop + padBottom);
+                rect.setAttribute('x', minX - padX); rect.setAttribute('y', minY - padTop);
+                rect.setAttribute('width', maxX - minX + padX * 2); rect.setAttribute('height', maxY - minY + padTop + padBottom);
                 rect.setAttribute('rx', '16');
-                rect.setAttribute('fill', `hsla(${hue}, 70%, 50%, 0.06)`);
-                rect.setAttribute('stroke', `hsla(${hue}, 70%, 50%, 0.3)`);
-                rect.setAttribute('stroke-dasharray', '8 4');
-                rect.setAttribute('stroke-width', '2');
+                rect.setAttribute('fill', `hsla(${hue}, 70%, 50%, 0.06)`); rect.setAttribute('stroke', `hsla(${hue}, 70%, 50%, 0.3)`);
+                rect.setAttribute('stroke-dasharray', '8 4'); rect.setAttribute('stroke-width', '2');
                 g.appendChild(rect);
 
                 const labelPosKey = `${minX}_${minY}`;
@@ -730,57 +1153,43 @@
                 labelOffsets[labelPosKey] = offsetIndex + 1;
 
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                text.setAttribute('x', minX - padX + 12);
-                text.setAttribute('y', minY - padTop + 20 + (offsetIndex * 15));
-                text.setAttribute('font-size', '11');
-                text.setAttribute('font-family', 'monospace');
-                text.setAttribute('font-weight', 'bold');
-                text.setAttribute('fill', `hsla(${hue}, 70%, 40%, 0.7)`);
+                text.setAttribute('x', minX - padX + 12); text.setAttribute('y', minY - padTop + 20 + (offsetIndex * 15));
+                text.setAttribute('font-size', '11'); text.setAttribute('font-family', 'monospace');
+                text.setAttribute('font-weight', 'bold'); text.setAttribute('fill', `hsla(${hue}, 70%, 40%, 0.7)`);
                 text.textContent = subnet;
-                g.appendChild(text);
-
-                lZones.appendChild(g);
+                g.appendChild(text); lZones.appendChild(g);
             });
 
-            const reach = state.settings.traceMode && state.selectedId && state.selectedType === 'node'
-                ? calculateReachability(state.selectedId)
-                : null;
+            const reach = state.settings.traceMode && state.selectedId && state.selectedType === 'node' ? calculateReachability(state.selectedId) : null;
 
+            // 2. Render Links
             state.links.forEach((link) => {
-                const src = getNode(link.source);
-                const tgt = getNode(link.target);
+                const src = getNode(link.source), tgt = getNode(link.target);
                 if (!src || !tgt) return;
 
                 const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                line.setAttribute('x1', src.x);
-                line.setAttribute('y1', src.y);
-                line.setAttribute('x2', tgt.x);
-                line.setAttribute('y2', tgt.y);
+                line.setAttribute('id', `ui-link-${link.id}`);
+                line.setAttribute('x1', src.x); line.setAttribute('y1', src.y); line.setAttribute('x2', tgt.x); line.setAttribute('y2', tgt.y);
 
                 const isSelected = state.selectedId === link.id && state.selectedType === 'link';
                 const isWireless = src.type === 'ap' || tgt.type === 'ap';
 
                 if (reach && reach.reachableLinks.has(link.id)) {
-                    line.setAttribute('stroke', '#f59e0b');
-                    line.setAttribute('stroke-width', '3');
-                    line.setAttribute('class', 'animate-flow cursor-pointer');
+                    line.setAttribute('stroke', '#f59e0b'); line.setAttribute('stroke-width', '3'); line.setAttribute('class', 'animate-flow cursor-pointer');
                 } else {
-                    line.setAttribute('stroke', isSelected ? '#3b82f6' : '#94a3b8');
+                    line.setAttribute('stroke', isSelected ? '#3b82f6' : (link.attachment === 'passthrough' ? '#a855f7' : '#94a3b8')); 
                     line.setAttribute('stroke-width', isSelected ? '3' : '2');
                     line.setAttribute('class', reach ? 'fade-inactive cursor-pointer' : 'cursor-pointer transition-colors');
-                    if (isWireless) line.setAttribute('stroke-dasharray', '4 4');
+                    if (isWireless || link.attachment) line.setAttribute('stroke-dasharray', '4 4');
                 }
-
-                line.addEventListener('mousedown', (event) => {
-                    event.stopPropagation();
-                    select(link.id, 'link');
-                });
-
+                line.addEventListener('mousedown', (event) => { event.stopPropagation(); select(link.id, 'link'); });
                 lLinks.appendChild(line);
             });
 
+            // 3. Render Nodes
             state.nodes.forEach((node) => {
                 const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                g.setAttribute('id', `ui-node-${node.id}`);
                 g.setAttribute('transform', `translate(${node.x}, ${node.y})`);
 
                 const isSelected = state.selectedId === node.id && state.selectedType === 'node';
@@ -788,188 +1197,127 @@
                 const isReachable = reach && reach.reachableNodes.has(node.id);
                 const isInactiveTraceNode = reach && !isReachable;
 
-                if (isInactiveTraceNode) {
-                    g.setAttribute('class', 'fade-inactive');
-                } else {
-                    g.setAttribute('class', state.mode === 'drag' ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair');
-                }
+                let classes = state.linkSourceId ? (isLinkSource ? 'linking-glow cursor-crosshair' : 'cursor-crosshair') : 'cursor-grab active:cursor-grabbing';
+                if (isInactiveTraceNode) classes += ' fade-inactive';
+                g.setAttribute('class', classes);
 
                 const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                rect.setAttribute('x', '-24');
-                rect.setAttribute('y', '-24');
-                rect.setAttribute('width', '48');
-                rect.setAttribute('height', '48');
-                rect.setAttribute('rx', '6');
+                rect.setAttribute('x', '-24'); rect.setAttribute('y', '-24'); rect.setAttribute('width', '48'); rect.setAttribute('height', '48'); rect.setAttribute('rx', '6');
 
-                if (isLinkSource) {
-                    rect.setAttribute('fill', '#fff7ed');
-                    rect.setAttribute('stroke', '#f97316');
-                    rect.setAttribute('stroke-width', '3');
-                } else if (isSelected) {
-                    rect.setAttribute('fill', '#eff6ff');
-                    rect.setAttribute('stroke', '#3b82f6');
-                    rect.setAttribute('stroke-width', '2');
-                } else if (isReachable) {
-                    rect.setAttribute('fill', '#fffbeb');
-                    rect.setAttribute('stroke', '#fcd34d');
-                    rect.setAttribute('stroke-width', '2.5');
-                } else {
-                    rect.setAttribute('fill', '#ffffff');
-                    rect.setAttribute('stroke', '#cbd5e1');
-                    rect.setAttribute('stroke-width', '1.5');
-                }
+                if (isLinkSource) { rect.setAttribute('fill', '#fff7ed'); rect.setAttribute('stroke', '#ea580c'); rect.setAttribute('stroke-width', '2'); } 
+                else if (isSelected) { rect.setAttribute('fill', '#eff6ff'); rect.setAttribute('stroke', '#3b82f6'); rect.setAttribute('stroke-width', '2'); } 
+                else if (isReachable) { rect.setAttribute('fill', '#fffbeb'); rect.setAttribute('stroke', '#fcd34d'); rect.setAttribute('stroke-width', '2.5'); } 
+                else { rect.setAttribute('fill', '#ffffff'); rect.setAttribute('stroke', '#cbd5e1'); rect.setAttribute('stroke-width', '1.5'); }
 
                 if (node.type === 'vm') rect.setAttribute('stroke-dasharray', '4 3');
-                rect.style.transition = 'all 0.1s ease';
-                g.appendChild(rect);
+                rect.style.transition = 'all 0.1s ease'; g.appendChild(rect);
 
                 const iconG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
                 iconG.setAttribute('transform', 'translate(-12, -14)');
                 iconG.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" stroke="#334155" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[node.type] || iconPaths.custom}</svg>`;
-                iconG.style.pointerEvents = 'none';
-                g.appendChild(iconG);
+                iconG.style.pointerEvents = 'none'; g.appendChild(iconG);
 
                 const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                label.setAttribute('text-anchor', 'middle');
-                label.setAttribute('y', '36');
-                label.setAttribute('font-size', '10');
-                label.setAttribute('font-weight', '600');
-                label.setAttribute('fill', '#334155');
-                label.textContent = node.name;
-                label.style.pointerEvents = 'none';
+                label.setAttribute('text-anchor', 'middle'); label.setAttribute('y', '36'); label.setAttribute('font-size', '10');
+                label.setAttribute('font-weight', '600'); label.setAttribute('fill', '#334155'); label.textContent = node.name; label.style.pointerEvents = 'none';
                 g.appendChild(label);
 
                 if (isLinkSource) {
                     const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    hint.setAttribute('text-anchor', 'middle');
-                    hint.setAttribute('y', '-34');
-                    hint.setAttribute('font-size', '9');
-                    hint.setAttribute('font-weight', '700');
-                    hint.setAttribute('fill', '#ea580c');
-                    hint.textContent = 'LINK SOURCE';
-                    hint.style.pointerEvents = 'none';
+                    hint.setAttribute('text-anchor', 'middle'); hint.setAttribute('y', '-34'); hint.setAttribute('font-size', '9');
+                    hint.setAttribute('font-weight', '700'); hint.setAttribute('fill', '#ea580c'); hint.textContent = 'LINK TARGET...'; hint.style.pointerEvents = 'none';
                     g.appendChild(hint);
                 }
 
-                if (!isDumbDevice(node.type) && node.ips && node.ips.length > 0) {
-                    const validDisplayIps = node.ips.filter((i) => i.trim() !== '');
+                if (!isDumbDevice(node) && node.interfaces && node.interfaces.length > 0) {
+                    const validDisplayIps = node.interfaces.map(i=>i.ip).filter((i) => i && i.trim() !== '');
                     validDisplayIps.slice(0, 2).forEach((ip, idx) => {
                         const ipLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                        ipLabel.setAttribute('text-anchor', 'middle');
-                        ipLabel.setAttribute('y', String(48 + idx * 10));
-                        ipLabel.setAttribute('font-size', '8');
-                        ipLabel.setAttribute('font-family', 'monospace');
-                        ipLabel.setAttribute('fill', '#64748b');
-
-                        let text = ip;
-                        if (idx === 1 && validDisplayIps.length > 2) {
-                            text += ` (+${validDisplayIps.length - 2})`;
-                        }
-                        ipLabel.textContent = text;
-                        ipLabel.style.pointerEvents = 'none';
-                        g.appendChild(ipLabel);
+                        ipLabel.setAttribute('text-anchor', 'middle'); ipLabel.setAttribute('y', String(48 + idx * 10));
+                        ipLabel.setAttribute('font-size', '8'); ipLabel.setAttribute('font-family', 'monospace'); ipLabel.setAttribute('fill', '#64748b');
+                        let text = ip; if (idx === 1 && validDisplayIps.length > 2) { text += ` (+${validDisplayIps.length - 2})`; }
+                        ipLabel.textContent = text; ipLabel.style.pointerEvents = 'none'; g.appendChild(ipLabel);
                     });
                 }
 
+                // Interactions
                 g.addEventListener('mousedown', (event) => {
                     event.stopPropagation();
-
-                    if (state.mode === 'drag') {
-                        isDraggingNode = true;
-                        draggedNode = node;
+                    if (!state.linkSourceId) {
+                        isDraggingNode = true; draggedNode = node;
                         const pt = getWorkspacePoint(event.clientX, event.clientY);
-                        dragOffset.x = pt.x - node.x;
-                        dragOffset.y = pt.y - node.y;
+                        dragOffset.x = pt.x - node.x; dragOffset.y = pt.y - node.y;
                         select(node.id, 'node');
-                        return;
                     }
+                });
 
-                    if (state.mode === 'link') {
-                        if (!state.linkSourceId) {
-                            state.linkSourceId = node.id;
-                            updateModeHelp();
-                            renderCanvasOnly();
-                            return;
-                        }
-
+                g.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    if (state.linkSourceId) {
                         if (state.linkSourceId !== node.id) {
-                            const duplicate = state.links.find((l) =>
-                                (l.source === state.linkSourceId && l.target === node.id) ||
-                                (l.source === node.id && l.target === state.linkSourceId)
-                            );
-
-                            if (!duplicate) {
-                                state.links.push({
-                                    id: `l_${Date.now()}`,
-                                    source: state.linkSourceId,
-                                    target: node.id
-                                });
+                            const duplicate = state.links.find((l) => (l.source === state.linkSourceId && l.target === node.id) || (l.source === node.id && l.target === state.linkSourceId));
+                            if (!duplicate) { 
+                                const sNode = getNode(state.linkSourceId);
+                                const isVirtual = (sNode.type === 'vm' || node.type === 'vm');
+                                state.links.push({ id: `l_${Date.now()}`, source: state.linkSourceId, target: node.id, attachment: isVirtual ? 'bridged' : null }); 
                             }
                         }
-
-                        state.linkSourceId = null;
-                        updateModeHelp();
-                        save();
-                        renderCanvasOnly();
+                        state.linkSourceId = null; save();
+renderCanvasOnly();
+renderNodeDiagnostics(node);
                     }
+                });
+
+                g.addEventListener('contextmenu', (event) => {
+                    event.preventDefault(); // Stops browser menu
+                    event.stopPropagation();
+                    state.linkSourceId = node.id;
+                    renderCanvasOnly();
                 });
 
                 lNodes.appendChild(g);
             });
-
             updateTraceStatus(reach);
             validateTopology();
         }
 
-        function renderSidebarIPs(node) {
-            const cont = document.getElementById('ipListContainer');
-            cont.innerHTML = '';
-            node.ips = node.ips || [];
-
-            if (!node.ips.length) {
-                cont.innerHTML = '<span class="text-[10px] text-slate-400 italic">No IPs configured.</span>';
-                return;
-            }
-
-            node.ips.forEach((ip, i) => {
-                const div = document.createElement('div');
-                div.className = 'flex items-center gap-1';
-
-                const inp = document.createElement('input');
-                inp.type = 'text';
-                inp.value = ip;
-                inp.placeholder = 'CIDR';
-                inp.className = 'flex-1 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500 w-full';
-
-                if (ip.trim() !== '' && !parseValidCIDR(ip)) {
-                    inp.classList.add('border-red-400', 'bg-red-50');
-                }
-
-                inp.addEventListener('input', (event) => {
-                    node.ips[i] = event.target.value;
-                    if (node.ips[i].trim() !== '' && !parseValidCIDR(node.ips[i])) {
-                        inp.classList.add('border-red-400', 'bg-red-50');
-                    } else {
-                        inp.classList.remove('border-red-400', 'bg-red-50');
-                    }
-                    save();
+        function renderSidebarData(node) {
+            const ifCont = document.getElementById('ifaceListContainer'); ifCont.innerHTML = '';
+            node.interfaces = node.interfaces || [];
+            if (!node.interfaces.length) { ifCont.innerHTML = '<span class="text-[10px] text-slate-400 italic">No interfaces defined.</span>'; }
+            else {
+                node.interfaces.forEach((iface, i) => {
+                    const div = document.createElement('div'); div.className = 'flex items-center gap-1';
+                    const nameInp = document.createElement('input'); nameInp.type = 'text'; nameInp.value = iface.name; nameInp.placeholder = 'eth0';
+                    nameInp.className = 'w-1/3 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500 bg-slate-50';
+                    nameInp.addEventListener('input', (e) => { node.interfaces[i].name = e.target.value; save();
                     renderCanvasOnly();
+                    renderNodeDiagnostics(node); });
+
+                    const ipInp = document.createElement('input'); ipInp.type = 'text'; ipInp.value = iface.ip; ipInp.placeholder = 'CIDR';
+                    ipInp.className = 'flex-1 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500';
+                    if (iface.ip.trim() !== '' && !parseValidCIDR(iface.ip)) ipInp.classList.add('border-red-400', 'bg-red-50');
+                    ipInp.addEventListener('input', (e) => { 
+                        node.interfaces[i].ip = e.target.value; 
+                        if (e.target.value.trim() !== '' && !parseValidCIDR(e.target.value)) ipInp.classList.add('border-red-400', 'bg-red-50');
+                        else ipInp.classList.remove('border-red-400', 'bg-red-50');
+                        save();
+                        renderCanvasOnly();
+                        renderNodeDiagnostics(node); 
+                    });
+
+                    const del = document.createElement('button'); del.innerHTML = '✖'; del.className = 'text-slate-400 hover:text-red-500 px-1';
+                    del.onclick = () => {
+                        node.interfaces.splice(i, 1);
+                        save();
+                        renderCanvasOnly();
+                        renderSidebarData(node);
+                        renderNodeDiagnostics(node);
+                    };
+                    
+                    div.appendChild(nameInp); div.appendChild(ipInp); div.appendChild(del); ifCont.appendChild(div);
                 });
-
-                const del = document.createElement('button');
-                del.innerHTML = '✖';
-                del.className = 'text-slate-400 hover:text-red-500 px-1';
-                del.onclick = () => {
-                    node.ips.splice(i, 1);
-                    save();
-                    renderCanvasOnly();
-                    renderSidebarIPs(node);
-                };
-
-                div.appendChild(inp);
-                div.appendChild(del);
-                cont.appendChild(div);
-            });
+            }
         }
 
         function clearPropertyInputs() {
@@ -979,450 +1327,230 @@
             document.getElementById('propOs').value = '';
             document.getElementById('propPorts').value = '';
             document.getElementById('propNotes').value = '';
-            document.getElementById('propZone').value = 'lan';
-            document.getElementById('ipListContainer').innerHTML = '';
+            document.getElementById('ifaceListContainer').innerHTML = '';
             document.getElementById('jumpGwBtn').classList.add('hidden');
+            renderNodeDiagnostics(null);
         }
 
         function select(id, type) {
-            state.selectedId = id;
-            state.selectedType = type;
-            state.linkSourceId = null;
-            updateModeHelp();
+            state.selectedId = id; state.selectedType = type; state.linkSourceId = null;
+            const pPane = document.getElementById('propertiesPane'), nPane = document.getElementById('noSelectionPane');
+            const netProps = document.getElementById('nodeNetworkProps'), generalProps = document.getElementById('nodeGeneralProps'), linkProps = document.getElementById('linkProps');
+            const nameInput = document.getElementById('propName'), jumpGwBtn = document.getElementById('jumpGwBtn');
 
-            const pPane = document.getElementById('propertiesPane');
-            const nPane = document.getElementById('noSelectionPane');
-            const netProps = document.getElementById('nodeNetworkProps');
-            const generalProps = document.getElementById('nodeGeneralProps');
-            const nameInput = document.getElementById('propName');
-            const jumpGwBtn = document.getElementById('jumpGwBtn');
-
-            if (!id) {
-                clearPropertyInputs();
-                pPane.classList.add('hidden');
-                pPane.classList.remove('flex');
-                nPane.classList.remove('hidden');
-                renderCanvasOnly();
-                return;
-            }
-
-            nPane.classList.add('hidden');
-            pPane.classList.remove('hidden');
-            pPane.classList.add('flex');
+            if (!id) { clearPropertyInputs(); pPane.classList.add('hidden'); pPane.classList.remove('flex'); nPane.classList.remove('hidden'); renderCanvasOnly(); return; }
+            nPane.classList.add('hidden'); pPane.classList.remove('hidden'); pPane.classList.add('flex');
 
             if (type === 'node') {
-                const node = getNode(id);
-                if (!node) return;
-
-                nameInput.value = node.name || '';
-                nameInput.disabled = false;
-
-                generalProps.classList.remove('hidden');
-                document.getElementById('propNotes').value = node.notes || '';
-                document.getElementById('propOs').value = node.os || '';
-                document.getElementById('propPorts').value = node.ports || '';
-
-                if (isDumbDevice(node.type)) {
-                    netProps.classList.add('hidden');
-                    jumpGwBtn.classList.add('hidden');
-                } else {
-                    netProps.classList.remove('hidden');
-                    document.getElementById('propZone').value = node.zone || 'lan';
-                    document.getElementById('propGw').value = node.gw || '';
-                    document.getElementById('propDns').value = node.dns || '';
-                    renderSidebarIPs(node);
-
-                    if (node.gw && node.gw.trim() !== '') {
-                        jumpGwBtn.classList.remove('hidden');
-                        jumpGwBtn.onclick = () => {
-                            const gwIpStr = node.gw.trim();
-                            const targetNode = state.nodes.find((n) => 
-                                getValidIps(n).some((ipData) => ipData.ip.toString() === gwIpStr)
-                            );
-
-                            if (targetNode) {
-                                const rect = document.getElementById('networkCanvas').getBoundingClientRect();
-                                state.camera.x = (rect.width / 2) - targetNode.x * state.camera.zoom;
-                                state.camera.y = (rect.height / 2) - targetNode.y * state.camera.zoom;
-                                applyCamera();
-                                select(targetNode.id, 'node');
-                            } else {
-                                alert(`Gateway node (${gwIpStr}) not found in the topology.`);
-                            }
-                        };
-                    } else {
-                        jumpGwBtn.classList.add('hidden');
-                    }
-                }
+                const node = getNode(id); if (!node) return;
+                nameInput.value = node.name || ''; nameInput.disabled = false; generalProps.classList.remove('hidden'); linkProps.classList.add('hidden');
+                document.getElementById('propOs').value = node.os || ''; document.getElementById('propPorts').value = node.ports || ''; document.getElementById('propNotes').value = node.notes || '';
+                
+                netProps.classList.remove('hidden');
+                document.getElementById('propGw').value = node.gw || ''; document.getElementById('propDns').value = node.dns || '';
+                if (node.gw && node.gw.trim() !== '') {
+                    jumpGwBtn.classList.remove('hidden');
+                    jumpGwBtn.onclick = () => {
+                        const gwIpStr = node.gw.trim(), targetNode = state.nodes.find((n) => getValidIps(n).some((ipData) => ipData.ip.toString() === gwIpStr));
+                        if (targetNode) {
+                            const rect = document.getElementById('networkCanvas').getBoundingClientRect();
+                            state.camera.x = (rect.width / 2) - targetNode.x * state.camera.zoom; state.camera.y = (rect.height / 2) - targetNode.y * state.camera.zoom;
+                            applyCamera(); select(targetNode.id, 'node');
+                        } else { alert(`Gateway node (${gwIpStr}) not found in the topology.`); }
+                    };
+                } else { jumpGwBtn.classList.add('hidden'); }
+                renderSidebarData(node);
+                renderNodeDiagnostics(node);
             } else if (type === 'link') {
-                const link = getLink(id);
-                if (!link) return;
+                const link = getLink(id); if (!link) return;
+                const a = getNode(link.source), b = getNode(link.target);
+                nameInput.value = `${a?.name || link.source} ↔ ${b?.name || link.target}`; nameInput.disabled = true;
+                netProps.classList.add('hidden'); generalProps.classList.add('hidden');
 
-                const a = getNode(link.source);
-                const b = getNode(link.target);
-
-                nameInput.value = `${a?.name || link.source} ↔ ${b?.name || link.target}`;
-                nameInput.disabled = true;
-
-                netProps.classList.add('hidden');
-                generalProps.classList.add('hidden');
+                if (link.attachment !== undefined && link.attachment !== null) {
+                    linkProps.classList.remove('hidden');
+                    document.getElementById('propAttachment').value = link.attachment;
+                    document.getElementById('propAttachment').onchange = (e) => { link.attachment = e.target.value; save();
+                    renderCanvasOnly();
+                    renderNodeDiagnostics(node); };
+                } else { linkProps.classList.add('hidden'); }
             }
-
             renderCanvasOnly();
         }
 
         function spawnNode(type) {
-            const rect = document.getElementById('networkCanvas').getBoundingClientRect();
-            const defs = initialDataDefaults[type] || { os: '', ports: '', zone: 'lan', ips: [] };
+            const rect = document.getElementById('networkCanvas').getBoundingClientRect(), defs = initialDataDefaults[type] || { os: '', ports: '', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.50/24'}] };
             const palette = paletteDefs.find((p) => p.type === type);
-
             const sx = Math.round(((rect.width / 2 - state.camera.x) / state.camera.zoom + (state.nodes.length % 6) * 20) / GRID_SNAP) * GRID_SNAP;
             const sy = Math.round(((rect.height / 2 - state.camera.y) / state.camera.zoom + (state.nodes.length % 6) * 20) / GRID_SNAP) * GRID_SNAP;
 
-            const node = {
-                id: `n_${Date.now()}`,
-                type,
-                name: `New ${palette?.name || 'Node'}`,
-                x: sx,
-                y: sy,
-                ips: [...(defs.ips || [])],
-                gw: defs.gw || '',
-                dns: defs.dns || '',
-                os: defs.os || '',
-                ports: defs.ports || '',
-                notes: '',
-                zone: defs.zone || 'lan'
-            };
-
-            state.nodes.push(node);
-            select(node.id, 'node');
-            save();
+            const node = { id: `n_${Date.now()}`, type, name: `New ${palette?.name || 'Node'}`, x: sx, y: sy, gw: defs.gw || '', dns: defs.dns || '', os: defs.os || '', ports: defs.ports || '', notes: '', interfaces: cloneData(defs.interfaces) };
+            state.nodes.push(node); select(node.id, 'node'); save();
             renderCanvasOnly();
+            renderNodeDiagnostics(node);
         }
 
         function getWorkspacePoint(clientX, clientY) {
             const rect = document.getElementById('networkCanvas').getBoundingClientRect();
-            return {
-                x: (clientX - rect.left - state.camera.x) / state.camera.zoom,
-                y: (clientY - rect.top - state.camera.y) / state.camera.zoom
-            };
+            return { x: (clientX - rect.left - state.camera.x) / state.camera.zoom, y: (clientY - rect.top - state.camera.y) / state.camera.zoom };
         }
 
         function applyCamera() {
             document.getElementById('workspace').setAttribute('transform', `translate(${state.camera.x}, ${state.camera.y}) scale(${state.camera.zoom})`);
-
-            const backgroundSize = GRID_SNAP * state.camera.zoom;
-            const canvasContainer = document.getElementById('canvasContainer');
-            canvasContainer.style.backgroundSize = `${backgroundSize}px ${backgroundSize}px`;
-            canvasContainer.style.backgroundPosition = `${state.camera.x}px ${state.camera.y}px`;
+            const backgroundSize = GRID_SNAP * state.camera.zoom, canvasContainer = document.getElementById('canvasContainer');
+            canvasContainer.style.backgroundSize = `${backgroundSize}px ${backgroundSize}px`; canvasContainer.style.backgroundPosition = `${state.camera.x}px ${state.camera.y}px`;
         }
 
         function updateOsDatalist() {
-            const dl = document.getElementById('osDatalist');
-            dl.innerHTML = '';
-            new Set(state.nodes.map((n) => n.os).filter(Boolean)).forEach((os) => {
-                dl.appendChild(new Option(os, os));
-            });
+            const dl = document.getElementById('osDatalist'); dl.innerHTML = '';
+            new Set(state.nodes.map((n) => n.os).filter(Boolean)).forEach((os) => { dl.appendChild(new Option(os, os)); });
         }
 
         function save() {
             try {
-                const cleanNodes = state.nodes.map((n) => ({
-                    id: n.id,
-                    type: n.type,
-                    name: n.name,
-                    x: n.x,
-                    y: n.y,
-                    ips: (n.ips || []).filter((i) => i.trim() !== ''),
-                    gw: n.gw || '',
-                    dns: n.dns || '',
-                    os: n.os || '',
-                    ports: n.ports || '',
-                    notes: n.notes || '',
-                    zone: n.zone || 'lan'
-                }));
-
-                const cleanLinks = state.links.map((l) => ({
-                    id: l.id,
-                    source: l.source,
-                    target: l.target
-                }));
-
+                const cleanNodes = state.nodes.map((n) => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', interfaces: n.interfaces || [] }));
+                const cleanLinks = state.links.map((l) => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment }));
                 const encoded = btoa(encodeURIComponent(JSON.stringify({ nodes: cleanNodes, links: cleanLinks })));
-                window.history.replaceState(null, '', `#${encoded}`);
-                updateOsDatalist();
-            } catch (err) {
-                console.warn('Could not save diagram state to URL hash:', err);
-            }
+                window.history.replaceState(null, '', `#${encoded}`); updateOsDatalist();
+            } catch (err) { console.warn('Could not save diagram state:', err); }
         }
 
         function normalizeLoadedNode(node) {
-            return {
-                id: node.id || `n_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-                type: node.type || 'custom',
-                name: node.name || 'Unnamed Node',
-                x: Number.isFinite(node.x) ? node.x : 200,
-                y: Number.isFinite(node.y) ? node.y : 200,
-                ips: Array.isArray(node.ips) ? node.ips : [],
-                gw: node.gw || '',
-                dns: node.dns || '',
-                os: node.os || '',
-                ports: node.ports || '',
-                notes: node.notes || '',
-                zone: node.zone || 'lan'
-            };
+            const def = initialDataDefaults[node.type] || { interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] };
+            let normalizedInterfaces = Array.isArray(node.interfaces) ? node.interfaces : cloneData(def.interfaces);
+            // Legacy converter from ips to interfaces
+            if (node.ips && Array.isArray(node.ips) && node.ips.length > 0) {
+                normalizedInterfaces = node.ips.map((ip, idx) => ({ id: `i_${Date.now()}_${idx}`, name: idx === 0 ? 'eth0' : `eth${idx}`, ip }));
+            } else if (node.ips && Array.isArray(node.ips) && node.ips.length === 0) {
+                normalizedInterfaces = [];
+            }
+            return { id: node.id || `n_${Date.now()}_${Math.random().toString(16).slice(2)}`, type: node.type || 'custom', name: node.name || 'Unnamed Node', x: Number.isFinite(node.x) ? node.x : 200, y: Number.isFinite(node.y) ? node.y : 200, gw: node.gw || '', dns: node.dns || '', os: node.os || '', ports: node.ports || '', notes: node.notes || '', interfaces: normalizedInterfaces };
         }
 
         function load() {
             const hash = window.location.hash.substring(1);
-
-            if (!hash) {
-                state.nodes = cloneData(templatesData.house.nodes).map(normalizeLoadedNode);
-                state.links = cloneData(templatesData.house.links);
-                updateOsDatalist();
-                return;
-            }
-
+            if (!hash) { state.nodes = cloneData(templatesData.house.nodes).map(normalizeLoadedNode); state.links = cloneData(templatesData.house.links); updateOsDatalist(); return; }
             try {
                 const parsed = JSON.parse(decodeURIComponent(atob(hash)));
-                state.nodes = (parsed.nodes || []).map(normalizeLoadedNode);
-                state.links = Array.isArray(parsed.links) ? parsed.links : [];
-                updateOsDatalist();
+                state.nodes = (parsed.nodes || []).map(normalizeLoadedNode); state.links = Array.isArray(parsed.links) ? parsed.links : []; updateOsDatalist();
             } catch (e) {
-                console.warn('Invalid URL hash. Loading default template instead.', e);
-                state.nodes = cloneData(templatesData.house.nodes).map(normalizeLoadedNode);
-                state.links = cloneData(templatesData.house.links);
-                updateOsDatalist();
+                state.nodes = cloneData(templatesData.house.nodes).map(normalizeLoadedNode); state.links = cloneData(templatesData.house.links); updateOsDatalist();
             }
-        }
-
-        function updateModeHelp() {
-            const help = document.getElementById('modeHelp');
-            if (!help) return;
-
-            if (state.mode === 'drag') {
-                help.textContent = 'Drag mode: move nodes or pan the canvas.';
-                return;
-            }
-
-            if (state.linkSourceId) {
-                const source = getNode(state.linkSourceId);
-                help.textContent = `Link mode: ${source?.name || 'source'} selected. Click another node to create a link.`;
-            } else {
-                help.textContent = 'Link mode: click node A, then node B.';
-            }
-        }
-
-        function setMode(mode) {
-            state.mode = mode;
-            state.linkSourceId = null;
-
-            const dragBtn = document.getElementById('modeDrag');
-            const linkBtn = document.getElementById('modeLink');
-
-            if (mode === 'drag') {
-                dragBtn.className = 'flex-1 text-center py-1 text-xs font-medium rounded bg-white text-slate-900 shadow-sm transition';
-                linkBtn.className = 'flex-1 text-center py-1 text-xs font-medium rounded text-slate-600 hover:text-slate-900 transition';
-            } else {
-                linkBtn.className = 'flex-1 text-center py-1 text-xs font-medium rounded bg-white text-slate-900 shadow-sm transition';
-                dragBtn.className = 'flex-1 text-center py-1 text-xs font-medium rounded text-slate-600 hover:text-slate-900 transition';
-                select(null, null);
-            }
-
-            updateModeHelp();
-            renderCanvasOnly();
         }
 
         function deleteSelected() {
             if (!state.selectedId) return;
-
-            if (state.selectedType === 'node') {
-                state.nodes = state.nodes.filter((n) => n.id !== state.selectedId);
-                state.links = state.links.filter((l) => l.source !== state.selectedId && l.target !== state.selectedId);
-            } else if (state.selectedType === 'link') {
-                state.links = state.links.filter((l) => l.id !== state.selectedId);
-            }
-
-            select(null, null);
-            save();
-            renderCanvasOnly();
+            if (state.selectedType === 'node') { state.nodes = state.nodes.filter((n) => n.id !== state.selectedId); state.links = state.links.filter((l) => l.source !== state.selectedId && l.target !== state.selectedId); } 
+            else if (state.selectedType === 'link') { state.links = state.links.filter((l) => l.id !== state.selectedId); }
+            select(null, null); save();
+renderCanvasOnly();
+renderNodeDiagnostics(node);
         }
 
         window.addEventListener('mousedown', (event) => {
             if (event.target.id === 'networkCanvas' && (event.button === 1 || event.button === 0)) {
-                isDraggingCanvas = true;
-                lastMouse = { x: event.clientX, y: event.clientY };
-
-                if (event.button === 0 && !isDraggingNode) {
-                    select(null, null);
-                }
+                isDraggingCanvas = true; lastMouse = { x: event.clientX, y: event.clientY };
+                if (event.button === 0 && !isDraggingNode) select(null, null);
             }
         });
 
         window.addEventListener('mousemove', (event) => {
             if (isDraggingCanvas && !isDraggingNode) {
-                state.camera.x += event.clientX - lastMouse.x;
-                state.camera.y += event.clientY - lastMouse.y;
-                lastMouse = { x: event.clientX, y: event.clientY };
-                applyCamera();
+                state.camera.x += event.clientX - lastMouse.x; state.camera.y += event.clientY - lastMouse.y;
+                lastMouse = { x: event.clientX, y: event.clientY }; applyCamera();
             } else if (isDraggingNode && draggedNode) {
                 const pt = getWorkspacePoint(event.clientX, event.clientY);
-                draggedNode.x = Math.round((pt.x - dragOffset.x) / GRID_SNAP) * GRID_SNAP;
+                draggedNode.x = Math.round((pt.x - dragOffset.x) / GRID_SNAP) * GRID_SNAP; 
                 draggedNode.y = Math.round((pt.y - dragOffset.y) / GRID_SNAP) * GRID_SNAP;
-                renderCanvasOnly();
+
+                // Direct DOM update (Zero RAM overhead)
+                const nodeEl = document.getElementById(`ui-node-${draggedNode.id}`);
+                if (nodeEl) nodeEl.setAttribute('transform', `translate(${draggedNode.x}, ${draggedNode.y})`);
+
+                state.links.forEach(l => {
+                    if (l.source === draggedNode.id || l.target === draggedNode.id) {
+                        const lineEl = document.getElementById(`ui-link-${l.id}`);
+                        if (lineEl) {
+                            const src = getNode(l.source), tgt = getNode(l.target);
+                            lineEl.setAttribute('x1', src.x); lineEl.setAttribute('y1', src.y);
+                            lineEl.setAttribute('x2', tgt.x); lineEl.setAttribute('y2', tgt.y);
+                        }
+                    }
+                });
             }
         });
 
-        window.addEventListener('mouseup', () => {
-            isDraggingCanvas = false;
-
-            if (isDraggingNode) {
-                isDraggingNode = false;
-                draggedNode = null;
-                save();
-            }
+        window.addEventListener('mouseup', () => { 
+            isDraggingCanvas = false; 
+            if (isDraggingNode) { 
+                isDraggingNode = false; draggedNode = null; save(); 
+                renderCanvasOnly(); // Render zones/traces only ONCE when mouse is released
+            } 
         });
 
+        window.addEventListener('mouseup', () => { isDraggingCanvas = false; if (isDraggingNode) { isDraggingNode = false; draggedNode = null; save(); } });
         document.getElementById('networkCanvas').addEventListener('wheel', (event) => {
-            event.preventDefault();
-
-            const rect = document.getElementById('networkCanvas').getBoundingClientRect();
-            const mx = event.clientX - rect.left;
-            const my = event.clientY - rect.top;
-            const nextZoom = Math.min(Math.max(0.2, state.camera.zoom * Math.exp(-event.deltaY * 0.001)), 5);
-
-            state.camera.x = mx - (mx - state.camera.x) * (nextZoom / state.camera.zoom);
-            state.camera.y = my - (my - state.camera.y) * (nextZoom / state.camera.zoom);
-            state.camera.zoom = nextZoom;
-            applyCamera();
+            event.preventDefault(); const rect = document.getElementById('networkCanvas').getBoundingClientRect();
+            const mx = event.clientX - rect.left, my = event.clientY - rect.top, nextZoom = Math.min(Math.max(0.2, state.camera.zoom * Math.exp(-event.deltaY * 0.001)), 5);
+            state.camera.x = mx - (mx - state.camera.x) * (nextZoom / state.camera.zoom); state.camera.y = my - (my - state.camera.y) * (nextZoom / state.camera.zoom); state.camera.zoom = nextZoom; applyCamera();
         }, { passive: false });
 
         window.addEventListener('keydown', (event) => {
-            const tagName = document.activeElement?.tagName || '';
-            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagName)) return;
-
-            if (event.key === 'Delete' || event.key === 'Backspace') {
-                deleteSelected();
-            }
-
-            if (event.key === 'Escape') {
-                state.linkSourceId = null;
-                select(null, null);
-                updateModeHelp();
-            }
+            const tagName = document.activeElement?.tagName || ''; if (['INPUT', 'TEXTAREA', 'SELECT', 'NUMBER'].includes(tagName)) return;
+            if (event.key === 'Delete' || event.key === 'Backspace') deleteSelected();
+            if (event.key === 'Escape') { state.linkSourceId = null; select(null, null); renderCanvasOnly(); }
         });
 
         document.getElementById('templateSelect').addEventListener('change', (event) => {
-            if (!confirm('Replace current workspace with template?')) {
-                return;
-            }
-
+            if (!confirm('Replace current workspace with template?')) return;
             const template = templatesData[event.target.value] || templatesData.house;
-            state.nodes = cloneData(template.nodes).map(normalizeLoadedNode);
-            state.links = cloneData(template.links);
-            state.selectedId = null;
-            state.selectedType = null;
-            state.linkSourceId = null;
-            state.camera = { x: 0, y: 0, zoom: 1 };
-            applyCamera();
-            select(null, null);
-            save();
+            state.nodes = cloneData(template.nodes).map(normalizeLoadedNode); state.links = cloneData(template.links);
+            state.selectedId = null; state.selectedType = null; state.linkSourceId = null; state.camera = { x: 0, y: 0, zoom: 1 };
+            applyCamera(); select(null, null); save();
             renderCanvasOnly();
+            renderNodeDiagnostics(node);
         });
 
         const propertyBindings = [
-            { key: 'name', id: 'propName', event: 'input' },
-            { key: 'gw', id: 'propGw', event: 'input' },
-            { key: 'dns', id: 'propDns', event: 'input' },
-            { key: 'os', id: 'propOs', event: 'input' },
-            { key: 'ports', id: 'propPorts', event: 'input' },
-            { key: 'notes', id: 'propNotes', event: 'input' },
-            { key: 'zone', id: 'propZone', event: 'change' }
+            { key: 'name', id: 'propName' },
+            { key: 'gw', id: 'propGw' },
+            { key: 'dns', id: 'propDns' },
+            { key: 'os', id: 'propOs' },
+            { key: 'ports', id: 'propPorts' },
+            { key: 'notes', id: 'propNotes' }
         ];
 
         propertyBindings.forEach((binding) => {
-            const el = document.getElementById(binding.id);
-            el.addEventListener(binding.event, (event) => {
+            document.getElementById(binding.id).addEventListener('input', (event) => {
                 if (!state.selectedId || state.selectedType !== 'node') return;
-
+            
                 const node = getNode(state.selectedId);
                 if (!node) return;
-
+            
                 node[binding.key] = event.target.value;
+            
                 save();
                 renderCanvasOnly();
+                renderNodeDiagnostics(node);
             });
         });
 
-        document.getElementById('addIpBtn').onclick = () => {
-            if (!state.selectedId || state.selectedType !== 'node') return;
-
-            const node = getNode(state.selectedId);
-            if (!node) return;
-
-            node.ips = node.ips || [];
-            node.ips.push('');
-            renderSidebarIPs(node);
-            save();
-            renderCanvasOnly();
-        };
-
+        document.getElementById('addIfaceBtn').onclick = () => { if (!state.selectedId || state.selectedType !== 'node') return; const node = getNode(state.selectedId); if (!node) return; node.interfaces = node.interfaces || []; node.interfaces.push({ id: `i_${Date.now()}`, name: `eth${node.interfaces.length}`, ip: '' }); renderSidebarData(node); save();
+        renderCanvasOnly();
+        renderNodeDiagnostics(node); };
         document.getElementById('deleteElementBtn').onclick = deleteSelected;
-
-        document.getElementById('zoomInBtn').onclick = () => {
-            state.camera.zoom = Math.min(5, state.camera.zoom * 1.2);
-            applyCamera();
-        };
-
-        document.getElementById('zoomOutBtn').onclick = () => {
-            state.camera.zoom = Math.max(0.2, state.camera.zoom / 1.2);
-            applyCamera();
-        };
-
-        document.getElementById('zoomResetBtn').onclick = () => {
-            state.camera.x = 0;
-            state.camera.y = 0;
-            state.camera.zoom = 1;
-            applyCamera();
-        };
-
-        document.getElementById('clearCanvasBtn').onclick = () => {
-            if (!confirm('Clear canvas?')) return;
-
-            state.nodes = [];
-            state.links = [];
-            state.selectedId = null;
-            state.selectedType = null;
-            state.linkSourceId = null;
-            save();
-            select(null, null);
-            renderCanvasOnly();
-        };
-
-        document.getElementById('copyUrlBtn').onclick = async () => {
-            save();
-            try {
-                await navigator.clipboard.writeText(window.location.href);
-                alert('URL copied.');
-            } catch (e) {
-                prompt('Copy this URL:', window.location.href);
-            }
-        };
-
-        document.getElementById('toggleConflicts').addEventListener('change', (event) => {
-            state.settings.showConflicts = event.target.checked;
-            validateTopology();
+        document.getElementById('zoomInBtn').onclick = () => { state.camera.zoom = Math.min(5, state.camera.zoom * 1.2); applyCamera(); };
+        document.getElementById('zoomOutBtn').onclick = () => { state.camera.zoom = Math.max(0.2, state.camera.zoom / 1.2); applyCamera(); };
+        document.getElementById('zoomResetBtn').onclick = () => { state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera(); };
+        document.getElementById('clearCanvasBtn').onclick = () => { if (!confirm('Clear canvas?')) return; state.nodes = []; state.links = []; state.selectedId = null; state.selectedType = null; state.linkSourceId = null; save(); select(null, null); renderCanvasOnly(); };
+        document.getElementById('copyUrlBtn').onclick = async () => { save(); try { await navigator.clipboard.writeText(window.location.href); alert('URL copied.'); } catch (e) { prompt('Copy this URL:', window.location.href); } };
+        
+        document.getElementById('toggleTrace').addEventListener('change', (event) => { state.settings.traceMode = event.target.checked; renderCanvasOnly(); });
+        document.getElementById('tracePort').addEventListener('input', () => {
+            if (state.settings.traceMode) renderCanvasOnly();
+            refreshSelectedNodeDiagnostics();
         });
-
-        document.getElementById('toggleTrace').addEventListener('change', (event) => {
-            state.settings.traceMode = event.target.checked;
-            renderCanvasOnly();
-        });
-
-        document.getElementById('modeDrag').onclick = () => setMode('drag');
-        document.getElementById('modeLink').onclick = () => setMode('link');
-
-        // Modal Logic
+        
         const aboutModal = document.getElementById('aboutModal');
         document.getElementById('openAboutBtn').onclick = () => aboutModal.classList.remove('hidden');
         document.getElementById('closeAboutBtn').onclick = () => aboutModal.classList.add('hidden');
@@ -1471,13 +1599,30 @@
             img.src = url;
         }
 
+        document.getElementById('canvasFilter').addEventListener('input', (event) => {
+            const term = event.target.value.toLowerCase().trim();
+            state.nodes.forEach(node => {
+                const el = document.getElementById(`ui-node-${node.id}`);
+                if (!el) return;
+
+                if (term === '') {
+                    el.style.opacity = '1';
+                    return;
+                }
+            
+                const matchName = (node.name || '').toLowerCase().includes(term);
+                const matchIp = (node.interfaces || []).some(i => i.ip.includes(term));
+
+                el.style.opacity = (matchName || matchIp) ? '1' : '0.15';
+            });
+        });
+
         document.getElementById('exportPngBtn').onclick = () => handleExport('png');
         document.getElementById('exportWebpBtn').onclick = () => handleExport('webp');
 
         window.addEventListener('popstate', () => { load(); renderCanvasOnly(); });
 
-        load(); applyCamera(); updateModeHelp(); renderCanvasOnly();
-
+        load(); applyCamera(); renderCanvasOnly();
     </script>
 </body>
 </html>
