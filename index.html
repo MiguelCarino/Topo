@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Net Topology Editor</title>
+    <title>NetTopology Pro</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ipaddr.js/2.1.0/ipaddr.min.js"></script>
     <style>
@@ -17,29 +17,10 @@
             background-size: 20px 20px;
         }
 
-        @keyframes dash {
-            to { stroke-dashoffset: -20; }
-        }
-
-        .animate-flow {
-            stroke-dasharray: 6 4;
-            animation: dash 0.5s linear infinite;
-        }
-
-        .fade-inactive {
-            opacity: 0.25;
-            filter: grayscale(100%);
-            transition: opacity 0.3s, filter 0.3s;
-        }
-
-        .zone-bubble {
-            transition: all 0.2s ease-out;
-            pointer-events: none;
-        }
-
-        .no-pointer {
-            pointer-events: none;
-        }
+        @keyframes dash { to { stroke-dashoffset: -20; } }
+        .animate-flow { stroke-dasharray: 6 4; animation: dash 0.5s linear infinite; }
+        .fade-inactive { opacity: 0.25; filter: grayscale(100%); transition: opacity 0.3s, filter 0.3s; }
+        .zone-bubble { transition: all 0.2s ease-out; pointer-events: none; }
     </style>
 </head>
 <body class="bg-gray-100 font-sans h-screen flex flex-col overflow-hidden text-slate-800">
@@ -53,7 +34,7 @@
                 <line x1="6" y1="18" x2="6.01" y2="18" />
             </svg>
             <div>
-                <h1 class="text-lg font-bold tracking-tight">NetTopology</h1>
+                <h1 class="text-lg font-bold tracking-tight">NetTopology Pro</h1>
                 <p class="text-[10px] text-slate-400">Auto-Subnets • L2/L3 Routing • Validation</p>
             </div>
         </div>
@@ -80,20 +61,29 @@
                 <option value="datacenter">🏢 Data Center</option>
                 <option value="hospital">🏥 Hospital</option>
                 <option value="campus">🏢 Corporate Campus</option>
+                <option value="retail">🛒 Retail POS</option>
+                <option value="factory">🏭 Smart Factory</option>
+                <option value="studio">🎬 Media Studio</option>
             </select>
 
-            <button id="copyUrlBtn" class="bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded text-xs font-medium transition flex items-center gap-2" title="Copy the shareable URL with the current diagram state">
+            <button id="copyUrlBtn" class="bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded text-xs font-medium transition flex items-center gap-2" title="Copy the shareable URL">
                 🔗 Copy URL
             </button>
 
-            <button id="exportImageBtn" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded text-xs font-medium transition flex items-center gap-2">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                </svg>
-                Export PNG
-            </button>
+            <div class="flex bg-emerald-600 rounded text-white overflow-hidden text-xs font-medium">
+                <div class="px-2 py-1.5 bg-emerald-700 flex items-center gap-1 cursor-default">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                    </svg>
+                    Export
+                </div>
+                <button id="exportPngBtn" class="hover:bg-emerald-500 px-2 py-1.5 border-l border-emerald-700 transition">PNG</button>
+                <button id="exportWebpBtn" class="hover:bg-emerald-500 px-2 py-1.5 border-l border-emerald-700 transition">WEBP</button>
+            </div>
 
             <button id="clearCanvasBtn" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-xs font-medium transition">Clear</button>
+            
+            <button id="openAboutBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1.5 rounded text-xs font-medium transition border border-slate-600">?</button>
         </div>
     </header>
 
@@ -110,7 +100,7 @@
 
             <div class="p-4 border-b border-slate-100 flex-1 overflow-y-auto">
                 <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">2. Library</h2>
-                <div class="grid grid-cols-2 gap-2" id="nodePalette"></div>
+                <div class="grid grid-cols-4 gap-2" id="nodePalette"></div>
             </div>
 
             <div class="p-4 border-t border-slate-100 bg-white flex flex-col shrink-0 h-[60%] overflow-y-auto">
@@ -210,25 +200,31 @@
                 </div>
             </div>
         </div>
+
+        <div id="aboutModal" class="fixed inset-0 bg-slate-900/60 hidden flex items-center justify-center z-50 transition-opacity">
+            <div class="bg-white rounded-lg shadow-2xl p-8 w-80 text-center relative">
+                <button id="closeAboutBtn" class="absolute top-3 right-4 text-slate-400 hover:text-slate-800 font-bold text-lg">✕</button>
+                <div class="mx-auto bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mb-4">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-blue-600">
+                        <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
+                    </svg>
+                </div>
+                <h2 class="text-xl font-extrabold text-slate-800 tracking-tight">NetTopology Pro</h2>
+                <p class="text-xs text-slate-500 mb-6 uppercase tracking-widest">Built by Miguel Cariño</p>
+                <div class="flex flex-col gap-3">
+                    <a href="https://linkedin.com/" target="_blank" class="block w-full bg-blue-600 text-white py-2 rounded-md text-sm font-medium hover:bg-blue-500 transition shadow-sm">LinkedIn Profile</a>
+                    <a href="https://github.com/" target="_blank" class="block w-full bg-slate-800 text-white py-2 rounded-md text-sm font-medium hover:bg-slate-700 transition shadow-sm">GitHub Repository</a>
+                    <a href="https://carino.systems" target="_blank" class="block w-full bg-emerald-600 text-white py-2 rounded-md text-sm font-medium hover:bg-emerald-500 transition shadow-sm">carino.systems</a>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
         const state = {
-            nodes: [],
-            links: [],
-            selectedId: null,
-            selectedType: null,
-            mode: 'drag',
-            linkSourceId: null,
-            settings: {
-                showConflicts: true,
-                traceMode: false
-            },
-            camera: {
-                x: 0,
-                y: 0,
-                zoom: 1
-            }
+            nodes: [], links: [], selectedId: null, selectedType: null, mode: 'drag', linkSourceId: null,
+            settings: { showConflicts: true, traceMode: false },
+            camera: { x: 0, y: 0, zoom: 1 }
         };
 
         const GRID_SNAP = 20;
@@ -244,21 +240,17 @@
             vm: '<rect x="2" y="2" width="20" height="20" rx="2" stroke-dasharray="4 4"/><path d="M12 8v8M8 12h8"/>',
             iot: '<path d="M4.9 19.1C3.1 17.3 2 14.8 2 12s1.1-5.3 2.9-7.1M19.1 4.9C20.9 6.7 22 9.2 22 12s-1.1 5.3-2.9 7.1M8.5 15.5c-1-1-1.6-2.4-1.6-3.5s.6-2.5 1.6-3.5M15.5 8.5c1 1 1.6 2.4 1.6 3.5s-.6 2.5-1.6 3.5"/><circle cx="12" cy="12" r="2"/>',
             dicom: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+            printer: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z"/>',
+            camera: '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
             custom: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>'
         };
 
         const paletteDefs = [
-            { type: 'cloud', name: 'Cloud' },
-            { type: 'router', name: 'Router' },
-            { type: 'firewall', name: 'Firewall' },
-            { type: 'switch', name: 'Switch' },
-            { type: 'server', name: 'Server' },
-            { type: 'vm', name: 'VM' },
-            { type: 'pc', name: 'Workstation' },
-            { type: 'ap', name: 'Wireless AP' },
-            { type: 'iot', name: 'IoT Device' },
-            { type: 'dicom', name: 'DICOM' },
-            { type: 'custom', name: 'Custom Node' }
+            { type: 'cloud', name: 'Cloud' }, { type: 'router', name: 'Router' }, { type: 'firewall', name: 'Firewall' },
+            { type: 'switch', name: 'Switch' }, { type: 'server', name: 'Server' }, { type: 'vm', name: 'VM' },
+            { type: 'pc', name: 'Workstation' }, { type: 'ap', name: 'Wireless AP' }, { type: 'iot', name: 'IoT Device' },
+            { type: 'printer', name: 'Printer' }, { type: 'camera', name: 'IP Camera' },
+            { type: 'dicom', name: 'DICOM' }, { type: 'custom', name: 'Custom Node' }
         ];
 
         const isDumbDevice = (type) => ['switch', 'ap'].includes(type);
@@ -266,7 +258,7 @@
 
         const initialDataDefaults = {
             cloud: { os: 'ISP / Cloud Network', ports: '80, 443', ips: ['8.8.8.8/32', '1.1.1.1/32'] },
-            router: { os: 'Edge Gateway / ISP Modem', ports: '22, 80, 443', ips: ['192.168.1.1/24', '1.1.1.1/32'], dns: '8.8.8.8' },
+            router: { os: 'Edge Gateway / Modem', ports: '22, 80, 443', ips: ['192.168.1.1/24', '1.1.1.1/32'], dns: '8.8.8.8' },
             firewall: { os: 'pfSense', ports: '443, 22', ips: ['10.0.0.1/24'], dns: '1.1.1.1' },
             switch: { os: 'SwitchOS', ports: '', ips: [] },
             server: { os: 'Linux Ubuntu', ports: '80, 443, 22', ips: ['192.168.1.10/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
@@ -274,6 +266,8 @@
             pc: { os: 'Windows 11', ports: '', ips: ['192.168.1.50/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
             ap: { os: 'UniFi', ports: '', ips: [] },
             iot: { os: 'FreeRTOS', ports: '1883', ips: ['192.168.1.100/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
+            printer: { os: 'Firmware', ports: '9100', ips: ['192.168.1.80/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
+            camera: { os: 'Firmware', ports: '554, 80', ips: ['192.168.1.90/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
             dicom: { os: 'Windows Embedded', ports: '104, 443', zone: 'isolated', ips: ['192.168.100.10/24'] },
             custom: { os: '', ports: '', ips: ['10.0.0.50/24'] }
         };
@@ -281,101 +275,117 @@
         const templatesData = {
             house: {
                 nodes: [
-                    { id: 'h1', type: 'cloud', name: 'ISP Cloud', x: 400, y: 100, ips: ['8.8.8.8/32'], os: 'ISP', ports: '' },
-                    { id: 'h2', type: 'router', name: 'Home Router', x: 400, y: 220, ips: ['192.168.1.1/24', '8.8.8.8/32'], gw: '0.0.0.0', dns: '8.8.8.8', os: 'OpenWrt', ports: '80' },
-                    { id: 'h3', type: 'pc', name: 'Laptop', x: 250, y: 350, ips: ['192.168.1.50/24'], gw: '192.168.1.1', dns: '8.8.8.8', os: 'Windows 11', ports: '' },
-                    { id: 'hap', type: 'ap', name: 'WiFi AP', x: 400, y: 350, ips: [], os: 'UniFi', ports: '' },
-                    { id: 'h5', type: 'iot', name: 'Thermostat', x: 550, y: 450, ips: ['192.168.1.52/24'], gw: '192.168.1.1', dns: '8.8.8.8', os: 'RTOS', ports: '1883' }
+                    { id: 'h1', type: 'cloud', name: 'ISP', x: 400, y: 100, ips: ['8.8.8.8/32'] },
+                    { id: 'h2', type: 'router', name: 'Home Router', x: 400, y: 220, ips: ['192.168.1.1/24', '8.8.8.8/32'], gw: '0.0.0.0', dns: '8.8.8.8' },
+                    { id: 'h3', type: 'pc', name: 'Home PC', x: 250, y: 350, ips: ['192.168.1.50/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
+                    { id: 'hp1', type: 'printer', name: 'Wireless Printer', x: 350, y: 350, ips: ['192.168.1.80/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
+                    { id: 'hap', type: 'ap', name: 'WiFi AP', x: 500, y: 350, ips: [] },
+                    { id: 'h5', type: 'iot', name: 'Smart TV', x: 450, y: 450, ips: ['192.168.1.101/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
+                    { id: 'h6', type: 'camera', name: 'Porch Cam', x: 550, y: 450, ips: ['192.168.1.102/24'], gw: '192.168.1.1', dns: '8.8.8.8' }
                 ],
-                links: [
-                    { id: 'hl1', source: 'h1', target: 'h2' },
-                    { id: 'hl2', source: 'h2', target: 'h3' },
-                    { id: 'hl3', source: 'h2', target: 'hap' },
-                    { id: 'hl4', source: 'hap', target: 'h5' }
-                ]
+                links: [{ id: 'hl1', source: 'h1', target: 'h2' }, { id: 'hl2', source: 'h2', target: 'h3' }, { id: 'hl3', source: 'h2', target: 'hap' }, { id: 'hl4', source: 'hap', target: 'h5' }, { id: 'hl5', source: 'hap', target: 'h6' }, { id: 'hl6', source: 'hap', target: 'hp1' }]
             },
             bank: {
                 nodes: [
-                    { id: 'b1', type: 'cloud', name: 'Internet', x: 400, y: 100, ips: [] },
-                    { id: 'b2', type: 'firewall', name: 'Edge Firewall', x: 400, y: 200, ips: ['10.50.0.1/24'], dns: '1.1.1.1' },
-                    { id: 'b3', type: 'switch', name: 'Core Switch', x: 400, y: 300, ips: [] },
-                    { id: 'b4', type: 'server', name: 'DB Server', x: 200, y: 300, ips: ['10.50.0.10/24'], gw: '10.50.0.1', dns: '10.50.0.1' },
-                    { id: 'b5', type: 'pc', name: 'Teller PC 1', x: 300, y: 450, ips: ['10.50.0.51/24'], gw: '10.50.0.1', dns: '10.50.0.1' },
-                    { id: 'b6', type: 'pc', name: 'Teller PC 2', x: 400, y: 450, ips: ['10.50.0.52/24'], gw: '10.50.0.1', dns: '10.50.0.1' },
-                    { id: 'b7', type: 'custom', name: 'Branch ATM', x: 500, y: 450, ips: ['10.50.0.100/24'], gw: '10.50.0.1', dns: '10.50.0.1' }
+                    { id: 'b1', type: 'cloud', name: 'WAN Connection', x: 400, y: 50, ips: [] },
+                    { id: 'b2', type: 'firewall', name: 'Edge Firewall', x: 400, y: 150, ips: ['10.50.0.1/16'], dns: '1.1.1.1' },
+                    { id: 'b3', type: 'router', name: 'Core Router', x: 400, y: 250, ips: ['10.50.10.1/24', '10.50.20.1/24'], gw: '10.50.0.1' },
+                    { id: 'b4', type: 'switch', name: 'Teller SW', x: 250, y: 350, ips: [] },
+                    { id: 'b5', type: 'pc', name: 'Teller 1', x: 150, y: 450, ips: ['10.50.10.51/24'], gw: '10.50.10.1', dns: '10.50.10.10' },
+                    { id: 'b6', type: 'pc', name: 'Teller 2', x: 250, y: 450, ips: ['10.50.10.52/24'], gw: '10.50.10.1', dns: '10.50.10.10' },
+                    { id: 'b7', type: 'printer', name: 'Secure Print', x: 350, y: 450, ips: ['10.50.10.80/24'], gw: '10.50.10.1' },
+                    { id: 'b8', type: 'switch', name: 'ATM SW', x: 550, y: 350, ips: [] },
+                    { id: 'b9', type: 'custom', name: 'Lobby ATM', x: 500, y: 450, ips: ['10.50.20.100/24'], gw: '10.50.20.1' },
+                    { id: 'b10', type: 'custom', name: 'Drive-Thru ATM', x: 600, y: 450, ips: ['10.50.20.101/24'], gw: '10.50.20.1' }
                 ],
-                links: [
-                    { id: 'bl1', source: 'b1', target: 'b2' },
-                    { id: 'bl2', source: 'b2', target: 'b3' },
-                    { id: 'bl3', source: 'b3', target: 'b4' },
-                    { id: 'bl4', source: 'b3', target: 'b5' },
-                    { id: 'bl5', source: 'b3', target: 'b6' },
-                    { id: 'bl6', source: 'b3', target: 'b7' }
-                ]
+                links: [{ id: 'bl1', source: 'b1', target: 'b2' }, { id: 'bl2', source: 'b2', target: 'b3' }, { id: 'bl3', source: 'b3', target: 'b4' }, { id: 'bl4', source: 'b3', target: 'b8' }, { id: 'bl5', source: 'b4', target: 'b5' }, { id: 'bl6', source: 'b4', target: 'b6' }, { id: 'bl7', source: 'b4', target: 'b7' }, { id: 'bl8', source: 'b8', target: 'b9' }, { id: 'bl9', source: 'b8', target: 'b10' }]
             },
             datacenter: {
                 nodes: [
-                    { id: 'd1', type: 'cloud', name: 'Internet', x: 400, y: 50, ips: [] },
-                    { id: 'd2', type: 'router', name: 'Load Balancer', x: 400, y: 150, ips: ['172.16.1.1/24', '172.16.2.1/24'], dns: '1.1.1.1' },
-                    { id: 'd3', type: 'switch', name: 'Web Tier SW', x: 300, y: 250, ips: [] },
-                    { id: 'd4', type: 'switch', name: 'DB Tier SW', x: 500, y: 250, ips: [] },
-                    { id: 'd5', type: 'vm', name: 'Web VM 1', x: 200, y: 350, ips: ['172.16.1.10/24'], gw: '172.16.1.1', dns: '172.16.1.1' },
-                    { id: 'd6', type: 'vm', name: 'Web VM 2', x: 300, y: 350, ips: ['172.16.1.11/24'], gw: '172.16.1.1', dns: '172.16.1.1' },
-                    { id: 'd7', type: 'server', name: 'DB Master', x: 500, y: 350, ips: ['172.16.2.10/24'], gw: '172.16.2.1', dns: '172.16.2.1' },
-                    { id: 'd8', type: 'server', name: 'DB Replica', x: 600, y: 350, ips: ['172.16.2.11/24'], gw: '172.16.2.1', dns: '172.16.2.1' }
+                    { id: 'd1', type: 'cloud', name: 'Internet Backbone', x: 400, y: 50, ips: [] },
+                    { id: 'd2', type: 'firewall', name: 'Edge FW (DMZ)', x: 400, y: 150, ips: ['172.16.1.1/24'], dns: '1.1.1.1' },
+                    { id: 'd3', type: 'switch', name: 'DMZ Switch', x: 400, y: 250, ips: [] },
+                    { id: 'd4', type: 'vm', name: 'Web Node 1', x: 300, y: 350, ips: ['172.16.1.10/24'], gw: '172.16.1.1' },
+                    { id: 'd5', type: 'vm', name: 'Web Node 2', x: 500, y: 350, ips: ['172.16.1.11/24'], gw: '172.16.1.1' },
+                    { id: 'd6', type: 'firewall', name: 'Internal FW', x: 400, y: 450, ips: ['172.16.2.1/24'], gw: '172.16.1.1' },
+                    { id: 'd7', type: 'switch', name: 'Database Switch', x: 400, y: 550, ips: [] },
+                    { id: 'd8', type: 'server', name: 'DB Master', x: 300, y: 650, ips: ['172.16.2.10/24'], gw: '172.16.2.1' },
+                    { id: 'd9', type: 'server', name: 'DB Replica', x: 500, y: 650, ips: ['172.16.2.11/24'], gw: '172.16.2.1' }
                 ],
-                links: [
-                    { id: 'dl1', source: 'd1', target: 'd2' },
-                    { id: 'dl2', source: 'd2', target: 'd3' },
-                    { id: 'dl3', source: 'd2', target: 'd4' },
-                    { id: 'dl4', source: 'd3', target: 'd5' },
-                    { id: 'dl5', source: 'd3', target: 'd6' },
-                    { id: 'dl6', source: 'd4', target: 'd7' },
-                    { id: 'dl7', source: 'd4', target: 'd8' }
-                ]
+                links: [{ id: 'dl1', source: 'd1', target: 'd2' }, { id: 'dl2', source: 'd2', target: 'd3' }, { id: 'dl3', source: 'd3', target: 'd4' }, { id: 'dl4', source: 'd3', target: 'd5' }, { id: 'dl5', source: 'd3', target: 'd6' }, { id: 'dl6', source: 'd6', target: 'd7' }, { id: 'dl7', source: 'd7', target: 'd8' }, { id: 'dl8', source: 'd7', target: 'd9' }]
             },
             hospital: {
                 nodes: [
-                    { id: 'hp1', type: 'cloud', name: 'Internet', x: 400, y: 50, ips: [] },
-                    { id: 'hp2', type: 'firewall', name: 'Edge Firewall', x: 400, y: 150, ips: ['10.10.10.1/24'], dns: '1.1.1.1' },
-                    { id: 'hp3', type: 'switch', name: 'Core Switch', x: 400, y: 250, ips: [] },
-                    { id: 'hp4', type: 'server', name: 'EHR Server', x: 200, y: 250, ips: ['10.10.10.20/24'], gw: '10.10.10.1', dns: '10.10.10.1' },
-                    { id: 'hp5', type: 'dicom', name: 'PACS Archive', x: 600, y: 250, ips: ['192.168.100.10/24'], zone: 'isolated', ports: '104, 11112' },
-                    { id: 'hp6', type: 'pc', name: 'Nurse Station', x: 300, y: 350, ips: ['10.10.10.50/24'], gw: '10.10.10.1', dns: '10.10.10.1' },
-                    { id: 'hp7', type: 'dicom', name: 'MRI Scanner', x: 400, y: 350, ips: ['192.168.100.11/24'], zone: 'isolated', ports: '104' },
-                    { id: 'hp8', type: 'iot', name: 'Vitals Monitor', x: 500, y: 350, ips: ['10.10.10.52/24'], gw: '10.10.10.1', dns: '10.10.10.1' }
+                    { id: 'hp1', type: 'cloud', name: 'ISP', x: 400, y: 50, ips: [] },
+                    { id: 'hp2', type: 'firewall', name: 'Main Firewall', x: 400, y: 150, ips: ['10.10.0.1/16'], dns: '1.1.1.1' },
+                    { id: 'hp3', type: 'router', name: 'Core Router', x: 400, y: 250, ips: ['10.10.10.1/24', '192.168.100.1/24'], gw: '10.10.0.1' },
+                    { id: 'hp4', type: 'switch', name: 'Admin SW', x: 250, y: 350, ips: [] },
+                    { id: 'hp5', type: 'server', name: 'EHR Server', x: 150, y: 450, ips: ['10.10.10.20/24'], gw: '10.10.10.1' },
+                    { id: 'hp6', type: 'pc', name: 'Nurse Desk', x: 250, y: 450, ips: ['10.10.10.50/24'], gw: '10.10.10.1' },
+                    { id: 'hp7', type: 'printer', name: 'Records Print', x: 350, y: 450, ips: ['10.10.10.80/24'], gw: '10.10.10.1' },
+                    { id: 'hp8', type: 'switch', name: 'Medical SW', x: 550, y: 350, ips: [] },
+                    { id: 'hp9', type: 'dicom', name: 'PACS Archive', x: 450, y: 450, ips: ['192.168.100.10/24'], zone: 'isolated' },
+                    { id: 'hp10', type: 'dicom', name: 'MRI Scanner', x: 550, y: 450, ips: ['192.168.100.11/24'], zone: 'isolated' },
+                    { id: 'hp11', type: 'iot', name: 'Vitals Mon', x: 650, y: 450, ips: ['192.168.100.52/24'], zone: 'isolated' }
                 ],
-                links: [
-                    { id: 'hpl1', source: 'hp1', target: 'hp2' },
-                    { id: 'hpl2', source: 'hp2', target: 'hp3' },
-                    { id: 'hpl3', source: 'hp3', target: 'hp4' },
-                    { id: 'hpl5', source: 'hp3', target: 'hp6' },
-                    { id: 'hpl7', source: 'hp3', target: 'hp8' },
-                    { id: 'is1', source: 'hp5', target: 'hp7' }
-                ]
+                links: [{ id: 'hpl1', source: 'hp1', target: 'hp2' }, { id: 'hpl2', source: 'hp2', target: 'hp3' }, { id: 'hpl3', source: 'hp3', target: 'hp4' }, { id: 'hpl4', source: 'hp3', target: 'hp8' }, { id: 'hpl5', source: 'hp4', target: 'hp5' }, { id: 'hpl6', source: 'hp4', target: 'hp6' }, { id: 'hpl7', source: 'hp4', target: 'hp7' }, { id: 'hpl8', source: 'hp8', target: 'hp9' }, { id: 'hpl9', source: 'hp8', target: 'hp10' }, { id: 'hpl10', source: 'hp8', target: 'hp11' }]
             },
             campus: {
                 nodes: [
                     { id: 'c1', type: 'cloud', name: 'WAN', x: 400, y: 50, ips: [] },
-                    { id: 'c2', type: 'firewall', name: 'Firewall', x: 400, y: 150, ips: ['10.0.0.1/16'], dns: '1.1.1.1' },
-                    { id: 'c3', type: 'router', name: 'Core Router', x: 400, y: 250, ips: ['10.0.1.1/24', '10.0.2.1/24'], dns: '10.0.0.1' },
-                    { id: 'c4', type: 'switch', name: 'IT VLAN SW', x: 250, y: 350, ips: [] },
-                    { id: 'c5', type: 'switch', name: 'HR VLAN SW', x: 550, y: 350, ips: [] },
-                    { id: 'c6', type: 'vm', name: 'Active Directory', x: 150, y: 450, ips: ['10.0.1.10/24'], gw: '10.0.1.1', dns: '10.0.1.10' },
-                    { id: 'c7', type: 'pc', name: 'Admin PC', x: 250, y: 450, ips: ['10.0.1.50/24'], gw: '10.0.1.1', dns: '10.0.1.10' },
-                    { id: 'c8', type: 'pc', name: 'HR PC', x: 550, y: 450, ips: ['10.0.2.50/24'], gw: '10.0.2.1', dns: '10.0.1.10' },
-                    { id: 'c9', type: 'ap', name: 'Guest WiFi', x: 650, y: 450, ips: [] }
+                    { id: 'c2', type: 'firewall', name: 'Campus Firewall', x: 400, y: 150, ips: ['10.0.0.1/16'], dns: '1.1.1.1' },
+                    { id: 'c3', type: 'router', name: 'Core Router', x: 400, y: 250, ips: ['10.0.1.1/24', '10.0.2.1/24', '172.20.0.1/24'], gw: '10.0.0.1' },
+                    { id: 'c4', type: 'switch', name: 'IT SW', x: 200, y: 350, ips: [] },
+                    { id: 'c5', type: 'vm', name: 'Domain Controller', x: 150, y: 450, ips: ['10.0.1.10/24'], gw: '10.0.1.1' },
+                    { id: 'c6', type: 'pc', name: 'Admin PC', x: 250, y: 450, ips: ['10.0.1.50/24'], gw: '10.0.1.1' },
+                    { id: 'c7', type: 'switch', name: 'HR SW', x: 400, y: 350, ips: [] },
+                    { id: 'c8', type: 'pc', name: 'HR Desktop', x: 400, y: 450, ips: ['10.0.2.50/24'], gw: '10.0.2.1' },
+                    { id: 'c9', type: 'ap', name: 'Guest AP', x: 600, y: 350, ips: [] },
+                    { id: 'c10', type: 'iot', name: 'Visitor Phone', x: 600, y: 450, ips: ['172.20.0.50/24'], gw: '172.20.0.1' }
                 ],
-                links: [
-                    { id: 'cl1', source: 'c1', target: 'c2' },
-                    { id: 'cl2', source: 'c2', target: 'c3' },
-                    { id: 'cl3', source: 'c3', target: 'c4' },
-                    { id: 'cl4', source: 'c3', target: 'c5' },
-                    { id: 'cl5', source: 'c4', target: 'c6' },
-                    { id: 'cl6', source: 'c4', target: 'c7' },
-                    { id: 'cl7', source: 'c5', target: 'c8' },
-                    { id: 'cl8', source: 'c5', target: 'c9' }
-                ]
+                links: [{ id: 'cl1', source: 'c1', target: 'c2' }, { id: 'cl2', source: 'c2', target: 'c3' }, { id: 'cl3', source: 'c3', target: 'c4' }, { id: 'cl4', source: 'c3', target: 'c7' }, { id: 'cl5', source: 'c3', target: 'c9' }, { id: 'cl6', source: 'c4', target: 'c5' }, { id: 'cl7', source: 'c4', target: 'c6' }, { id: 'cl8', source: 'c7', target: 'c8' }, { id: 'cl9', source: 'c9', target: 'c10' }]
+            },
+            retail: {
+                nodes: [
+                    { id: 'r1', type: 'cloud', name: 'ISP', x: 400, y: 50, ips: [] },
+                    { id: 'r2', type: 'router', name: 'Store Router', x: 400, y: 150, ips: ['192.168.5.1/24', '10.5.5.1/24'], gw: '0.0.0.0' },
+                    { id: 'r3', type: 'switch', name: 'Core SW', x: 400, y: 250, ips: [] },
+                    { id: 'r4', type: 'switch', name: 'POS SW', x: 250, y: 350, ips: [] },
+                    { id: 'r5', type: 'pc', name: 'Register 1', x: 150, y: 450, ips: ['192.168.5.10/24'], gw: '192.168.5.1' },
+                    { id: 'r6', type: 'pc', name: 'Register 2', x: 250, y: 450, ips: ['192.168.5.11/24'], gw: '192.168.5.1' },
+                    { id: 'r7', type: 'printer', name: 'Receipt Printer', x: 350, y: 450, ips: ['192.168.5.80/24'], gw: '192.168.5.1' },
+                    { id: 'r8', type: 'switch', name: 'CCTV SW', x: 550, y: 350, ips: [] },
+                    { id: 'r9', type: 'server', name: 'NVR', x: 450, y: 450, ips: ['10.5.5.10/24'], gw: '10.5.5.1' },
+                    { id: 'r10', type: 'camera', name: 'Entrance Cam', x: 550, y: 450, ips: ['10.5.5.90/24'], gw: '10.5.5.1' },
+                    { id: 'r11', type: 'camera', name: 'Aisle Cam', x: 650, y: 450, ips: ['10.5.5.91/24'], gw: '10.5.5.1' }
+                ],
+                links: [{ id: 'rl1', source: 'r1', target: 'r2' }, { id: 'rl2', source: 'r2', target: 'r3' }, { id: 'rl3', source: 'r3', target: 'r4' }, { id: 'rl4', source: 'r3', target: 'r8' }, { id: 'rl5', source: 'r4', target: 'r5' }, { id: 'rl6', source: 'r4', target: 'r6' }, { id: 'rl7', source: 'r4', target: 'r7' }, { id: 'rl8', source: 'r8', target: 'r9' }, { id: 'rl9', source: 'r8', target: 'r10' }, { id: 'rl10', source: 'r8', target: 'r11' }]
+            },
+            factory: {
+                nodes: [
+                    { id: 'f1', type: 'cloud', name: 'WAN', x: 400, y: 50, ips: [] },
+                    { id: 'f2', type: 'firewall', name: 'Plant Firewall', x: 400, y: 150, ips: ['10.20.0.1/16'], dns: '1.1.1.1' },
+                    { id: 'f3', type: 'router', name: 'Core Router', x: 400, y: 250, ips: ['10.20.10.1/24', '10.20.20.1/24'], gw: '10.20.0.1' },
+                    { id: 'f4', type: 'server', name: 'SCADA Master', x: 250, y: 350, ips: ['10.20.10.10/24'], gw: '10.20.10.1' },
+                    { id: 'f5', type: 'switch', name: 'Plant SW', x: 550, y: 350, ips: [] },
+                    { id: 'f6', type: 'iot', name: 'PLC Controller 1', x: 450, y: 450, ips: ['10.20.20.50/24'], gw: '10.20.20.1' },
+                    { id: 'f7', type: 'iot', name: 'Robotic Arm 2', x: 550, y: 450, ips: ['10.20.20.51/24'], gw: '10.20.20.1' },
+                    { id: 'f8', type: 'camera', name: 'QA Cam', x: 650, y: 450, ips: ['10.20.20.90/24'], gw: '10.20.20.1' }
+                ],
+                links: [{ id: 'fl1', source: 'f1', target: 'f2' }, { id: 'fl2', source: 'f2', target: 'f3' }, { id: 'fl3', source: 'f3', target: 'f4' }, { id: 'fl4', source: 'f3', target: 'f5' }, { id: 'fl5', source: 'f5', target: 'f6' }, { id: 'fl6', source: 'f5', target: 'f7' }, { id: 'fl7', source: 'f5', target: 'f8' }]
+            },
+            studio: {
+                nodes: [
+                    { id: 's1', type: 'cloud', name: 'Internet', x: 400, y: 50, ips: [] },
+                    { id: 's2', type: 'router', name: 'Gateway', x: 400, y: 150, ips: ['10.0.0.1/24'] },
+                    { id: 's3', type: 'switch', name: '10G Switch', x: 400, y: 250, ips: [] },
+                    { id: 's4', type: 'server', name: 'NAS Storage', x: 200, y: 350, ips: ['10.0.0.10/24'], gw: '10.0.0.1' },
+                    { id: 's5', type: 'pc', name: 'Edit Bay 1', x: 350, y: 350, ips: ['10.0.0.50/24'], gw: '10.0.0.1' },
+                    { id: 's6', type: 'pc', name: 'Edit Bay 2', x: 450, y: 350, ips: ['10.0.0.51/24'], gw: '10.0.0.1' },
+                    { id: 's7', type: 'camera', name: 'Studio Cam A', x: 550, y: 350, ips: ['10.0.0.90/24'], gw: '10.0.0.1' },
+                    { id: 's8', type: 'camera', name: 'Studio Cam B', x: 650, y: 350, ips: ['10.0.0.91/24'], gw: '10.0.0.1' }
+                ],
+                links: [{ id: 'sl1', source: 's1', target: 's2' }, { id: 'sl2', source: 's2', target: 's3' }, { id: 'sl3', source: 's3', target: 's4' }, { id: 'sl4', source: 's3', target: 's5' }, { id: 'sl5', source: 's3', target: 's6' }, { id: 'sl6', source: 's3', target: 's7' }, { id: 'sl7', source: 's3', target: 's8' }]
             }
         };
 
@@ -678,6 +688,8 @@
                 });
             });
 
+            let labelOffsets = {}; 
+
             Object.entries(subnets).forEach(([subnet, nodes]) => {
                 if (!nodes.length) return;
 
@@ -693,17 +705,19 @@
                     maxY = Math.max(maxY, node.y);
                 });
 
-                const pad = 45;
+                const padX = 45;
+                const padTop = 45;
+                const padBottom = 80;
                 const hue = Array.from(subnet).reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
 
                 const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
                 g.setAttribute('class', 'zone-bubble');
 
                 const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                rect.setAttribute('x', minX - pad);
-                rect.setAttribute('y', minY - pad);
-                rect.setAttribute('width', maxX - minX + pad * 2);
-                rect.setAttribute('height', maxY - minY + pad * 2);
+                rect.setAttribute('x', minX - padX);
+                rect.setAttribute('y', minY - padTop);
+                rect.setAttribute('width', maxX - minX + padX * 2);
+                rect.setAttribute('height', maxY - minY + padTop + padBottom);
                 rect.setAttribute('rx', '16');
                 rect.setAttribute('fill', `hsla(${hue}, 70%, 50%, 0.06)`);
                 rect.setAttribute('stroke', `hsla(${hue}, 70%, 50%, 0.3)`);
@@ -711,9 +725,13 @@
                 rect.setAttribute('stroke-width', '2');
                 g.appendChild(rect);
 
+                const labelPosKey = `${minX}_${minY}`;
+                const offsetIndex = labelOffsets[labelPosKey] || 0;
+                labelOffsets[labelPosKey] = offsetIndex + 1;
+
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                text.setAttribute('x', minX - pad + 12);
-                text.setAttribute('y', minY - pad + 20);
+                text.setAttribute('x', minX - padX + 12);
+                text.setAttribute('y', minY - padTop + 20 + (offsetIndex * 15));
                 text.setAttribute('font-size', '11');
                 text.setAttribute('font-family', 'monospace');
                 text.setAttribute('font-weight', 'bold');
@@ -1404,115 +1422,61 @@
         document.getElementById('modeDrag').onclick = () => setMode('drag');
         document.getElementById('modeLink').onclick = () => setMode('link');
 
-        document.getElementById('exportImageBtn').onclick = () => {
-            if (!state.nodes.length) {
-                alert('Nothing to export. Add at least one node first.');
-                return;
-            }
+        // Modal Logic
+        const aboutModal = document.getElementById('aboutModal');
+        document.getElementById('openAboutBtn').onclick = () => aboutModal.classList.remove('hidden');
+        document.getElementById('closeAboutBtn').onclick = () => aboutModal.classList.add('hidden');
+        aboutModal.addEventListener('click', (e) => { if(e.target === aboutModal) aboutModal.classList.add('hidden'); });
 
-            const PADDING = 90;
-            const NODE_HALF_SIZE = 24;
-            const LABEL_EXTRA_BOTTOM = 42;
-            const SCALE = 4;
-
-            let minX = Infinity;
-            let minY = Infinity;
-            let maxX = -Infinity;
-            let maxY = -Infinity;
+        function handleExport(format) {
+            if (!state.nodes.length) { alert('Nothing to export. Add at least one node first.'); return; }
+            const PADDING = 90, NODE_HALF_SIZE = 24, LABEL_EXTRA_BOTTOM = 42, SCALE = 4;
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
             state.nodes.forEach((node) => {
-                minX = Math.min(minX, node.x - NODE_HALF_SIZE);
-                minY = Math.min(minY, node.y - NODE_HALF_SIZE);
-                maxX = Math.max(maxX, node.x + NODE_HALF_SIZE);
-                maxY = Math.max(maxY, node.y + NODE_HALF_SIZE + LABEL_EXTRA_BOTTOM);
+                minX = Math.min(minX, node.x - NODE_HALF_SIZE); minY = Math.min(minY, node.y - NODE_HALF_SIZE);
+                maxX = Math.max(maxX, node.x + NODE_HALF_SIZE); maxY = Math.max(maxY, node.y + NODE_HALF_SIZE + LABEL_EXTRA_BOTTOM);
             });
 
-            minX -= PADDING;
-            minY -= PADDING;
-            maxX += PADDING;
-            maxY += PADDING;
+            minX -= PADDING; minY -= PADDING; maxX += PADDING; maxY += PADDING;
+            const exportWidth = Math.max(1, Math.ceil(maxX - minX)), exportHeight = Math.max(1, Math.ceil(maxY - minY));
+            const originalCamera = { x: state.camera.x, y: state.camera.y, zoom: state.camera.zoom };
 
-            const exportWidth = Math.max(1, Math.ceil(maxX - minX));
-            const exportHeight = Math.max(1, Math.ceil(maxY - minY));
-
-            const originalCamera = {
-                x: state.camera.x,
-                y: state.camera.y,
-                zoom: state.camera.zoom
-            };
-
-            const svg = document.getElementById('networkCanvas');
-            const workspace = document.getElementById('workspace');
-
+            const svg = document.getElementById('networkCanvas'), workspace = document.getElementById('workspace');
             workspace.setAttribute('transform', `translate(${-minX}, ${-minY}) scale(1)`);
-            svg.setAttribute('width', exportWidth * SCALE);
-            svg.setAttribute('height', exportHeight * SCALE);
-            svg.setAttribute('viewBox', `0 0 ${exportWidth} ${exportHeight}`);
+            svg.setAttribute('width', exportWidth * SCALE); svg.setAttribute('height', exportHeight * SCALE); svg.setAttribute('viewBox', `0 0 ${exportWidth} ${exportHeight}`);
 
             let serialized = new XMLSerializer().serializeToString(svg);
+            svg.removeAttribute('width'); svg.removeAttribute('height'); svg.removeAttribute('viewBox');
+            state.camera = originalCamera; applyCamera(); renderCanvasOnly();
 
-            svg.removeAttribute('width');
-            svg.removeAttribute('height');
-            svg.removeAttribute('viewBox');
+            if (!serialized.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)) serialized = serialized.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
 
-            state.camera = originalCamera;
-            applyCamera();
-            renderCanvasOnly();
-
-            if (!serialized.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)) {
-                serialized = serialized.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
-            }
-
-            const url = URL.createObjectURL(new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' }));
-            const img = new Image();
-
+            const url = URL.createObjectURL(new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' })), img = new Image();
             img.onload = () => {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                canvas.width = exportWidth * SCALE;
-                canvas.height = exportHeight * SCALE;
-
-                ctx.fillStyle = '#f8fafc';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-                ctx.fillStyle = '#cbd5e1';
-                ctx.scale(SCALE, SCALE);
+                const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
+                canvas.width = exportWidth * SCALE; canvas.height = exportHeight * SCALE;
+                ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#cbd5e1'; ctx.scale(SCALE, SCALE);
                 for (let x = ((-minX) % GRID_SNAP + GRID_SNAP) % GRID_SNAP; x < exportWidth; x += GRID_SNAP) {
                     for (let y = ((-minY) % GRID_SNAP + GRID_SNAP) % GRID_SNAP; y < exportHeight; y += GRID_SNAP) {
-                        ctx.beginPath();
-                        ctx.arc(x, y, 1.5, 0, Math.PI * 2);
-                        ctx.fill();
+                        ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2); ctx.fill();
                     }
                 }
-                ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-                ctx.drawImage(img, 0, 0, exportWidth * SCALE, exportHeight * SCALE);
-
-                const a = document.createElement('a');
-                a.href = canvas.toDataURL('image/png');
-                a.download = 'network-diagram.png';
-                a.click();
-
+                ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0, exportWidth * SCALE, exportHeight * SCALE);
+                const a = document.createElement('a'); a.href = canvas.toDataURL(`image/${format}`); a.download = `network-diagram.${format}`; a.click();
                 URL.revokeObjectURL(url);
             };
-
-            img.onerror = () => {
-                URL.revokeObjectURL(url);
-                alert('Could not export image.');
-            };
-
+            img.onerror = () => { URL.revokeObjectURL(url); alert('Could not export image.'); };
             img.src = url;
-        };
+        }
 
-        window.addEventListener('popstate', () => {
-            load();
-            renderCanvasOnly();
-        });
+        document.getElementById('exportPngBtn').onclick = () => handleExport('png');
+        document.getElementById('exportWebpBtn').onclick = () => handleExport('webp');
 
-        load();
-        applyCamera();
-        updateModeHelp();
-        renderCanvasOnly();
+        window.addEventListener('popstate', () => { load(); renderCanvasOnly(); });
+
+        load(); applyCamera(); updateModeHelp(); renderCanvasOnly();
 
     </script>
 </body>
