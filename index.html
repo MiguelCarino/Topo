@@ -99,7 +99,7 @@
                 <ul class="text-[10px] text-slate-600 space-y-1.5 font-medium">
                     <li>🖱️ <span class="font-bold text-slate-800">Single Click:</span> Select a node/link to edit.</li>
                     <li>✋ <span class="font-bold text-slate-800">Drag:</span> Move nodes or pan the canvas.</li>
-                    <li>⚡ <span class="font-bold text-orange-600">Double Click:</span> Enter Link Mode. Click another node to connect. <span class="text-slate-400 font-normal border border-slate-200 px-1 rounded shadow-sm bg-white">Esc</span> cancels.</li>
+                    <li>⚡ <span class="font-bold text-orange-600">Right Click:</span> Enter Link Mode. Click another node to connect. <span class="text-slate-400 font-normal border border-slate-200 px-1 rounded shadow-sm bg-white">Esc</span> cancels.</li>
                 </ul>
             </div>
 
@@ -130,6 +130,16 @@
                             <option value="passthrough">PCI Passthrough (Direct L2)</option>
                         </select>
                         <p class="text-[9px] text-slate-400 mt-1 leading-tight">Passthrough bypasses the host OS, connecting the VM directly to the physical switch logic.</p>
+                    </div>
+
+                    <div id="linkMediumProps" class="hidden pt-2 border-t border-slate-100">
+                        <label class="block text-[10px] font-bold text-emerald-600 mb-1 uppercase">Link Material</label>
+                        <select id="propMedium" class="w-full border border-emerald-300 bg-emerald-50 rounded px-2 py-1 text-xs focus:outline-emerald-500">
+                            <option value="utp">UTP (Solid Gray)</option>
+                            <option value="fiber">Fiber Optic (Solid Cyan)</option>
+                            <option value="wireless">Wireless (Dashed Purple)</option>
+                            <option value="powerline">Powerline (Dash-Dot Yellow)</option>
+                        </select>
                     </div>
 
                     <div id="nodeNetworkProps" class="space-y-3">
@@ -1113,16 +1123,24 @@
             lZones.innerHTML = ''; lLinks.innerHTML = ''; lNodes.innerHTML = '';
             document.getElementById('networkCanvas').className = `w-full h-full absolute inset-0 select-none ${state.linkSourceId ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`;
 
-            // 1. Render Zone Bubbles (Only Private IPs, skipping clouds)
+            // 1. Render Zone Bubbles (Controllable per interface)
             const subnets = {};
             state.nodes.forEach((node) => { 
                 if (node.type === 'cloud') return; // Suppress cloud public zones
-                getValidIps(node).forEach((ipData) => { 
-                    if (!ipData.isPrivate) return; // Suppress public IPs
+                if (!node.interfaces) return;
+                
+                node.interfaces.forEach((iface) => {
+                    const ipData = parseValidCIDR(iface.ip);
+                    if (!ipData) return;
+                    
+                    // Check explicit toggle first. If undefined, fallback to isPrivate rule.
+                    const shouldDraw = iface.drawZone !== undefined ? iface.drawZone : ipData.isPrivate;
+                    if (!shouldDraw) return;
+                    
                     const subnet = ipData.networkStr; 
                     if (!subnets[subnet]) subnets[subnet] = []; 
                     subnets[subnet].push(node); 
-                }); 
+                });
             });
 
             let labelOffsets = {}; 
@@ -1173,14 +1191,24 @@
 
                 const isSelected = state.selectedId === link.id && state.selectedType === 'link';
                 const isWireless = src.type === 'ap' || tgt.type === 'ap';
+                const medium = link.medium || (isWireless ? 'wireless' : 'utp');
+
+                let defaultColor = '#94a3b8'; // utp
+                let dashArray = null;
+
+                if (medium === 'fiber') defaultColor = '#06b6d4';
+                else if (medium === 'wireless') { defaultColor = '#8b5cf6'; dashArray = '4 4'; }
+                else if (medium === 'powerline') { defaultColor = '#eab308'; dashArray = '8 4 2 4'; }
+                
+                if (link.attachment === 'passthrough') { defaultColor = '#a855f7'; dashArray = '4 4'; }
 
                 if (reach && reach.reachableLinks.has(link.id)) {
                     line.setAttribute('stroke', '#f59e0b'); line.setAttribute('stroke-width', '3'); line.setAttribute('class', 'animate-flow cursor-pointer');
                 } else {
-                    line.setAttribute('stroke', isSelected ? '#3b82f6' : (link.attachment === 'passthrough' ? '#a855f7' : '#94a3b8')); 
+                    line.setAttribute('stroke', isSelected ? '#3b82f6' : defaultColor); 
                     line.setAttribute('stroke-width', isSelected ? '3' : '2');
                     line.setAttribute('class', reach ? 'fade-inactive cursor-pointer' : 'cursor-pointer transition-colors');
-                    if (isWireless || link.attachment) line.setAttribute('stroke-dasharray', '4 4');
+                    if (dashArray) line.setAttribute('stroke-dasharray', dashArray);
                 }
                 line.addEventListener('mousedown', (event) => { event.stopPropagation(); select(link.id, 'link'); });
                 lLinks.appendChild(line);
@@ -1279,7 +1307,7 @@ renderNodeDiagnostics(node);
             });
             updateTraceStatus(reach);
             validateTopology();
-        }
+        };
 
         function renderSidebarData(node) {
             const ifCont = document.getElementById('ifaceListContainer'); ifCont.innerHTML = '';
@@ -1297,10 +1325,37 @@ renderNodeDiagnostics(node);
                     const ipInp = document.createElement('input'); ipInp.type = 'text'; ipInp.value = iface.ip; ipInp.placeholder = 'CIDR';
                     ipInp.className = 'flex-1 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500';
                     if (iface.ip.trim() !== '' && !parseValidCIDR(iface.ip)) ipInp.classList.add('border-red-400', 'bg-red-50');
+                    const zoneLabel = document.createElement('label');
+                    zoneLabel.className = 'flex items-center gap-0.5 text-[9px] text-slate-500 font-bold cursor-pointer mx-1';
+                    zoneLabel.title = 'Draw Subnet Zone Bubble';
+                    
+                    const zoneCb = document.createElement('input');
+                    zoneCb.type = 'checkbox';
+                    zoneCb.className = 'w-3 h-3 accent-blue-500 rounded cursor-pointer';
+                    
+                    const initParsed = parseValidCIDR(iface.ip);
+                    zoneCb.checked = iface.drawZone !== undefined ? iface.drawZone : (initParsed ? initParsed.isPrivate : false);
+                    
+                    zoneCb.onchange = (e) => {
+                        node.interfaces[i].drawZone = e.target.checked;
+                        save();
+                        renderCanvasOnly();
+                    };
+                    
+                    zoneLabel.appendChild(zoneCb);
+                    zoneLabel.appendChild(document.createTextNode('Zone'));
+
                     ipInp.addEventListener('input', (e) => { 
                         node.interfaces[i].ip = e.target.value; 
-                        if (e.target.value.trim() !== '' && !parseValidCIDR(e.target.value)) ipInp.classList.add('border-red-400', 'bg-red-50');
+                        const parsedData = parseValidCIDR(e.target.value);
+                        if (e.target.value.trim() !== '' && !parsedData) ipInp.classList.add('border-red-400', 'bg-red-50');
                         else ipInp.classList.remove('border-red-400', 'bg-red-50');
+                        
+                        // Auto-update checkbox fallback visual state if it was never explicitly set
+                        if (node.interfaces[i].drawZone === undefined && parsedData) {
+                            zoneCb.checked = parsedData.isPrivate;
+                        }
+                        
                         save();
                         renderCanvasOnly();
                         renderNodeDiagnostics(node); 
@@ -1315,7 +1370,7 @@ renderNodeDiagnostics(node);
                         renderNodeDiagnostics(node);
                     };
                     
-                    div.appendChild(nameInp); div.appendChild(ipInp); div.appendChild(del); ifCont.appendChild(div);
+                    div.appendChild(nameInp); div.appendChild(ipInp); div.appendChild(zoneLabel); div.appendChild(del); ifCont.appendChild(div);
                 });
             }
         }
@@ -1344,6 +1399,7 @@ renderNodeDiagnostics(node);
             if (type === 'node') {
                 const node = getNode(id); if (!node) return;
                 nameInput.value = node.name || ''; nameInput.disabled = false; generalProps.classList.remove('hidden'); linkProps.classList.add('hidden');
+                if (document.getElementById('linkMediumProps')) document.getElementById('linkMediumProps').classList.add('hidden');
                 document.getElementById('propOs').value = node.os || ''; document.getElementById('propPorts').value = node.ports || ''; document.getElementById('propNotes').value = node.notes || '';
                 
                 netProps.classList.remove('hidden');
@@ -1370,10 +1426,13 @@ renderNodeDiagnostics(node);
                 if (link.attachment !== undefined && link.attachment !== null) {
                     linkProps.classList.remove('hidden');
                     document.getElementById('propAttachment').value = link.attachment;
-                    document.getElementById('propAttachment').onchange = (e) => { link.attachment = e.target.value; save();
-                    renderCanvasOnly();
-                    renderNodeDiagnostics(node); };
+                    document.getElementById('propAttachment').onchange = (e) => { link.attachment = e.target.value; save(); renderCanvasOnly(); };
                 } else { linkProps.classList.add('hidden'); }
+
+                const linkMediumProps = document.getElementById('linkMediumProps');
+                linkMediumProps.classList.remove('hidden');
+                document.getElementById('propMedium').value = link.medium || 'utp';
+                document.getElementById('propMedium').onchange = (e) => { link.medium = e.target.value; save(); renderCanvasOnly(); };
             }
             renderCanvasOnly();
         }
@@ -1408,8 +1467,8 @@ renderNodeDiagnostics(node);
 
         function save() {
             try {
-                const cleanNodes = state.nodes.map((n) => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', interfaces: n.interfaces || [] }));
-                const cleanLinks = state.links.map((l) => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment }));
+                const cleanNodes = state.nodes.map((n) => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', interfaces: (n.interfaces || []).map(i => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone })) }));
+                const cleanLinks = state.links.map((l) => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium }));
                 const encoded = btoa(encodeURIComponent(JSON.stringify({ nodes: cleanNodes, links: cleanLinks })));
                 window.history.replaceState(null, '', `#${encoded}`); updateOsDatalist();
             } catch (err) { console.warn('Could not save diagram state:', err); }
@@ -1585,7 +1644,7 @@ renderNodeDiagnostics(node);
                 const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
                 canvas.width = exportWidth * SCALE; canvas.height = exportHeight * SCALE;
                 ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.fillStyle = '#cbd5e1'; ctx.scale(SCALE, SCALE);
+                ctx.fillStyle = '#f8fafc'; ctx.scale(SCALE, SCALE);
                 for (let x = ((-minX) % GRID_SNAP + GRID_SNAP) % GRID_SNAP; x < exportWidth; x += GRID_SNAP) {
                     for (let y = ((-minY) % GRID_SNAP + GRID_SNAP) % GRID_SNAP; y < exportHeight; y += GRID_SNAP) {
                         ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2); ctx.fill();
