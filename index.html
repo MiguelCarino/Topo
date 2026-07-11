@@ -199,10 +199,6 @@
             </div>
 
             <button id="clearCanvasBtn" class="cs-btn">Clear</button>
-
-            <div class="cs-vdiv"></div>
-
-            <button id="openAboutBtn" class="cs-icon-btn" title="About">?</button>
         </div>
     </header>
 
@@ -343,23 +339,6 @@
                 </div>
             </div>
 
-            <div id="aboutModal" class="fixed inset-0 bg-slate-900/60 hidden flex items-center justify-center z-50 transition-opacity">
-            <div class="bg-white rounded-lg shadow-2xl p-8 w-80 text-center relative">
-                <button id="closeAboutBtn" class="absolute top-3 right-4 text-slate-400 hover:text-slate-800 font-bold text-lg">✕</button>
-                <div class="mx-auto bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mb-4">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-blue-600">
-                        <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
-                    </svg>
-                </div>
-                <h2 class="text-xl font-extrabold text-slate-800 tracking-tight">NetTopology Pro v2</h2>
-                <p class="text-xs text-slate-500 mb-6 uppercase tracking-widest">Built by Miguel Cariño</p>
-                <div class="flex flex-col gap-3">
-                    <a href="https://linkedin.com/" target="_blank" class="block w-full bg-blue-600 text-white py-2 rounded-md text-sm font-medium hover:bg-blue-500 transition shadow-sm">LinkedIn Profile</a>
-                    <a href="https://github.com/" target="_blank" class="block w-full bg-slate-800 text-white py-2 rounded-md text-sm font-medium hover:bg-slate-700 transition shadow-sm">GitHub Repository</a>
-                    <a href="https://carino.systems" target="_blank" class="block w-full bg-emerald-600 text-white py-2 rounded-md text-sm font-medium hover:bg-emerald-500 transition shadow-sm">carino.systems</a>
-                </div>
-            </div>
-        </div>
     </div>
 
     <script>
@@ -1575,6 +1554,27 @@ renderNodeDiagnostics(node);
             canvasContainer.style.backgroundSize = `${backgroundSize}px ${backgroundSize}px`; canvasContainer.style.backgroundPosition = `${state.camera.x}px ${state.camera.y}px`;
         }
 
+        // Frame the whole topology in the viewport (centered + zoomed to fit).
+        function fitToView() {
+            if (!state.nodes.length) { state.camera = { x: 0, y: 0, zoom: 1 }; applyCamera(); return; }
+            const rect = document.getElementById('networkCanvas').getBoundingClientRect();
+            if (!rect.width || !rect.height) { requestAnimationFrame(fitToView); return; }
+            const NODE = 30, LABEL = 46; // node half-box + label allowance below
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            state.nodes.forEach((n) => {
+                minX = Math.min(minX, n.x - NODE); minY = Math.min(minY, n.y - NODE);
+                maxX = Math.max(maxX, n.x + NODE); maxY = Math.max(maxY, n.y + NODE + LABEL);
+            });
+            const PAD = 80;
+            const w = (maxX - minX) || 1, h = (maxY - minY) || 1;
+            const zoom = Math.min(1.4, Math.max(0.2, Math.min((rect.width - PAD * 2) / w, (rect.height - PAD * 2) / h)));
+            const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+            state.camera.zoom = zoom;
+            state.camera.x = rect.width / 2 - cx * zoom;
+            state.camera.y = rect.height / 2 - cy * zoom;
+            applyCamera();
+        }
+
         function updateOsDatalist() {
             const dl = document.getElementById('osDatalist'); dl.innerHTML = '';
             new Set(state.nodes.map((n) => n.os).filter(Boolean)).forEach((os) => { dl.appendChild(new Option(os, os)); });
@@ -1617,8 +1617,7 @@ renderNodeDiagnostics(node);
             if (state.selectedType === 'node') { state.nodes = state.nodes.filter((n) => n.id !== state.selectedId); state.links = state.links.filter((l) => l.source !== state.selectedId && l.target !== state.selectedId); } 
             else if (state.selectedType === 'link') { state.links = state.links.filter((l) => l.id !== state.selectedId); }
             select(null, null); save();
-renderCanvasOnly();
-renderNodeDiagnostics(node);
+            renderCanvasOnly();
         }
 
         window.addEventListener('mousedown', (event) => {
@@ -1679,10 +1678,10 @@ renderNodeDiagnostics(node);
             if (!confirm('Replace current workspace with template?')) return;
             const template = templatesData[event.target.value] || templatesData.house;
             state.nodes = cloneData(template.nodes).map(normalizeLoadedNode); state.links = cloneData(template.links);
-            state.selectedId = null; state.selectedType = null; state.linkSourceId = null; state.camera = { x: 0, y: 0, zoom: 1 };
-            applyCamera(); select(null, null); save();
+            state.selectedId = null; state.selectedType = null; state.linkSourceId = null;
+            select(null, null); save();
             renderCanvasOnly();
-            renderNodeDiagnostics(node);
+            fitToView();
         });
 
         const propertyBindings = [
@@ -1719,17 +1718,21 @@ renderNodeDiagnostics(node);
         document.getElementById('clearCanvasBtn').onclick = () => { if (!confirm('Clear canvas?')) return; state.nodes = []; state.links = []; state.selectedId = null; state.selectedType = null; state.linkSourceId = null; save(); select(null, null); renderCanvasOnly(); };
         document.getElementById('copyUrlBtn').onclick = async () => { save(); try { await navigator.clipboard.writeText(window.location.href); alert('URL copied.'); } catch (e) { prompt('Copy this URL:', window.location.href); } };
         
-        document.getElementById('toggleTrace').addEventListener('change', (event) => { state.settings.traceMode = event.target.checked; renderCanvasOnly(); });
+        document.getElementById('toggleTrace').addEventListener('change', (event) => {
+            state.settings.traceMode = event.target.checked;
+            // On first activation, if nothing is selected, pick a sensible start
+            // node (prefer a router/firewall gateway) so the trace lights up right away.
+            if (state.settings.traceMode && (!state.selectedId || state.selectedType !== 'node')) {
+                const start = state.nodes.find((n) => isRoutingDevice(n.type)) || state.nodes.find((n) => n.type !== 'cloud') || state.nodes[0];
+                if (start) { select(start.id, 'node'); return; } // select() re-renders
+            }
+            renderCanvasOnly();
+        });
         document.getElementById('tracePort').addEventListener('input', () => {
             if (state.settings.traceMode) renderCanvasOnly();
             refreshSelectedNodeDiagnostics();
         });
         
-        const aboutModal = document.getElementById('aboutModal');
-        document.getElementById('openAboutBtn').onclick = () => aboutModal.classList.remove('hidden');
-        document.getElementById('closeAboutBtn').onclick = () => aboutModal.classList.add('hidden');
-        aboutModal.addEventListener('click', (e) => { if(e.target === aboutModal) aboutModal.classList.add('hidden'); });
-
         function handleExport(format) {
             if (!state.nodes.length) { alert('Nothing to export. Add at least one node first.'); return; }
             const PADDING = 90, NODE_HALF_SIZE = 24, LABEL_EXTRA_BOTTOM = 42, SCALE = 4;
@@ -1794,9 +1797,9 @@ renderNodeDiagnostics(node);
         document.getElementById('exportPngBtn').onclick = () => handleExport('png');
         document.getElementById('exportWebpBtn').onclick = () => handleExport('webp');
 
-        window.addEventListener('popstate', () => { load(); renderCanvasOnly(); });
+        window.addEventListener('popstate', () => { load(); renderCanvasOnly(); fitToView(); });
 
-        load(); applyCamera(); renderCanvasOnly();
+        load(); renderCanvasOnly(); fitToView();
     </script>
 <script src="carino-navbar.js" data-app="NetTopology" defer></script>
 </body>
