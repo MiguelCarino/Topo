@@ -34,6 +34,8 @@
         /* === Carino Systems Header === */
         :root {
             --cs-bg: #050505;
+            --cs-bg-card: #0b0b0b;
+            --cs-bg-elev: #0d0d0d;
             --cs-accent: #eab308;
             --cs-accent-faint: rgba(234, 179, 8, 0.05);
             --cs-accent-glow: rgba(234, 179, 8, 0.15);
@@ -160,6 +162,69 @@
         }
         .cs-export-btn:last-child { border-right: none; }
         .cs-export-btn:hover { background: var(--cs-accent-faint); color: var(--cs-accent); }
+
+        /* ============================================================
+           Carino branding pass — rebrand the app CHROME (sidebar +
+           floating controls) to gold-on-black so it matches the navbar.
+           The diagram canvas stays light: it is the exportable document.
+           Scoped overrides of the Tailwind light utilities used inline.
+           ============================================================ */
+        body { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+        aside {
+            background: var(--cs-bg-card) !important;
+            border-right: 1px solid var(--cs-border) !important;
+            color: var(--cs-text-sec);
+        }
+        aside .bg-white, aside .bg-slate-50 { background: transparent !important; }
+        aside .border-slate-100, aside .border-slate-200, aside .border-slate-300 { border-color: var(--cs-border) !important; }
+        aside h2 { color: var(--cs-text-muted) !important; font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.1em; }
+        aside .text-slate-800, aside .text-slate-700 { color: var(--cs-text) !important; }
+        aside .text-slate-600, aside .text-slate-500 { color: var(--cs-text-sec) !important; }
+        aside .text-slate-400 { color: var(--cs-text-muted) !important; }
+        aside .text-orange-600 { color: var(--cs-accent) !important; }
+        aside ul li .border { border-color: var(--cs-border) !important; background: var(--cs-bg-elev) !important; color: var(--cs-text-sec) !important; }
+        /* form controls */
+        aside input, aside select, aside textarea {
+            background: var(--cs-bg-elev) !important;
+            border: 1px solid var(--cs-border) !important;
+            color: var(--cs-text) !important;
+            border-radius: 6px !important;
+        }
+        aside input::placeholder { color: var(--cs-text-muted) !important; }
+        aside input:focus, aside select:focus, aside textarea:focus {
+            outline: none !important;
+            border-color: var(--cs-accent) !important;
+            box-shadow: 0 0 0 3px var(--cs-accent-faint) !important;
+        }
+        aside select option { background: #111; color: var(--cs-text); }
+        /* semantic accent labels/selects → gold family */
+        aside .text-indigo-600, aside .text-emerald-600, aside .text-blue-600 { color: var(--cs-accent) !important; }
+        aside .border-indigo-300, aside .border-emerald-300 { border-color: var(--cs-border) !important; }
+        aside .bg-indigo-50, aside .bg-emerald-50 { background: var(--cs-bg-elev) !important; }
+        aside .focus\:outline-blue-500:focus, aside .focus\:outline-indigo-500:focus { outline-color: var(--cs-accent) !important; }
+        aside a { color: var(--cs-accent) !important; }
+        /* node-palette hardware buttons */
+        #nodePalette button {
+            background: var(--cs-bg-elev) !important;
+            border: 1px solid var(--cs-border) !important;
+            color: var(--cs-text-sec) !important;
+            border-radius: 8px !important;
+            transition: 0.15s;
+        }
+        #nodePalette button:hover { border-color: var(--cs-accent) !important; color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
+        #nodePalette button svg { stroke: currentColor !important; }
+        /* jump-to-gateway (dark slate button) → outline gold */
+        #jumpGwBtn { background: transparent !important; border: 1px solid var(--cs-border) !important; color: var(--cs-text-sec) !important; border-radius: 6px !important; }
+        #jumpGwBtn:hover { border-color: var(--cs-accent) !important; color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
+        /* floating zoom controls over the light canvas → dark card */
+        #canvasContainer > .absolute.bottom-4.right-4 { background: var(--cs-bg-card) !important; border: 1px solid var(--cs-border) !important; color: var(--cs-text-sec) !important; border-radius: 8px; overflow: hidden; }
+        #canvasContainer > .absolute.bottom-4.right-4 button { border-color: var(--cs-border) !important; }
+        #canvasContainer > .absolute.bottom-4.right-4 button:hover { background: var(--cs-accent-faint) !important; color: var(--cs-accent) !important; }
+        /* validation alert → solid dark card so it reads on the light canvas */
+        #conflictAlert { background: var(--cs-bg-card) !important; border: 1px solid var(--cs-border) !important; border-left: 4px solid var(--cs-accent) !important; box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important; }
+        #conflictAlert h4 { color: var(--cs-accent) !important; }
+        #conflictAlert .text-amber-800, #conflictAlert ul { color: #fde68a !important; }
+        #conflictAlert .text-amber-500 { color: var(--cs-accent) !important; }
     </style>
 </head>
 <body class="bg-gray-100 font-sans h-screen flex flex-col overflow-hidden text-slate-800">
@@ -179,16 +244,44 @@
 
             <div class="cs-vdiv"></div>
 
-            <select id="templateSelect" class="cs-select">
-                <option value="house">🏠 Smart Home</option>
-                <option value="bank">🏦 Bank Branch</option>
-                <option value="datacenter">🏢 Data Center</option>
-                <option value="hospital">🏥 Hospital</option>
-                <option value="campus">🏢 Corporate Campus</option>
-                <option value="retail">🛒 Retail POS</option>
-                <option value="factory">🏭 Smart Factory</option>
-                <option value="studio">🎬 Media Studio</option>
+            <select id="templateSelect" class="cs-select" title="Replace the canvas with a full template">
+                <optgroup label="Templates">
+                    <option value="house">🏠 Smart Home</option>
+                    <option value="bank">🏦 Bank Branch</option>
+                    <option value="datacenter">🏢 Data Center</option>
+                    <option value="hospital">🏥 Hospital</option>
+                    <option value="campus">🏢 Corporate Campus</option>
+                    <option value="retail">🛒 Retail POS</option>
+                    <option value="factory">🏭 Smart Factory</option>
+                    <option value="studio">🎬 Media Studio</option>
+                    <option value="callcenter">📞 Call Center</option>
+                    <option value="showcase">🧩 Full Showcase (all node types)</option>
+                </optgroup>
+                <optgroup id="userTemplateGroup" label="My Templates"></optgroup>
             </select>
+
+            <select id="snippetSelect" class="cs-select" title="Stamp a reusable building block onto the canvas">
+                <option value="">＋ Add Block…</option>
+                <option value="dicom">🩻 DICOM Imaging (modalities → PACS)</option>
+                <option value="dmz">🛡️ DMZ (FW + 2 zones)</option>
+                <option value="dcpod">🗄️ DC Pod (L3 + servers/VM/container)</option>
+                <option value="webfarm">🌐 Web Farm (LB + 3 servers)</option>
+                <option value="k8s">☸️ Kubernetes (ingress + control + workers)</option>
+                <option value="homelab">🧪 Homelab (hypervisor + VMs + NAS)</option>
+                <option value="vlan">🔀 VLAN Segment (SW + 3 hosts)</option>
+                <option value="wifi">📶 Wireless Cell (AP + 3 clients)</option>
+                <option value="iotseg">🔌 Isolated IoT/Guest (FW + AP + devices)</option>
+                <option value="voip">📞 VoIP (PBX + switch + phones)</option>
+                <option value="surveillance">📹 Surveillance (NVR + PoE + 3 cams)</option>
+                <option value="storage">💽 Storage (NAS + backup)</option>
+                <option value="mgmt">🛠️ Management (monitoring + syslog + jump)</option>
+                <option value="branch">🏢 Branch Office (router + LAN + phone)</option>
+                <option value="vpnsite">🔒 VPN Site-to-Site (tunnel)</option>
+                <option value="hapair">⚖️ HA Firewall Pair</option>
+            </select>
+
+            <button id="tidyBtn" class="cs-btn" title="Auto-arrange the topology into tiers">⤢ Tidy</button>
+            <button id="saveTemplateBtn" class="cs-btn" title="Save the current canvas as a reusable template">💾 Save</button>
 
             <button id="copyUrlBtn" class="cs-btn" title="Copy the shareable URL">🔗 Copy URL</button>
 
@@ -250,6 +343,7 @@
                             <option value="fiber">Fiber Optic (Solid Cyan)</option>
                             <option value="wireless">Wireless (Dashed Purple)</option>
                             <option value="powerline">Powerline (Dash-Dot Yellow)</option>
+                            <option value="vpn">VPN Tunnel (Overlay · Teal)</option>
                         </select>
                     </div>
 
@@ -276,6 +370,10 @@
                                 <button id="jumpGwBtn" class="w-full hidden bg-slate-700 hover:bg-slate-600 text-white py-1 rounded text-[10px] font-bold transition">⏭️ Jump to Gateway</button>
                             </div>
                         </div>
+                        <label id="natRow" class="hidden items-center gap-2 mt-2 cursor-pointer" title="NAT hides this device's private (inside) subnets from the WAN side — only the gateway itself is reachable from outside.">
+                            <input type="checkbox" id="propNat" class="accent-amber-500">
+                            <span class="text-[10px] font-bold text-slate-500 uppercase">NAT / Masquerade</span>
+                        </label>
                     </div>
 
                     <div id="nodeGeneralProps" class="pt-3 border-t border-slate-100">
@@ -361,22 +459,35 @@
             vm: '<rect x="2" y="2" width="20" height="20" rx="2" stroke-dasharray="4 4"/><path d="M12 8v8M8 12h8"/>',
             iot: '<path d="M4.9 19.1C3.1 17.3 2 14.8 2 12s1.1-5.3 2.9-7.1M19.1 4.9C20.9 6.7 22 9.2 22 12s-1.1 5.3-2.9 7.1M8.5 15.5c-1-1-1.6-2.4-1.6-3.5s.6-2.5 1.6-3.5M15.5 8.5c1 1 1.6 2.4 1.6 3.5s-.6 2.5-1.6 3.5"/><circle cx="12" cy="12" r="2"/>',
             dicom: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+            container: '<rect x="2" y="7" width="20" height="12" rx="1"/><path d="M6 7v12M10 7v12M14 7v12M18 7v12"/>',
+            loadbalancer: '<circle cx="12" cy="4" r="2"/><circle cx="5" cy="20" r="2"/><circle cx="12" cy="20" r="2"/><circle cx="19" cy="20" r="2"/><path d="M12 6v3M12 9l-7 9M12 9v9M12 9l7 9"/>',
+            l3switch: '<rect x="2" y="9" width="20" height="7" rx="2"/><path d="M6 12.5h12"/><path d="M8 6l3-3 3 3M8 19l3 3 3-3"/>',
+            edge: '<rect x="5" y="9" width="14" height="7" rx="1.5"/><path d="M9 9V4M15 9V4M12 16v4"/><path d="M6 4h6M12 4h6"/>',
+            vpn: '<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15" r="1"/><path d="M12 16v2"/>',
+            voip: '<path d="M15.05 5A5 5 0 0 1 19 8.95M15.05 1A9 9 0 0 1 23 8.94M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>',
             printer: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z"/>',
             camera: '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
             custom: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>'
         };
 
+        // Palette order: each base type is followed by its L3 derivatives, so
+        // Router → Load Balancer / L3 Switch / Edge, and Firewall → VPN Gateway.
         const paletteDefs = [
-            { type: 'cloud', name: 'Cloud' }, { type: 'router', name: 'Router' }, { type: 'firewall', name: 'Firewall' },
-            { type: 'switch', name: 'Switch' }, { type: 'server', name: 'Server' }, { type: 'vm', name: 'VM' },
-            { type: 'pc', name: 'Workstation' }, { type: 'ap', name: 'Wireless AP' }, { type: 'iot', name: 'IoT Device' },
-            { type: 'printer', name: 'Printer' }, { type: 'camera', name: 'IP Camera' },
-            { type: 'dicom', name: 'DICOM' }, { type: 'custom', name: 'Custom Node' }
+            { type: 'cloud', name: 'Cloud' }, { type: 'router', name: 'Router' }, { type: 'loadbalancer', name: 'Load Balancer' },
+            { type: 'l3switch', name: 'L3 Switch' }, { type: 'edge', name: 'Edge Gateway' }, { type: 'firewall', name: 'Firewall' },
+            { type: 'vpn', name: 'VPN Gateway' }, { type: 'switch', name: 'Switch' }, { type: 'ap', name: 'Wireless AP' },
+            { type: 'server', name: 'Server' }, { type: 'vm', name: 'VM' }, { type: 'container', name: 'Container' },
+            { type: 'pc', name: 'Workstation' }, { type: 'voip', name: 'VoIP Phone' }, { type: 'iot', name: 'IoT Device' },
+            { type: 'printer', name: 'Printer' }, { type: 'camera', name: 'IP Camera' }, { type: 'dicom', name: 'DICOM' },
+            { type: 'custom', name: 'Custom Node' }
         ];
 
-        // Architecture Helpers
+        // Virtual endpoints (VM/container) get the bridged/host attachment on their links.
+        const isVirtualType = (t) => t === 'vm' || t === 'container';
+
+        // Architecture Helpers — routing family now includes the L3 derivatives.
         const isDumbDevice = (node) => ['switch', 'ap'].includes(node.type) && getValidIps(node).length === 0;
-        const isRoutingDevice = (type) => ['router', 'firewall', 'cloud'].includes(type);
+        const isRoutingDevice = (type) => ['router', 'firewall', 'cloud', 'loadbalancer', 'vpn', 'l3switch', 'edge'].includes(type);
         
         function isPrivateIP(ipObj) {
             if (ipObj.kind() !== 'ipv4') return false;
@@ -398,7 +509,13 @@
             ap: { os: 'UniFi', interfaces: [] },
             iot: { os: 'FreeRTOS', gw: '192.168.1.1', dns: '8.8.8.8', ports: '1883', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.100/24' }] },
             printer: { os: 'Firmware', gw: '192.168.1.1', ports: '9100', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.80/24' }] },
-            camera: { os: 'Firmware', gw: '192.168.1.1', ports: '554', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.90/24' }] }
+            camera: { os: 'Firmware', gw: '192.168.1.1', ports: '554', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.90/24' }] },
+            container: { os: 'Docker', gw: '192.168.1.1', dns: '8.8.8.8', ports: '8080', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.120/24' }] },
+            loadbalancer: { os: 'HAProxy', gw: '203.0.113.1', dns: '8.8.8.8', ports: '80, 443', nat: true, interfaces: [{ id: 'i1', name: 'vip0', ip: '203.0.113.20/24' }, { id: 'i2', name: 'pool0', ip: '10.30.0.1/24' }] },
+            l3switch: { os: 'Cisco IOS', dns: '8.8.8.8', ports: '22', interfaces: [{ id: 'i1', name: 'vlan10', ip: '10.10.10.1/24' }, { id: 'i2', name: 'vlan20', ip: '10.10.20.1/24' }] },
+            edge: { os: 'Omada', dns: '8.8.8.8', ports: '443, 500, 4500', nat: true, interfaces: [{ id: 'i1', name: 'wan0', ip: '203.0.113.2/30' }, { id: 'i2', name: 'wan1', ip: '198.51.100.2/30' }, { id: 'i3', name: 'lan', ip: '192.168.0.1/24' }] },
+            vpn: { os: 'FortiGate', dns: '1.1.1.1', ports: '443, 500, 4500', nat: true, interfaces: [{ id: 'i1', name: 'wan', ip: '203.0.113.10/30' }, { id: 'i2', name: 'lan', ip: '10.0.0.1/24' }] },
+            voip: { os: 'SIP', gw: '192.168.1.1', dns: '8.8.8.8', ports: '5060, 5061', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.60/24' }] }
         };
 
         // Templates Data (Converted to Interface format via Normalizer)
@@ -432,17 +549,29 @@
             },
             datacenter: {
                 nodes: [
-                    { id: 'd1', type: 'cloud', name: 'Internet Backbone', x: 400, y: 50, ips: [] },
-                    { id: 'd2', type: 'firewall', name: 'Edge FW (DMZ)', x: 400, y: 150, ips: ['172.16.1.1/24'], dns: '1.1.1.1' },
-                    { id: 'd3', type: 'switch', name: 'DMZ Switch', x: 400, y: 250, ips: [] },
-                    { id: 'd4', type: 'vm', name: 'Web Node 1', x: 300, y: 350, ips: ['172.16.1.10/24'], gw: '172.16.1.1', ports: '80, 443' },
-                    { id: 'd5', type: 'vm', name: 'Web Node 2', x: 500, y: 350, ips: ['172.16.1.11/24'], gw: '172.16.1.1', ports: '80, 443' },
-                    { id: 'd6', type: 'firewall', name: 'Internal FW', x: 400, y: 450, ips: ['172.16.2.1/24'], gw: '172.16.1.1' },
-                    { id: 'd7', type: 'switch', name: 'Database Switch', x: 400, y: 550, ips: [] },
-                    { id: 'd8', type: 'server', name: 'DB Master', x: 300, y: 650, ips: ['172.16.2.10/24'], gw: '172.16.2.1', ports: '3306' },
-                    { id: 'd9', type: 'server', name: 'DB Replica', x: 500, y: 650, ips: ['172.16.2.11/24'], gw: '172.16.2.1', ports: '3306' }
+                    { id: 'd1',  type: 'cloud',        name: 'Internet Backbone', x: 480, y: 40,  ips: [] },
+                    { id: 'd2',  type: 'edge',         name: 'Edge Router',       x: 480, y: 150, nat: true, gw: '203.0.113.1', dns: '1.1.1.1', ips: ['203.0.113.2/30', '198.51.100.2/30', '172.16.0.1/24'] },
+                    { id: 'd3',  type: 'firewall',     name: 'Perimeter FW',      x: 480, y: 260, nat: true, gw: '172.16.0.1', ips: ['172.16.0.2/24', '172.16.1.1/24', '172.16.2.1/24'], ports: '443, 22' },
+                    { id: 'd4',  type: 'loadbalancer', name: 'App Load Balancer', x: 260, y: 380, gw: '172.16.1.1', ips: ['172.16.1.5/24', '10.10.0.1/24'], ports: '80, 443' },
+                    { id: 'd5',  type: 'l3switch',     name: 'Core Fabric',       x: 640, y: 380, gw: '172.16.2.1', ips: ['172.16.2.2/24', '10.20.0.1/24', '10.30.0.1/24'] },
+                    { id: 'd6',  type: 'vm',           name: 'Web Node 1',        x: 120, y: 510, ips: ['10.10.0.11/24'], gw: '10.10.0.1', ports: '80, 443' },
+                    { id: 'd7',  type: 'vm',           name: 'Web Node 2',        x: 220, y: 510, ips: ['10.10.0.12/24'], gw: '10.10.0.1', ports: '80, 443' },
+                    { id: 'd8',  type: 'container',    name: 'API Container',     x: 320, y: 510, ips: ['10.10.0.13/24'], gw: '10.10.0.1', ports: '8080' },
+                    { id: 'd9',  type: 'server',       name: 'App Server 1',      x: 470, y: 510, ips: ['10.20.0.11/24'], gw: '10.20.0.1', ports: '8080' },
+                    { id: 'd10', type: 'server',       name: 'App Server 2',      x: 570, y: 510, ips: ['10.20.0.12/24'], gw: '10.20.0.1', ports: '8080' },
+                    { id: 'd11', type: 'pc',           name: 'Jump Host',         x: 670, y: 510, ips: ['10.20.0.50/24'], gw: '10.20.0.1', ports: '22' },
+                    { id: 'd12', type: 'switch',       name: 'Storage Switch',    x: 820, y: 510, ips: [] },
+                    { id: 'd13', type: 'server',       name: 'DB Master',         x: 760, y: 640, ips: ['10.30.0.10/24'], gw: '10.30.0.1', ports: '5432' },
+                    { id: 'd14', type: 'server',       name: 'DB Replica',        x: 850, y: 640, ips: ['10.30.0.11/24'], gw: '10.30.0.1', ports: '5432' },
+                    { id: 'd15', type: 'server',       name: 'NAS Storage',       x: 940, y: 640, ips: ['10.30.0.20/24'], gw: '10.30.0.1', ports: '2049, 445' }
                 ],
-                links: [{ id: 'dl1', source: 'd1', target: 'd2' }, { id: 'dl2', source: 'd2', target: 'd3' }, { id: 'dl3', source: 'd3', target: 'd4' }, { id: 'dl4', source: 'd3', target: 'd5' }, { id: 'dl5', source: 'd3', target: 'd6' }, { id: 'dl6', source: 'd6', target: 'd7' }, { id: 'dl7', source: 'd7', target: 'd8' }, { id: 'dl8', source: 'd7', target: 'd9' }]
+                links: [
+                    { id: 'dl1', source: 'd1', target: 'd2' }, { id: 'dl2', source: 'd2', target: 'd3' },
+                    { id: 'dl3', source: 'd3', target: 'd4' }, { id: 'dl4', source: 'd3', target: 'd5' },
+                    { id: 'dl5', source: 'd4', target: 'd6' }, { id: 'dl6', source: 'd4', target: 'd7' }, { id: 'dl7', source: 'd4', target: 'd8', attachment: 'bridged' },
+                    { id: 'dl8', source: 'd5', target: 'd9' }, { id: 'dl9', source: 'd5', target: 'd10' }, { id: 'dl10', source: 'd5', target: 'd11' }, { id: 'dl11', source: 'd5', target: 'd12' },
+                    { id: 'dl12', source: 'd12', target: 'd13' }, { id: 'dl13', source: 'd12', target: 'd14' }, { id: 'dl14', source: 'd12', target: 'd15' }
+                ]
             },
             hospital: {
                 nodes: [
@@ -517,6 +646,95 @@
                     { id: 's9', type: 'camera', name: 'Studio Cam B', x: 650, y: 350, ips: ['10.0.0.91/24'], gw: '10.0.0.1' }
                 ],
                 links: [{ id: 'sl1', source: 's1', target: 's2' }, { id: 'sl2', source: 's2', target: 's3' }, { id: 'sl3', source: 's3', target: 's4' }, { id: 'sl_pass', source: 's4', target: 's5', attachment: 'passthrough' }, { id: 'sl4', source: 's3', target: 's6' }, { id: 'sl5', source: 's3', target: 's7' }, { id: 'sl6', source: 's3', target: 's8' }, { id: 'sl7', source: 's3', target: 's9' }]
+            },
+            callcenter: {
+                nodes: [
+                    { id: 'c1',  type: 'cloud',    name: 'Internet',           x: 460, y: 50,  ips: [] },
+                    { id: 'c2',  type: 'router',   name: 'CC Gateway',         x: 460, y: 155, nat: true, gw: '203.0.113.1', dns: '1.1.1.1', ips: ['203.0.113.2/30', '10.5.0.1/24'] },
+                    { id: 'c3',  type: 'firewall', name: 'Firewall / UTM',     x: 460, y: 260, nat: true, gw: '10.5.0.1', ips: ['10.5.0.2/24', '10.5.10.1/24', '10.5.20.1/24'], ports: '443, 22' },
+                    { id: 'c4',  type: 'switch',   name: 'Voice Switch',       x: 270, y: 370, ips: [] },
+                    { id: 'c5',  type: 'switch',   name: 'Data Switch',        x: 640, y: 370, ips: [] },
+                    { id: 'c6',  type: 'voip',     name: 'Agent Phone 1',      x: 110, y: 490, ips: ['10.5.10.61/24'], gw: '10.5.10.1', ports: '5060' },
+                    { id: 'c7',  type: 'voip',     name: 'Agent Phone 2',      x: 200, y: 490, ips: ['10.5.10.62/24'], gw: '10.5.10.1', ports: '5060' },
+                    { id: 'c8',  type: 'voip',     name: 'Agent Phone 3',      x: 290, y: 490, ips: ['10.5.10.63/24'], gw: '10.5.10.1', ports: '5060' },
+                    { id: 'c9',  type: 'voip',     name: 'Supervisor Phone',   x: 380, y: 490, ips: ['10.5.10.64/24'], gw: '10.5.10.1', ports: '5060' },
+                    { id: 'c10', type: 'custom',   name: 'PBX / Call Manager', x: 245, y: 600, ips: ['10.5.10.10/24'], gw: '10.5.10.1', ports: '5060, 5061' },
+                    { id: 'c11', type: 'pc',       name: 'Agent PC 1',         x: 500, y: 490, ips: ['10.5.20.51/24'], gw: '10.5.20.1' },
+                    { id: 'c12', type: 'pc',       name: 'Agent PC 2',         x: 590, y: 490, ips: ['10.5.20.52/24'], gw: '10.5.20.1' },
+                    { id: 'c13', type: 'pc',       name: 'Supervisor PC',      x: 680, y: 490, ips: ['10.5.20.53/24'], gw: '10.5.20.1' },
+                    { id: 'c14', type: 'server',   name: 'CRM / Recording',    x: 560, y: 600, ips: ['10.5.20.10/24'], gw: '10.5.20.1', ports: '80, 443, 5432' },
+                    { id: 'c15', type: 'printer',  name: 'Office Printer',     x: 660, y: 600, ips: ['10.5.20.80/24'], gw: '10.5.20.1', ports: '9100' }
+                ],
+                links: [
+                    { id: 'cl1', source: 'c1', target: 'c2' }, { id: 'cl2', source: 'c2', target: 'c3' },
+                    { id: 'cl3', source: 'c3', target: 'c4' }, { id: 'cl4', source: 'c3', target: 'c5' },
+                    { id: 'cl5', source: 'c4', target: 'c6' }, { id: 'cl6', source: 'c4', target: 'c7' }, { id: 'cl7', source: 'c4', target: 'c8' }, { id: 'cl8', source: 'c4', target: 'c9' }, { id: 'cl9', source: 'c4', target: 'c10' },
+                    { id: 'cl10', source: 'c5', target: 'c11' }, { id: 'cl11', source: 'c5', target: 'c12' }, { id: 'cl12', source: 'c5', target: 'c13' }, { id: 'cl13', source: 'c5', target: 'c14' }, { id: 'cl14', source: 'c5', target: 'c15' }
+                ]
+            },
+            // A real mixed-use building — hospital, studio, office and call-center
+            // tenants on-site, plus a branch office and a home both linked back over
+            // VPN. Exercises every node type, NAT, and the VPN overlay.
+            showcase: {
+                nodes: [
+                    // --- Building edge / core ---
+                    { id: 'net',  type: 'cloud',        name: 'Internet',            x: 820,  y: 40,  ips: [] },
+                    { id: 'edge', type: 'edge',         name: 'Building Edge GW',    x: 420,  y: 150, nat: true, gw: '203.0.113.1', dns: '1.1.1.1', ips: ['203.0.113.2/30', '198.51.100.6/30', '10.0.0.1/24'] },
+                    { id: 'vpn',  type: 'vpn',          name: 'VPN Concentrator',    x: 820,  y: 150, nat: true, gw: '203.0.113.9', dns: '1.1.1.1', ips: ['203.0.113.10/30', '10.0.0.3/24'], ports: '443, 500, 4500' },
+                    { id: 'fw',   type: 'firewall',     name: 'Core Firewall',       x: 420,  y: 270, nat: true, gw: '10.0.0.1', dns: '1.1.1.1', ips: ['10.0.0.2/24', '10.10.0.1/24', '10.20.0.1/24'], ports: '443, 22' },
+                    { id: 'l3',   type: 'l3switch',     name: 'Core Distribution',   x: 300,  y: 390, gw: '10.10.0.1', ips: ['10.10.0.2/24', '10.10.10.1/24', '10.10.20.1/24', '10.10.30.1/24', '10.10.40.1/24'] },
+                    { id: 'lb',   type: 'loadbalancer', name: 'Web Load Balancer',   x: 640,  y: 390, nat: true, gw: '10.20.0.1', ips: ['10.20.0.5/24', '10.30.0.1/24'], ports: '80, 443' },
+                    // --- Server farm (behind the LB) ---
+                    { id: 'as',   type: 'server',       name: 'App Server',          x: 560,  y: 510, ips: ['10.30.0.11/24'], gw: '10.30.0.1', ports: '80, 443' },
+                    { id: 'wvm',  type: 'vm',           name: 'Web VM',              x: 650,  y: 510, ips: ['10.30.0.12/24'], gw: '10.30.0.1' },
+                    { id: 'ctr',  type: 'container',    name: 'API Container',       x: 740,  y: 510, ips: ['10.30.0.13/24'], gw: '10.30.0.1', ports: '8080' },
+                    // --- Hospital tenant (VLAN 10) ---
+                    { id: 'hsw',  type: 'switch',       name: 'Hospital Switch',     x: 90,   y: 510, ips: [] },
+                    { id: 'dcm',  type: 'dicom',        name: 'CT Modality',         x: 40,   y: 630, ips: ['10.10.10.20/24'], gw: '10.10.10.1', ports: '104' },
+                    { id: 'pacs', type: 'server',       name: 'PACS Server',         x: 130,  y: 630, ips: ['10.10.10.10/24'], gw: '10.10.10.1', ports: '104, 11112' },
+                    { id: 'radpc',type: 'pc',           name: 'Radiology WS',        x: 40,   y: 730, ips: ['10.10.10.50/24'], gw: '10.10.10.1' },
+                    { id: 'wcam', type: 'camera',       name: 'Ward Camera',         x: 130,  y: 730, ips: ['10.10.10.90/24'], gw: '10.10.10.1', ports: '554' },
+                    // --- Studio tenant (VLAN 20) ---
+                    { id: 'ssw',  type: 'switch',       name: 'Studio Switch',       x: 250,  y: 510, ips: [] },
+                    { id: 'scam', type: 'camera',       name: 'Studio Cam',          x: 210,  y: 630, ips: ['10.10.20.90/24'], gw: '10.10.20.1', ports: '554' },
+                    { id: 'epc',  type: 'pc',           name: 'Edit Bay',            x: 300,  y: 630, ips: ['10.10.20.50/24'], gw: '10.10.20.1' },
+                    // --- On-site office tenant (VLAN 30, wireless) ---
+                    { id: 'oap',  type: 'ap',           name: 'Office WiFi',         x: 440,  y: 510, ips: [] },
+                    { id: 'opc',  type: 'pc',           name: 'Office WS',           x: 380,  y: 630, ips: ['10.10.30.50/24'], gw: '10.10.30.1' },
+                    { id: 'opr',  type: 'printer',      name: 'Office Printer',      x: 470,  y: 630, ips: ['10.10.30.80/24'], gw: '10.10.30.1', ports: '9100' },
+                    { id: 'oph',  type: 'voip',         name: 'Desk Phone',          x: 400,  y: 730, ips: ['10.10.30.60/24'], gw: '10.10.30.1', ports: '5060' },
+                    { id: 'osen', type: 'iot',          name: 'Smart Sensor',        x: 490,  y: 730, ips: ['10.10.30.100/24'], gw: '10.10.30.1', ports: '1883' },
+                    // --- Call center tenant (VLAN 40) ---
+                    { id: 'csw',  type: 'switch',       name: 'Call Center Switch',  x: 940,  y: 510, ips: [] },
+                    { id: 'cp1',  type: 'voip',         name: 'Agent Phone 1',       x: 860,  y: 630, ips: ['10.10.40.61/24'], gw: '10.10.40.1', ports: '5060' },
+                    { id: 'cp2',  type: 'voip',         name: 'Agent Phone 2',       x: 950,  y: 630, ips: ['10.10.40.62/24'], gw: '10.10.40.1', ports: '5060' },
+                    { id: 'capc', type: 'pc',           name: 'Agent WS',            x: 1040, y: 630, ips: ['10.10.40.50/24'], gw: '10.10.40.1' },
+                    { id: 'pbx',  type: 'custom',       name: 'PBX Controller',      x: 940,  y: 730, ips: ['10.10.40.10/24'], gw: '10.10.40.1', ports: '5060' },
+                    // --- Branch office (over VPN) ---
+                    { id: 'ro',   type: 'router',       name: 'Branch Office GW',    x: 1180, y: 150, nat: true, gw: '198.51.100.9', ips: ['198.51.100.10/30', '172.16.5.1/24'] },
+                    { id: 'rsw',  type: 'switch',       name: 'Branch Switch',       x: 1180, y: 270, ips: [] },
+                    { id: 'rmtpc',type: 'pc',           name: 'Branch WS',           x: 1130, y: 390, ips: ['172.16.5.50/24'], gw: '172.16.5.1' },
+                    { id: 'rpr',  type: 'printer',      name: 'Branch Printer',      x: 1230, y: 390, ips: ['172.16.5.80/24'], gw: '172.16.5.1', ports: '9100' },
+                    // --- Home (over VPN) ---
+                    { id: 'hm',   type: 'router',       name: 'Home Router (VPN)',   x: 1460, y: 150, nat: true, gw: '198.51.100.13', ips: ['198.51.100.14/30', '192.168.1.1/24'] },
+                    { id: 'hpc',  type: 'pc',           name: 'Home PC',             x: 1410, y: 270, ips: ['192.168.1.50/24'], gw: '192.168.1.1' },
+                    { id: 'hiot', type: 'iot',          name: 'Smart Home Hub',      x: 1510, y: 270, ips: ['192.168.1.100/24'], gw: '192.168.1.1', ports: '1883' }
+                ],
+                links: [
+                    { id: 'k1',  source: 'net', target: 'edge' }, { id: 'k2', source: 'net', target: 'vpn' },
+                    { id: 'k3',  source: 'net', target: 'ro' },   { id: 'k4', source: 'net', target: 'hm' },
+                    { id: 'kv1', source: 'vpn', target: 'ro', medium: 'vpn' }, { id: 'kv2', source: 'vpn', target: 'hm', medium: 'vpn' },
+                    { id: 'k5',  source: 'edge', target: 'fw' },  { id: 'k6', source: 'edge', target: 'vpn' },
+                    { id: 'k7',  source: 'fw', target: 'l3' },    { id: 'k8', source: 'fw', target: 'lb' },
+                    { id: 'k9',  source: 'lb', target: 'as' },    { id: 'k10', source: 'lb', target: 'wvm', attachment: 'bridged' }, { id: 'k11', source: 'lb', target: 'ctr', attachment: 'bridged' },
+                    { id: 'k12', source: 'l3', target: 'hsw' },   { id: 'k13', source: 'l3', target: 'ssw' }, { id: 'k14', source: 'l3', target: 'oap' }, { id: 'k15', source: 'l3', target: 'csw' },
+                    { id: 'k16', source: 'hsw', target: 'dcm' },  { id: 'k17', source: 'hsw', target: 'pacs' }, { id: 'k18', source: 'hsw', target: 'radpc' }, { id: 'k19', source: 'hsw', target: 'wcam' },
+                    { id: 'k20', source: 'ssw', target: 'scam' }, { id: 'k21', source: 'ssw', target: 'epc' },
+                    { id: 'k22', source: 'oap', target: 'opc', medium: 'wireless' }, { id: 'k23', source: 'oap', target: 'opr', medium: 'wireless' }, { id: 'k24', source: 'oap', target: 'oph', medium: 'wireless' }, { id: 'k25', source: 'oap', target: 'osen', medium: 'wireless' },
+                    { id: 'k26', source: 'csw', target: 'cp1' },  { id: 'k27', source: 'csw', target: 'cp2' }, { id: 'k28', source: 'csw', target: 'capc' }, { id: 'k29', source: 'csw', target: 'pbx' },
+                    { id: 'k30', source: 'ro', target: 'rsw' },   { id: 'k31', source: 'rsw', target: 'rmtpc' }, { id: 'k32', source: 'rsw', target: 'rpr' },
+                    { id: 'k33', source: 'hm', target: 'hpc' },   { id: 'k34', source: 'hm', target: 'hiot' }
+                ]
             }
         };
 
@@ -528,7 +746,12 @@
             const btn = document.createElement('button');
             btn.className = 'palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer';
             btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="#1e293b" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[d.type]}</svg><span class="text-[9px] font-medium mt-1 uppercase text-center leading-tight">${d.name}</span>`;
-            btn.onclick = () => spawnNode(d.type);
+            btn.title = 'Click to add (connects to the selected node) — or drag onto the canvas';
+            // Click: add connected to the current selection (fast tree building)
+            btn.onclick = () => spawnNode(d.type, { connectTo: (state.selectedType === 'node' && state.selectedId) ? state.selectedId : null });
+            // Drag: drop onto the canvas at the cursor
+            btn.setAttribute('draggable', 'true');
+            btn.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/carino-node', d.type); e.dataTransfer.effectAllowed = 'copy'; });
             paletteContainer.appendChild(btn);
         });
 
@@ -1033,15 +1256,39 @@
             const start = getNode(startNodeId);
             if (!start) return { reachableNodes: new Set(), reachableLinks: new Set() };
 
-            const reachableNodes = new Set([startNodeId]), reachableLinks = new Set(), queue = [startNodeId], processed = new Set();
+            // Queue entries carry viaNet: the subnet we arrived on (or a sentinel),
+            // so NAT can tell inside↔outside direction.
+            const reachableNodes = new Set([startNodeId]), reachableLinks = new Set(), queue = [{ id: startNodeId, viaNet: null }], processedMode = {};
             const targetPort = document.getElementById('tracePort').value.trim();
+            const _natCache = {};
 
-            function shareSubnet(a, b) {
-                if (!a || !b) return false;
-                if (a.type === 'cloud' || b.type === 'cloud') return true;
+            // Returns the shared subnet's networkStr, '__cloud__' if either is the
+            // Internet cloud, or null.
+            function sharedSubnetOf(a, b) {
+                if (!a || !b) return null;
+                if (a.type === 'cloud' || b.type === 'cloud') return '__cloud__';
                 const ipsA = getValidIps(a), ipsB = getValidIps(b);
-                if (!ipsA.length || !ipsB.length) return false;
-                return ipsA.some((ia) => ipsB.some((ib) => ia.kind === ib.kind && ia.networkStr === ib.networkStr));
+                for (const ia of ipsA) for (const ib of ipsB) if (ia.kind === ib.kind && ia.networkStr === ib.networkStr) return ia.networkStr;
+                return null;
+            }
+            function shareSubnet(a, b) { return sharedSubnetOf(a, b) !== null; }
+
+            // For a NAT gateway, classify its subnets into outside (WAN/public) vs
+            // inside (private LAN). Outside = the subnet containing its default gw, or
+            // any public (non-RFC1918) subnet.
+            function natInfo(node) {
+                if (!node) return { nat: false, outside: new Set(), inside: new Set() };
+                if (_natCache[node.id]) return _natCache[node.id];
+                const info = { nat: !!node.nat, outside: new Set(), inside: new Set() };
+                if (node.nat) {
+                    const ips = getValidIps(node).filter(i => i.kind === 'ipv4');
+                    let gwNet = null;
+                    if (node.gw) { try { const g = ipaddr.parse(node.gw.trim()).toString(); ips.forEach(i => { const c = parseValidCIDR(g + '/' + i.prefix); if (c && c.networkStr === i.networkStr) gwNet = i.networkStr; }); } catch (e) {} }
+                    ips.forEach(i => { if (!i.isPrivate) info.outside.add(i.networkStr); else info.inside.add(i.networkStr); });
+                    if (gwNet) { info.outside.add(gwNet); info.inside.delete(gwNet); }
+                    if (info.outside.size === 0 && ips.length) { const o = gwNet || ips[0].networkStr; info.outside.add(o); info.inside.delete(o); }
+                }
+                _natCache[node.id] = info; return info;
             }
 
             function isGateway(client, possibleGateway) {
@@ -1085,17 +1332,27 @@
                     state.links.filter((l) => l.source === l2id || l.target === l2id).forEach((link) => {
                         const neighborId = link.source === l2id ? link.target : link.source, neighbor = getNode(neighborId);
                         if (!neighbor || isDumbDevice(neighbor)) return;
-                        reachableNodes.add(neighborId); reachableLinks.add(link.id); queue.push(neighborId);
+                        reachableNodes.add(neighborId); reachableLinks.add(link.id); queue.push({ id: neighborId, viaNet: null });
                     });
                 });
             }
 
             while (queue.length) {
-                const currentId = queue.shift();
-                if (processed.has(currentId)) continue;
-                processed.add(currentId);
+                const { id: currentId, viaNet } = queue.shift();
                 const currentNode = getNode(currentId);
                 if (!currentNode) continue;
+
+                // NAT boundary: arriving on WAN/outside (or via the Internet cloud)
+                // hides the device's private (inside) subnets. A node reached on a
+                // blocked (outside) path may be re-expanded later if a trusted (inside/
+                // VPN) path reaches it — so tunnel order doesn't matter.
+                const ni = natInfo(currentNode);
+                const enteredOutside = ni.nat && viaNet && (viaNet === '__cloud__' || ni.outside.has(viaNet));
+                const blockInside = enteredOutside && ni.inside.size > 0;
+                const mode = blockInside ? 'blocked' : 'full';
+                if (processedMode[currentId] === 'full') continue;
+                if (processedMode[currentId] === 'blocked' && mode !== 'full') continue;
+                processedMode[currentId] = mode;
 
                 const l2 = getL2Domain(currentId);
                 l2.nodes.forEach((id) => reachableNodes.add(id)); l2.links.forEach((id) => reachableLinks.add(id));
@@ -1105,6 +1362,7 @@
                     state.links.filter((l) => l.source === l2id || l.target === l2id).forEach((link) => {
                         const neighborId = link.source === l2id ? link.target : link.source, neighbor = getNode(neighborId);
                         if (!neighbor || isDumbDevice(neighbor)) return;
+                        if (link.medium === 'vpn') return; // overlay tunnels handled below, not as physical adjacency
                         candidateDevices.add(neighborId); candidateLinks.set(neighborId, link.id);
                     });
                 });
@@ -1113,16 +1371,28 @@
                     if (deviceId === currentId) return;
                     const device = getNode(deviceId);
                     if (!device) return;
+                    const shared = sharedSubnetOf(currentNode, device);
+                    if (!shared) return;
+                    if (blockInside && ni.inside.has(shared)) return; // NAT hides this inside subnet from the WAN side
 
-                    if (shareSubnet(currentNode, device)) {
-                        reachableNodes.add(deviceId);
-                        if (candidateLinks.has(deviceId)) reachableLinks.add(candidateLinks.get(deviceId));
-                        
-                        const currentCanRoute = isRoutingDevice(currentNode.type), deviceCanRoute = isRoutingDevice(device.type);
-                        const viaGateway = isGateway(currentNode, device) || isGateway(device, currentNode);
-                        
-                        if (deviceCanRoute && (viaGateway || currentCanRoute)) queue.push(deviceId);
-                    }
+                    reachableNodes.add(deviceId);
+                    if (candidateLinks.has(deviceId)) reachableLinks.add(candidateLinks.get(deviceId));
+
+                    const currentCanRoute = isRoutingDevice(currentNode.type), deviceCanRoute = isRoutingDevice(device.type);
+                    const viaGateway = isGateway(currentNode, device) || isGateway(device, currentNode);
+                    if (deviceCanRoute && (viaGateway || currentCanRoute)) queue.push({ id: deviceId, viaNet: shared });
+                });
+
+                // VPN overlay: a tunnel is a routed adjacency across the underlay. The
+                // far endpoint (and its LAN) becomes reachable, entering on the trusted
+                // side (so it bypasses the far gateway's NAT).
+                l2.nodes.forEach((l2id) => {
+                    state.links.filter((l) => l.medium === 'vpn' && (l.source === l2id || l.target === l2id)).forEach((link) => {
+                        const farId = link.source === l2id ? link.target : link.source, far = getNode(farId);
+                        if (!far) return;
+                        reachableNodes.add(farId); reachableLinks.add(link.id);
+                        queue.push({ id: farId, viaNet: '__vpn__' });
+                    });
                 });
             }
 
@@ -1260,16 +1530,33 @@
                 rect.setAttribute('stroke-dasharray', '8 4'); rect.setAttribute('stroke-width', '2');
                 g.appendChild(rect);
 
+                // Label sits as a "tab" ABOVE the zone's top edge so it is never
+                // hidden behind a node; stacked subnets at the same corner rise upward.
                 const labelPosKey = `${minX}_${minY}`;
                 const offsetIndex = labelOffsets[labelPosKey] || 0;
                 labelOffsets[labelPosKey] = offsetIndex + 1;
 
+                const lx = minX - padX + 6;
+                const ly = minY - padTop - 8 - (offsetIndex * 17);
+
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                text.setAttribute('x', minX - padX + 12); text.setAttribute('y', minY - padTop + 20 + (offsetIndex * 15));
+                text.setAttribute('x', lx); text.setAttribute('y', ly);
                 text.setAttribute('font-size', '11'); text.setAttribute('font-family', 'monospace');
-                text.setAttribute('font-weight', 'bold'); text.setAttribute('fill', `hsla(${hue}, 70%, 40%, 0.7)`);
+                text.setAttribute('font-weight', 'bold'); text.setAttribute('fill', `hsla(${hue}, 70%, 34%, 1)`);
                 text.textContent = subnet;
-                g.appendChild(text); lZones.appendChild(g);
+                g.appendChild(text);
+                lZones.appendChild(g);
+                // Backdrop behind the text so crossing links don't bleed through it.
+                try {
+                    const bb = text.getBBox();
+                    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    bg.setAttribute('x', bb.x - 5); bg.setAttribute('y', bb.y - 2);
+                    bg.setAttribute('width', bb.width + 10); bg.setAttribute('height', bb.height + 4);
+                    bg.setAttribute('rx', '3');
+                    bg.setAttribute('fill', '#f8fafc'); bg.setAttribute('fill-opacity', '0.9');
+                    bg.setAttribute('stroke', `hsla(${hue}, 70%, 50%, 0.35)`); bg.setAttribute('stroke-width', '1');
+                    g.insertBefore(bg, text);
+                } catch (e) { /* getBBox unavailable */ }
             });
 
             const reach = state.settings.traceMode && state.selectedId && state.selectedType === 'node' ? calculateReachability(state.selectedId) : null;
@@ -1289,18 +1576,20 @@
 
                 let defaultColor = '#94a3b8'; // utp
                 let dashArray = null;
+                let baseWidth = 2;
 
                 if (medium === 'fiber') defaultColor = '#06b6d4';
                 else if (medium === 'wireless') { defaultColor = '#8b5cf6'; dashArray = '4 4'; }
                 else if (medium === 'powerline') { defaultColor = '#eab308'; dashArray = '8 4 2 4'; }
-                
+                else if (medium === 'vpn') { defaultColor = '#14b8a6'; dashArray = '10 6'; baseWidth = 2.5; } // secure overlay tunnel
+
                 if (link.attachment === 'passthrough') { defaultColor = '#a855f7'; dashArray = '4 4'; }
 
                 if (reach && reach.reachableLinks.has(link.id)) {
                     line.setAttribute('stroke', '#f59e0b'); line.setAttribute('stroke-width', '3'); line.setAttribute('class', 'animate-flow cursor-pointer');
                 } else {
-                    line.setAttribute('stroke', isSelected ? '#3b82f6' : defaultColor); 
-                    line.setAttribute('stroke-width', isSelected ? '3' : '2');
+                    line.setAttribute('stroke', isSelected ? '#eab308' : defaultColor);
+                    line.setAttribute('stroke-width', isSelected ? '3' : baseWidth);
                     line.setAttribute('class', reach ? 'fade-inactive cursor-pointer' : 'cursor-pointer transition-colors');
                     if (dashArray) line.setAttribute('stroke-dasharray', dashArray);
                 }
@@ -1327,11 +1616,11 @@
                 rect.setAttribute('x', '-24'); rect.setAttribute('y', '-24'); rect.setAttribute('width', '48'); rect.setAttribute('height', '48'); rect.setAttribute('rx', '6');
 
                 if (isLinkSource) { rect.setAttribute('fill', '#fff7ed'); rect.setAttribute('stroke', '#ea580c'); rect.setAttribute('stroke-width', '2'); } 
-                else if (isSelected) { rect.setAttribute('fill', '#eff6ff'); rect.setAttribute('stroke', '#3b82f6'); rect.setAttribute('stroke-width', '2'); } 
+                else if (isSelected) { rect.setAttribute('fill', '#fefce8'); rect.setAttribute('stroke', '#eab308'); rect.setAttribute('stroke-width', '2'); } 
                 else if (isReachable) { rect.setAttribute('fill', '#fffbeb'); rect.setAttribute('stroke', '#fcd34d'); rect.setAttribute('stroke-width', '2.5'); } 
                 else { rect.setAttribute('fill', '#ffffff'); rect.setAttribute('stroke', '#cbd5e1'); rect.setAttribute('stroke-width', '1.5'); }
 
-                if (node.type === 'vm') rect.setAttribute('stroke-dasharray', '4 3');
+                if (isVirtualType(node.type)) rect.setAttribute('stroke-dasharray', '4 3');
                 rect.style.transition = 'all 0.1s ease'; g.appendChild(rect);
 
                 const iconG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -1380,8 +1669,8 @@
                             const duplicate = state.links.find((l) => (l.source === state.linkSourceId && l.target === node.id) || (l.source === node.id && l.target === state.linkSourceId));
                             if (!duplicate) { 
                                 const sNode = getNode(state.linkSourceId);
-                                const isVirtual = (sNode.type === 'vm' || node.type === 'vm');
-                                state.links.push({ id: `l_${Date.now()}`, source: state.linkSourceId, target: node.id, attachment: isVirtual ? 'bridged' : null }); 
+                                const isVirtual = isVirtualType(sNode.type) || isVirtualType(node.type);
+                                state.links.push({ id: `l_${Date.now()}`, source: state.linkSourceId, target: node.id, attachment: isVirtual ? 'bridged' : null });
                             }
                         }
                         state.linkSourceId = null; save();
@@ -1498,6 +1787,13 @@ renderNodeDiagnostics(node);
                 
                 netProps.classList.remove('hidden');
                 document.getElementById('propGw').value = node.gw || ''; document.getElementById('propDns').value = node.dns || '';
+                // NAT toggle — only meaningful on routing devices
+                const natRow = document.getElementById('natRow'), propNat = document.getElementById('propNat');
+                if (isRoutingDevice(node.type)) {
+                    natRow.classList.remove('hidden'); natRow.classList.add('flex');
+                    propNat.checked = !!node.nat;
+                    propNat.onchange = (e) => { node.nat = e.target.checked; save(); renderCanvasOnly(); renderNodeDiagnostics(node); };
+                } else { natRow.classList.add('hidden'); natRow.classList.remove('flex'); }
                 if (node.gw && node.gw.trim() !== '') {
                     jumpGwBtn.classList.remove('hidden');
                     jumpGwBtn.onclick = () => {
@@ -1531,16 +1827,284 @@ renderNodeDiagnostics(node);
             renderCanvasOnly();
         }
 
-        function spawnNode(type) {
-            const rect = document.getElementById('networkCanvas').getBoundingClientRect(), defs = initialDataDefaults[type] || { os: '', ports: '', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.50/24'}] };
+        // Create a node. opts.at = {x,y} drop point; opts.connectTo = node id to
+        // link to (and inherit its subnet for auto-IP).
+        function spawnNode(type, opts = {}) {
+            const defs = initialDataDefaults[type] || { os: '', ports: '', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.50/24'}] };
             const palette = paletteDefs.find((p) => p.type === type);
-            const sx = Math.round(((rect.width / 2 - state.camera.x) / state.camera.zoom + (state.nodes.length % 6) * 20) / GRID_SNAP) * GRID_SNAP;
-            const sy = Math.round(((rect.height / 2 - state.camera.y) / state.camera.zoom + (state.nodes.length % 6) * 20) / GRID_SNAP) * GRID_SNAP;
+            const connectTo = opts.connectTo ? getNode(opts.connectTo) : null;
+            let x, y;
+            if (opts.at) {
+                x = opts.at.x; y = opts.at.y;
+            } else if (connectTo) {
+                const degree = state.links.filter(l => l.source === connectTo.id || l.target === connectTo.id).length;
+                x = connectTo.x + ((degree % 2 === 0 ? -1 : 1) * (70 + Math.floor(degree / 2) * 80));
+                y = connectTo.y + 130;
+            } else {
+                const rect = document.getElementById('networkCanvas').getBoundingClientRect();
+                x = (rect.width / 2 - state.camera.x) / state.camera.zoom + (state.nodes.length % 6) * 20;
+                y = (rect.height / 2 - state.camera.y) / state.camera.zoom + (state.nodes.length % 6) * 20;
+            }
+            x = Math.round(x / GRID_SNAP) * GRID_SNAP;
+            y = Math.round(y / GRID_SNAP) * GRID_SNAP;
 
-            const node = { id: `n_${Date.now()}`, type, name: `New ${palette?.name || 'Node'}`, x: sx, y: sy, gw: defs.gw || '', dns: defs.dns || '', os: defs.os || '', ports: defs.ports || '', notes: '', interfaces: cloneData(defs.interfaces) };
-            state.nodes.push(node); select(node.id, 'node'); save();
+            const node = { id: `n_${Date.now()}`, type, name: `New ${palette?.name || 'Node'}`, x, y, gw: defs.gw || '', dns: defs.dns || '', os: defs.os || '', ports: defs.ports || '', notes: '', nat: !!defs.nat, interfaces: cloneData(defs.interfaces) };
+
+            // Subnet-aware auto-IP: when connecting into an existing subnet, hand the
+            // new node the next free host address + that subnet's gateway.
+            if (connectTo && node.interfaces.length) {
+                const ctx = subnetContext(connectTo);
+                if (ctx) {
+                    const free = nextFreeHost(ctx.networkStr, ctx.prefix);
+                    if (free) { node.interfaces[0].ip = free; if (ctx.gatewayIp) node.gw = ctx.gatewayIp; }
+                }
+            }
+
+            state.nodes.push(node);
+            if (connectTo && connectTo.id !== node.id) {
+                const isVirtual = isVirtualType(connectTo.type) || isVirtualType(type);
+                state.links.push({ id: `l_${Date.now()}`, source: connectTo.id, target: node.id, attachment: isVirtual ? 'bridged' : null });
+            }
+            select(node.id, 'node'); save();
             renderCanvasOnly();
             renderNodeDiagnostics(node);
+        }
+
+        // ---- Subnet / auto-IP helpers (IPv4) ----
+        function ipToNum(ip) { const o = ip.split('.').map(Number); return (((o[0] << 24) >>> 0) | (o[1] << 16) | (o[2] << 8) | o[3]) >>> 0; }
+        function numToIp(n) { return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.'); }
+
+        function subnetContext(node) {
+            const own = getValidIps(node).filter(i => i.kind === 'ipv4');
+            if (own.length) return { networkStr: own[0].networkStr, prefix: own[0].prefix, gatewayIp: gatewayForSubnet(own[0].networkStr) };
+            // dumb device (switch/ap): borrow a subnet from an IP-bearing neighbor
+            const neighborIds = state.links.filter(l => l.source === node.id || l.target === node.id).map(l => l.source === node.id ? l.target : l.source);
+            for (const nid of neighborIds) {
+                const nb = getNode(nid); if (!nb) continue;
+                const ips = getValidIps(nb).filter(i => i.kind === 'ipv4');
+                if (ips.length) return { networkStr: ips[0].networkStr, prefix: ips[0].prefix, gatewayIp: gatewayForSubnet(ips[0].networkStr) };
+            }
+            return null;
+        }
+
+        function gatewayForSubnet(networkStr) {
+            for (const n of state.nodes) {
+                const ips = getValidIps(n).filter(i => i.kind === 'ipv4' && i.networkStr === networkStr);
+                if (ips.length && isRoutingDevice(n.type)) return ips[0].ip.toString();
+            }
+            for (const n of state.nodes) {
+                const ips = getValidIps(n).filter(i => i.kind === 'ipv4' && i.networkStr === networkStr);
+                if (ips.length && n.gw) return n.gw;
+            }
+            const [base] = networkStr.split('/');
+            return numToIp(ipToNum(base) + 1);
+        }
+
+        function nextFreeHost(networkStr, prefix) {
+            if (!networkStr || prefix >= 31) return null;
+            const [base] = networkStr.split('/');
+            const netNum = ipToNum(base);
+            const broadcast = netNum + 2 ** (32 - prefix) - 1;
+            const used = new Set();
+            state.nodes.forEach(n => getValidIps(n).forEach(i => { if (i.kind === 'ipv4') used.add(ipToNum(i.ip.toString())); }));
+            for (let h = netNum + 1; h < broadcast; h++) if (!used.has(h)) return `${numToIp(h)}/${prefix}`;
+            return null;
+        }
+
+        // ---- Auto-layout: tiered top-down tree (barycenter-ordered), toggleable ----
+        let _tidyBackup = null;
+        function setTidyLabel() { const b = document.getElementById('tidyBtn'); if (b) b.innerHTML = _tidyBackup ? '↺ Untidy' : '⤢ Tidy'; }
+        function invalidateTidy() { if (_tidyBackup) { _tidyBackup = null; setTidyLabel(); } }
+        function tidyLayout() {
+            if (!state.nodes.length) return;
+            // Second press → restore the layout captured before the last Tidy.
+            if (_tidyBackup) {
+                const byId = {}; state.nodes.forEach(n => byId[n.id] = n);
+                _tidyBackup.forEach(p => { if (byId[p.id]) { byId[p.id].x = p.x; byId[p.id].y = p.y; } });
+                _tidyBackup = null; setTidyLabel();
+                save(); renderCanvasOnly(); fitToView();
+                return;
+            }
+            _tidyBackup = state.nodes.map(n => ({ id: n.id, x: n.x, y: n.y })); // snapshot for undo
+            setTidyLabel();
+            const adj = {}; state.nodes.forEach(n => adj[n.id] = []);
+            state.links.forEach(l => { if (adj[l.source] && adj[l.target]) { adj[l.source].push(l.target); adj[l.target].push(l.source); } });
+            const roots = state.nodes.filter(n => n.type === 'cloud').map(n => n.id);
+            if (!roots.length) { const r = state.nodes.find(n => isRoutingDevice(n.type)); roots.push((r || state.nodes[0]).id); }
+            const depth = {}, q = [...roots]; roots.forEach(id => depth[id] = 0);
+            while (q.length) { const cur = q.shift(); adj[cur].forEach(nb => { if (depth[nb] === undefined) { depth[nb] = depth[cur] + 1; q.push(nb); } }); }
+            let maxD = Math.max(0, ...Object.values(depth));
+            state.nodes.forEach(n => { if (depth[n.id] === undefined) depth[n.id] = ++maxD; }); // disconnected → own rows
+            const tiers = {}; state.nodes.forEach(n => (tiers[depth[n.id]] ||= []).push(n));
+            const COLW = 150, ROWH = 130, startX = 140, startY = 120;
+            Object.keys(tiers).map(Number).sort((a, b) => a - b).forEach(d => {
+                const row = tiers[d];
+                if (d > 0) row.sort((a, b) => barycenter(a, adj, depth) - barycenter(b, adj, depth));
+                row.forEach((n, i) => { n.x = Math.round((startX + i * COLW) / GRID_SNAP) * GRID_SNAP; n.y = Math.round((startY + d * ROWH) / GRID_SNAP) * GRID_SNAP; });
+            });
+            save(); renderCanvasOnly(); fitToView();
+        }
+        function barycenter(node, adj, depth) {
+            const parents = adj[node.id].filter(id => depth[id] === depth[node.id] - 1).map(id => getNode(id)).filter(p => p && Number.isFinite(p.x));
+            return parents.length ? parents.reduce((a, p) => a + p.x, 0) / parents.length : 0;
+        }
+
+        // ---- Building-block snippets (stamped, not replacing) ----
+        const SNIPPETS = {
+            dmz: { nodes: [
+                { tid: 'fw', type: 'firewall', name: 'Edge FW', dx: 0, dy: -60, ips: ['203.0.113.1/30', '10.20.0.1/24', '10.20.10.1/24'], dns: '1.1.1.1' },
+                { tid: 'sw1', type: 'switch', name: 'LAN SW', dx: -120, dy: 60, ips: [] },
+                { tid: 'sw2', type: 'switch', name: 'DMZ SW', dx: 120, dy: 60, ips: [] },
+                { tid: 'srv', type: 'server', name: 'DMZ Server', dx: 120, dy: 180, ips: ['10.20.10.10/24'], gw: '10.20.10.1', ports: '80, 443' } ],
+              links: [{ s: 'fw', t: 'sw1' }, { s: 'fw', t: 'sw2' }, { s: 'sw2', t: 'srv' }] },
+            dcpod: { nodes: [
+                { tid: 'core', type: 'l3switch', name: 'Pod Core L3', dx: 0, dy: -60, ips: ['10.30.0.1/24'], gw: '10.30.0.254' },
+                { tid: 's1', type: 'server', name: 'App Server', dx: -160, dy: 90, ips: ['10.30.0.11/24'], gw: '10.30.0.1', ports: '8080' },
+                { tid: 's2', type: 'server', name: 'DB Server', dx: -40, dy: 90, ips: ['10.30.0.12/24'], gw: '10.30.0.1', ports: '5432' },
+                { tid: 'c1', type: 'container', name: 'Container', dx: 80, dy: 90, ips: ['10.30.0.13/24'], gw: '10.30.0.1', ports: '8080' },
+                { tid: 'vm1', type: 'vm', name: 'Worker VM', dx: 200, dy: 90, ips: ['10.30.0.14/24'], gw: '10.30.0.1' } ],
+              links: [{ s: 'core', t: 's1' }, { s: 'core', t: 's2' }, { s: 'core', t: 'c1', attachment: 'bridged' }, { s: 'core', t: 'vm1', attachment: 'bridged' }] },
+            vlan: { nodes: [
+                { tid: 'sw', type: 'switch', name: 'VLAN SW', dx: 0, dy: 0, ips: [] },
+                { tid: 'p1', type: 'pc', name: 'Host 1', dx: -120, dy: 120, ips: ['10.40.0.51/24'], gw: '10.40.0.1' },
+                { tid: 'p2', type: 'pc', name: 'Host 2', dx: 0, dy: 120, ips: ['10.40.0.52/24'], gw: '10.40.0.1' },
+                { tid: 'p3', type: 'pc', name: 'Host 3', dx: 120, dy: 120, ips: ['10.40.0.53/24'], gw: '10.40.0.1' } ],
+              links: [{ s: 'sw', t: 'p1' }, { s: 'sw', t: 'p2' }, { s: 'sw', t: 'p3' }] },
+            wifi: { nodes: [
+                { tid: 'ap', type: 'ap', name: 'Access Point', dx: 0, dy: 0, ips: [] },
+                { tid: 'c1', type: 'iot', name: 'Phone', dx: -120, dy: 120, ips: ['10.50.0.101/24'], gw: '10.50.0.1' },
+                { tid: 'c2', type: 'pc', name: 'Laptop', dx: 0, dy: 120, ips: ['10.50.0.102/24'], gw: '10.50.0.1' },
+                { tid: 'c3', type: 'camera', name: 'WiFi Cam', dx: 120, dy: 120, ips: ['10.50.0.103/24'], gw: '10.50.0.1' } ],
+              links: [{ s: 'ap', t: 'c1', medium: 'wireless' }, { s: 'ap', t: 'c2', medium: 'wireless' }, { s: 'ap', t: 'c3', medium: 'wireless' }] },
+            hapair: { nodes: [
+                { tid: 'f1', type: 'firewall', name: 'FW Primary', dx: -80, dy: 0, ips: ['10.0.0.2/24'], dns: '1.1.1.1' },
+                { tid: 'f2', type: 'firewall', name: 'FW Standby', dx: 80, dy: 0, ips: ['10.0.0.3/24'], dns: '1.1.1.1' } ],
+              links: [{ s: 'f1', t: 'f2' }] },
+            webfarm: { nodes: [
+                { tid: 'lb', type: 'loadbalancer', name: 'Web LB', dx: 0, dy: -60, nat: true, gw: '10.60.0.1', ips: ['10.60.0.5/24', '10.61.0.1/24'], ports: '80, 443' },
+                { tid: 'w1', type: 'server', name: 'Web 1', dx: -120, dy: 90, ips: ['10.61.0.11/24'], gw: '10.61.0.1', ports: '80, 443' },
+                { tid: 'w2', type: 'server', name: 'Web 2', dx: 0, dy: 90, ips: ['10.61.0.12/24'], gw: '10.61.0.1', ports: '80, 443' },
+                { tid: 'w3', type: 'server', name: 'Web 3', dx: 120, dy: 90, ips: ['10.61.0.13/24'], gw: '10.61.0.1', ports: '80, 443' } ],
+              links: [{ s: 'lb', t: 'w1' }, { s: 'lb', t: 'w2' }, { s: 'lb', t: 'w3' }] },
+            vpnsite: { nodes: [
+                { tid: 'net', type: 'cloud', name: 'Internet', dx: 0, dy: -130, ips: [] },
+                { tid: 'g1', type: 'vpn', name: 'HQ VPN GW', dx: -150, dy: 0, nat: true, gw: '203.0.113.1', ips: ['203.0.113.10/30', '10.70.0.1/24'], ports: '443, 500, 4500' },
+                { tid: 'g2', type: 'router', name: 'Branch GW', dx: 150, dy: 0, nat: true, gw: '198.51.100.1', ips: ['198.51.100.10/30', '10.71.0.1/24'] },
+                { tid: 'h1', type: 'pc', name: 'HQ Host', dx: -150, dy: 120, ips: ['10.70.0.50/24'], gw: '10.70.0.1' },
+                { tid: 'h2', type: 'pc', name: 'Branch Host', dx: 150, dy: 120, ips: ['10.71.0.50/24'], gw: '10.71.0.1' } ],
+              links: [{ s: 'net', t: 'g1' }, { s: 'net', t: 'g2' }, { s: 'g1', t: 'g2', medium: 'vpn' }, { s: 'g1', t: 'h1' }, { s: 'g2', t: 'h2' }] },
+            voip: { nodes: [
+                { tid: 'sw', type: 'switch', name: 'Voice Switch', dx: 0, dy: -60, ips: [] },
+                { tid: 'pbx', type: 'custom', name: 'PBX', dx: -130, dy: 60, ips: ['10.80.0.10/24'], gw: '10.80.0.1', ports: '5060, 5061' },
+                { tid: 'p1', type: 'voip', name: 'Phone 1', dx: 0, dy: 90, ips: ['10.80.0.61/24'], gw: '10.80.0.1', ports: '5060' },
+                { tid: 'p2', type: 'voip', name: 'Phone 2', dx: 120, dy: 90, ips: ['10.80.0.62/24'], gw: '10.80.0.1', ports: '5060' } ],
+              links: [{ s: 'sw', t: 'pbx' }, { s: 'sw', t: 'p1' }, { s: 'sw', t: 'p2' }] },
+            surveillance: { nodes: [
+                { tid: 'nvr', type: 'server', name: 'NVR', dx: 0, dy: -70, ips: ['10.90.0.10/24'], gw: '10.90.0.1', ports: '554, 80' },
+                { tid: 'sw', type: 'switch', name: 'PoE Switch', dx: 0, dy: 30, ips: [] },
+                { tid: 'cam1', type: 'camera', name: 'Camera 1', dx: -130, dy: 150, ips: ['10.90.0.91/24'], gw: '10.90.0.1', ports: '554' },
+                { tid: 'cam2', type: 'camera', name: 'Camera 2', dx: 0, dy: 150, ips: ['10.90.0.92/24'], gw: '10.90.0.1', ports: '554' },
+                { tid: 'cam3', type: 'camera', name: 'Camera 3', dx: 130, dy: 150, ips: ['10.90.0.93/24'], gw: '10.90.0.1', ports: '554' } ],
+              links: [{ s: 'sw', t: 'nvr' }, { s: 'sw', t: 'cam1' }, { s: 'sw', t: 'cam2' }, { s: 'sw', t: 'cam3' }] },
+            storage: { nodes: [
+                { tid: 'sw', type: 'switch', name: 'Storage Switch', dx: 0, dy: -60, ips: [] },
+                { tid: 'nas', type: 'server', name: 'NAS', dx: -90, dy: 70, ips: ['10.100.0.10/24'], gw: '10.100.0.1', ports: '2049, 445' },
+                { tid: 'bkp', type: 'server', name: 'Backup', dx: 90, dy: 70, ips: ['10.100.0.11/24'], gw: '10.100.0.1', ports: '873' } ],
+              links: [{ s: 'sw', t: 'nas' }, { s: 'sw', t: 'bkp' }] },
+            // Medical imaging: US/CT/MR/CR/DX modalities send DICOM to a PACS,
+            // with reading workstations and a DICOM film printer.
+            dicom: { nodes: [
+                { tid: 'sw',   type: 'switch',  name: 'Imaging Switch',  dx: 0,    dy: -100, ips: [] },
+                { tid: 'pacs', type: 'server',  name: 'PACS Server',     dx: -240, dy: 20,  ips: ['10.120.0.10/24'], gw: '10.120.0.1', ports: '104, 11112, 443' },
+                { tid: 'prn',  type: 'printer', name: 'DICOM Printer',   dx: -120, dy: 20,  ips: ['10.120.0.80/24'], gw: '10.120.0.1', ports: '104' },
+                { tid: 'ws1',  type: 'pc',      name: 'Reading WS 1',    dx: 150,  dy: 20,  ips: ['10.120.0.51/24'], gw: '10.120.0.1' },
+                { tid: 'ws2',  type: 'pc',      name: 'Reading WS 2',    dx: 250,  dy: 20,  ips: ['10.120.0.52/24'], gw: '10.120.0.1' },
+                { tid: 'us',   type: 'dicom',   name: 'US Scanner',      dx: -160, dy: 160, ips: ['10.120.0.21/24'], gw: '10.120.0.1', ports: '104' },
+                { tid: 'ct',   type: 'dicom',   name: 'CT Scanner',      dx: -80,  dy: 160, ips: ['10.120.0.22/24'], gw: '10.120.0.1', ports: '104' },
+                { tid: 'mr',   type: 'dicom',   name: 'MR Scanner',      dx: 0,    dy: 160, ips: ['10.120.0.23/24'], gw: '10.120.0.1', ports: '104' },
+                { tid: 'cr',   type: 'dicom',   name: 'CR Unit',         dx: 80,   dy: 160, ips: ['10.120.0.24/24'], gw: '10.120.0.1', ports: '104' },
+                { tid: 'dx',   type: 'dicom',   name: 'DX Unit',         dx: 160,  dy: 160, ips: ['10.120.0.25/24'], gw: '10.120.0.1', ports: '104' } ],
+              links: [{ s: 'sw', t: 'pacs' }, { s: 'sw', t: 'prn' }, { s: 'sw', t: 'ws1' }, { s: 'sw', t: 'ws2' }, { s: 'sw', t: 'us' }, { s: 'sw', t: 'ct' }, { s: 'sw', t: 'mr' }, { s: 'sw', t: 'cr' }, { s: 'sw', t: 'dx' }] },
+            // Homelab: a hypervisor running VMs + a container, plus a NAS.
+            homelab: { nodes: [
+                { tid: 'sw',  type: 'switch',    name: 'Lab Switch',        dx: 0,    dy: -70, ips: [] },
+                { tid: 'hv',  type: 'server',    name: 'Hypervisor (PVE)',  dx: -120, dy: 50,  ips: ['10.110.0.10/24'], gw: '10.110.0.1', ports: '8006, 22' },
+                { tid: 'nas', type: 'server',    name: 'NAS',               dx: 120,  dy: 50,  ips: ['10.110.0.20/24'], gw: '10.110.0.1', ports: '2049, 445' },
+                { tid: 'vm1', type: 'vm',        name: 'VM: Web',           dx: -60,  dy: 160, ips: ['10.110.0.21/24'], gw: '10.110.0.1', ports: '80, 443' },
+                { tid: 'vm2', type: 'vm',        name: 'VM: DB',            dx: 40,   dy: 160, ips: ['10.110.0.22/24'], gw: '10.110.0.1', ports: '5432' },
+                { tid: 'ct1', type: 'container', name: 'Container: App',    dx: 140,  dy: 160, ips: ['10.110.0.31/24'], gw: '10.110.0.1', ports: '8080' } ],
+              links: [{ s: 'sw', t: 'hv' }, { s: 'sw', t: 'nas' }, { s: 'hv', t: 'vm1', attachment: 'bridged' }, { s: 'hv', t: 'vm2', attachment: 'bridged' }, { s: 'hv', t: 'ct1', attachment: 'bridged' }] },
+            // A complete small branch office behind its own NAT router.
+            branch: { nodes: [
+                { tid: 'rtr', type: 'router',  name: 'Branch Router',  dx: 0,    dy: -100, nat: true, gw: '198.51.100.9', ips: ['198.51.100.10/30', '172.16.9.1/24'] },
+                { tid: 'sw',  type: 'switch',  name: 'Branch Switch',  dx: 0,    dy: 10,  ips: [] },
+                { tid: 'pc1', type: 'pc',      name: 'Desk 1',         dx: -150, dy: 140, ips: ['172.16.9.51/24'], gw: '172.16.9.1' },
+                { tid: 'pc2', type: 'pc',      name: 'Desk 2',         dx: -50,  dy: 140, ips: ['172.16.9.52/24'], gw: '172.16.9.1' },
+                { tid: 'prn', type: 'printer', name: 'Printer',        dx: 50,   dy: 140, ips: ['172.16.9.80/24'], gw: '172.16.9.1', ports: '9100' },
+                { tid: 'ph',  type: 'voip',    name: 'Desk Phone',     dx: 150,  dy: 140, ips: ['172.16.9.60/24'], gw: '172.16.9.1', ports: '5060' } ],
+              links: [{ s: 'rtr', t: 'sw' }, { s: 'sw', t: 'pc1' }, { s: 'sw', t: 'pc2' }, { s: 'sw', t: 'prn' }, { s: 'sw', t: 'ph' }] },
+            // Kubernetes: control plane + worker pods behind an ingress load balancer.
+            k8s: { nodes: [
+                { tid: 'lb', type: 'loadbalancer', name: 'Ingress LB',    dx: 0,    dy: -90, nat: true, gw: '10.130.0.1', ips: ['10.130.0.5/24'], ports: '80, 443' },
+                { tid: 'sw', type: 'switch',       name: 'Cluster Switch',dx: 0,    dy: 10,  ips: [] },
+                { tid: 'cp', type: 'server',       name: 'Control Plane', dx: -150, dy: 140, ips: ['10.130.0.10/24'], gw: '10.130.0.1', ports: '6443' },
+                { tid: 'w1', type: 'container',    name: 'Worker Pod 1',  dx: -40,  dy: 140, ips: ['10.130.0.21/24'], gw: '10.130.0.1', ports: '8080' },
+                { tid: 'w2', type: 'container',    name: 'Worker Pod 2',  dx: 60,   dy: 140, ips: ['10.130.0.22/24'], gw: '10.130.0.1', ports: '8080' },
+                { tid: 'w3', type: 'container',    name: 'Worker Pod 3',  dx: 160,  dy: 140, ips: ['10.130.0.23/24'], gw: '10.130.0.1', ports: '8080' } ],
+              links: [{ s: 'lb', t: 'sw' }, { s: 'sw', t: 'cp' }, { s: 'sw', t: 'w1' }, { s: 'sw', t: 'w2' }, { s: 'sw', t: 'w3' }] },
+            // Isolated IoT / guest VLAN gated by its own firewall.
+            iotseg: { nodes: [
+                { tid: 'fw',  type: 'firewall', name: 'IoT Firewall',  dx: 0,    dy: -100, nat: true, gw: '10.0.0.1', dns: '1.1.1.1', ips: ['10.0.0.9/24', '10.140.0.1/24'] },
+                { tid: 'ap',  type: 'ap',       name: 'IoT AP',        dx: 0,    dy: 10,  ips: [] },
+                { tid: 'hub', type: 'iot',      name: 'Smart Hub',     dx: -140, dy: 140, ips: ['10.140.0.10/24'], gw: '10.140.0.1', ports: '1883' },
+                { tid: 'cam', type: 'camera',   name: 'WiFi Camera',   dx: -30,  dy: 140, ips: ['10.140.0.90/24'], gw: '10.140.0.1', ports: '554' },
+                { tid: 'sen', type: 'iot',      name: 'Sensor',        dx: 80,   dy: 140, ips: ['10.140.0.100/24'], gw: '10.140.0.1', ports: '1883' },
+                { tid: 'tv',  type: 'iot',      name: 'Smart TV',      dx: 180,  dy: 140, ips: ['10.140.0.101/24'], gw: '10.140.0.1' } ],
+              links: [{ s: 'fw', t: 'ap' }, { s: 'ap', t: 'hub', medium: 'wireless' }, { s: 'ap', t: 'cam', medium: 'wireless' }, { s: 'ap', t: 'sen', medium: 'wireless' }, { s: 'ap', t: 'tv', medium: 'wireless' }] },
+            // Out-of-band management / monitoring segment.
+            mgmt: { nodes: [
+                { tid: 'sw',   type: 'switch', name: 'Mgmt Switch',      dx: 0,    dy: -70, ips: [] },
+                { tid: 'mon',  type: 'server', name: 'Monitoring',       dx: -110, dy: 60,  ips: ['10.150.0.10/24'], gw: '10.150.0.1', ports: '3000, 9090' },
+                { tid: 'log',  type: 'server', name: 'Syslog / SIEM',    dx: 110,  dy: 60,  ips: ['10.150.0.11/24'], gw: '10.150.0.1', ports: '514, 443' },
+                { tid: 'jump', type: 'pc',     name: 'Jump Host',        dx: 0,    dy: 160, ips: ['10.150.0.50/24'], gw: '10.150.0.1', ports: '22' } ],
+              links: [{ s: 'sw', t: 'mon' }, { s: 'sw', t: 'log' }, { s: 'sw', t: 'jump' }] }
+        };
+
+        function stampSnippet(key) {
+            const snip = SNIPPETS[key]; if (!snip) return;
+            const rect = document.getElementById('networkCanvas').getBoundingClientRect();
+            const cx = (rect.width / 2 - state.camera.x) / state.camera.zoom;
+            const cy = (rect.height / 2 - state.camera.y) / state.camera.zoom;
+            const stamp = Date.now(); const idMap = {}; const newIds = [];
+            snip.nodes.forEach((n, i) => {
+                const nid = `s_${stamp}_${i}`; idMap[n.tid] = nid; newIds.push(nid);
+                state.nodes.push(normalizeLoadedNode({ ...cloneData(n), id: nid,
+                    x: Math.round((cx + n.dx) / GRID_SNAP) * GRID_SNAP, y: Math.round((cy + n.dy) / GRID_SNAP) * GRID_SNAP }));
+            });
+            snip.links.forEach((l, i) => state.links.push({ id: `sl_${stamp}_${i}`, source: idMap[l.s], target: idMap[l.t], attachment: l.attachment || null, medium: l.medium }));
+            save(); invalidateTidy(); renderCanvasOnly();
+        }
+
+        // ---- User-saved templates (localStorage) ----
+        const USER_TPL_KEY = 'nettopo_user_templates';
+        function loadUserTemplates() { try { return JSON.parse(localStorage.getItem(USER_TPL_KEY) || '{}'); } catch (e) { return {}; } }
+        function refreshUserTemplateOptions() {
+            const grp = document.getElementById('userTemplateGroup'); if (!grp) return;
+            const tpls = loadUserTemplates(); grp.innerHTML = '';
+            Object.keys(tpls).forEach(name => { const o = document.createElement('option'); o.value = 'user:' + name; o.textContent = '💾 ' + name; grp.appendChild(o); });
+            grp.style.display = Object.keys(tpls).length ? '' : 'none';
+        }
+        function saveUserTemplate() {
+            if (!state.nodes.length) { alert('Nothing to save — add some nodes first.'); return; }
+            const name = prompt('Save current canvas as template — name:'); if (!name) return;
+            const tpls = loadUserTemplates();
+            tpls[name.trim()] = {
+                nodes: state.nodes.map(n => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw, dns: n.dns, os: n.os, ports: n.ports, notes: n.notes, interfaces: cloneData(n.interfaces) })),
+                links: state.links.map(l => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium }))
+            };
+            localStorage.setItem(USER_TPL_KEY, JSON.stringify(tpls));
+            refreshUserTemplateOptions();
+            alert(`Saved template "${name.trim()}".`);
         }
 
         function getWorkspacePoint(clientX, clientY) {
@@ -1582,7 +2146,7 @@ renderNodeDiagnostics(node);
 
         function save() {
             try {
-                const cleanNodes = state.nodes.map((n) => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', interfaces: (n.interfaces || []).map(i => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone })) }));
+                const cleanNodes = state.nodes.map((n) => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', nat: !!n.nat, interfaces: (n.interfaces || []).map(i => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone })) }));
                 const cleanLinks = state.links.map((l) => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium }));
                 const encoded = btoa(encodeURIComponent(JSON.stringify({ nodes: cleanNodes, links: cleanLinks })));
                 window.history.replaceState(null, '', `#${encoded}`); updateOsDatalist();
@@ -1598,7 +2162,7 @@ renderNodeDiagnostics(node);
             } else if (node.ips && Array.isArray(node.ips) && node.ips.length === 0) {
                 normalizedInterfaces = [];
             }
-            return { id: node.id || `n_${Date.now()}_${Math.random().toString(16).slice(2)}`, type: node.type || 'custom', name: node.name || 'Unnamed Node', x: Number.isFinite(node.x) ? node.x : 200, y: Number.isFinite(node.y) ? node.y : 200, gw: node.gw || '', dns: node.dns || '', os: node.os || '', ports: node.ports || '', notes: node.notes || '', interfaces: normalizedInterfaces };
+            return { id: node.id || `n_${Date.now()}_${Math.random().toString(16).slice(2)}`, type: node.type || 'custom', name: node.name || 'Unnamed Node', x: Number.isFinite(node.x) ? node.x : 200, y: Number.isFinite(node.y) ? node.y : 200, gw: node.gw || '', dns: node.dns || '', os: node.os || '', ports: node.ports || '', notes: node.notes || '', nat: !!(node.nat || (initialDataDefaults[node.type] && initialDataDefaults[node.type].nat && node.nat === undefined)), interfaces: normalizedInterfaces };
         }
 
         function load() {
@@ -1655,10 +2219,10 @@ renderNodeDiagnostics(node);
 
         window.addEventListener('mouseup', () => { 
             isDraggingCanvas = false; 
-            if (isDraggingNode) { 
-                isDraggingNode = false; draggedNode = null; save(); 
+            if (isDraggingNode) {
+                isDraggingNode = false; draggedNode = null; save(); invalidateTidy(); // manual move → next Tidy re-tidies
                 renderCanvasOnly(); // Render zones/traces only ONCE when mouse is released
-            } 
+            }
         });
 
         window.addEventListener('mouseup', () => { isDraggingCanvas = false; if (isDraggingNode) { isDraggingNode = false; draggedNode = null; save(); } });
@@ -1675,14 +2239,37 @@ renderNodeDiagnostics(node);
         });
 
         document.getElementById('templateSelect').addEventListener('change', (event) => {
+            const val = event.target.value;
+            let template;
+            if (val.startsWith('user:')) { template = loadUserTemplates()[val.slice(5)]; }
+            else { template = templatesData[val]; }
+            if (!template) return;
             if (!confirm('Replace current workspace with template?')) return;
-            const template = templatesData[event.target.value] || templatesData.house;
             state.nodes = cloneData(template.nodes).map(normalizeLoadedNode); state.links = cloneData(template.links);
             state.selectedId = null; state.selectedType = null; state.linkSourceId = null;
-            select(null, null); save();
+            select(null, null); save(); invalidateTidy();
             renderCanvasOnly();
             fitToView();
         });
+
+        // Stamp a building block onto the current canvas (additive)
+        document.getElementById('snippetSelect').addEventListener('change', (event) => {
+            const key = event.target.value; event.target.value = '';
+            if (key) { stampSnippet(key); }
+        });
+
+        document.getElementById('tidyBtn').onclick = tidyLayout;
+        document.getElementById('saveTemplateBtn').onclick = saveUserTemplate;
+
+        // Drag a palette item and drop it onto the canvas at the cursor
+        (function () {
+            const cc = document.getElementById('canvasContainer');
+            cc.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('text/carino-node')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+            cc.addEventListener('drop', (e) => {
+                const type = e.dataTransfer.getData('text/carino-node'); if (!type) return;
+                e.preventDefault(); spawnNode(type, { at: getWorkspacePoint(e.clientX, e.clientY) });
+            });
+        })();
 
         const propertyBindings = [
             { key: 'name', id: 'propName' },
@@ -1715,7 +2302,7 @@ renderNodeDiagnostics(node);
         document.getElementById('zoomInBtn').onclick = () => { state.camera.zoom = Math.min(5, state.camera.zoom * 1.2); applyCamera(); };
         document.getElementById('zoomOutBtn').onclick = () => { state.camera.zoom = Math.max(0.2, state.camera.zoom / 1.2); applyCamera(); };
         document.getElementById('zoomResetBtn').onclick = () => { state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera(); };
-        document.getElementById('clearCanvasBtn').onclick = () => { if (!confirm('Clear canvas?')) return; state.nodes = []; state.links = []; state.selectedId = null; state.selectedType = null; state.linkSourceId = null; save(); select(null, null); renderCanvasOnly(); };
+        document.getElementById('clearCanvasBtn').onclick = () => { if (!confirm('Clear canvas?')) return; state.nodes = []; state.links = []; state.selectedId = null; state.selectedType = null; state.linkSourceId = null; save(); invalidateTidy(); select(null, null); renderCanvasOnly(); };
         document.getElementById('copyUrlBtn').onclick = async () => { save(); try { await navigator.clipboard.writeText(window.location.href); alert('URL copied.'); } catch (e) { prompt('Copy this URL:', window.location.href); } };
         
         document.getElementById('toggleTrace').addEventListener('change', (event) => {
@@ -1799,6 +2386,7 @@ renderNodeDiagnostics(node);
 
         window.addEventListener('popstate', () => { load(); renderCanvasOnly(); fitToView(); });
 
+        refreshUserTemplateOptions();
         load(); renderCanvasOnly(); fitToView();
     </script>
 <script src="carino-navbar.js" data-app="NetTopology" defer></script>
