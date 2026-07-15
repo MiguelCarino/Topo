@@ -19,8 +19,39 @@
             background-size: 20px 20px;
         }
 
-        @keyframes dash { to { stroke-dashoffset: -20; } }
-        .animate-flow { stroke-dasharray: 6 4; animation: dash 0.5s linear infinite; }
+        /* Trace flow. Each medium moves signal differently, so each animates differently:
+           fibre sprints in long streaks, copper walks, powerline crawls over a noisy
+           dash-dot-dot line, a tunnel marches in encrypted blocks, and radio does not
+           flow down a cable at all — it emits ))) arcs instead.
+           Travel speed is held constant per medium while the patterns differ, so each
+           duration below is (dashoffset ÷ speed): copper 40 px/s, fibre 112.5, VPN 35.6,
+           powerline 22.5. Change a pattern and the duration must be recomputed to match.
+           Every dashoffset is a whole multiple of its dash period, so the loop is seamless. */
+        @keyframes flow-utp { to { stroke-dashoffset: -24; } }              /* period 12 */
+        .flow-utp { stroke-dasharray: 7 5; animation: flow-utp 0.6s linear infinite; }
+
+        /* Long streaks of light. */
+        @keyframes flow-fiber { to { stroke-dashoffset: -60; } }            /* period 30 */
+        .flow-fiber { stroke-dasharray: 22 8; animation: flow-fiber 0.533s linear infinite; }
+
+        /* Dash-dot-dot: a cluttered, noisy carrier. */
+        @keyframes flow-powerline { to { stroke-dashoffset: -44; } }        /* period 22 */
+        .flow-powerline { stroke-dasharray: 9 3 2 3 2 3; animation: flow-powerline 1.956s linear infinite; }
+
+        /* Dash-dot: encrypted blocks with a marker between them. */
+        @keyframes flow-vpn { to { stroke-dashoffset: -44; } }              /* period 22 */
+        .flow-vpn { stroke-dasharray: 12 4 2 4; animation: flow-vpn 1.238s linear infinite; }
+
+        /* Radio carries no dashes at all: the ))) arcs ride the link as glyphs on a
+           textPath (see renderCanvasOnly), and this faint base line is just the
+           association itself showing through underneath. */
+        .flow-wireless { stroke-dasharray: none; opacity: 0.3; }
+        .flow-wave { pointer-events: none; }
+
+        /* Respect users who ask the OS for less motion: keep each identity, drop the loop. */
+        @media (prefers-reduced-motion: reduce) {
+            .flow-utp, .flow-fiber, .flow-powerline, .flow-vpn { animation: none; }
+        }
         
         @keyframes pulse-glow { 
             0%, 100% { filter: drop-shadow(0 0 4px #f97316); stroke: #ea580c; } 
@@ -213,6 +244,42 @@
         }
         #nodePalette button:hover { border-color: var(--cs-accent) !important; color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
         #nodePalette button svg { stroke: currentColor !important; }
+
+        /* Library tabs: Nodes / Networks / Blocks */
+        .lib-tab {
+            background: transparent; border: none; border-bottom: 2px solid transparent;
+            color: var(--cs-text-muted); font-family: 'IBM Plex Mono', monospace;
+            cursor: pointer; transition: 0.15s; display: flex; align-items: center; justify-content: center; gap: 5px;
+        }
+        .lib-tab:hover { color: var(--cs-text-sec); background: var(--cs-accent-faint); }
+        .lib-tab[aria-selected="true"] { color: var(--cs-accent); border-bottom-color: var(--cs-accent); background: var(--cs-accent-faint); }
+        .lib-key, .kbd {
+            font-family: 'IBM Plex Mono', monospace; font-size: 8px; line-height: 1;
+            border: 1px solid var(--cs-border); border-radius: 3px; padding: 2px 3px;
+            color: var(--cs-text-muted); background: var(--cs-bg-elev);
+        }
+        .lib-tab[aria-selected="true"] .lib-key { border-color: var(--cs-accent-dim); color: var(--cs-accent); }
+
+        /* One row per template/block */
+        .lib-item {
+            display: flex; align-items: flex-start; gap: 8px; width: 100%; text-align: left;
+            background: var(--cs-bg-elev); border: 1px solid var(--cs-border); border-radius: 6px;
+            padding: 7px 8px; cursor: pointer; transition: 0.15s;
+        }
+        .lib-item:hover { border-color: var(--cs-accent); background: var(--cs-accent-faint); }
+        .lib-item-icon { font-size: 14px; line-height: 1.1; flex-shrink: 0; }
+        .lib-item-name { font-size: 11px; font-weight: 700; color: var(--cs-text); }
+        .lib-item:hover .lib-item-name { color: var(--cs-accent); }
+        .lib-item-blurb { font-size: 9px; color: var(--cs-text-muted); line-height: 1.3; margin-top: 1px; }
+        .lib-item-del { color: var(--cs-text-muted); font-size: 10px; padding: 0 2px; background: none; border: none; cursor: pointer; }
+        .lib-item-del:hover { color: #dc2626; }
+
+        /* Shortcut cheatsheet */
+        #shortcutHelp kbd {
+            font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+            border: 1px solid var(--cs-border); border-radius: 4px; padding: 2px 6px;
+            color: var(--cs-accent); background: var(--cs-bg-elev); white-space: nowrap;
+        }
         /* jump-to-gateway (dark slate button) → outline gold */
         #jumpGwBtn { background: transparent !important; border: 1px solid var(--cs-border) !important; color: var(--cs-text-sec) !important; border-radius: 6px !important; }
         #jumpGwBtn:hover { border-color: var(--cs-accent) !important; color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
@@ -224,6 +291,8 @@
         #conflictAlert { background: var(--cs-bg-card) !important; border: 1px solid var(--cs-border) !important; border-left: 4px solid var(--cs-accent) !important; box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important; }
         #conflictAlert h4 { color: var(--cs-accent) !important; }
         #conflictAlert .text-amber-800, #conflictAlert ul { color: #fde68a !important; }
+        #conflictPill { background: var(--cs-bg-card) !important; border: 1px solid var(--cs-accent-dim) !important; color: var(--cs-accent) !important; box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important; }
+        #conflictPill:hover { border-color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
         #conflictAlert .text-amber-500 { color: var(--cs-accent) !important; }
     </style>
 </head>
@@ -244,41 +313,6 @@
 
             <div class="cs-vdiv"></div>
 
-            <select id="templateSelect" class="cs-select" title="Replace the canvas with a full template">
-                <optgroup label="Templates">
-                    <option value="house">🏠 Smart Home</option>
-                    <option value="bank">🏦 Bank Branch</option>
-                    <option value="datacenter">🏢 Data Center</option>
-                    <option value="hospital">🏥 Hospital</option>
-                    <option value="campus">🏢 Corporate Campus</option>
-                    <option value="retail">🛒 Retail POS</option>
-                    <option value="factory">🏭 Smart Factory</option>
-                    <option value="studio">🎬 Media Studio</option>
-                    <option value="callcenter">📞 Call Center</option>
-                    <option value="showcase">🧩 Full Showcase (all node types)</option>
-                </optgroup>
-                <optgroup id="userTemplateGroup" label="My Templates"></optgroup>
-            </select>
-
-            <select id="snippetSelect" class="cs-select" title="Stamp a reusable building block onto the canvas">
-                <option value="">＋ Add Block…</option>
-                <option value="dicom">🩻 DICOM Imaging (modalities → PACS)</option>
-                <option value="dmz">🛡️ DMZ (FW + 2 zones)</option>
-                <option value="dcpod">🗄️ DC Pod (L3 + servers/VM/container)</option>
-                <option value="webfarm">🌐 Web Farm (LB + 3 servers)</option>
-                <option value="k8s">☸️ Kubernetes (ingress + control + workers)</option>
-                <option value="homelab">🧪 Homelab (hypervisor + VMs + NAS)</option>
-                <option value="vlan">🔀 VLAN Segment (SW + 3 hosts)</option>
-                <option value="wifi">📶 Wireless Cell (AP + 3 clients)</option>
-                <option value="iotseg">🔌 Isolated IoT/Guest (FW + AP + devices)</option>
-                <option value="voip">📞 VoIP (PBX + switch + phones)</option>
-                <option value="surveillance">📹 Surveillance (NVR + PoE + 3 cams)</option>
-                <option value="storage">💽 Storage (NAS + backup)</option>
-                <option value="mgmt">🛠️ Management (monitoring + syslog + jump)</option>
-                <option value="branch">🏢 Branch Office (router + LAN + phone)</option>
-                <option value="vpnsite">🔒 VPN Site-to-Site (tunnel)</option>
-                <option value="hapair">⚖️ HA Firewall Pair</option>
-            </select>
 
             <button id="tidyBtn" class="cs-btn" title="Auto-arrange the topology into tiers">⤢ Tidy</button>
             <button id="saveTemplateBtn" class="cs-btn" title="Save the current canvas as a reusable template">💾 Save</button>
@@ -298,21 +332,39 @@
     <div class="flex flex-1 overflow-hidden relative">
         <aside class="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-sm z-10 h-full">
             
-            <div class="p-4 border-b border-slate-100 bg-slate-50">
-                <h2 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">How to Use</h2>
-                <ul class="text-[10px] text-slate-600 space-y-1.5 font-medium">
-                    <li>🖱️ <span class="font-bold text-slate-800">Single Click:</span> Select a node/link to edit.</li>
-                    <li>✋ <span class="font-bold text-slate-800">Drag:</span> Move nodes or pan the canvas.</li>
-                    <li>⚡ <span class="font-bold text-orange-600">Right Click:</span> Enter Link Mode. Click another node to connect. <span class="text-slate-400 font-normal border border-slate-200 px-1 rounded shadow-sm bg-white">Esc</span> cancels.</li>
-                </ul>
+            <div class="flex border-b border-slate-200 shrink-0" id="libraryTabs" role="tablist">
+                <button data-tab="nodes" class="lib-tab flex-1 px-2 py-2.5 text-[11px] font-bold uppercase tracking-wider" role="tab">Nodes <span class="lib-key">1</span></button>
+                <button data-tab="templates" class="lib-tab flex-1 px-2 py-2.5 text-[11px] font-bold uppercase tracking-wider" role="tab">Networks <span class="lib-key">2</span></button>
+                <button data-tab="blocks" class="lib-tab flex-1 px-2 py-2.5 text-[11px] font-bold uppercase tracking-wider" role="tab">Blocks <span class="lib-key">3</span></button>
             </div>
 
             <div class="p-4 border-b border-slate-100 flex-1 overflow-y-auto min-h-[200px]">
-                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Hardware Library</h2>
-                <div class="grid grid-cols-3 gap-2" id="nodePalette"></div>
+                <div id="tabPanel-nodes" class="lib-panel">
+                    <div class="grid grid-cols-3 gap-2" id="nodePalette"></div>
+                    <ul class="text-[10px] text-slate-600 space-y-1.5 font-medium mt-4 pt-3 border-t border-slate-100">
+                        <li>🖱️ <span class="font-bold text-slate-800">Click:</span> Select a node/link to edit.</li>
+                        <li>✋ <span class="font-bold text-slate-800">Drag:</span> Move nodes, or pan the canvas.</li>
+                        <li>⚡ <span class="font-bold text-orange-600">Right Click:</span> Link mode — click another node to connect.</li>
+                        <li>⌨️ <span class="font-bold text-slate-800">Press <span class="kbd">?</span></span> for keyboard shortcuts.</li>
+                    </ul>
+                </div>
+
+                <div id="tabPanel-templates" class="lib-panel hidden">
+                    <p class="text-[10px] text-slate-400 mb-2 leading-tight">A whole network. Replaces the canvas.</p>
+                    <div id="templateList" class="flex flex-col gap-1"></div>
+                    <div id="userTemplateSection" class="hidden mt-3 pt-3 border-t border-slate-100">
+                        <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">My Networks</h3>
+                        <div id="userTemplateList" class="flex flex-col gap-1"></div>
+                    </div>
+                </div>
+
+                <div id="tabPanel-blocks" class="lib-panel hidden">
+                    <p class="text-[10px] text-slate-400 mb-2 leading-tight">A reusable piece. Stamps onto what you already have.</p>
+                    <div id="blockList" class="flex flex-col gap-1"></div>
+                </div>
             </div>
 
-            <div class="p-4 border-t border-slate-100 bg-white flex flex-col shrink-0 h-[50%] overflow-y-auto relative">
+            <div class="p-4 border-t border-slate-100 bg-white flex flex-col shrink-0 max-h-[50%] overflow-y-auto relative">
                 <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Configuration</h2>
                 <div class="p-4 border-t border-slate-100 bg-slate-50">
                     <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filter Canvas</h2>
@@ -334,6 +386,12 @@
                             <option value="passthrough">PCI Passthrough (Direct L2)</option>
                         </select>
                         <p class="text-[9px] text-slate-400 mt-1 leading-tight">Passthrough bypasses the host OS, connecting the VM directly to the physical switch logic.</p>
+                    </div>
+
+                    <div id="linkPortProps" class="hidden pt-2 border-t border-slate-100">
+                        <label class="block text-[10px] font-bold text-amber-600 mb-1 uppercase">Plugged Into</label>
+                        <div id="linkPortBody" class="flex flex-col gap-2"></div>
+                        <p class="text-[9px] text-slate-400 mt-1 leading-tight">Pick the interface this link uses on each end. Occupied ports are marked — you can still pick one, and the node will flag the conflict.</p>
                     </div>
 
                     <div id="linkMediumProps" class="hidden pt-2 border-t border-slate-100">
@@ -427,13 +485,33 @@
             </svg>
             </main>
 
+            <!-- Stays click-through so it never blocks the canvas beneath it; only the
+                 dismiss button and the scrollable list take pointer events. -->
             <div id="conflictAlert" class="absolute top-4 right-4 bg-amber-50 border-l-4 border-amber-500 rounded p-3 shadow-lg max-w-md hidden z-20 transition-all pointer-events-none">
                 <div class="flex gap-2">
                     <span class="text-amber-500 font-bold text-lg">⚠️</span>
-                    <div class="flex-1">
-                        <h4 class="text-xs font-bold text-amber-900 uppercase">Validation Alerts</h4>
-                        <ul id="conflictMsgList" class="text-[11px] text-amber-800 mt-1 list-disc pl-3 space-y-1"></ul>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-start justify-between gap-2">
+                            <h4 class="text-xs font-bold text-amber-900 uppercase">Validation Alerts</h4>
+                            <button id="conflictHideBtn" class="pointer-events-auto text-amber-500 hover:text-amber-700 text-xs font-bold leading-none px-1 -mt-0.5" title="Hide validation alerts">✕</button>
+                        </div>
+                        <ul id="conflictMsgList" class="text-[11px] text-amber-800 mt-1 list-disc pl-3 space-y-1 max-h-[38vh] overflow-y-auto pointer-events-auto"></ul>
                     </div>
+                </div>
+            </div>
+
+            <!-- Collapsed form: hiding the panel should not hide that problems exist. -->
+            <button id="conflictPill" class="absolute top-4 right-4 hidden z-20 bg-amber-50 border border-amber-500 rounded-full shadow-lg px-2.5 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition" title="Show validation alerts">
+                ⚠️ <span id="conflictPillCount">0</span>
+            </button>
+
+            <div id="shortcutHelp" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
+                <div class="rounded-lg shadow-2xl p-5 w-full max-w-sm" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
+                    <div class="flex justify-between items-center mb-3">
+                        <h4 class="text-[11px] font-bold uppercase tracking-wider" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">Keyboard Shortcuts</h4>
+                        <button id="shortcutClose" class="text-sm leading-none" style="color: var(--cs-text-muted)">✕</button>
+                    </div>
+                    <div id="shortcutBody" class="text-[11px]"></div>
                 </div>
             </div>
 
@@ -488,7 +566,283 @@
         // Architecture Helpers — routing family now includes the L3 derivatives.
         const isDumbDevice = (node) => ['switch', 'ap'].includes(node.type) && getValidIps(node).length === 0;
         const isRoutingDevice = (type) => ['router', 'firewall', 'cloud', 'loadbalancer', 'vpn', 'l3switch', 'edge'].includes(type);
-        
+
+        // ---- Interface / port binding model ----
+        // A link binds to a specific interface on each end (link.sourceIface /
+        // link.targetIface hold interface ids). Both are optional: diagrams saved
+        // before this existed load as unbound and get auto-bound on load.
+
+        // Switch/AP faceplates are implicit: a 24-port switch stores `portCount: 24`,
+        // not 24 interface objects, so the shared URL hash stays small. A port only
+        // materializes into node.interfaces once it gets a name or an IP (a mgmt VLAN).
+        const DEFAULT_PORT_COUNT = { switch: 8, ap: 1 };
+        const hasPortGrid = (node) => !!node && (node.type === 'switch' || node.type === 'ap');
+        const portCountOf = (node) => Number.isFinite(node?.portCount) ? node.portCount : (DEFAULT_PORT_COUNT[node?.type] ?? 0);
+
+        // Wirelessness is a property of the interface, not the node: an AP uplinks to a
+        // switch by cable and serves clients by radio. Names follow the kernel's
+        // conventions — wl* covers wlan0/wlp1s0/wlo1, plus the older ath*/ra*.
+        const WIRELESS_NAME_RE = /^(wl|wifi|wi-fi|ath|ra\d)/i;
+        // Default wired names only: a deliberately named interface is left alone.
+        const WIRED_DEFAULT_RE = /^(eth|eno|enp|ens|enx|em|igb|ix|bge|re)\d/i;
+
+        // Explicit flag wins, else infer from the name — the same tri-state as drawZone.
+        const ifaceIsWireless = (iface) => !iface ? false
+            : (iface.wireless !== undefined ? !!iface.wireless : WIRELESS_NAME_RE.test(iface.name || ''));
+
+        // Date.now() alone collides when a node + link + iface are created in one tick.
+        let idSeq = 0;
+        const nextId = (prefix) => `${prefix}_${Date.now().toString(36)}${(idSeq++).toString(36)}`;
+
+        // Every interface on a node: materialized ones, plus the implicit faceplate
+        // ports for switches/APs. Implicit entries are flagged so the editor knows
+        // they aren't in node.interfaces yet.
+        function getInterfaces(node) {
+            if (!node) return [];
+            const explicit = (node.interfaces || []).map((i) => ({ ...i, implicit: false }));
+            if (!hasPortGrid(node)) return explicit;
+
+            const byId = new Map(explicit.map((i) => [i.id, i]));
+            const out = [];
+            for (let p = 1; p <= portCountOf(node); p++) {
+                const id = `p${p}`;
+                out.push(byId.get(id) || { id, name: String(p), ip: '', implicit: true });
+                byId.delete(id);
+            }
+            byId.forEach((i) => out.push(i)); // extras (mgmt VLAN) sit after the faceplate
+            return out;
+        }
+
+        function ifaceOn(node, ifaceId) { return getInterfaces(node).find((i) => i.id === ifaceId) || null; }
+        function ifaceLabel(node, ifaceId) { return ifaceOn(node, ifaceId)?.name || ifaceId || '—'; }
+
+        // Promote an implicit faceplate port into node.interfaces so it can hold a name/IP.
+        function materializeIface(node, ifaceId) {
+            node.interfaces = node.interfaces || [];
+            const existing = node.interfaces.find((i) => i.id === ifaceId);
+            if (existing) return existing;
+            const virt = ifaceOn(node, ifaceId);
+            if (!virt) return null;
+            const real = { id: virt.id, name: virt.name, ip: '' };
+            node.interfaces.push(real);
+            return real;
+        }
+
+        // Give a node somewhere to plug a link in. opts.wireless yields a radio, since a
+        // Wi-Fi association cannot land on a socket. Otherwise opts.grow gains a switch a
+        // faceplate port, and everything else gains an addressed NIC — a switch's
+        // management VLAN is a NIC, not a port.
+        function createIfaceFor(node, opts = {}) {
+            node.interfaces = node.interfaces || [];
+            const taken = new Set(node.interfaces.map((i) => i.name));
+            const nextName = (stem) => { let n = 0; while (taken.has(`${stem}${n}`)) n++; return `${stem}${n}`; };
+
+            if (opts.wireless) {
+                const radio = { id: nextId('i'), name: nextName('wlan'), ip: '' };
+                node.interfaces.push(radio);
+                return radio;
+            }
+            if (opts.grow && hasPortGrid(node)) {
+                node.portCount = portCountOf(node) + 1;
+                return { id: `p${node.portCount}`, name: String(node.portCount), ip: '', implicit: true };
+            }
+            const iface = { id: nextId('i'), name: nextName('eth'), ip: '' };
+            node.interfaces.push(iface);
+            return iface;
+        }
+
+        // Which interface a link lands on at a given node.
+        const ifaceKeyFor = (link, nodeId) => (link.source === nodeId ? 'sourceIface' : 'targetIface');
+        const ifaceIdOn = (link, nodeId) => link[ifaceKeyFor(link, nodeId)] || null;
+
+        // What an unlabelled link touching an AP most likely is. An AP uplinks to
+        // infrastructure by cable (often PoE) and serves endpoints by radio; two APs
+        // are a mesh backhaul.
+        function apMediumGuess(src, tgt) {
+            const ap = src.type === 'ap' ? src : tgt.type === 'ap' ? tgt : null;
+            if (!ap) return 'utp';
+            const other = ap === src ? tgt : src;
+            if (other.type === 'ap') return 'wireless';
+            if (other.type === 'switch' || isRoutingDevice(other.type)) return 'utp';
+            return 'wireless';
+        }
+
+        // Cheap lookup that skips implicit faceplate ports — they are never radios.
+        const explicitIface = (node, ifaceId) => (node?.interfaces || []).find((i) => i.id === ifaceId) || null;
+
+        function effectiveMedium(link, src, tgt) {
+            if (link.medium) return link.medium;
+            src = src || getNode(link.source);
+            tgt = tgt || getNode(link.target);
+            if (!src || !tgt) return 'utp';
+            // A link landing on a radio is wireless whatever the node types suggest.
+            if (ifaceIsWireless(explicitIface(src, link.sourceIface)) || ifaceIsWireless(explicitIface(tgt, link.targetIface))) return 'wireless';
+            return apMediumGuess(src, tgt);
+        }
+
+        // A cable owns its port; a radio, a tunnel and a bridge do not.
+        function isExclusiveLink(link) {
+            const medium = effectiveMedium(link);
+            if (medium === 'wireless' || medium === 'vpn') return false;
+            return link.attachment !== 'bridged';
+        }
+
+        const linksAtNode = (nodeId) => state.links.filter((l) => l.source === nodeId || l.target === nodeId);
+        const linkOnIface = (nodeId, ifaceId) => linksAtNode(nodeId).find((l) => ifaceIdOn(l, nodeId) === ifaceId) || null;
+
+        function ifaceIsOccupied(nodeId, ifaceId, excludeLinkId) {
+            return linksAtNode(nodeId).some((l) => l.id !== excludeLinkId && ifaceIdOn(l, nodeId) === ifaceId && isExclusiveLink(l));
+        }
+
+        // Pick the interface on `node` that should carry a link to `otherNode`.
+        //
+        // On a routing device, subnet agreement outranks availability: a router drawn
+        // with several hosts on one interface is shorthand for an unmodelled switch,
+        // and binding those cables to a free-but-wrong-subnet NIC would be a worse lie
+        // than sharing the right one. On a host, an interface is a physical socket, so
+        // a free NIC outranks the right subnet — a second cable means a second NIC.
+        function autoPickIface(node, otherNode, opts = {}) {
+            // Kind comes first and is non-negotiable: a Wi-Fi association belongs on a
+            // radio and a cable belongs on a socket, whatever the addressing says.
+            const wantWireless = opts.medium === 'wireless';
+            const interfaces = getInterfaces(node).filter((i) => ifaceIsWireless(i) === wantWireless);
+            if (!interfaces.length) return createIfaceFor(node, { grow: true, wireless: wantWireless }).id;
+
+            const isFree = (i) => !ifaceIsOccupied(node.id, i.id, opts.excludeLinkId);
+            const otherNets = new Set(getValidIps(otherNode).map((i) => i.networkStr));
+            const onOtherSubnet = (i) => {
+                const parsed = parseValidCIDR(i.ip);
+                return parsed && otherNets.has(parsed.networkStr);
+            };
+
+            const matching = interfaces.filter(onOtherSubnet);
+            const match = matching.find(isFree) || (isRoutingDevice(node.type) ? matching[0] : null);
+            if (match) return match.id;
+
+            const free = interfaces.filter(isFree);
+            const bare = free.find((i) => !i.ip || !i.ip.trim());
+            if (bare) return bare.id;
+            if (free.length) return free[0].id;
+
+            return createIfaceFor(node, { grow: true, wireless: wantWireless }).id;
+        }
+
+        // Bind both ends of a link, skipping ends that are already bound.
+        function bindLink(link) {
+            const src = getNode(link.source), tgt = getNode(link.target);
+            if (!src || !tgt) return link;
+            const medium = effectiveMedium(link, src, tgt);
+            if (!link.sourceIface) link.sourceIface = autoPickIface(src, tgt, { excludeLinkId: link.id, medium });
+            if (!link.targetIface) link.targetIface = autoPickIface(tgt, src, { excludeLinkId: link.id, medium });
+            return link;
+        }
+
+        // Migration: a single-NIC device associated to an AP by radio has a wireless NIC
+        // whatever the seed data called it. Rename rather than invent a second interface,
+        // so the address stays on the interface that actually carries the traffic. Only
+        // touches default kernel-style wired names, never one the user chose.
+        function reconcileWirelessNames() {
+            state.nodes.forEach((node) => {
+                if (hasPortGrid(node) || isRoutingDevice(node.type)) return;
+                const interfaces = node.interfaces || [];
+                if (interfaces.length !== 1) return;
+                const only = interfaces[0];
+                if (ifaceIsWireless(only) || !WIRED_DEFAULT_RE.test(only.name || '')) return;
+
+                const links = linksAtNode(node.id);
+                if (links.length !== 1 || effectiveMedium(links[0]) !== 'wireless') return;
+                only.name = 'wlan0';
+            });
+        }
+
+        // Migration for diagrams drawn before links carried interface refs.
+        function autoBindLinks() {
+            reconcileWirelessNames();
+            state.links.forEach(bindLink);
+        }
+
+        // ---- Link geometry ----
+        // Redundant cables between the same pair would stack into one invisible line,
+        // so parallel runs bow apart. Shared by the renderer and the drag handler so a
+        // bowed link keeps its shape while you move its endpoints.
+        const PARALLEL_BOW = 34;
+
+        // Trace-flow animation per medium; see the keyframes in <style>. FLOW_DASH mirrors
+        // each class's stroke-dasharray as an attribute: exported SVG/PNG carries no
+        // stylesheet, so without it a traced link rasterises as a plain solid line.
+        const FLOW_CLASS = { utp: 'flow-utp', fiber: 'flow-fiber', wireless: 'flow-wireless', powerline: 'flow-powerline', vpn: 'flow-vpn' };
+        const FLOW_DASH = { utp: '7 5', fiber: '22 8', wireless: 'none', powerline: '9 3 2 3 2 3', vpn: '12 4 2 4' };
+
+        // One ")))" wave repeat, and its measured width in px (filled on first use).
+        const WAVE_UNIT = ')  ';
+        let waveAdvance = 0;
+
+        function linkGeometry(link) {
+            const src = getNode(link.source), tgt = getNode(link.target);
+            if (!src || !tgt) return null;
+
+            const siblings = state.links
+                .filter((l) => (l.source === link.source && l.target === link.target) || (l.source === link.target && l.target === link.source))
+                .map((l) => l.id);
+            const rank = siblings.indexOf(link.id);
+            // Fan symmetrically around the straight path, so a lone link stays straight.
+            const bow = siblings.length > 1 ? (rank - (siblings.length - 1) / 2) * PARALLEL_BOW : 0;
+
+            const dx = tgt.x - src.x, dy = tgt.y - src.y;
+            const len = Math.hypot(dx, dy) || 1;
+            const ctrl = { x: (src.x + tgt.x) / 2 + (-dy / len) * bow, y: (src.y + tgt.y) / 2 + (dx / len) * bow };
+
+            return {
+                src, tgt, ctrl, bow,
+                // With ctrl at the midpoint this reduces to the straight-line point,
+                // so labels use one formula either way.
+                pointAt: (t) => ({
+                    x: (1 - t) * (1 - t) * src.x + 2 * (1 - t) * t * ctrl.x + t * t * tgt.x,
+                    y: (1 - t) * (1 - t) * src.y + 2 * (1 - t) * t * ctrl.y + t * t * tgt.y
+                })
+            };
+        }
+
+        function applyLinkGeometry(el, geo) {
+            el.setAttribute('d', `M ${geo.src.x} ${geo.src.y} Q ${geo.ctrl.x} ${geo.ctrl.y} ${geo.tgt.x} ${geo.tgt.y}`);
+        }
+
+        // ---- L2 topology analysis ----
+
+        // Broadcast domain reachable from a node by hopping dumb switches/APs and
+        // VM passthrough links. Mirrors getL2Domain() inside calculateReachability(),
+        // but callable from diagnostics.
+        function l2DomainOf(originId) {
+            const nodes = new Set([originId]), queue = [originId], seen = new Set();
+            while (queue.length) {
+                const currentId = queue.shift();
+                if (seen.has(currentId)) continue;
+                seen.add(currentId);
+
+                linksAtNode(currentId).forEach((link) => {
+                    if (effectiveMedium(link) === 'vpn') return; // overlay, not physical adjacency
+                    const nextNodeId = link.source === currentId ? link.target : link.source;
+                    const next = getNode(nextNodeId);
+                    if (!next) return;
+                    if (isDumbDevice(next) || link.attachment === 'passthrough') {
+                        if (!nodes.has(nextNodeId)) { nodes.add(nextNodeId); queue.push(nextNodeId); }
+                    }
+                });
+            }
+            return nodes;
+        }
+
+        // Canonical id for the broadcast segment a link drops into, seen from one end.
+        // Through a dumb switch it is the whole switched fabric (so two NICs landing on
+        // trunked switches share a key); on a direct cable it is just that cable.
+        function segmentKeyOf(link, fromNodeId) {
+            const otherId = link.source === fromNodeId ? link.target : link.source;
+            const other = getNode(otherId);
+            if (!other || !isDumbDevice(other)) return `link:${link.id}`;
+            return `seg:${[...l2DomainOf(otherId)].sort().join(',')}`;
+        }
+
+
         function isPrivateIP(ipObj) {
             if (ipObj.kind() !== 'ipv4') return false;
             const octets = ipObj.octets;
@@ -506,7 +860,7 @@
             server: { os: 'Ubuntu OS', gw: '192.168.1.1', dns: '8.8.8.8', ports: '80, 443, 22', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.10/24' }] },
             vm: { os: 'Ubuntu VM', gw: '192.168.1.1', dns: '8.8.8.8', ports: '22', interfaces: [{ id: 'i1', name: 'vnet0', ip: '192.168.1.11/24' }] },
             pc: { os: 'Windows 11', gw: '192.168.1.1', dns: '8.8.8.8', ports: '80, 443', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.50/24' }] },
-            ap: { os: 'UniFi', interfaces: [] },
+            ap: { os: 'UniFi', interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] }, // radio serves clients; faceplate port is the uplink
             iot: { os: 'FreeRTOS', gw: '192.168.1.1', dns: '8.8.8.8', ports: '1883', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.100/24' }] },
             printer: { os: 'Firmware', gw: '192.168.1.1', ports: '9100', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.80/24' }] },
             camera: { os: 'Firmware', gw: '192.168.1.1', ports: '554', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.90/24' }] },
@@ -519,16 +873,77 @@
         };
 
         // Templates Data (Converted to Interface format via Normalizer)
+        // A deliberately broken network: every node here trips a different check, so the
+        // diagnostics have something to demonstrate on. Interfaces and bindings are
+        // explicit throughout — auto-bind is good enough to quietly repair most of these
+        // if left to choose, which would defeat the point.
+        // dx/dy are block offsets; the template wrapper below turns them into absolute
+        // coordinates so the same data serves both menus.
+        const COMMON_ERRORS = {
+            nodes: [
+                { tid: 'rtr', type: 'router', name: 'Gateway', dx: 0, dy: -180, dns: '8.8.8.8',
+                  interfaces: [{ id: 'r1', name: 'eth0', ip: '192.168.9.1/24' }] },
+
+                // L2 loop: two switches, two cables, no STP.
+                { tid: 'sw1', type: 'switch', name: 'Switch A', dx: -110, dy: -40, portCount: 8, interfaces: [] },
+                { tid: 'sw2', type: 'switch', name: 'Switch B', dx: 150, dy: -40, portCount: 8, interfaces: [] },
+
+                // ARP flux + MAC flapping: two NICs, one subnet, one broadcast domain.
+                { tid: 'pacs', type: 'server', name: 'PACS (dual NIC)', dx: -260, dy: 90, gw: '192.168.9.1', ports: '104, 11112',
+                  interfaces: [{ id: 'e1', name: 'eno1', ip: '192.168.9.10/24' }, { id: 'e2', name: 'enp4s0', ip: '192.168.9.11/24' }] },
+
+                // Duplicate IP: same address as the PACS server's eno1.
+                { tid: 'dup', type: 'server', name: 'Duplicate IP', dx: 260, dy: 90, gw: '192.168.9.1',
+                  interfaces: [{ id: 'd1', name: 'eth0', ip: '192.168.9.10/24' }] },
+
+                // Wi-Fi association cabled out of the Ethernet port while a radio sits idle.
+                { tid: 'ap', type: 'ap', name: 'Access Point', dx: -10, dy: 90, portCount: 1,
+                  interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
+                { tid: 'lap', type: 'pc', name: 'Laptop (Wi-Fi on eth0)', dx: -10, dy: 220, gw: '192.168.9.1',
+                  interfaces: [{ id: 'l1', name: 'eth0', ip: '192.168.9.50/24' }, { id: 'l2', name: 'wlan0', ip: '' }] },
+
+                // Cabled to the gateway but addressed on another subnet, with a gateway it
+                // therefore cannot reach.
+                // Kept off the top-right: that corner is where the validation panel sits,
+                // and this node is one of the things the panel is talking about.
+                { tid: 'mis', type: 'pc', name: 'Wrong Subnet', dx: -280, dy: -180, gw: '192.168.9.1',
+                  interfaces: [{ id: 'm1', name: 'eth0', ip: '10.99.9.5/24' }] }
+            ],
+            links: [
+                { s: 'rtr', t: 'sw1', si: 'r1', ti: 'p1' },
+                { s: 'sw1', t: 'sw2', si: 'p2', ti: 'p1' },
+                { s: 'sw1', t: 'sw2', si: 'p3', ti: 'p2' },              // closes the loop
+                { s: 'pacs', t: 'sw1', si: 'e1', ti: 'p4' },
+                { s: 'pacs', t: 'sw1', si: 'e2', ti: 'p5' },             // same subnet, same fabric
+                { s: 'ap', t: 'sw1', si: 'p1', ti: 'p6' },               // uplink: cable, port to port
+                { s: 'lap', t: 'ap', si: 'l1', ti: 'w1', medium: 'wireless' }, // radio out of eth0
+                { s: 'dup', t: 'sw2', si: 'd1', ti: 'p3' },
+                { s: 'mis', t: 'rtr', si: 'm1', ti: 'r1' }               // subnet mismatch on one cable
+            ]
+        };
+
+        // Same block, placed absolutely, so it can also be opened as a whole workspace.
+        const commonErrorsTemplate = (originX, originY) => ({
+            nodes: COMMON_ERRORS.nodes.map((n) => {
+                const { tid, dx, dy, ...rest } = n;
+                return { ...cloneData(rest), id: tid, x: originX + dx, y: originY + dy };
+            }),
+            links: COMMON_ERRORS.links.map((l, i) => ({
+                id: `ce${i}`, source: l.s, target: l.t, sourceIface: l.si, targetIface: l.ti,
+                medium: l.medium, attachment: l.attachment || null
+            }))
+        });
+
         const templatesData = {
             house: {
                 nodes: [
-                    { id: 'h1', type: 'cloud', name: 'ISP', x: 400, y: 100, ips: ['8.8.8.8/32'] },
-                    { id: 'h2', type: 'router', name: 'Home Router', x: 400, y: 220, ips: ['192.168.1.1/24', '8.8.8.8/32'], gw: '0.0.0.0', dns: '8.8.8.8' },
+                    { id: 'h1', type: 'cloud', name: 'ISP', x: 400, y: 100, ips: ['203.0.113.1/30'] },
+                    { id: 'h2', type: 'router', name: 'Home Router', x: 400, y: 220, ips: ['192.168.1.1/24', '203.0.113.2/30'], gw: '203.0.113.1', dns: '8.8.8.8' },
                     { id: 'h3', type: 'pc', name: 'Home PC', x: 250, y: 350, ips: ['192.168.1.50/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
-                    { id: 'hp1', type: 'printer', name: 'Wireless Printer', x: 350, y: 350, ips: ['192.168.1.80/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
+                    { id: 'hp1', type: 'printer', name: 'Wireless Printer', x: 350, y: 350, gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.80/24' }] },
                     { id: 'hap', type: 'ap', name: 'WiFi AP', x: 500, y: 350, ips: [] },
-                    { id: 'h5', type: 'iot', name: 'Smart TV', x: 450, y: 450, ips: ['192.168.1.101/24'], gw: '192.168.1.1', dns: '8.8.8.8' },
-                    { id: 'h6', type: 'camera', name: 'Porch Cam', x: 550, y: 450, ips: ['192.168.1.102/24'], gw: '192.168.1.1', dns: '8.8.8.8' }
+                    { id: 'h5', type: 'iot', name: 'Smart TV', x: 450, y: 450, gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.101/24' }] },
+                    { id: 'h6', type: 'camera', name: 'Porch Cam', x: 550, y: 450, gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.102/24' }] }
                 ],
                 links: [{ id: 'hl1', source: 'h1', target: 'h2' }, { id: 'hl2', source: 'h2', target: 'h3' }, { id: 'hl3', source: 'h2', target: 'hap' }, { id: 'hl4', source: 'hap', target: 'h5' }, { id: 'hl5', source: 'hap', target: 'h6' }, { id: 'hl6', source: 'hap', target: 'hp1' }]
             },
@@ -537,11 +952,11 @@
                     { id: 'b1', type: 'cloud', name: 'WAN Connection', x: 400, y: 50, ips: [] },
                     { id: 'b2', type: 'firewall', name: 'Edge Firewall', x: 400, y: 150, ips: ['10.50.0.1/16'], dns: '1.1.1.1' },
                     { id: 'b3', type: 'router', name: 'Core Router', x: 400, y: 250, ips: ['10.50.10.1/24', '10.50.20.1/24'], gw: '10.50.0.1' },
-                    { id: 'b4', type: 'switch', name: 'Teller SW', x: 250, y: 350, ips: [] },
+                    { id: 'b4', type: 'switch', name: 'Teller SW', x: 250, y: 350, portCount: 8, ips: [] },
                     { id: 'b5', type: 'pc', name: 'Teller 1', x: 150, y: 450, ips: ['10.50.10.51/24'], gw: '10.50.10.1', dns: '10.50.10.10' },
                     { id: 'b6', type: 'pc', name: 'Teller 2', x: 250, y: 450, ips: ['10.50.10.52/24'], gw: '10.50.10.1', dns: '10.50.10.10' },
                     { id: 'b7', type: 'printer', name: 'Secure Print', x: 350, y: 450, ips: ['10.50.10.80/24'], gw: '10.50.10.1' },
-                    { id: 'b8', type: 'switch', name: 'ATM SW', x: 550, y: 350, ips: [] },
+                    { id: 'b8', type: 'switch', name: 'ATM SW', x: 550, y: 350, portCount: 8, ips: [] },
                     { id: 'b9', type: 'custom', name: 'Lobby ATM', x: 500, y: 450, ips: ['10.50.20.100/24'], gw: '10.50.20.1' },
                     { id: 'b10', type: 'custom', name: 'Drive-Thru ATM', x: 600, y: 450, ips: ['10.50.20.101/24'], gw: '10.50.20.1' }
                 ],
@@ -560,7 +975,7 @@
                     { id: 'd9',  type: 'server',       name: 'App Server 1',      x: 470, y: 510, ips: ['10.20.0.11/24'], gw: '10.20.0.1', ports: '8080' },
                     { id: 'd10', type: 'server',       name: 'App Server 2',      x: 570, y: 510, ips: ['10.20.0.12/24'], gw: '10.20.0.1', ports: '8080' },
                     { id: 'd11', type: 'pc',           name: 'Jump Host',         x: 670, y: 510, ips: ['10.20.0.50/24'], gw: '10.20.0.1', ports: '22' },
-                    { id: 'd12', type: 'switch',       name: 'Storage Switch',    x: 820, y: 510, ips: [] },
+                    { id: 'd12', type: 'switch',       name: 'Storage Switch',    x: 820, y: 510, portCount: 8, ips: [] },
                     { id: 'd13', type: 'server',       name: 'DB Master',         x: 760, y: 640, ips: ['10.30.0.10/24'], gw: '10.30.0.1', ports: '5432' },
                     { id: 'd14', type: 'server',       name: 'DB Replica',        x: 850, y: 640, ips: ['10.30.0.11/24'], gw: '10.30.0.1', ports: '5432' },
                     { id: 'd15', type: 'server',       name: 'NAS Storage',       x: 940, y: 640, ips: ['10.30.0.20/24'], gw: '10.30.0.1', ports: '2049, 445' }
@@ -578,11 +993,11 @@
                     { id: 'hp1', type: 'cloud', name: 'ISP', x: 400, y: 50, ips: [] },
                     { id: 'hp2', type: 'firewall', name: 'Main Firewall', x: 400, y: 150, ips: ['10.10.0.1/16'], dns: '1.1.1.1' },
                     { id: 'hp3', type: 'router', name: 'Core Router', x: 400, y: 250, ips: ['10.10.10.1/24', '192.168.100.1/24'], gw: '10.10.0.1' },
-                    { id: 'hp4', type: 'switch', name: 'Admin SW', x: 250, y: 350, ips: [] },
+                    { id: 'hp4', type: 'switch', name: 'Admin SW', x: 250, y: 350, portCount: 8, ips: [] },
                     { id: 'hp5', type: 'server', name: 'EHR Server', x: 150, y: 450, ips: ['10.10.10.20/24'], gw: '10.10.10.1' },
                     { id: 'hp6', type: 'pc', name: 'Nurse Desk', x: 250, y: 450, ips: ['10.10.10.50/24'], gw: '10.10.10.1' },
                     { id: 'hp7', type: 'printer', name: 'Records Print', x: 350, y: 450, ips: ['10.10.10.80/24'], gw: '10.10.10.1' },
-                    { id: 'hp8', type: 'switch', name: 'Medical SW', x: 550, y: 350, ips: [] },
+                    { id: 'hp8', type: 'switch', name: 'Medical SW', x: 550, y: 350, portCount: 8, ips: [] },
                     { id: 'hp9', type: 'dicom', name: 'PACS Archive', x: 450, y: 450, ips: ['192.168.100.10/24'] },
                     { id: 'hp10', type: 'dicom', name: 'MRI Scanner', x: 550, y: 450, ips: ['192.168.100.11/24'] },
                     { id: 'hp11', type: 'iot', name: 'Vitals Mon', x: 650, y: 450, ips: ['192.168.100.52/24'], gw: '192.168.100.1' }
@@ -594,10 +1009,10 @@
                     { id: 'c1', type: 'cloud', name: 'WAN', x: 400, y: 50, ips: [] },
                     { id: 'c2', type: 'firewall', name: 'Campus Firewall', x: 400, y: 150, ips: ['10.0.0.1/16'], dns: '1.1.1.1' },
                     { id: 'c3', type: 'router', name: 'Core Router', x: 400, y: 250, ips: ['10.0.1.1/24', '10.0.2.1/24', '172.20.0.1/24'], gw: '10.0.0.1' },
-                    { id: 'c4', type: 'switch', name: 'IT SW', x: 200, y: 350, ips: [] },
+                    { id: 'c4', type: 'switch', name: 'IT SW', x: 200, y: 350, portCount: 8, ips: [] },
                     { id: 'c5', type: 'vm', name: 'Domain Controller', x: 150, y: 450, ips: ['10.0.1.10/24'], gw: '10.0.1.1' },
                     { id: 'c6', type: 'pc', name: 'Admin PC', x: 250, y: 450, ips: ['10.0.1.50/24'], gw: '10.0.1.1' },
-                    { id: 'c7', type: 'switch', name: 'HR SW', x: 400, y: 350, ips: [] },
+                    { id: 'c7', type: 'switch', name: 'HR SW', x: 400, y: 350, portCount: 8, ips: [] },
                     { id: 'c8', type: 'pc', name: 'HR Desktop', x: 400, y: 450, ips: ['10.0.2.50/24'], gw: '10.0.2.1' },
                     { id: 'c9', type: 'ap', name: 'Guest AP', x: 600, y: 350, ips: [] },
                     { id: 'c10', type: 'iot', name: 'Visitor Phone', x: 600, y: 450, ips: ['172.20.0.50/24'], gw: '172.20.0.1' }
@@ -608,12 +1023,12 @@
                 nodes: [
                     { id: 'r1', type: 'cloud', name: 'ISP', x: 400, y: 50, ips: [] },
                     { id: 'r2', type: 'router', name: 'Store Router', x: 400, y: 150, ips: ['192.168.5.1/24', '10.5.5.1/24'], gw: '0.0.0.0' },
-                    { id: 'r3', type: 'switch', name: 'Core SW', x: 400, y: 250, ips: [] },
-                    { id: 'r4', type: 'switch', name: 'POS SW', x: 250, y: 350, ips: [] },
+                    { id: 'r3', type: 'switch', name: 'Core SW', x: 400, y: 250, portCount: 8, ips: [] },
+                    { id: 'r4', type: 'switch', name: 'POS SW', x: 250, y: 350, portCount: 8, ips: [] },
                     { id: 'r5', type: 'pc', name: 'Register 1', x: 150, y: 450, ips: ['192.168.5.10/24'], gw: '192.168.5.1' },
                     { id: 'r6', type: 'pc', name: 'Register 2', x: 250, y: 450, ips: ['192.168.5.11/24'], gw: '192.168.5.1' },
                     { id: 'r7', type: 'printer', name: 'Receipt Printer', x: 350, y: 450, ips: ['192.168.5.80/24'], gw: '192.168.5.1' },
-                    { id: 'r8', type: 'switch', name: 'CCTV SW', x: 550, y: 350, ips: [] },
+                    { id: 'r8', type: 'switch', name: 'CCTV SW', x: 550, y: 350, portCount: 8, ips: [] },
                     { id: 'r9', type: 'server', name: 'NVR', x: 450, y: 450, ips: ['10.5.5.10/24'], gw: '10.5.5.1' },
                     { id: 'r10', type: 'camera', name: 'Entrance Cam', x: 550, y: 450, ips: ['10.5.5.90/24'], gw: '10.5.5.1' },
                     { id: 'r11', type: 'camera', name: 'Aisle Cam', x: 650, y: 450, ips: ['10.5.5.91/24'], gw: '10.5.5.1' }
@@ -626,7 +1041,7 @@
                     { id: 'f2', type: 'firewall', name: 'Plant Firewall', x: 400, y: 150, ips: ['10.20.0.1/16'], dns: '1.1.1.1' },
                     { id: 'f3', type: 'router', name: 'Core Router', x: 400, y: 250, ips: ['10.20.10.1/24', '10.20.20.1/24'], gw: '10.20.0.1' },
                     { id: 'f4', type: 'server', name: 'SCADA Master', x: 250, y: 350, ips: ['10.20.10.10/24'], gw: '10.20.10.1' },
-                    { id: 'f5', type: 'switch', name: 'Plant SW', x: 550, y: 350, ips: [] },
+                    { id: 'f5', type: 'switch', name: 'Plant SW', x: 550, y: 350, portCount: 8, ips: [] },
                     { id: 'f6', type: 'iot', name: 'PLC Controller 1', x: 450, y: 450, ips: ['10.20.20.50/24'], gw: '10.20.20.1' },
                     { id: 'f7', type: 'iot', name: 'Robotic Arm 2', x: 550, y: 450, ips: ['10.20.20.51/24'], gw: '10.20.20.1' },
                     { id: 'f8', type: 'camera', name: 'QA Cam', x: 650, y: 450, ips: ['10.20.20.90/24'], gw: '10.20.20.1' }
@@ -637,7 +1052,7 @@
                 nodes: [
                     { id: 's1', type: 'cloud', name: 'Internet', x: 400, y: 50, ips: [] },
                     { id: 's2', type: 'router', name: 'Gateway', x: 400, y: 150, ips: ['10.0.0.1/24'] },
-                    { id: 's3', type: 'switch', name: '10G Switch', x: 400, y: 250, ips: [] },
+                    { id: 's3', type: 'switch', name: '10G Switch', x: 400, y: 250, portCount: 8, ips: [] },
                     { id: 's4', type: 'server', name: 'NAS Storage', x: 200, y: 350, ips: ['10.0.0.10/24'], gw: '10.0.0.1' },
                     { id: 's5', type: 'vm', name: 'Render Node (Passthrough)', x: 100, y: 450, ips: ['10.0.0.11/24'], gw: '10.0.0.1' },
                     { id: 's6', type: 'pc', name: 'Edit Bay 1', x: 350, y: 350, ips: ['10.0.0.50/24'], gw: '10.0.0.1' },
@@ -652,8 +1067,8 @@
                     { id: 'c1',  type: 'cloud',    name: 'Internet',           x: 460, y: 50,  ips: [] },
                     { id: 'c2',  type: 'router',   name: 'CC Gateway',         x: 460, y: 155, nat: true, gw: '203.0.113.1', dns: '1.1.1.1', ips: ['203.0.113.2/30', '10.5.0.1/24'] },
                     { id: 'c3',  type: 'firewall', name: 'Firewall / UTM',     x: 460, y: 260, nat: true, gw: '10.5.0.1', ips: ['10.5.0.2/24', '10.5.10.1/24', '10.5.20.1/24'], ports: '443, 22' },
-                    { id: 'c4',  type: 'switch',   name: 'Voice Switch',       x: 270, y: 370, ips: [] },
-                    { id: 'c5',  type: 'switch',   name: 'Data Switch',        x: 640, y: 370, ips: [] },
+                    { id: 'c4',  type: 'switch',   name: 'Voice Switch',       x: 270, y: 370, portCount: 8, ips: [] },
+                    { id: 'c5',  type: 'switch',   name: 'Data Switch',        x: 640, y: 370, portCount: 8, ips: [] },
                     { id: 'c6',  type: 'voip',     name: 'Agent Phone 1',      x: 110, y: 490, ips: ['10.5.10.61/24'], gw: '10.5.10.1', ports: '5060' },
                     { id: 'c7',  type: 'voip',     name: 'Agent Phone 2',      x: 200, y: 490, ips: ['10.5.10.62/24'], gw: '10.5.10.1', ports: '5060' },
                     { id: 'c8',  type: 'voip',     name: 'Agent Phone 3',      x: 290, y: 490, ips: ['10.5.10.63/24'], gw: '10.5.10.1', ports: '5060' },
@@ -685,34 +1100,40 @@
                     { id: 'l3',   type: 'l3switch',     name: 'Core Distribution',   x: 300,  y: 390, gw: '10.10.0.1', ips: ['10.10.0.2/24', '10.10.10.1/24', '10.10.20.1/24', '10.10.30.1/24', '10.10.40.1/24'] },
                     { id: 'lb',   type: 'loadbalancer', name: 'Web Load Balancer',   x: 640,  y: 390, nat: true, gw: '10.20.0.1', ips: ['10.20.0.5/24', '10.30.0.1/24'], ports: '80, 443' },
                     // --- Server farm (behind the LB) ---
-                    { id: 'as',   type: 'server',       name: 'App Server',          x: 560,  y: 510, ips: ['10.30.0.11/24'], gw: '10.30.0.1', ports: '80, 443' },
+                    { id: 'as',   type: 'server',       name: 'App Server',          x: 560,  y: 510, gw: '10.30.0.1', ports: '80, 443',
+                      // Two subnets, not one: this is multi-homing done right — compare the
+                      // PACS server in the Common Errors template.
+                      interfaces: [{ id: 'a1', name: 'eth0', ip: '10.30.0.11/24' }, { id: 'a2', name: 'eth1', ip: '10.31.0.11/24' }, { id: 'a3', name: 'eth2', ip: '' }] },
+                    { id: 'pvm',  type: 'vm',           name: 'GPU VM (passthrough)', x: 620, y: 630, ips: ['10.30.0.14/24'], gw: '10.30.0.1' },
+                    { id: 'bsw',  type: 'switch',       name: 'Storage Switch',      x: 780,  y: 630, portCount: 8, ips: [] },
+                    { id: 'nas',  type: 'server',       name: 'NAS',                 x: 780,  y: 730, ips: ['10.31.0.10/24'], ports: '2049, 445' },
                     { id: 'wvm',  type: 'vm',           name: 'Web VM',              x: 650,  y: 510, ips: ['10.30.0.12/24'], gw: '10.30.0.1' },
                     { id: 'ctr',  type: 'container',    name: 'API Container',       x: 740,  y: 510, ips: ['10.30.0.13/24'], gw: '10.30.0.1', ports: '8080' },
                     // --- Hospital tenant (VLAN 10) ---
-                    { id: 'hsw',  type: 'switch',       name: 'Hospital Switch',     x: 90,   y: 510, ips: [] },
+                    { id: 'hsw',  type: 'switch',       name: 'Hospital Switch',     x: 90,   y: 510, portCount: 8,  ips: [] },
                     { id: 'dcm',  type: 'dicom',        name: 'CT Modality',         x: 40,   y: 630, ips: ['10.10.10.20/24'], gw: '10.10.10.1', ports: '104' },
                     { id: 'pacs', type: 'server',       name: 'PACS Server',         x: 130,  y: 630, ips: ['10.10.10.10/24'], gw: '10.10.10.1', ports: '104, 11112' },
                     { id: 'radpc',type: 'pc',           name: 'Radiology WS',        x: 40,   y: 730, ips: ['10.10.10.50/24'], gw: '10.10.10.1' },
                     { id: 'wcam', type: 'camera',       name: 'Ward Camera',         x: 130,  y: 730, ips: ['10.10.10.90/24'], gw: '10.10.10.1', ports: '554' },
                     // --- Studio tenant (VLAN 20) ---
-                    { id: 'ssw',  type: 'switch',       name: 'Studio Switch',       x: 250,  y: 510, ips: [] },
+                    { id: 'ssw',  type: 'switch',       name: 'Studio Switch',       x: 250,  y: 510, portCount: 8,  ips: [] },
                     { id: 'scam', type: 'camera',       name: 'Studio Cam',          x: 210,  y: 630, ips: ['10.10.20.90/24'], gw: '10.10.20.1', ports: '554' },
                     { id: 'epc',  type: 'pc',           name: 'Edit Bay',            x: 300,  y: 630, ips: ['10.10.20.50/24'], gw: '10.10.20.1' },
                     // --- On-site office tenant (VLAN 30, wireless) ---
                     { id: 'oap',  type: 'ap',           name: 'Office WiFi',         x: 440,  y: 510, ips: [] },
-                    { id: 'opc',  type: 'pc',           name: 'Office WS',           x: 380,  y: 630, ips: ['10.10.30.50/24'], gw: '10.10.30.1' },
-                    { id: 'opr',  type: 'printer',      name: 'Office Printer',      x: 470,  y: 630, ips: ['10.10.30.80/24'], gw: '10.10.30.1', ports: '9100' },
-                    { id: 'oph',  type: 'voip',         name: 'Desk Phone',          x: 400,  y: 730, ips: ['10.10.30.60/24'], gw: '10.10.30.1', ports: '5060' },
-                    { id: 'osen', type: 'iot',          name: 'Smart Sensor',        x: 490,  y: 730, ips: ['10.10.30.100/24'], gw: '10.10.30.1', ports: '1883' },
+                    { id: 'opc',  type: 'pc',           name: 'Office WS',           x: 380,  y: 630, gw: '10.10.30.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.50/24' }] },
+                    { id: 'opr',  type: 'printer',      name: 'Office Printer',      x: 470,  y: 630, gw: '10.10.30.1', ports: '9100', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.80/24' }] },
+                    { id: 'oph',  type: 'voip',         name: 'Desk Phone',          x: 400,  y: 730, gw: '10.10.30.1', ports: '5060', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.60/24' }] },
+                    { id: 'osen', type: 'iot',          name: 'Smart Sensor',        x: 490,  y: 730, gw: '10.10.30.1', ports: '1883', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.100/24' }] },
                     // --- Call center tenant (VLAN 40) ---
-                    { id: 'csw',  type: 'switch',       name: 'Call Center Switch',  x: 940,  y: 510, ips: [] },
+                    { id: 'csw',  type: 'switch',       name: 'Call Center Switch',  x: 940,  y: 510, portCount: 24, ips: [] },
                     { id: 'cp1',  type: 'voip',         name: 'Agent Phone 1',       x: 860,  y: 630, ips: ['10.10.40.61/24'], gw: '10.10.40.1', ports: '5060' },
                     { id: 'cp2',  type: 'voip',         name: 'Agent Phone 2',       x: 950,  y: 630, ips: ['10.10.40.62/24'], gw: '10.10.40.1', ports: '5060' },
                     { id: 'capc', type: 'pc',           name: 'Agent WS',            x: 1040, y: 630, ips: ['10.10.40.50/24'], gw: '10.10.40.1' },
                     { id: 'pbx',  type: 'custom',       name: 'PBX Controller',      x: 940,  y: 730, ips: ['10.10.40.10/24'], gw: '10.10.40.1', ports: '5060' },
                     // --- Branch office (over VPN) ---
                     { id: 'ro',   type: 'router',       name: 'Branch Office GW',    x: 1180, y: 150, nat: true, gw: '198.51.100.9', ips: ['198.51.100.10/30', '172.16.5.1/24'] },
-                    { id: 'rsw',  type: 'switch',       name: 'Branch Switch',       x: 1180, y: 270, ips: [] },
+                    { id: 'rsw',  type: 'switch',       name: 'Branch Switch',       x: 1180, y: 270, portCount: 8,  ips: [] },
                     { id: 'rmtpc',type: 'pc',           name: 'Branch WS',           x: 1130, y: 390, ips: ['172.16.5.50/24'], gw: '172.16.5.1' },
                     { id: 'rpr',  type: 'printer',      name: 'Branch Printer',      x: 1230, y: 390, ips: ['172.16.5.80/24'], gw: '172.16.5.1', ports: '9100' },
                     // --- Home (over VPN) ---
@@ -724,8 +1145,8 @@
                     { id: 'k1',  source: 'net', target: 'edge' }, { id: 'k2', source: 'net', target: 'vpn' },
                     { id: 'k3',  source: 'net', target: 'ro' },   { id: 'k4', source: 'net', target: 'hm' },
                     { id: 'kv1', source: 'vpn', target: 'ro', medium: 'vpn' }, { id: 'kv2', source: 'vpn', target: 'hm', medium: 'vpn' },
-                    { id: 'k5',  source: 'edge', target: 'fw' },  { id: 'k6', source: 'edge', target: 'vpn' },
-                    { id: 'k7',  source: 'fw', target: 'l3' },    { id: 'k8', source: 'fw', target: 'lb' },
+                    { id: 'k5',  source: 'edge', target: 'fw', medium: 'fiber' },  { id: 'k6', source: 'edge', target: 'vpn' },
+                    { id: 'k7',  source: 'fw', target: 'l3' },    { id: 'k7b', source: 'fw', target: 'l3' },  { id: 'k8', source: 'fw', target: 'lb' },
                     { id: 'k9',  source: 'lb', target: 'as' },    { id: 'k10', source: 'lb', target: 'wvm', attachment: 'bridged' }, { id: 'k11', source: 'lb', target: 'ctr', attachment: 'bridged' },
                     { id: 'k12', source: 'l3', target: 'hsw' },   { id: 'k13', source: 'l3', target: 'ssw' }, { id: 'k14', source: 'l3', target: 'oap' }, { id: 'k15', source: 'l3', target: 'csw' },
                     { id: 'k16', source: 'hsw', target: 'dcm' },  { id: 'k17', source: 'hsw', target: 'pacs' }, { id: 'k18', source: 'hsw', target: 'radpc' }, { id: 'k19', source: 'hsw', target: 'wcam' },
@@ -733,10 +1154,265 @@
                     { id: 'k22', source: 'oap', target: 'opc', medium: 'wireless' }, { id: 'k23', source: 'oap', target: 'opr', medium: 'wireless' }, { id: 'k24', source: 'oap', target: 'oph', medium: 'wireless' }, { id: 'k25', source: 'oap', target: 'osen', medium: 'wireless' },
                     { id: 'k26', source: 'csw', target: 'cp1' },  { id: 'k27', source: 'csw', target: 'cp2' }, { id: 'k28', source: 'csw', target: 'capc' }, { id: 'k29', source: 'csw', target: 'pbx' },
                     { id: 'k30', source: 'ro', target: 'rsw' },   { id: 'k31', source: 'rsw', target: 'rmtpc' }, { id: 'k32', source: 'rsw', target: 'rpr' },
-                    { id: 'k33', source: 'hm', target: 'hpc' },   { id: 'k34', source: 'hm', target: 'hiot' }
+                    { id: 'k33', source: 'hm', target: 'hpc' },   { id: 'k34', source: 'hm', target: 'hiot', medium: 'powerline' },
+                    { id: 'k35', source: 'as', target: 'bsw', sourceIface: 'a2' }, { id: 'k36', source: 'bsw', target: 'nas' },
+                    { id: 'k37', source: 'as', target: 'pvm', sourceIface: 'a3', attachment: 'passthrough' }
                 ]
-            }
+            },
+            // --- Industry templates -------------------------------------------------
+            // Interfaces are named and bound explicitly on the L3 downlinks: an L3 switch
+            // has several same-priority interfaces, and letting auto-bind guess which VLAN
+            // a cable lands on is a coin flip once more than one is free.
+            imaging: {
+                nodes: [
+                    { id: 'i_net', type: 'cloud',  name: 'Internet',            x: 480, y: 40,  ips: [] },
+                    { id: 'i_rtr', type: 'router', name: 'Clinic Gateway',      x: 340, y: 150, nat: true, gw: '203.0.113.1', dns: '1.1.1.1', ports: '22',
+                      interfaces: [{ id: 'w', name: 'eth0', ip: '203.0.113.2/30' }, { id: 'l', name: 'eth1', ip: '10.60.0.1/24' }] },
+                    { id: 'i_vpn', type: 'vpn',    name: 'Teleradiology VPN',   x: 720, y: 150, nat: true, gw: '203.0.113.5', dns: '1.1.1.1', ports: '443, 500, 4500',
+                      interfaces: [{ id: 'w', name: 'wan', ip: '203.0.113.6/30' }, { id: 'c', name: 'lan', ip: '10.60.0.3/24' }, { id: 't', name: 'tun0', ip: '10.60.30.1/24' }] },
+                    { id: 'i_l3',  type: 'l3switch', name: 'Core L3',           x: 480, y: 270, gw: '10.60.0.1', dns: '1.1.1.1', ports: '22',
+                      interfaces: [{ id: 'c', name: 'vlan1', ip: '10.60.0.2/24' }, { id: 'm', name: 'vlan10', ip: '10.60.10.1/24' }, { id: 'o', name: 'vlan20', ip: '10.60.20.1/24' }] },
+                    { id: 'i_msw', type: 'switch', name: 'Modality Switch',     x: 300, y: 390, portCount: 16, ips: [] },
+                    { id: 'i_osw', type: 'switch', name: 'Reading Room Switch', x: 700, y: 390, portCount: 8, ips: [] },
+                    { id: 'i_ct',  type: 'dicom',  name: 'CT Scanner',          x: 120, y: 510, ips: ['10.60.10.20/24'], gw: '10.60.10.1', ports: '104' },
+                    { id: 'i_mr',  type: 'dicom',  name: 'MRI',                 x: 220, y: 510, ips: ['10.60.10.21/24'], gw: '10.60.10.1', ports: '104' },
+                    { id: 'i_us',  type: 'dicom',  name: 'Ultrasound',          x: 320, y: 510, ips: ['10.60.10.22/24'], gw: '10.60.10.1', ports: '104' },
+                    { id: 'i_cr',  type: 'dicom',  name: 'CR / DX',             x: 420, y: 510, ips: ['10.60.10.23/24'], gw: '10.60.10.1', ports: '104' },
+                    { id: 'i_pacs',type: 'server', name: 'PACS Server',         x: 170, y: 630, ips: ['10.60.10.10/24'], gw: '10.60.10.1', ports: '104, 11112, 443' },
+                    { id: 'i_vna', type: 'server', name: 'VNA Archive',         x: 290, y: 630, ips: ['10.60.10.11/24'], gw: '10.60.10.1', ports: '104, 11112' },
+                    { id: 'i_prn', type: 'printer',name: 'DICOM Film Printer',  x: 410, y: 630, ips: ['10.60.10.80/24'], gw: '10.60.10.1', ports: '104' },
+                    { id: 'i_ris', type: 'server', name: 'RIS / Worklist',      x: 600, y: 510, ips: ['10.60.20.10/24'], gw: '10.60.20.1', ports: '80, 443' },
+                    { id: 'i_ws1', type: 'pc',     name: 'Reading WS 1',        x: 700, y: 510, ips: ['10.60.20.50/24'], gw: '10.60.20.1' },
+                    { id: 'i_ws2', type: 'pc',     name: 'Reading WS 2',        x: 800, y: 510, ips: ['10.60.20.51/24'], gw: '10.60.20.1' },
+                    { id: 'i_rad', type: 'pc',     name: 'Remote Radiologist',  x: 920, y: 270, ips: ['10.60.30.50/24'], gw: '10.60.30.1' }
+                ],
+                links: [
+                    { id: 'im1', source: 'i_net', target: 'i_rtr', targetIface: 'w' },
+                    { id: 'im2', source: 'i_net', target: 'i_vpn', targetIface: 'w' },
+                    { id: 'im3', source: 'i_rtr', target: 'i_l3', sourceIface: 'l', targetIface: 'c' },
+                    { id: 'im4', source: 'i_vpn', target: 'i_l3', sourceIface: 'c', targetIface: 'c' },
+                    { id: 'im5', source: 'i_l3', target: 'i_msw', sourceIface: 'm', targetIface: 'p1' },
+                    { id: 'im6', source: 'i_l3', target: 'i_osw', sourceIface: 'o', targetIface: 'p1' },
+                    { id: 'im7', source: 'i_msw', target: 'i_ct', sourceIface: 'p2' },
+                    { id: 'im8', source: 'i_msw', target: 'i_mr', sourceIface: 'p3' },
+                    { id: 'im9', source: 'i_msw', target: 'i_us', sourceIface: 'p4' },
+                    { id: 'im10', source: 'i_msw', target: 'i_cr', sourceIface: 'p5' },
+                    { id: 'im11', source: 'i_msw', target: 'i_pacs', sourceIface: 'p6' },
+                    { id: 'im12', source: 'i_msw', target: 'i_prn', sourceIface: 'p7' },
+                    // Whole-study retrieval off the archive is the one link worth fibre.
+                    { id: 'im13', source: 'i_msw', target: 'i_vna', sourceIface: 'p8', medium: 'fiber' },
+                    { id: 'im14', source: 'i_osw', target: 'i_ris', sourceIface: 'p2' },
+                    { id: 'im15', source: 'i_osw', target: 'i_ws1', sourceIface: 'p3' },
+                    { id: 'im16', source: 'i_osw', target: 'i_ws2', sourceIface: 'p4' },
+                    { id: 'im17', source: 'i_vpn', target: 'i_rad', sourceIface: 't', medium: 'vpn' }
+                ]
+            },
+            hotel: {
+                nodes: [
+                    { id: 'h_net', type: 'cloud', name: 'Internet',        x: 480, y: 40,  ips: [] },
+                    { id: 'h_edge',type: 'edge',  name: 'Hotel Edge GW',   x: 480, y: 150, nat: true, gw: '198.51.100.1', dns: '1.1.1.1', ports: '443',
+                      interfaces: [{ id: 'w', name: 'wan0', ip: '198.51.100.2/30' }, { id: 'l', name: 'lan', ip: '10.70.0.1/24' }] },
+                    { id: 'h_l3',  type: 'l3switch', name: 'Core L3',      x: 480, y: 270, gw: '10.70.0.1', ports: '22',
+                      interfaces: [{ id: 'c', name: 'vlan1', ip: '10.70.0.2/24' }, { id: 's', name: 'vlan10', ip: '10.70.10.1/24' }, { id: 'g', name: 'vlan20', ip: '10.70.20.1/24' }, { id: 'b', name: 'vlan30', ip: '10.70.30.1/24' }] },
+                    { id: 'h_ssw', type: 'switch', name: 'Staff Switch',   x: 200, y: 390, portCount: 8, ips: [] },
+                    { id: 'h_pms', type: 'server', name: 'PMS Server',     x: 120, y: 510, ips: ['10.70.10.10/24'], gw: '10.70.10.1', ports: '443, 1433' },
+                    { id: 'h_rec', type: 'pc',     name: 'Reception WS',   x: 230, y: 510, ips: ['10.70.10.50/24'], gw: '10.70.10.1' },
+                    { id: 'h_ph',  type: 'voip',   name: 'Front Desk Phone', x: 340, y: 510, ips: ['10.70.10.60/24'], gw: '10.70.10.1', ports: '5060' },
+                    { id: 'h_ap1', type: 'ap',     name: 'Guest AP – Floor 1', x: 480, y: 390, ips: [] },
+                    { id: 'h_ap2', type: 'ap',     name: 'Guest AP – Floor 2', x: 620, y: 390, ips: [] },
+                    { id: 'h_gl',  type: 'pc',     name: 'Guest Laptop',   x: 450, y: 520, gw: '10.70.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.70.20.101/24' }] },
+                    { id: 'h_gp',  type: 'iot',    name: 'Guest Phone',    x: 640, y: 520, gw: '10.70.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.70.20.102/24' }] },
+                    { id: 'h_bsw', type: 'switch', name: 'Building Switch', x: 820, y: 390, portCount: 16, ips: [] },
+                    { id: 'h_tv',  type: 'iot',    name: 'Room IPTV',      x: 740, y: 510, ips: ['10.70.30.20/24'], gw: '10.70.30.1', ports: '554' },
+                    { id: 'h_lock',type: 'iot',    name: 'Door Lock Hub',  x: 850, y: 510, ips: ['10.70.30.30/24'], gw: '10.70.30.1', ports: '1883' },
+                    { id: 'h_cam', type: 'camera', name: 'Lobby Camera',   x: 960, y: 510, ips: ['10.70.30.90/24'], gw: '10.70.30.1', ports: '554' }
+                ],
+                links: [
+                    { id: 'ho1', source: 'h_net', target: 'h_edge', targetIface: 'w' },
+                    { id: 'ho2', source: 'h_edge', target: 'h_l3', sourceIface: 'l', targetIface: 'c' },
+                    { id: 'ho3', source: 'h_l3', target: 'h_ssw', sourceIface: 's', targetIface: 'p1' },
+                    { id: 'ho4', source: 'h_ssw', target: 'h_pms', sourceIface: 'p2' },
+                    { id: 'ho5', source: 'h_ssw', target: 'h_rec', sourceIface: 'p3' },
+                    { id: 'ho6', source: 'h_ssw', target: 'h_ph', sourceIface: 'p4' },
+                    // Both APs hang off the one guest VLAN interface — the routing-device
+                    // exemption is what makes that legal rather than a double-booked port.
+                    { id: 'ho7', source: 'h_l3', target: 'h_ap1', sourceIface: 'g', targetIface: 'p1' },
+                    { id: 'ho8', source: 'h_l3', target: 'h_ap2', sourceIface: 'g', targetIface: 'p1' },
+                    { id: 'ho9', source: 'h_ap1', target: 'h_gl', medium: 'wireless' },
+                    { id: 'ho10', source: 'h_ap2', target: 'h_gp', medium: 'wireless' },
+                    { id: 'ho11', source: 'h_l3', target: 'h_bsw', sourceIface: 'b', targetIface: 'p1' },
+                    { id: 'ho12', source: 'h_bsw', target: 'h_tv', sourceIface: 'p2' },
+                    { id: 'ho13', source: 'h_bsw', target: 'h_lock', sourceIface: 'p3' },
+                    { id: 'ho14', source: 'h_bsw', target: 'h_cam', sourceIface: 'p4' }
+                ]
+            },
+            vessel: {
+                nodes: [
+                    { id: 'v_sat', type: 'cloud',  name: 'VSAT / LEO Uplink', x: 480, y: 40, ips: [] },
+                    { id: 'v_mdm', type: 'router', name: 'Satellite Modem',   x: 480, y: 150, nat: true, gw: '100.64.0.1',
+                      interfaces: [{ id: 'w', name: 'wan0', ip: '100.64.0.2/30' }, { id: 'l', name: 'lan', ip: '172.20.0.1/24' }] },
+                    { id: 'v_fw',  type: 'firewall', name: 'Vessel Firewall', x: 480, y: 270, nat: true, gw: '172.20.0.1', dns: '1.1.1.1', ports: '443, 22',
+                      interfaces: [{ id: 'w', name: 'igb0', ip: '172.20.0.2/24' }, { id: 'n', name: 'igb1', ip: '172.20.10.1/24' }, { id: 'o', name: 'igb2', ip: '172.20.20.1/24' }, { id: 'c', name: 'igb3', ip: '172.20.30.1/24' }] },
+                    { id: 'v_nsw', type: 'switch', name: 'Bridge Switch',     x: 220, y: 390, portCount: 8, ips: [] },
+                    { id: 'v_ecd', type: 'custom', name: 'ECDIS (Charts)',    x: 120, y: 510, ips: ['172.20.10.20/24'], gw: '172.20.10.1' },
+                    { id: 'v_rdr', type: 'custom', name: 'Radar',             x: 230, y: 510, ips: ['172.20.10.21/24'], gw: '172.20.10.1' },
+                    { id: 'v_ais', type: 'iot',    name: 'AIS Transponder',   x: 340, y: 510, ips: ['172.20.10.22/24'], gw: '172.20.10.1' },
+                    { id: 'v_osw', type: 'switch', name: 'Engine Room Switch', x: 560, y: 390, portCount: 8, ips: [] },
+                    { id: 'v_scd', type: 'custom', name: 'Engine SCADA',      x: 490, y: 510, ips: ['172.20.20.10/24'], gw: '172.20.20.1', ports: '502' },
+                    { id: 'v_plc', type: 'iot',    name: 'Engine PLC',        x: 600, y: 510, ips: ['172.20.20.20/24'], gw: '172.20.20.1', ports: '502' },
+                    { id: 'v_ap',  type: 'ap',     name: 'Crew Wi-Fi',        x: 820, y: 390, ips: [] },
+                    { id: 'v_cph', type: 'iot',    name: 'Crew Phone',        x: 820, y: 520, gw: '172.20.30.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '172.20.30.101/24' }] }
+                ],
+                links: [
+                    { id: 've1', source: 'v_sat', target: 'v_mdm', targetIface: 'w' },
+                    { id: 've2', source: 'v_mdm', target: 'v_fw', sourceIface: 'l', targetIface: 'w' },
+                    { id: 've3', source: 'v_fw', target: 'v_nsw', sourceIface: 'n', targetIface: 'p1' },
+                    { id: 've4', source: 'v_nsw', target: 'v_ecd', sourceIface: 'p2' },
+                    { id: 've5', source: 'v_nsw', target: 'v_rdr', sourceIface: 'p3' },
+                    { id: 've6', source: 'v_nsw', target: 'v_ais', sourceIface: 'p4' },
+                    { id: 've7', source: 'v_fw', target: 'v_osw', sourceIface: 'o', targetIface: 'p1' },
+                    { id: 've8', source: 'v_osw', target: 'v_scd', sourceIface: 'p2' },
+                    { id: 've9', source: 'v_osw', target: 'v_plc', sourceIface: 'p3' },
+                    { id: 've10', source: 'v_fw', target: 'v_ap', sourceIface: 'c', targetIface: 'p1' },
+                    { id: 've11', source: 'v_ap', target: 'v_cph', medium: 'wireless' }
+                ]
+            },
+            warehouse: {
+                nodes: [
+                    { id: 'wh_net', type: 'cloud',  name: 'Internet',       x: 480, y: 40,  ips: [] },
+                    { id: 'wh_rtr', type: 'router', name: 'Site Router',    x: 480, y: 150, nat: true, gw: '203.0.113.9', dns: '1.1.1.1',
+                      interfaces: [{ id: 'w', name: 'eth0', ip: '203.0.113.10/30' }, { id: 'l', name: 'eth1', ip: '10.80.0.1/24' }] },
+                    { id: 'wh_l3',  type: 'l3switch', name: 'Core L3',      x: 480, y: 270, gw: '10.80.0.1', ports: '22',
+                      interfaces: [{ id: 'c', name: 'vlan1', ip: '10.80.0.2/24' }, { id: 'd', name: 'vlan10', ip: '10.80.10.1/24' }, { id: 'r', name: 'vlan20', ip: '10.80.20.1/24' }] },
+                    { id: 'wh_osw', type: 'switch', name: 'Office Switch',  x: 240, y: 390, portCount: 8, ips: [] },
+                    { id: 'wh_wms', type: 'server', name: 'WMS Server',     x: 130, y: 510, ips: ['10.80.10.10/24'], gw: '10.80.10.1', ports: '443, 8080' },
+                    { id: 'wh_ofc', type: 'pc',     name: 'Office WS',      x: 240, y: 510, ips: ['10.80.10.50/24'], gw: '10.80.10.1' },
+                    { id: 'wh_lp',  type: 'printer',name: 'Label Printer',  x: 350, y: 510, ips: ['10.80.10.80/24'], gw: '10.80.10.1', ports: '9100' },
+                    { id: 'wh_ap1', type: 'ap',     name: 'Aisle AP 1',     x: 600, y: 390, ips: [] },
+                    { id: 'wh_ap2', type: 'ap',     name: 'Aisle AP 2',     x: 800, y: 390, ips: [] },
+                    { id: 'wh_h1',  type: 'iot',    name: 'Handheld Scanner 1', x: 540, y: 520, gw: '10.80.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.80.20.101/24' }] },
+                    { id: 'wh_h2',  type: 'iot',    name: 'Handheld Scanner 2', x: 670, y: 520, gw: '10.80.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.80.20.102/24' }] },
+                    { id: 'wh_fl',  type: 'iot',    name: 'Forklift Terminal',  x: 810, y: 520, gw: '10.80.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.80.20.103/24' }] }
+                ],
+                links: [
+                    { id: 'wa1', source: 'wh_net', target: 'wh_rtr', targetIface: 'w' },
+                    { id: 'wa2', source: 'wh_rtr', target: 'wh_l3', sourceIface: 'l', targetIface: 'c' },
+                    { id: 'wa3', source: 'wh_l3', target: 'wh_osw', sourceIface: 'd', targetIface: 'p1' },
+                    { id: 'wa4', source: 'wh_osw', target: 'wh_wms', sourceIface: 'p2' },
+                    { id: 'wa5', source: 'wh_osw', target: 'wh_ofc', sourceIface: 'p3' },
+                    { id: 'wa6', source: 'wh_osw', target: 'wh_lp', sourceIface: 'p4' },
+                    { id: 'wa7', source: 'wh_l3', target: 'wh_ap1', sourceIface: 'r', targetIface: 'p1' },
+                    { id: 'wa8', source: 'wh_l3', target: 'wh_ap2', sourceIface: 'r', targetIface: 'p1' },
+                    { id: 'wa9', source: 'wh_ap1', target: 'wh_h1', medium: 'wireless' },
+                    { id: 'wa10', source: 'wh_ap1', target: 'wh_h2', medium: 'wireless' },
+                    { id: 'wa11', source: 'wh_ap2', target: 'wh_fl', medium: 'wireless' }
+                ]
+            },
+            // Two enclaves that never touch. The unclassified side reaches its own WAN
+            // and the classified side reaches its own through an inline Type 1 encryptor;
+            // there is deliberately no link, no shared subnet and no shared switch between
+            // them. Trace from either side and the other simply is not there — which is the
+            // whole point of the drawing.
+            military: {
+                nodes: [
+                    // --- Unclassified enclave -----------------------------------------
+                    { id: 'm_net',  type: 'cloud', name: 'DISA NIPRNet',       x: 400,  y: 40,  ips: ['203.0.113.17/30'] },
+                    { id: 'm_edge', type: 'edge',  name: 'Base Boundary',      x: 400,  y: 150, nat: true, gw: '203.0.113.17', dns: '1.1.1.1', ports: '443',
+                      interfaces: [{ id: 'w', name: 'wan0', ip: '203.0.113.18/30' }, { id: 'l', name: 'lan', ip: '10.90.0.1/24' }] },
+                    { id: 'm_fw',   type: 'firewall', name: 'NIPR Firewall',   x: 400,  y: 270, nat: true, gw: '10.90.0.1', dns: '1.1.1.1', ports: '443, 22',
+                      interfaces: [{ id: 'w', name: 'igb0', ip: '10.90.0.2/24' }, { id: 'a', name: 'igb1', ip: '10.90.10.1/24' }, { id: 'b', name: 'igb2', ip: '10.90.20.1/24' }, { id: 'c', name: 'igb3', ip: '10.90.30.1/24' }] },
+                    { id: 'm_hqsw', type: 'switch', name: 'HQ Switch',         x: 140,  y: 390, portCount: 24, ips: [] },
+                    { id: 'm_hq1',  type: 'pc',     name: 'Command WS',        x: 40,   y: 520, ips: ['10.90.10.50/24'], gw: '10.90.10.1' },
+                    { id: 'm_hq2',  type: 'pc',     name: 'Admin WS',          x: 140,  y: 520, ips: ['10.90.10.51/24'], gw: '10.90.10.1' },
+                    { id: 'm_c2',   type: 'server', name: 'Ops / C2 Server',   x: 240,  y: 520, ips: ['10.90.10.10/24'], gw: '10.90.10.1', ports: '443, 22' },
+                    { id: 'm_lgsw', type: 'switch', name: 'Logistics Switch',  x: 400,  y: 390, portCount: 8, ips: [] },
+                    { id: 'm_log',  type: 'server', name: 'Logistics Server',  x: 360,  y: 520, ips: ['10.90.20.10/24'], gw: '10.90.20.1', ports: '443' },
+                    { id: 'm_prn',  type: 'printer', name: 'Logistics Printer', x: 460, y: 520, ips: ['10.90.20.80/24'], gw: '10.90.20.1', ports: '9100' },
+                    { id: 'm_scsw', type: 'switch', name: 'Perimeter Switch',  x: 680,  y: 390, portCount: 16, ips: [] },
+                    { id: 'm_gate', type: 'custom', name: 'Gate Access Control', x: 580, y: 520, ips: ['10.90.30.20/24'], gw: '10.90.30.1', ports: '443' },
+                    { id: 'm_cm1',  type: 'camera', name: 'Perimeter Cam N',   x: 680,  y: 520, ips: ['10.90.30.91/24'], gw: '10.90.30.1', ports: '554' },
+                    { id: 'm_cm2',  type: 'camera', name: 'Perimeter Cam S',   x: 780,  y: 520, ips: ['10.90.30.92/24'], gw: '10.90.30.1', ports: '554' },
+                    { id: 'm_ap',   type: 'ap',     name: 'Motor Pool Wi-Fi',  x: 900,  y: 390, ips: [] },
+                    { id: 'm_hh',   type: 'iot',    name: 'Motor Pool Handheld', x: 900, y: 520, gw: '10.90.30.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.90.30.101/24' }] },
+
+                    // --- Classified enclave: no path to anything above -----------------
+                    { id: 'm_snet', type: 'cloud', name: 'DISA SIPRNet',       x: 1260, y: 40,  ips: ['198.51.100.17/30'] },
+                    // ct = ciphertext (black) side, pt = plaintext (red) side.
+                    { id: 'm_tac',  type: 'vpn',   name: 'TACLANE (Type 1 INE)', x: 1260, y: 150, gw: '198.51.100.17', ports: '500, 4500',
+                      interfaces: [{ id: 'ct', name: 'ct', ip: '198.51.100.18/30' }, { id: 'pt', name: 'pt', ip: '10.91.0.1/24' }] },
+                    { id: 'm_scif', type: 'switch', name: 'SCIF Switch',       x: 1260, y: 270, portCount: 8, ips: [] },
+                    { id: 'm_sw1',  type: 'pc',     name: 'SIPR WS 1',         x: 1160, y: 400, ips: ['10.91.0.50/24'], gw: '10.91.0.1' },
+                    { id: 'm_sw2',  type: 'pc',     name: 'SIPR WS 2',         x: 1260, y: 400, ips: ['10.91.0.51/24'], gw: '10.91.0.1' },
+                    { id: 'm_ssrv', type: 'server', name: 'Classified Server', x: 1360, y: 400, ips: ['10.91.0.10/24'], gw: '10.91.0.1', ports: '445' }
+                ],
+                links: [
+                    { id: 'ml1', source: 'm_net', target: 'm_edge', targetIface: 'w' },
+                    { id: 'ml2', source: 'm_edge', target: 'm_fw', sourceIface: 'l', targetIface: 'w' },
+                    // Building-to-building backbone runs on fibre.
+                    { id: 'ml3', source: 'm_fw', target: 'm_hqsw', sourceIface: 'a', targetIface: 'p1', medium: 'fiber' },
+                    { id: 'ml4', source: 'm_hqsw', target: 'm_hq1', sourceIface: 'p2' },
+                    { id: 'ml5', source: 'm_hqsw', target: 'm_hq2', sourceIface: 'p3' },
+                    { id: 'ml6', source: 'm_hqsw', target: 'm_c2', sourceIface: 'p4' },
+                    { id: 'ml7', source: 'm_fw', target: 'm_lgsw', sourceIface: 'b', targetIface: 'p1', medium: 'fiber' },
+                    { id: 'ml8', source: 'm_lgsw', target: 'm_log', sourceIface: 'p2' },
+                    { id: 'ml9', source: 'm_lgsw', target: 'm_prn', sourceIface: 'p3' },
+                    { id: 'ml10', source: 'm_fw', target: 'm_scsw', sourceIface: 'c', targetIface: 'p1', medium: 'fiber' },
+                    { id: 'ml11', source: 'm_scsw', target: 'm_gate', sourceIface: 'p2' },
+                    { id: 'ml12', source: 'm_scsw', target: 'm_cm1', sourceIface: 'p3' },
+                    { id: 'ml13', source: 'm_scsw', target: 'm_cm2', sourceIface: 'p4' },
+                    { id: 'ml14', source: 'm_scsw', target: 'm_ap', sourceIface: 'p5', targetIface: 'p1' },
+                    { id: 'ml15', source: 'm_ap', target: 'm_hh', medium: 'wireless' },
+
+                    { id: 'ml16', source: 'm_snet', target: 'm_tac', targetIface: 'ct' },
+                    { id: 'ml17', source: 'm_tac', target: 'm_scif', sourceIface: 'pt', targetIface: 'p1', medium: 'fiber' },
+                    { id: 'ml18', source: 'm_scif', target: 'm_sw1', sourceIface: 'p2' },
+                    { id: 'ml19', source: 'm_scif', target: 'm_sw2', sourceIface: 'p3' },
+                    { id: 'ml20', source: 'm_scif', target: 'm_ssrv', sourceIface: 'p4' }
+                ]
+            },
+            errors: commonErrorsTemplate(620, 380)
         };
+
+        // Menu copy for the library tabs. Order here is the order shown; the key must
+        // match templatesData / SNIPPETS.
+        const TEMPLATE_META = [
+            { key: 'house',      icon: '🏠', name: 'Smart Home',      blurb: 'Router, Wi-Fi and a handful of devices' },
+            { key: 'hospital',   icon: '🏥', name: 'Hospital',        blurb: 'Clinical VLANs, PACS and modalities' },
+            { key: 'imaging',    icon: '🩻', name: 'Imaging Centre',  blurb: 'Modalities → PACS → VNA, teleradiology over VPN' },
+            { key: 'bank',       icon: '🏦', name: 'Bank Branch',     blurb: 'Segmented cardholder and staff zones' },
+            { key: 'datacenter', icon: '🏢', name: 'Data Centre',     blurb: 'Spine/leaf fabric with server pods' },
+            { key: 'campus',     icon: '🎓', name: 'Corporate Campus', blurb: 'Multi-building core with wireless' },
+            { key: 'retail',     icon: '🛒', name: 'Retail POS',      blurb: 'Tills, back office and guest Wi-Fi' },
+            { key: 'hotel',      icon: '🏨', name: 'Hotel',           blurb: 'Guest Wi-Fi, PMS, IPTV and door locks' },
+            { key: 'warehouse',  icon: '📦', name: 'Warehouse',       blurb: 'Aisle APs, handheld scanners and a WMS' },
+            { key: 'factory',    icon: '🏭', name: 'Smart Factory',   blurb: 'OT/IT split with PLCs and SCADA' },
+            { key: 'military',   icon: '🪖', name: 'Military Base',   blurb: 'Air-gapped NIPR and SIPR enclaves, Type 1 crypto' },
+            { key: 'vessel',     icon: '🚢', name: 'Vessel',          blurb: 'Satellite uplink, bridge, engine room, crew' },
+            { key: 'studio',     icon: '🎬', name: 'Media Studio',    blurb: '10G edit bays and a passthrough render node' },
+            { key: 'callcenter', icon: '📞', name: 'Call Center',     blurb: 'PBX, agent phones and workstations' },
+            { key: 'showcase',   icon: '🧩', name: 'Full Showcase',   blurb: 'Every node type, medium and feature at once' },
+            { key: 'errors',     icon: '🚑', name: 'Common Errors',   blurb: 'Broken on purpose — six faults to find' }
+        ];
+
+        const SNIPPET_META = [
+            { key: 'dicom',        icon: '🩻', name: 'DICOM Imaging',   blurb: 'Modalities → PACS' },
+            { key: 'dmz',          icon: '🛡️', name: 'DMZ',             blurb: 'Firewall + two zones' },
+            { key: 'dcpod',        icon: '🗄️', name: 'DC Pod',          blurb: 'L3 + servers, VM, container' },
+            { key: 'webfarm',      icon: '🌐', name: 'Web Farm',        blurb: 'Load balancer + 3 servers' },
+            { key: 'k8s',          icon: '☸️', name: 'Kubernetes',      blurb: 'Ingress, control plane, workers' },
+            { key: 'homelab',      icon: '🧪', name: 'Homelab',         blurb: 'Hypervisor, VMs and a NAS' },
+            { key: 'vlan',         icon: '🔀', name: 'VLAN Segment',    blurb: 'Switch + 3 hosts' },
+            { key: 'wifi',         icon: '📶', name: 'Wireless Cell',   blurb: 'AP + 3 associated clients' },
+            { key: 'iotseg',       icon: '🔌', name: 'Isolated IoT',    blurb: 'Firewall + AP + guest devices' },
+            { key: 'voip',         icon: '📞', name: 'VoIP',            blurb: 'PBX, switch and phones' },
+            { key: 'surveillance', icon: '📹', name: 'Surveillance',    blurb: 'NVR + PoE switch + 3 cameras' },
+            { key: 'storage',      icon: '💽', name: 'Storage',         blurb: 'NAS + backup target' },
+            { key: 'mgmt',         icon: '🛠️', name: 'Management',      blurb: 'Monitoring, syslog, jump host' },
+            { key: 'branch',       icon: '🏢', name: 'Branch Office',   blurb: 'Router, LAN and a phone' },
+            { key: 'vpnsite',      icon: '🔒', name: 'VPN Site-to-Site', blurb: 'Tunnel between two sites' },
+            { key: 'hapair',       icon: '⚖️', name: 'HA Firewall Pair', blurb: 'Primary + standby' },
+            { key: 'errors',       icon: '🚑', name: 'Common Errors',   blurb: 'ARP flux, L2 loop, Wi-Fi on eth0…' }
+        ];
 
         const lZones = document.getElementById('layer-zones'), lLinks = document.getElementById('layer-links'), lNodes = document.getElementById('layer-nodes');
         let isDraggingCanvas = false, isDraggingNode = false, draggedNode = null, dragOffset = { x: 0, y: 0 }, lastMouse = { x: 0, y: 0 };
@@ -1050,6 +1726,156 @@
             };
         }
 
+        // Two interfaces on one subnet make the Linux weak host model answer ARP for
+        // both NICs (ARP flux). If they also land in the same broadcast domain, the
+        // switch sees one MAC on two ports and flaps its CAM table — which is what
+        // breaks outbound ARP while established TCP sessions keep working.
+        function evaluateMultiHoming(node) {
+            if (isDumbDevice(node)) {
+                return { level: 'info', text: 'L2 backplane nodes do not hold IPs to duplicate.' };
+            }
+
+            const addressed = getInterfaces(node)
+                .map((iface) => ({ iface, parsed: parseValidCIDR(iface.ip) }))
+                .filter((entry) => entry.parsed);
+
+            const byNet = new Map();
+            addressed.forEach(({ iface, parsed }) => {
+                if (!byNet.has(parsed.networkStr)) byNet.set(parsed.networkStr, []);
+                byNet.get(parsed.networkStr).push(iface);
+            });
+
+            const duplicated = [...byNet.entries()].filter(([, list]) => list.length > 1);
+            if (!duplicated.length) {
+                return { level: 'good', text: 'Each interface sits on its own subnet.' };
+            }
+
+            for (const [networkStr, list] of duplicated) {
+                const names = list.map((i) => i.name).join(' + ');
+                const segments = list
+                    .map((iface) => {
+                        const link = linkOnIface(node.id, iface.id);
+                        return link ? segmentKeyOf(link, node.id) : null;
+                    })
+                    .filter(Boolean);
+
+                const sameSegment = segments.some((seg, idx) => segments.indexOf(seg) !== idx);
+                if (sameSegment) {
+                    return {
+                        level: 'bad',
+                        text: `MAC flapping: ${names} both sit on ${networkStr} in the same broadcast domain. The switch sees this MAC on two ports and rewrites its CAM table, so new outbound ARP gets dropped while existing TCP sessions survive. Fix: unplug one, set arp_ignore=1 / arp_announce=2, or bond the NICs.`
+                    };
+                }
+            }
+
+            const [networkStr, list] = duplicated[0];
+            return {
+                level: 'warn',
+                text: `ARP flux: ${list.map((i) => i.name).join(' + ')} share subnet ${networkStr}. The kernel answers ARP for these IPs on both NICs (weak host model). They reach different broadcast domains, so switches will not flap — but set arp_ignore=1 / arp_announce=2 to bind ARP to its own interface.`
+            };
+        }
+
+        // Physical plausibility of what is plugged in where.
+        function evaluatePorts(node) {
+            const adjacent = linksAtNode(node.id);
+            if (!adjacent.length) {
+                return { level: 'info', text: 'No links attached.' };
+            }
+
+            const unbound = adjacent.filter((l) => !ifaceIdOn(l, node.id));
+            if (unbound.length) {
+                return { level: 'warn', text: `${unbound.length} link(s) are not bound to an interface. Select the link and pick a port.` };
+            }
+
+            // A switch port or a host NIC is a physical socket that takes one cable. A
+            // router's L3 interface is a subnet gateway, and diagrams routinely hang
+            // several hosts off one — the switch is simply not drawn. Only complain
+            // about the former.
+            const isSocket = (ifaceId) => hasPortGrid(node) ? /^p\d+$/.test(ifaceId) : !isRoutingDevice(node.type);
+            const usage = new Map();
+            adjacent.forEach((link) => {
+                if (!isExclusiveLink(link)) return; // radios, tunnels and bridges share
+                const id = ifaceIdOn(link, node.id);
+                if (!isSocket(id)) return;
+                usage.set(id, (usage.get(id) || 0) + 1);
+            });
+            const doubled = [...usage.entries()].filter(([, count]) => count > 1);
+            if (doubled.length) {
+                const names = doubled.map(([id]) => ifaceLabel(node, id)).join(', ');
+                return { level: 'bad', text: `Two cables on one port: ${names}. A physical port carries one link.` };
+            }
+
+            const known = new Set(getInterfaces(node).map((i) => i.id));
+            const orphaned = adjacent.filter((l) => !known.has(ifaceIdOn(l, node.id)));
+            if (orphaned.length) {
+                return { level: 'bad', text: `${orphaned.length} link(s) land on interfaces this node no longer has. Rebind them or raise the port count.` };
+            }
+
+            if (hasPortGrid(node)) {
+                // Count sockets only. An AP's radio is not part of the faceplate, and its
+                // clients must not read as cables in a port.
+                const total = portCountOf(node);
+                const used = new Set(adjacent.map((l) => ifaceIdOn(l, node.id)).filter((id) => /^p\d+$/.test(id))).size;
+                if (used > total) {
+                    return { level: 'bad', text: `${used} cables on a ${total}-port ${node.type}. Raise the port count or add a switch.` };
+                }
+                const clients = adjacent.filter((l) => ifaceIsWireless(ifaceOn(node, ifaceIdOn(l, node.id)))).length;
+                const radioNote = clients ? `, ${clients} wireless client${clients === 1 ? '' : 's'}` : '';
+                return { level: 'good', text: `${used} of ${total} ports in use${radioNote}.` };
+            }
+
+            return { level: 'good', text: `${adjacent.length} link(s) on distinct interfaces.` };
+        }
+
+        // Radio and copper are not interchangeable: a Wi-Fi association cannot originate
+        // from eth0/eno1/enp1s0, and a cable cannot terminate on a radio.
+        function evaluateRadio(node) {
+            const problems = [];
+            linksAtNode(node.id).forEach((link) => {
+                const iface = ifaceOn(node, ifaceIdOn(link, node.id));
+                if (!iface) return;
+                const medium = effectiveMedium(link);
+                if (medium === 'vpn') return; // an overlay rides whatever is underneath
+                const peer = getNode(link.source === node.id ? link.target : link.source);
+                const name = peer?.name || 'peer';
+                const wireless = ifaceIsWireless(iface);
+
+                if (medium === 'wireless' && !wireless) problems.push(`${iface.name} is wired but carries the Wi-Fi link to ${name}`);
+                else if (medium !== 'wireless' && wireless) problems.push(`${iface.name} is a radio but carries the ${medium} cable to ${name}`);
+            });
+
+            if (problems.length) {
+                return { level: 'bad', text: `${problems.join('; ')}. Wi-Fi needs a wireless NIC (wlan0, wlp1s0); cables need an Ethernet port.` };
+            }
+            const radios = getInterfaces(node).filter(ifaceIsWireless).length;
+            if (!linksAtNode(node.id).length) return { level: 'info', text: 'No links attached.' };
+            return { level: 'good', text: radios ? `Links match their interface type (${radios} radio${radios === 1 ? '' : 's'}).` : 'Links match their interface type.' };
+        }
+
+        // Interface-level problems only — this is what the canvas badge reflects, so it
+        // deliberately ignores gateway/DNS/trace concerns that are not about the NICs.
+        function interfaceIssues(node) {
+            if (!node) return [];
+            const issues = [];
+
+            const invalid = (node.interfaces || []).filter((iface) => iface.ip && !parseValidCIDR(iface.ip));
+            if (invalid.length) {
+                issues.push({ label: 'Interfaces', level: 'bad', text: `Invalid CIDR on: ${invalid.map((i) => i.name || 'interface').join(', ')}` });
+            }
+
+            [['Multi-Homing', evaluateMultiHoming(node)], ['Ports', evaluatePorts(node)], ['Radio', evaluateRadio(node)]].forEach(([label, result]) => {
+                if (result.level === 'bad' || result.level === 'warn') issues.push({ label, ...result });
+            });
+
+            return issues;
+        }
+
+        function nodeSeverity(node) {
+            const issues = interfaceIssues(node);
+            if (!issues.length) return null;
+            return issues.some((i) => i.level === 'bad') ? 'bad' : 'warn';
+        }
+
         function evaluateGateway(node) {
             if (isDumbDevice(node)) {
                 return {
@@ -1220,6 +2046,9 @@
         
             const checks = [
                 ['Interfaces', evaluateInterfaces(node)],
+                ['Multi-Homing', evaluateMultiHoming(node)],
+                ['Ports', evaluatePorts(node)],
+                ['Radio', evaluateRadio(node)],
                 ['Gateway', evaluateGateway(node)],
                 ['DNS', evaluateDns(node)],
                 ['Trace Port', evaluateTracePort(node)]
@@ -1461,24 +2290,49 @@
             Object.entries(ipMap).forEach(([ip, names]) => {
                 if (names.length > 1) errors.push(`IP Conflict: ${ip} shared by ${names.join(', ')}.`);
             });
-        
+
+            // Interface-level problems, surfaced globally so you do not have to click
+            // each node to find the one that is flapping.
+            state.nodes.forEach((node) => {
+                interfaceIssues(node).forEach((issue) => errors.push(`${node.name}: ${issue.text}`));
+            });
+
+            // Both ends of a cable are one wire: if each end holds an IP, they must agree.
+            state.links.forEach((link) => {
+                const src = getNode(link.source), tgt = getNode(link.target);
+                if (!src || !tgt || effectiveMedium(link) === 'vpn') return;
+                const a = parseValidCIDR(ifaceOn(src, link.sourceIface)?.ip);
+                const b = parseValidCIDR(ifaceOn(tgt, link.targetIface)?.ip);
+                if (!a || !b || a.networkStr === b.networkStr) return;
+                errors.push(`${src.name} (${ifaceLabel(src, link.sourceIface)}) and ${tgt.name} (${ifaceLabel(tgt, link.targetIface)}) are cabled together but sit on different subnets (${a.networkStr} vs ${b.networkStr}).`);
+            });
+
+            // An L2 loop is the sibling failure to MAC flapping: a cycle through dumb
+            // switches floods broadcasts forever unless STP is running.
+            const parent = {};
+            const find = (id) => { while (parent[id] !== id) { parent[id] = parent[parent[id]]; id = parent[id]; } return id; };
+            state.nodes.forEach((n) => { parent[n.id] = n.id; });
+            state.links.forEach((link) => {
+                const src = getNode(link.source), tgt = getNode(link.target);
+                if (!src || !tgt || effectiveMedium(link) === 'vpn') return;
+                if (!isDumbDevice(src) || !isDumbDevice(tgt)) return; // only forwarding devices close a loop
+                const rootA = find(src.id), rootB = find(tgt.id);
+                if (rootA === rootB) errors.push(`L2 loop: the link between ${src.name} and ${tgt.name} closes a switching loop. Broadcast storm risk unless STP is enabled.`);
+                else parent[rootA] = rootB;
+            });
+
+            const pill = document.getElementById('conflictPill');
+            const hidden = !!state.settings.alertsHidden;
+
             if (errors.length) {
                 msgList.innerHTML = errors.map((e) => `<li>${escapeHtml(e)}</li>`).join('');
-                function cloneData(data) { return JSON.parse(JSON.stringify(data)); }
-
-                function escapeHtml(value) {
-                    return String(value ?? '')
-                        .replaceAll('&', '&amp;')
-                        .replaceAll('<', '&lt;')
-                        .replaceAll('>', '&gt;')
-                        .replaceAll('"', '&quot;')
-                        .replaceAll("'", '&#039;');
-                }
-
-                function getNode(id) { return state.nodes.find((n) => n.id === id) || null; }
-                alertBox.classList.remove('hidden');
+                document.getElementById('conflictPillCount').textContent = String(errors.length);
+                alertBox.classList.toggle('hidden', hidden);
+                pill.classList.toggle('hidden', !hidden);
             } else {
+                msgList.innerHTML = ''; // otherwise the last run's errors linger in the hidden panel
                 alertBox.classList.add('hidden');
+                pill.classList.add('hidden');
             }
         }
 
@@ -1566,13 +2420,14 @@
                 const src = getNode(link.source), tgt = getNode(link.target);
                 if (!src || !tgt) return;
 
-                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                const geo = linkGeometry(link);
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                line.setAttribute('fill', 'none');
+                applyLinkGeometry(line, geo);
                 line.setAttribute('id', `ui-link-${link.id}`);
-                line.setAttribute('x1', src.x); line.setAttribute('y1', src.y); line.setAttribute('x2', tgt.x); line.setAttribute('y2', tgt.y);
 
                 const isSelected = state.selectedId === link.id && state.selectedType === 'link';
-                const isWireless = src.type === 'ap' || tgt.type === 'ap';
-                const medium = link.medium || (isWireless ? 'wireless' : 'utp');
+                const medium = effectiveMedium(link, src, tgt);
 
                 let defaultColor = '#94a3b8'; // utp
                 let dashArray = null;
@@ -1586,7 +2441,12 @@
                 if (link.attachment === 'passthrough') { defaultColor = '#a855f7'; dashArray = '4 4'; }
 
                 if (reach && reach.reachableLinks.has(link.id)) {
-                    line.setAttribute('stroke', '#f59e0b'); line.setAttribute('stroke-width', '3'); line.setAttribute('class', 'animate-flow cursor-pointer');
+                    // Amber still means "reachable"; the flow pattern keeps the medium
+                    // readable while tracing, which the old single animation lost.
+                    line.setAttribute('stroke', '#f59e0b');
+                    line.setAttribute('stroke-width', medium === 'fiber' ? '3.5' : medium === 'wireless' ? '2.5' : '3');
+                    line.setAttribute('stroke-dasharray', FLOW_DASH[medium] || FLOW_DASH.utp);
+                    line.setAttribute('class', `${FLOW_CLASS[medium] || FLOW_CLASS.utp} cursor-pointer`);
                 } else {
                     line.setAttribute('stroke', isSelected ? '#eab308' : defaultColor);
                     line.setAttribute('stroke-width', isSelected ? '3' : baseWidth);
@@ -1595,6 +2455,75 @@
                 }
                 line.addEventListener('mousedown', (event) => { event.stopPropagation(); select(link.id, 'link'); });
                 lLinks.appendChild(line);
+
+                // Radio does not march down a wire, so a traced wireless link emits ")))"
+                // arcs that ride the link itself — textPath rotates each glyph to follow
+                // the path, so they stay square-on to the direction of travel even on a
+                // bowed run.
+                if (reach && reach.reachableLinks.has(link.id) && medium === 'wireless') {
+                    const waves = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    waves.setAttribute('class', 'flow-wave');
+                    waves.setAttribute('font-family', 'monospace');
+                    waves.setAttribute('font-size', '13');
+                    waves.setAttribute('font-weight', '700');
+                    waves.setAttribute('fill', '#f59e0b');
+                    waves.setAttribute('dominant-baseline', 'middle');
+
+                    const path = document.createElementNS('http://www.w3.org/2000/svg', 'textPath');
+                    path.setAttribute('href', `#ui-link-${link.id}`);
+
+                    // Measure the glyph advance once rather than assuming it: the loop has
+                    // to close on exactly one repeat or the arcs visibly jump. It only
+                    // depends on the font and size, both fixed, so every later link reuses
+                    // it and skips the layout flush entirely.
+                    const total = line.getTotalLength();
+                    const reps = waveAdvance ? Math.ceil(total / waveAdvance) + 2 : Math.max(3, Math.ceil(total / 8) + 3);
+                    path.textContent = WAVE_UNIT.repeat(reps);
+                    waves.appendChild(path);
+                    lLinks.appendChild(waves);
+
+                    if (!waveAdvance) waveAdvance = waves.getComputedTextLength() / reps;
+                    const advance = waveAdvance;
+                    if (advance > 0) {
+                        // Run from -advance to 0: starting at 0 would leave a bare gap at
+                        // the head of the link for one whole cycle.
+                        const anim = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
+                        anim.setAttribute('attributeName', 'startOffset');
+                        anim.setAttribute('from', String(-advance));
+                        anim.setAttribute('to', '0');
+                        anim.setAttribute('dur', '1.2s');
+                        anim.setAttribute('repeatCount', 'indefinite');
+                        path.appendChild(anim);
+                    }
+                }
+
+                // Port labels would bury the canvas if always on, so they ride the selection.
+                if (isSelected) {
+                    // Place labels a fixed distance out rather than a fixed fraction, so
+                    // they clear the node's glyph and IP text on a short link without
+                    // drifting to the midpoint on a long one.
+                    const span = Math.hypot(tgt.x - src.x, tgt.y - src.y) || 1;
+                    const off = Math.min(0.42, Math.max(0.15, 66 / span));
+
+                    [[src, link.sourceIface, off], [tgt, link.targetIface, 1 - off]].forEach(([node, ifaceId, t]) => {
+                        const name = ifaceId ? ifaceLabel(node, ifaceId) : 'unbound';
+                        const at = geo.pointAt(t);
+                        const portLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                        portLabel.setAttribute('x', String(at.x));
+                        portLabel.setAttribute('y', String(at.y));
+                        portLabel.setAttribute('text-anchor', 'middle');
+                        portLabel.setAttribute('font-size', '8');
+                        portLabel.setAttribute('font-family', 'monospace');
+                        portLabel.setAttribute('font-weight', '700');
+                        portLabel.setAttribute('fill', ifaceId ? '#a16207' : '#dc2626');
+                        portLabel.setAttribute('paint-order', 'stroke');
+                        portLabel.setAttribute('stroke', '#ffffff');
+                        portLabel.setAttribute('stroke-width', '3');
+                        portLabel.textContent = name;
+                        portLabel.style.pointerEvents = 'none';
+                        lLinks.appendChild(portLabel);
+                    });
+                }
             });
 
             // 3. Render Nodes
@@ -1607,6 +2536,7 @@
                 const isLinkSource = state.linkSourceId === node.id;
                 const isReachable = reach && reach.reachableNodes.has(node.id);
                 const isInactiveTraceNode = reach && !isReachable;
+                const severity = nodeSeverity(node);
 
                 let classes = state.linkSourceId ? (isLinkSource ? 'linking-glow cursor-crosshair' : 'cursor-crosshair') : 'cursor-grab active:cursor-grabbing';
                 if (isInactiveTraceNode) classes += ' fade-inactive';
@@ -1617,7 +2547,9 @@
 
                 if (isLinkSource) { rect.setAttribute('fill', '#fff7ed'); rect.setAttribute('stroke', '#ea580c'); rect.setAttribute('stroke-width', '2'); } 
                 else if (isSelected) { rect.setAttribute('fill', '#fefce8'); rect.setAttribute('stroke', '#eab308'); rect.setAttribute('stroke-width', '2'); } 
-                else if (isReachable) { rect.setAttribute('fill', '#fffbeb'); rect.setAttribute('stroke', '#fcd34d'); rect.setAttribute('stroke-width', '2.5'); } 
+                else if (isReachable) { rect.setAttribute('fill', '#fffbeb'); rect.setAttribute('stroke', '#fcd34d'); rect.setAttribute('stroke-width', '2.5'); }
+                else if (severity === 'bad') { rect.setAttribute('fill', '#fef2f2'); rect.setAttribute('stroke', '#dc2626'); rect.setAttribute('stroke-width', '2'); }
+                else if (severity === 'warn') { rect.setAttribute('fill', '#fffbeb'); rect.setAttribute('stroke', '#d97706'); rect.setAttribute('stroke-width', '2'); }
                 else { rect.setAttribute('fill', '#ffffff'); rect.setAttribute('stroke', '#cbd5e1'); rect.setAttribute('stroke-width', '1.5'); }
 
                 if (isVirtualType(node.type)) rect.setAttribute('stroke-dasharray', '4 3');
@@ -1632,6 +2564,33 @@
                 label.setAttribute('text-anchor', 'middle'); label.setAttribute('y', '36'); label.setAttribute('font-size', '10');
                 label.setAttribute('font-weight', '600'); label.setAttribute('fill', '#334155'); label.textContent = node.name; label.style.pointerEvents = 'none';
                 g.appendChild(label);
+
+                // Badge rides on top of selection/trace styling, so a flapping node stays
+                // visible even while it is selected or lit up by a trace.
+                if (severity) {
+                    const issues = interfaceIssues(node);
+                    const badge = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                    badge.setAttribute('transform', 'translate(19, -19)');
+
+                    const disc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    disc.setAttribute('r', '7.5');
+                    disc.setAttribute('fill', severity === 'bad' ? '#dc2626' : '#d97706');
+                    disc.setAttribute('stroke', '#ffffff');
+                    disc.setAttribute('stroke-width', '1.5');
+                    badge.appendChild(disc);
+
+                    const mark = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    mark.setAttribute('text-anchor', 'middle'); mark.setAttribute('y', '3.5');
+                    mark.setAttribute('font-size', '10'); mark.setAttribute('font-weight', '900'); mark.setAttribute('fill', '#ffffff');
+                    mark.textContent = '!';
+                    badge.appendChild(mark);
+
+                    const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+                    tip.textContent = issues.map((i) => `${i.label}: ${i.text}`).join('\n\n');
+                    badge.appendChild(tip); // needs pointer events for the tooltip; clicks bubble to the node
+
+                    g.appendChild(badge);
+                }
 
                 if (isLinkSource) {
                     const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -1666,12 +2625,15 @@
                     event.stopPropagation();
                     if (state.linkSourceId) {
                         if (state.linkSourceId !== node.id) {
-                            const duplicate = state.links.find((l) => (l.source === state.linkSourceId && l.target === node.id) || (l.source === node.id && l.target === state.linkSourceId));
-                            if (!duplicate) { 
-                                const sNode = getNode(state.linkSourceId);
-                                const isVirtual = isVirtualType(sNode.type) || isVirtualType(node.type);
-                                state.links.push({ id: `l_${Date.now()}`, source: state.linkSourceId, target: node.id, attachment: isVirtual ? 'bridged' : null });
-                            }
+                            const sNode = getNode(state.linkSourceId);
+                            // A second cable between the same pair is legitimate (redundant
+                            // NICs, LAG), so only an identical port-to-port run is a duplicate.
+                            const link = { id: nextId('l'), source: state.linkSourceId, target: node.id, attachment: (isVirtualType(sNode.type) || isVirtualType(node.type)) ? 'bridged' : null };
+                            bindLink(link);
+                            const duplicate = state.links.some((l) =>
+                                (l.source === link.source && l.target === link.target && l.sourceIface === link.sourceIface && l.targetIface === link.targetIface) ||
+                                (l.source === link.target && l.target === link.source && l.sourceIface === link.targetIface && l.targetIface === link.sourceIface));
+                            if (!duplicate) state.links.push(link);
                         }
                         state.linkSourceId = null; save();
 renderCanvasOnly();
@@ -1692,24 +2654,78 @@ renderNodeDiagnostics(node);
             validateTopology();
         };
 
+        // Switch/AP faceplate: how many ports the device has, and what is in them.
+        // Ports stay implicit unless one is given a name or IP, so a 48-port switch
+        // costs one number in the URL hash rather than 48 objects.
+        function renderFaceplate(node, container) {
+            const wrap = document.createElement('div');
+            wrap.className = 'mb-2';
+
+            const head = document.createElement('div');
+            head.className = 'flex items-center justify-between mb-1';
+            head.innerHTML = '<span class="text-[9px] font-bold text-slate-500 uppercase">Physical Ports</span>';
+
+            const count = document.createElement('input');
+            count.type = 'number'; count.min = '0'; count.max = '96';
+            count.value = String(portCountOf(node));
+            count.className = 'w-14 border border-slate-300 rounded px-1 py-0.5 text-[10px] font-mono text-right focus:outline-blue-500';
+            count.oninput = (e) => {
+                const next = parseInt(e.target.value, 10);
+                if (!Number.isFinite(next) || next < 0) return;
+                node.portCount = Math.min(next, 96);
+                save(); renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node);
+            };
+            head.appendChild(count);
+            wrap.appendChild(head);
+
+            const grid = document.createElement('div');
+            grid.className = 'flex flex-wrap gap-1';
+            const ports = getInterfaces(node).filter((i) => /^p\d+$/.test(i.id));
+
+            if (!ports.length) {
+                grid.innerHTML = '<span class="text-[9px] text-slate-400 italic">No ports. Raise the count above.</span>';
+            }
+
+            ports.forEach((port) => {
+                const link = linkOnIface(node.id, port.id);
+                const neighbour = link ? getNode(link.source === node.id ? link.target : link.source) : null;
+                const chip = document.createElement('button');
+                chip.className = 'w-6 h-6 rounded border text-[9px] font-mono font-bold transition ' + (
+                    neighbour ? 'bg-emerald-50 border-emerald-400 text-emerald-700 hover:border-emerald-600'
+                        : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400');
+                chip.textContent = port.name || port.id;
+                chip.title = neighbour ? `Port ${port.name} → ${neighbour.name}` : `Port ${port.name} — free`;
+                if (link) chip.onclick = () => select(link.id, 'link'); // jump to the cable in this port
+                grid.appendChild(chip);
+            });
+
+            wrap.appendChild(grid);
+            container.appendChild(wrap);
+        }
+
         function renderSidebarData(node) {
             const ifCont = document.getElementById('ifaceListContainer'); ifCont.innerHTML = '';
             node.interfaces = node.interfaces || [];
-            if (!node.interfaces.length) { ifCont.innerHTML = '<span class="text-[10px] text-slate-400 italic">No interfaces defined.</span>'; }
+
+            if (hasPortGrid(node)) renderFaceplate(node, ifCont);
+
+            if (!node.interfaces.length) {
+                if (!hasPortGrid(node)) ifCont.innerHTML = '<span class="text-[10px] text-slate-400 italic">No interfaces defined.</span>';
+            }
             else {
                 node.interfaces.forEach((iface, i) => {
-                    const div = document.createElement('div'); div.className = 'flex items-center gap-1';
+                    const div = document.createElement('div'); div.className = 'flex items-center gap-1 min-w-0';
                     const nameInp = document.createElement('input'); nameInp.type = 'text'; nameInp.value = iface.name; nameInp.placeholder = 'eth0';
-                    nameInp.className = 'w-1/3 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500 bg-slate-50';
+                    nameInp.className = 'w-[74px] shrink-0 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500 bg-slate-50';
                     nameInp.addEventListener('input', (e) => { node.interfaces[i].name = e.target.value; save();
                     renderCanvasOnly();
                     renderNodeDiagnostics(node); });
 
                     const ipInp = document.createElement('input'); ipInp.type = 'text'; ipInp.value = iface.ip; ipInp.placeholder = 'CIDR';
-                    ipInp.className = 'flex-1 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500';
+                    ipInp.className = 'flex-1 min-w-0 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500';
                     if (iface.ip.trim() !== '' && !parseValidCIDR(iface.ip)) ipInp.classList.add('border-red-400', 'bg-red-50');
                     const zoneLabel = document.createElement('label');
-                    zoneLabel.className = 'flex items-center gap-0.5 text-[9px] text-slate-500 font-bold cursor-pointer mx-1';
+                    zoneLabel.className = 'flex items-center gap-0.5 shrink-0 text-[9px] text-slate-500 font-bold cursor-pointer mx-1';
                     zoneLabel.title = 'Draw Subnet Zone Bubble';
                     
                     const zoneCb = document.createElement('input');
@@ -1744,7 +2760,7 @@ renderNodeDiagnostics(node);
                         renderNodeDiagnostics(node); 
                     });
 
-                    const del = document.createElement('button'); del.innerHTML = '✖'; del.className = 'text-slate-400 hover:text-red-500 px-1';
+                    const del = document.createElement('button'); del.innerHTML = '✖'; del.className = 'text-slate-400 hover:text-red-500 px-1 shrink-0';
                     del.onclick = () => {
                         node.interfaces.splice(i, 1);
                         save();
@@ -1753,9 +2769,89 @@ renderNodeDiagnostics(node);
                         renderNodeDiagnostics(node);
                     };
                     
-                    div.appendChild(nameInp); div.appendChild(ipInp); div.appendChild(zoneLabel); div.appendChild(del); ifCont.appendChild(div);
+                    // Show what is plugged into this interface, so the ARP-flux warning
+                    // can be traced back to a specific cable without hunting the canvas.
+                    const link = linkOnIface(node.id, iface.id);
+                    const peer = link ? getNode(link.source === node.id ? link.target : link.source) : null;
+                    const wire = document.createElement('button');
+                    const radio = ifaceIsWireless(iface);
+                    wire.className = 'text-[9px] shrink-0 px-0.5 ' + (peer ? 'text-slate-400 hover:text-blue-600' : 'text-slate-300 cursor-default');
+                    wire.textContent = peer ? (radio ? '📶' : '🔌') : (radio ? '📡' : '○');
+                    wire.title = peer ? `${radio ? 'Associated' : 'Linked'} to ${peer.name}` : `${radio ? 'Radio' : 'Interface'} not linked`;
+                    if (link) wire.onclick = () => select(link.id, 'link');
+
+                    div.appendChild(nameInp); div.appendChild(ipInp); div.appendChild(zoneLabel); div.appendChild(wire); div.appendChild(del); ifCont.appendChild(div);
                 });
             }
+        }
+
+        // Interface picker for a selected link: one row per end, chips for each
+        // interface. Occupied chips are marked but still selectable — conflicts are
+        // reported, not blocked, so you can draw a network to document that it is wrong.
+        function renderLinkPorts(link) {
+            const panel = document.getElementById('linkPortProps');
+            const body = document.getElementById('linkPortBody');
+            const src = getNode(link.source), tgt = getNode(link.target);
+            if (!src || !tgt) { panel.classList.add('hidden'); return; }
+
+            body.innerHTML = '';
+            [[src, tgt], [tgt, src]].forEach(([node, other]) => {
+                const key = ifaceKeyFor(link, node.id);
+                const row = document.createElement('div');
+
+                const head = document.createElement('div');
+                head.className = 'flex items-center justify-between mb-1';
+                head.innerHTML = `<span class="text-[10px] font-bold text-slate-600 truncate">${escapeHtml(node.name)}</span>`;
+
+                const addBtn = document.createElement('button');
+                addBtn.className = 'text-[9px] text-blue-600 hover:underline font-bold shrink-0 ml-1';
+                addBtn.textContent = hasPortGrid(node) ? '+ Port' : '+ NIC';
+                addBtn.onclick = () => {
+                    link[key] = createIfaceFor(node, { grow: true }).id;
+                    save(); renderCanvasOnly(); renderLinkPorts(link);
+                };
+                head.appendChild(addBtn);
+                row.appendChild(head);
+
+                const chips = document.createElement('div');
+                chips.className = 'flex flex-wrap gap-1';
+
+                const interfaces = getInterfaces(node);
+                if (!interfaces.length) {
+                    chips.innerHTML = '<span class="text-[9px] text-slate-400 italic">No interfaces — add one.</span>';
+                }
+
+                interfaces.forEach((iface) => {
+                    const selected = link[key] === iface.id;
+                    const takenBy = linksAtNode(node.id).find((l) => l.id !== link.id && ifaceIdOn(l, node.id) === iface.id && isExclusiveLink(l));
+                    const chip = document.createElement('button');
+                    chip.className = 'px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold transition ' + (
+                        selected ? 'bg-amber-100 border-amber-500 text-amber-800'
+                            : takenBy ? 'bg-slate-100 border-slate-300 text-slate-400 hover:border-slate-400'
+                                : 'bg-white border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600');
+                    chip.textContent = iface.name || iface.id;
+
+                    if (takenBy) {
+                        const neighbour = getNode(takenBy.source === node.id ? takenBy.target : takenBy.source);
+                        chip.title = `In use by ${neighbour?.name || 'another link'}`;
+                    } else if (iface.ip) {
+                        chip.title = iface.ip;
+                    }
+
+                    chip.onclick = () => {
+                        // Picking an implicit faceplate port keeps it implicit until it
+                        // needs a name or IP, so the URL hash stays small.
+                        link[key] = iface.id;
+                        save(); renderCanvasOnly(); renderLinkPorts(link);
+                    };
+                    chips.appendChild(chip);
+                });
+
+                row.appendChild(chips);
+                body.appendChild(row);
+            });
+
+            panel.classList.remove('hidden');
         }
 
         function clearPropertyInputs() {
@@ -1783,6 +2879,7 @@ renderNodeDiagnostics(node);
                 const node = getNode(id); if (!node) return;
                 nameInput.value = node.name || ''; nameInput.disabled = false; generalProps.classList.remove('hidden'); linkProps.classList.add('hidden');
                 if (document.getElementById('linkMediumProps')) document.getElementById('linkMediumProps').classList.add('hidden');
+                document.getElementById('linkPortProps').classList.add('hidden');
                 document.getElementById('propOs').value = node.os || ''; document.getElementById('propPorts').value = node.ports || ''; document.getElementById('propNotes').value = node.notes || '';
                 
                 netProps.classList.remove('hidden');
@@ -1819,10 +2916,12 @@ renderNodeDiagnostics(node);
                     document.getElementById('propAttachment').onchange = (e) => { link.attachment = e.target.value; save(); renderCanvasOnly(); };
                 } else { linkProps.classList.add('hidden'); }
 
+                renderLinkPorts(link);
+
                 const linkMediumProps = document.getElementById('linkMediumProps');
                 linkMediumProps.classList.remove('hidden');
                 document.getElementById('propMedium').value = link.medium || 'utp';
-                document.getElementById('propMedium').onchange = (e) => { link.medium = e.target.value; save(); renderCanvasOnly(); };
+                document.getElementById('propMedium').onchange = (e) => { link.medium = e.target.value; save(); renderCanvasOnly(); renderLinkPorts(link); };
             }
             renderCanvasOnly();
         }
@@ -1848,7 +2947,14 @@ renderNodeDiagnostics(node);
             x = Math.round(x / GRID_SNAP) * GRID_SNAP;
             y = Math.round(y / GRID_SNAP) * GRID_SNAP;
 
-            const node = { id: `n_${Date.now()}`, type, name: `New ${palette?.name || 'Node'}`, x, y, gw: defs.gw || '', dns: defs.dns || '', os: defs.os || '', ports: defs.ports || '', notes: '', nat: !!defs.nat, interfaces: cloneData(defs.interfaces) };
+            const node = { id: nextId('n'), type, name: `New ${palette?.name || 'Node'}`, x, y, gw: defs.gw || '', dns: defs.dns || '', os: defs.os || '', ports: defs.ports || '', notes: '', nat: !!defs.nat, interfaces: cloneData(defs.interfaces) };
+
+            // Spawned onto an AP by radio: the seed data's eth0 is the wrong hardware,
+            // so rename before it inherits an address.
+            if (connectTo && node.interfaces.length && apMediumGuess(connectTo, node) === 'wireless'
+                && !node.interfaces.some(ifaceIsWireless) && WIRED_DEFAULT_RE.test(node.interfaces[0].name || '')) {
+                node.interfaces[0].name = 'wlan0';
+            }
 
             // Subnet-aware auto-IP: when connecting into an existing subnet, hand the
             // new node the next free host address + that subnet's gateway.
@@ -1863,7 +2969,7 @@ renderNodeDiagnostics(node);
             state.nodes.push(node);
             if (connectTo && connectTo.id !== node.id) {
                 const isVirtual = isVirtualType(connectTo.type) || isVirtualType(type);
-                state.links.push({ id: `l_${Date.now()}`, source: connectTo.id, target: node.id, attachment: isVirtual ? 'bridged' : null });
+                state.links.push(bindLink({ id: nextId('l'), source: connectTo.id, target: node.id, attachment: isVirtual ? 'bridged' : null }));
             }
             select(node.id, 'node'); save();
             renderCanvasOnly();
@@ -1951,10 +3057,11 @@ renderNodeDiagnostics(node);
 
         // ---- Building-block snippets (stamped, not replacing) ----
         const SNIPPETS = {
+            errors: COMMON_ERRORS,
             dmz: { nodes: [
                 { tid: 'fw', type: 'firewall', name: 'Edge FW', dx: 0, dy: -60, ips: ['203.0.113.1/30', '10.20.0.1/24', '10.20.10.1/24'], dns: '1.1.1.1' },
-                { tid: 'sw1', type: 'switch', name: 'LAN SW', dx: -120, dy: 60, ips: [] },
-                { tid: 'sw2', type: 'switch', name: 'DMZ SW', dx: 120, dy: 60, ips: [] },
+                { tid: 'sw1', type: 'switch', name: 'LAN SW', dx: -120, dy: 60, portCount: 8, ips: [] },
+                { tid: 'sw2', type: 'switch', name: 'DMZ SW', dx: 120, dy: 60, portCount: 8, ips: [] },
                 { tid: 'srv', type: 'server', name: 'DMZ Server', dx: 120, dy: 180, ips: ['10.20.10.10/24'], gw: '10.20.10.1', ports: '80, 443' } ],
               links: [{ s: 'fw', t: 'sw1' }, { s: 'fw', t: 'sw2' }, { s: 'sw2', t: 'srv' }] },
             dcpod: { nodes: [
@@ -1965,16 +3072,16 @@ renderNodeDiagnostics(node);
                 { tid: 'vm1', type: 'vm', name: 'Worker VM', dx: 200, dy: 90, ips: ['10.30.0.14/24'], gw: '10.30.0.1' } ],
               links: [{ s: 'core', t: 's1' }, { s: 'core', t: 's2' }, { s: 'core', t: 'c1', attachment: 'bridged' }, { s: 'core', t: 'vm1', attachment: 'bridged' }] },
             vlan: { nodes: [
-                { tid: 'sw', type: 'switch', name: 'VLAN SW', dx: 0, dy: 0, ips: [] },
+                { tid: 'sw', type: 'switch', name: 'VLAN SW', dx: 0, dy: 0, portCount: 8, ips: [] },
                 { tid: 'p1', type: 'pc', name: 'Host 1', dx: -120, dy: 120, ips: ['10.40.0.51/24'], gw: '10.40.0.1' },
                 { tid: 'p2', type: 'pc', name: 'Host 2', dx: 0, dy: 120, ips: ['10.40.0.52/24'], gw: '10.40.0.1' },
                 { tid: 'p3', type: 'pc', name: 'Host 3', dx: 120, dy: 120, ips: ['10.40.0.53/24'], gw: '10.40.0.1' } ],
               links: [{ s: 'sw', t: 'p1' }, { s: 'sw', t: 'p2' }, { s: 'sw', t: 'p3' }] },
             wifi: { nodes: [
                 { tid: 'ap', type: 'ap', name: 'Access Point', dx: 0, dy: 0, ips: [] },
-                { tid: 'c1', type: 'iot', name: 'Phone', dx: -120, dy: 120, ips: ['10.50.0.101/24'], gw: '10.50.0.1' },
-                { tid: 'c2', type: 'pc', name: 'Laptop', dx: 0, dy: 120, ips: ['10.50.0.102/24'], gw: '10.50.0.1' },
-                { tid: 'c3', type: 'camera', name: 'WiFi Cam', dx: 120, dy: 120, ips: ['10.50.0.103/24'], gw: '10.50.0.1' } ],
+                { tid: 'c1', type: 'iot', name: 'Phone', dx: -120, dy: 120, gw: '10.50.0.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.50.0.101/24' }] },
+                { tid: 'c2', type: 'pc', name: 'Laptop', dx: 0, dy: 120, gw: '10.50.0.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.50.0.102/24' }] },
+                { tid: 'c3', type: 'camera', name: 'WiFi Cam', dx: 120, dy: 120, gw: '10.50.0.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.50.0.103/24' }] } ],
               links: [{ s: 'ap', t: 'c1', medium: 'wireless' }, { s: 'ap', t: 'c2', medium: 'wireless' }, { s: 'ap', t: 'c3', medium: 'wireless' }] },
             hapair: { nodes: [
                 { tid: 'f1', type: 'firewall', name: 'FW Primary', dx: -80, dy: 0, ips: ['10.0.0.2/24'], dns: '1.1.1.1' },
@@ -1994,27 +3101,27 @@ renderNodeDiagnostics(node);
                 { tid: 'h2', type: 'pc', name: 'Branch Host', dx: 150, dy: 120, ips: ['10.71.0.50/24'], gw: '10.71.0.1' } ],
               links: [{ s: 'net', t: 'g1' }, { s: 'net', t: 'g2' }, { s: 'g1', t: 'g2', medium: 'vpn' }, { s: 'g1', t: 'h1' }, { s: 'g2', t: 'h2' }] },
             voip: { nodes: [
-                { tid: 'sw', type: 'switch', name: 'Voice Switch', dx: 0, dy: -60, ips: [] },
+                { tid: 'sw', type: 'switch', name: 'Voice Switch', dx: 0, dy: -60, portCount: 8, ips: [] },
                 { tid: 'pbx', type: 'custom', name: 'PBX', dx: -130, dy: 60, ips: ['10.80.0.10/24'], gw: '10.80.0.1', ports: '5060, 5061' },
                 { tid: 'p1', type: 'voip', name: 'Phone 1', dx: 0, dy: 90, ips: ['10.80.0.61/24'], gw: '10.80.0.1', ports: '5060' },
                 { tid: 'p2', type: 'voip', name: 'Phone 2', dx: 120, dy: 90, ips: ['10.80.0.62/24'], gw: '10.80.0.1', ports: '5060' } ],
               links: [{ s: 'sw', t: 'pbx' }, { s: 'sw', t: 'p1' }, { s: 'sw', t: 'p2' }] },
             surveillance: { nodes: [
                 { tid: 'nvr', type: 'server', name: 'NVR', dx: 0, dy: -70, ips: ['10.90.0.10/24'], gw: '10.90.0.1', ports: '554, 80' },
-                { tid: 'sw', type: 'switch', name: 'PoE Switch', dx: 0, dy: 30, ips: [] },
+                { tid: 'sw', type: 'switch', name: 'PoE Switch', dx: 0, dy: 30, portCount: 8, ips: [] },
                 { tid: 'cam1', type: 'camera', name: 'Camera 1', dx: -130, dy: 150, ips: ['10.90.0.91/24'], gw: '10.90.0.1', ports: '554' },
                 { tid: 'cam2', type: 'camera', name: 'Camera 2', dx: 0, dy: 150, ips: ['10.90.0.92/24'], gw: '10.90.0.1', ports: '554' },
                 { tid: 'cam3', type: 'camera', name: 'Camera 3', dx: 130, dy: 150, ips: ['10.90.0.93/24'], gw: '10.90.0.1', ports: '554' } ],
               links: [{ s: 'sw', t: 'nvr' }, { s: 'sw', t: 'cam1' }, { s: 'sw', t: 'cam2' }, { s: 'sw', t: 'cam3' }] },
             storage: { nodes: [
-                { tid: 'sw', type: 'switch', name: 'Storage Switch', dx: 0, dy: -60, ips: [] },
+                { tid: 'sw', type: 'switch', name: 'Storage Switch', dx: 0, dy: -60, portCount: 8, ips: [] },
                 { tid: 'nas', type: 'server', name: 'NAS', dx: -90, dy: 70, ips: ['10.100.0.10/24'], gw: '10.100.0.1', ports: '2049, 445' },
                 { tid: 'bkp', type: 'server', name: 'Backup', dx: 90, dy: 70, ips: ['10.100.0.11/24'], gw: '10.100.0.1', ports: '873' } ],
               links: [{ s: 'sw', t: 'nas' }, { s: 'sw', t: 'bkp' }] },
             // Medical imaging: US/CT/MR/CR/DX modalities send DICOM to a PACS,
             // with reading workstations and a DICOM film printer.
             dicom: { nodes: [
-                { tid: 'sw',   type: 'switch',  name: 'Imaging Switch',  dx: 0,    dy: -100, ips: [] },
+                { tid: 'sw',   type: 'switch',  name: 'Imaging Switch',  dx: 0,    dy: -100, portCount: 8, ips: [] },
                 { tid: 'pacs', type: 'server',  name: 'PACS Server',     dx: -240, dy: 20,  ips: ['10.120.0.10/24'], gw: '10.120.0.1', ports: '104, 11112, 443' },
                 { tid: 'prn',  type: 'printer', name: 'DICOM Printer',   dx: -120, dy: 20,  ips: ['10.120.0.80/24'], gw: '10.120.0.1', ports: '104' },
                 { tid: 'ws1',  type: 'pc',      name: 'Reading WS 1',    dx: 150,  dy: 20,  ips: ['10.120.0.51/24'], gw: '10.120.0.1' },
@@ -2027,7 +3134,7 @@ renderNodeDiagnostics(node);
               links: [{ s: 'sw', t: 'pacs' }, { s: 'sw', t: 'prn' }, { s: 'sw', t: 'ws1' }, { s: 'sw', t: 'ws2' }, { s: 'sw', t: 'us' }, { s: 'sw', t: 'ct' }, { s: 'sw', t: 'mr' }, { s: 'sw', t: 'cr' }, { s: 'sw', t: 'dx' }] },
             // Homelab: a hypervisor running VMs + a container, plus a NAS.
             homelab: { nodes: [
-                { tid: 'sw',  type: 'switch',    name: 'Lab Switch',        dx: 0,    dy: -70, ips: [] },
+                { tid: 'sw',  type: 'switch',    name: 'Lab Switch',        dx: 0,    dy: -70, portCount: 8, ips: [] },
                 { tid: 'hv',  type: 'server',    name: 'Hypervisor (PVE)',  dx: -120, dy: 50,  ips: ['10.110.0.10/24'], gw: '10.110.0.1', ports: '8006, 22' },
                 { tid: 'nas', type: 'server',    name: 'NAS',               dx: 120,  dy: 50,  ips: ['10.110.0.20/24'], gw: '10.110.0.1', ports: '2049, 445' },
                 { tid: 'vm1', type: 'vm',        name: 'VM: Web',           dx: -60,  dy: 160, ips: ['10.110.0.21/24'], gw: '10.110.0.1', ports: '80, 443' },
@@ -2037,7 +3144,7 @@ renderNodeDiagnostics(node);
             // A complete small branch office behind its own NAT router.
             branch: { nodes: [
                 { tid: 'rtr', type: 'router',  name: 'Branch Router',  dx: 0,    dy: -100, nat: true, gw: '198.51.100.9', ips: ['198.51.100.10/30', '172.16.9.1/24'] },
-                { tid: 'sw',  type: 'switch',  name: 'Branch Switch',  dx: 0,    dy: 10,  ips: [] },
+                { tid: 'sw',  type: 'switch',  name: 'Branch Switch',  dx: 0,    dy: 10,  portCount: 8, ips: [] },
                 { tid: 'pc1', type: 'pc',      name: 'Desk 1',         dx: -150, dy: 140, ips: ['172.16.9.51/24'], gw: '172.16.9.1' },
                 { tid: 'pc2', type: 'pc',      name: 'Desk 2',         dx: -50,  dy: 140, ips: ['172.16.9.52/24'], gw: '172.16.9.1' },
                 { tid: 'prn', type: 'printer', name: 'Printer',        dx: 50,   dy: 140, ips: ['172.16.9.80/24'], gw: '172.16.9.1', ports: '9100' },
@@ -2046,7 +3153,7 @@ renderNodeDiagnostics(node);
             // Kubernetes: control plane + worker pods behind an ingress load balancer.
             k8s: { nodes: [
                 { tid: 'lb', type: 'loadbalancer', name: 'Ingress LB',    dx: 0,    dy: -90, nat: true, gw: '10.130.0.1', ips: ['10.130.0.5/24'], ports: '80, 443' },
-                { tid: 'sw', type: 'switch',       name: 'Cluster Switch',dx: 0,    dy: 10,  ips: [] },
+                { tid: 'sw', type: 'switch',       name: 'Cluster Switch',dx: 0,    dy: 10,  portCount: 8, ips: [] },
                 { tid: 'cp', type: 'server',       name: 'Control Plane', dx: -150, dy: 140, ips: ['10.130.0.10/24'], gw: '10.130.0.1', ports: '6443' },
                 { tid: 'w1', type: 'container',    name: 'Worker Pod 1',  dx: -40,  dy: 140, ips: ['10.130.0.21/24'], gw: '10.130.0.1', ports: '8080' },
                 { tid: 'w2', type: 'container',    name: 'Worker Pod 2',  dx: 60,   dy: 140, ips: ['10.130.0.22/24'], gw: '10.130.0.1', ports: '8080' },
@@ -2063,7 +3170,7 @@ renderNodeDiagnostics(node);
               links: [{ s: 'fw', t: 'ap' }, { s: 'ap', t: 'hub', medium: 'wireless' }, { s: 'ap', t: 'cam', medium: 'wireless' }, { s: 'ap', t: 'sen', medium: 'wireless' }, { s: 'ap', t: 'tv', medium: 'wireless' }] },
             // Out-of-band management / monitoring segment.
             mgmt: { nodes: [
-                { tid: 'sw',   type: 'switch', name: 'Mgmt Switch',      dx: 0,    dy: -70, ips: [] },
+                { tid: 'sw',   type: 'switch', name: 'Mgmt Switch',      dx: 0,    dy: -70, portCount: 8, ips: [] },
                 { tid: 'mon',  type: 'server', name: 'Monitoring',       dx: -110, dy: 60,  ips: ['10.150.0.10/24'], gw: '10.150.0.1', ports: '3000, 9090' },
                 { tid: 'log',  type: 'server', name: 'Syslog / SIEM',    dx: 110,  dy: 60,  ips: ['10.150.0.11/24'], gw: '10.150.0.1', ports: '514, 443' },
                 { tid: 'jump', type: 'pc',     name: 'Jump Host',        dx: 0,    dy: 160, ips: ['10.150.0.50/24'], gw: '10.150.0.1', ports: '22' } ],
@@ -2075,25 +3182,44 @@ renderNodeDiagnostics(node);
             const rect = document.getElementById('networkCanvas').getBoundingClientRect();
             const cx = (rect.width / 2 - state.camera.x) / state.camera.zoom;
             const cy = (rect.height / 2 - state.camera.y) / state.camera.zoom;
-            const stamp = Date.now(); const idMap = {}; const newIds = [];
-            snip.nodes.forEach((n, i) => {
-                const nid = `s_${stamp}_${i}`; idMap[n.tid] = nid; newIds.push(nid);
+            // nextId, not Date.now(): two blocks stamped in the same millisecond would
+            // otherwise be handed identical node ids and merge into each other.
+            const idMap = {}; const newIds = [];
+            snip.nodes.forEach((n) => {
+                const nid = nextId('s'); idMap[n.tid] = nid; newIds.push(nid);
                 state.nodes.push(normalizeLoadedNode({ ...cloneData(n), id: nid,
                     x: Math.round((cx + n.dx) / GRID_SNAP) * GRID_SNAP, y: Math.round((cy + n.dy) / GRID_SNAP) * GRID_SNAP }));
             });
-            snip.links.forEach((l, i) => state.links.push({ id: `sl_${stamp}_${i}`, source: idMap[l.s], target: idMap[l.t], attachment: l.attachment || null, medium: l.medium }));
+            // Push every link before binding: naming a stamped AP client's radio depends
+            // on seeing its link, which does not exist until the whole block is in.
+            // s/t are template-local node ids; si/ti pin a link to a specific interface
+            // (needed when a block means to show a *wrong* binding, which auto-bind
+            // would otherwise quietly correct).
+            snip.links.forEach((l) => state.links.push({ id: nextId('sl'), source: idMap[l.s], target: idMap[l.t], attachment: l.attachment || null, medium: l.medium, sourceIface: l.si || null, targetIface: l.ti || null }));
+            autoBindLinks();
             save(); invalidateTidy(); renderCanvasOnly();
         }
 
         // ---- User-saved templates (localStorage) ----
+        // UI preferences live in localStorage, not the URL hash — a shared diagram should
+        // not carry the sharer's panel state. traceMode is deliberately not persisted:
+        // reopening into an active trace with nothing selected is confusing.
+        const SETTINGS_KEY = 'nettopo_settings';
+
+        function loadSettings() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {};
+                state.settings.alertsHidden = !!saved.alertsHidden;
+                if (['nodes', 'templates', 'blocks'].includes(saved.libraryTab)) state.settings.libraryTab = saved.libraryTab;
+            } catch (e) { /* first run or blocked storage */ }
+        }
+
+        function saveSettings() {
+            try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ alertsHidden: !!state.settings.alertsHidden, libraryTab: state.settings.libraryTab })); } catch (e) { /* private mode */ }
+        }
+
         const USER_TPL_KEY = 'nettopo_user_templates';
         function loadUserTemplates() { try { return JSON.parse(localStorage.getItem(USER_TPL_KEY) || '{}'); } catch (e) { return {}; } }
-        function refreshUserTemplateOptions() {
-            const grp = document.getElementById('userTemplateGroup'); if (!grp) return;
-            const tpls = loadUserTemplates(); grp.innerHTML = '';
-            Object.keys(tpls).forEach(name => { const o = document.createElement('option'); o.value = 'user:' + name; o.textContent = '💾 ' + name; grp.appendChild(o); });
-            grp.style.display = Object.keys(tpls).length ? '' : 'none';
-        }
         function saveUserTemplate() {
             if (!state.nodes.length) { alert('Nothing to save — add some nodes first.'); return; }
             const name = prompt('Save current canvas as template — name:'); if (!name) return;
@@ -2103,7 +3229,7 @@ renderNodeDiagnostics(node);
                 links: state.links.map(l => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium }))
             };
             localStorage.setItem(USER_TPL_KEY, JSON.stringify(tpls));
-            refreshUserTemplateOptions();
+            renderUserTemplates();
             alert(`Saved template "${name.trim()}".`);
         }
 
@@ -2146,8 +3272,9 @@ renderNodeDiagnostics(node);
 
         function save() {
             try {
-                const cleanNodes = state.nodes.map((n) => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', nat: !!n.nat, interfaces: (n.interfaces || []).map(i => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone })) }));
-                const cleanLinks = state.links.map((l) => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium }));
+                // Allowlist: any field not named here is dropped on the next save.
+                const cleanNodes = state.nodes.map((n) => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', nat: !!n.nat, portCount: Number.isFinite(n.portCount) ? n.portCount : undefined, interfaces: (n.interfaces || []).map(i => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone })) }));
+                const cleanLinks = state.links.map((l) => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium, sourceIface: l.sourceIface || undefined, targetIface: l.targetIface || undefined }));
                 const encoded = btoa(encodeURIComponent(JSON.stringify({ nodes: cleanNodes, links: cleanLinks })));
                 window.history.replaceState(null, '', `#${encoded}`); updateOsDatalist();
             } catch (err) { console.warn('Could not save diagram state:', err); }
@@ -2162,18 +3289,40 @@ renderNodeDiagnostics(node);
             } else if (node.ips && Array.isArray(node.ips) && node.ips.length === 0) {
                 normalizedInterfaces = [];
             }
-            return { id: node.id || `n_${Date.now()}_${Math.random().toString(16).slice(2)}`, type: node.type || 'custom', name: node.name || 'Unnamed Node', x: Number.isFinite(node.x) ? node.x : 200, y: Number.isFinite(node.y) ? node.y : 200, gw: node.gw || '', dns: node.dns || '', os: node.os || '', ports: node.ports || '', notes: node.notes || '', nat: !!(node.nat || (initialDataDefaults[node.type] && initialDataDefaults[node.type].nat && node.nat === undefined)), interfaces: normalizedInterfaces };
+            // An AP without a radio cannot serve anyone; older diagrams stored none, so
+            // its clients would otherwise all land in the uplink socket.
+            if (node.type === 'ap' && !normalizedInterfaces.some(ifaceIsWireless)) {
+                normalizedInterfaces = [{ id: 'w1', name: 'wlan0', ip: '' }, ...normalizedInterfaces];
+            }
+
+            const normalized = { id: node.id || `n_${Date.now()}_${Math.random().toString(16).slice(2)}`, type: node.type || 'custom', name: node.name || 'Unnamed Node', x: Number.isFinite(node.x) ? node.x : 200, y: Number.isFinite(node.y) ? node.y : 200, gw: node.gw || '', dns: node.dns || '', os: node.os || '', ports: node.ports || '', notes: node.notes || '', nat: !!(node.nat || (initialDataDefaults[node.type] && initialDataDefaults[node.type].nat && node.nat === undefined)), interfaces: normalizedInterfaces };
+            if (Number.isFinite(node.portCount)) normalized.portCount = node.portCount;
+            return normalized;
+        }
+
+        // Links from older diagrams carry no interface refs; keep them optional here and
+        // let autoBindLinks() fill them in once every node is loaded.
+        function normalizeLoadedLink(link) {
+            return { id: link.id || nextId('l'), source: link.source, target: link.target, attachment: link.attachment, medium: link.medium, sourceIface: link.sourceIface || null, targetIface: link.targetIface || null };
+        }
+
+        function loadTemplateState(tpl) {
+            state.nodes = cloneData(tpl.nodes).map(normalizeLoadedNode);
+            state.links = cloneData(tpl.links).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
         }
 
         function load() {
             const hash = window.location.hash.substring(1);
-            if (!hash) { state.nodes = cloneData(templatesData.house.nodes).map(normalizeLoadedNode); state.links = cloneData(templatesData.house.links); updateOsDatalist(); return; }
+            if (!hash) { loadTemplateState(templatesData.house); autoBindLinks(); updateOsDatalist(); return; }
             try {
                 const parsed = JSON.parse(decodeURIComponent(atob(hash)));
-                state.nodes = (parsed.nodes || []).map(normalizeLoadedNode); state.links = Array.isArray(parsed.links) ? parsed.links : []; updateOsDatalist();
+                state.nodes = (parsed.nodes || []).map(normalizeLoadedNode);
+                state.links = (Array.isArray(parsed.links) ? parsed.links : []).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
             } catch (e) {
-                state.nodes = cloneData(templatesData.house.nodes).map(normalizeLoadedNode); state.links = cloneData(templatesData.house.links); updateOsDatalist();
+                loadTemplateState(templatesData.house);
             }
+            autoBindLinks();
+            updateOsDatalist();
         }
 
         function deleteSelected() {
@@ -2207,11 +3356,8 @@ renderNodeDiagnostics(node);
                 state.links.forEach(l => {
                     if (l.source === draggedNode.id || l.target === draggedNode.id) {
                         const lineEl = document.getElementById(`ui-link-${l.id}`);
-                        if (lineEl) {
-                            const src = getNode(l.source), tgt = getNode(l.target);
-                            lineEl.setAttribute('x1', src.x); lineEl.setAttribute('y1', src.y);
-                            lineEl.setAttribute('x2', tgt.x); lineEl.setAttribute('y2', tgt.y);
-                        }
+                        const geo = lineEl && linkGeometry(l);
+                        if (geo) applyLinkGeometry(lineEl, geo);
                     }
                 });
             }
@@ -2232,31 +3378,144 @@ renderNodeDiagnostics(node);
             state.camera.x = mx - (mx - state.camera.x) * (nextZoom / state.camera.zoom); state.camera.y = my - (my - state.camera.y) * (nextZoom / state.camera.zoom); state.camera.zoom = nextZoom; applyCamera();
         }, { passive: false });
 
+        // ---- Keyboard shortcuts ----
+        // The handler and the on-screen cheatsheet are generated from this one table, so
+        // the documented keys cannot drift away from the ones that actually fire.
+        function setTraceMode(on) {
+            const box = document.getElementById('toggleTrace');
+            box.checked = on;
+            box.dispatchEvent(new Event('change')); // reuse the checkbox's own logic
+        }
+
+        function toggleShortcutHelp(force) {
+            const panel = document.getElementById('shortcutHelp');
+            const show = force !== undefined ? force : panel.classList.contains('hidden');
+            panel.classList.toggle('hidden', !show);
+        }
+
+        const SHORTCUTS = [
+            { keys: ['T'], label: 'Toggle trace mode', test: (e) => e.key.toLowerCase() === 't',
+              run: () => setTraceMode(!state.settings.traceMode) },
+            { keys: ['F'], label: 'Fit the diagram to the view', test: (e) => e.key.toLowerCase() === 'f',
+              run: () => fitToView() },
+            { keys: ['A'], label: 'Show / hide validation alerts', test: (e) => e.key.toLowerCase() === 'a',
+              run: () => { state.settings.alertsHidden = !state.settings.alertsHidden; saveSettings(); validateTopology(); } },
+            { keys: ['L'], label: 'Link from the selected node', test: (e) => e.key.toLowerCase() === 'l',
+              run: () => { if (state.selectedType === 'node' && state.selectedId) { state.linkSourceId = state.selectedId; renderCanvasOnly(); } } },
+            { keys: ['1'], label: 'Nodes tab', test: (e) => e.key === '1', run: () => showLibraryTab('nodes') },
+            { keys: ['2'], label: 'Networks tab', test: (e) => e.key === '2', run: () => showLibraryTab('templates') },
+            { keys: ['3'], label: 'Blocks tab', test: (e) => e.key === '3', run: () => showLibraryTab('blocks') },
+            { keys: ['/'], label: 'Search the canvas', test: (e) => e.key === '/',
+              run: () => { const f = document.getElementById('canvasFilter'); f.focus(); f.select(); } },
+            { keys: ['0'], label: 'Reset zoom to 1:1', test: (e) => e.key === '0',
+              run: () => document.getElementById('zoomResetBtn').click() },
+            { keys: ['+', '−'], label: 'Zoom in / out', test: (e) => ['+', '=', '-', '_'].includes(e.key),
+              run: (e) => document.getElementById(['+', '='].includes(e.key) ? 'zoomInBtn' : 'zoomOutBtn').click() },
+            { keys: ['Del'], label: 'Delete the selection', test: (e) => e.key === 'Delete' || e.key === 'Backspace',
+              run: () => deleteSelected() },
+            { keys: ['Esc'], label: 'Cancel link mode / deselect', test: (e) => e.key === 'Escape',
+              run: () => { toggleShortcutHelp(false); state.linkSourceId = null; select(null, null); renderCanvasOnly(); } },
+            { keys: ['?'], label: 'Show this list', test: (e) => e.key === '?', run: () => toggleShortcutHelp() }
+        ];
+
         window.addEventListener('keydown', (event) => {
-            const tagName = document.activeElement?.tagName || ''; if (['INPUT', 'TEXTAREA', 'SELECT', 'NUMBER'].includes(tagName)) return;
-            if (event.key === 'Delete' || event.key === 'Backspace') deleteSelected();
-            if (event.key === 'Escape') { state.linkSourceId = null; select(null, null); renderCanvasOnly(); }
+            if (event.ctrlKey || event.metaKey || event.altKey) return; // leave browser/OS combos alone
+
+            const tag = document.activeElement?.tagName || '';
+            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) {
+                // Escape is the way out of a field; every other key belongs to the field.
+                if (event.key === 'Escape') document.activeElement.blur();
+                return;
+            }
+
+            const hit = SHORTCUTS.find((sc) => sc.test(event));
+            if (!hit) return;
+            event.preventDefault();
+            hit.run(event);
         });
 
-        document.getElementById('templateSelect').addEventListener('change', (event) => {
-            const val = event.target.value;
-            let template;
-            if (val.startsWith('user:')) { template = loadUserTemplates()[val.slice(5)]; }
-            else { template = templatesData[val]; }
+        function renderShortcutHelp() {
+            document.getElementById('shortcutBody').innerHTML = SHORTCUTS.map((sc) => `
+                <div class="flex items-center justify-between gap-3 py-1">
+                    <span style="color: var(--cs-text-sec)">${escapeHtml(sc.label)}</span>
+                    <span class="flex gap-1 shrink-0">${sc.keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join('')}</span>
+                </div>`).join('');
+        }
+
+        // ---- Library tabs ----
+        function showLibraryTab(name) {
+            state.settings.libraryTab = name;
+            saveSettings();
+            document.querySelectorAll('.lib-tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
+            document.querySelectorAll('.lib-panel').forEach((p) => p.classList.toggle('hidden', p.id !== `tabPanel-${name}`));
+        }
+        document.querySelectorAll('.lib-tab').forEach((t) => { t.onclick = () => showLibraryTab(t.dataset.tab); });
+
+        function libraryItem({ icon, name, blurb }, onPick, onDelete) {
+            const row = document.createElement('div');
+            row.className = 'lib-item';
+            const btn = document.createElement('button');
+            btn.className = 'flex items-start gap-2 flex-1 min-w-0 bg-transparent border-0 p-0 text-left cursor-pointer';
+            btn.innerHTML = `<span class="lib-item-icon">${icon}</span><span class="min-w-0"><span class="lib-item-name block truncate">${escapeHtml(name)}</span><span class="lib-item-blurb block">${escapeHtml(blurb)}</span></span>`;
+            btn.onclick = onPick;
+            row.appendChild(btn);
+            if (onDelete) {
+                const del = document.createElement('button');
+                del.className = 'lib-item-del shrink-0'; del.textContent = '✖'; del.title = `Delete "${name}"`;
+                del.onclick = (e) => { e.stopPropagation(); onDelete(); };
+                row.appendChild(del);
+            }
+            return row;
+        }
+
+        function applyTemplate(template) {
             if (!template) return;
-            if (!confirm('Replace current workspace with template?')) return;
-            state.nodes = cloneData(template.nodes).map(normalizeLoadedNode); state.links = cloneData(template.links);
+            if (!confirm('Replace current workspace with this network?')) return;
+            loadTemplateState(template); autoBindLinks();
             state.selectedId = null; state.selectedType = null; state.linkSourceId = null;
             select(null, null); save(); invalidateTidy();
             renderCanvasOnly();
             fitToView();
-        });
+        }
 
-        // Stamp a building block onto the current canvas (additive)
-        document.getElementById('snippetSelect').addEventListener('change', (event) => {
-            const key = event.target.value; event.target.value = '';
-            if (key) { stampSnippet(key); }
-        });
+        function renderLibrary() {
+            const tplList = document.getElementById('templateList');
+            tplList.innerHTML = '';
+            TEMPLATE_META.forEach((meta) => {
+                if (!templatesData[meta.key]) return; // meta without data would render a dead row
+                tplList.appendChild(libraryItem(meta, () => applyTemplate(templatesData[meta.key])));
+            });
+
+            const blockList = document.getElementById('blockList');
+            blockList.innerHTML = '';
+            SNIPPET_META.forEach((meta) => {
+                if (!SNIPPETS[meta.key]) return;
+                blockList.appendChild(libraryItem(meta, () => { stampSnippet(meta.key); showLibraryTab('nodes'); }));
+            });
+
+            renderUserTemplates();
+        }
+
+        function renderUserTemplates() {
+            const section = document.getElementById('userTemplateSection');
+            const list = document.getElementById('userTemplateList');
+            const saved = loadUserTemplates();
+            const names = Object.keys(saved);
+            list.innerHTML = '';
+            section.classList.toggle('hidden', !names.length);
+            names.forEach((name) => {
+                list.appendChild(libraryItem(
+                    { icon: '💾', name, blurb: `${(saved[name].nodes || []).length} nodes · saved locally` },
+                    () => applyTemplate(saved[name]),
+                    () => {
+                        if (!confirm(`Delete saved network "${name}"?`)) return;
+                        const all = loadUserTemplates(); delete all[name];
+                        try { localStorage.setItem(USER_TPL_KEY, JSON.stringify(all)); } catch (e) { /* private mode */ }
+                        renderUserTemplates();
+                    }
+                ));
+            });
+        }
 
         document.getElementById('tidyBtn').onclick = tidyLayout;
         document.getElementById('saveTemplateBtn').onclick = saveUserTemplate;
@@ -2295,7 +3554,7 @@ renderNodeDiagnostics(node);
             });
         });
 
-        document.getElementById('addIfaceBtn').onclick = () => { if (!state.selectedId || state.selectedType !== 'node') return; const node = getNode(state.selectedId); if (!node) return; node.interfaces = node.interfaces || []; node.interfaces.push({ id: `i_${Date.now()}`, name: `eth${node.interfaces.length}`, ip: '' }); renderSidebarData(node); save();
+        document.getElementById('addIfaceBtn').onclick = () => { if (!state.selectedId || state.selectedType !== 'node') return; const node = getNode(state.selectedId); if (!node) return; createIfaceFor(node); renderSidebarData(node); save();
         renderCanvasOnly();
         renderNodeDiagnostics(node); };
         document.getElementById('deleteElementBtn').onclick = deleteSelected;
@@ -2386,7 +3645,22 @@ renderNodeDiagnostics(node);
 
         window.addEventListener('popstate', () => { load(); renderCanvasOnly(); fitToView(); });
 
-        refreshUserTemplateOptions();
+        document.getElementById('conflictHideBtn').onclick = () => {
+            state.settings.alertsHidden = true; saveSettings(); validateTopology();
+        };
+        document.getElementById('conflictPill').onclick = () => {
+            state.settings.alertsHidden = false; saveSettings(); validateTopology();
+        };
+
+        document.getElementById('shortcutClose').onclick = () => toggleShortcutHelp(false);
+        document.getElementById('shortcutHelp').onclick = (e) => {
+            if (e.target.id === 'shortcutHelp') toggleShortcutHelp(false); // click the backdrop to dismiss
+        };
+
+        renderLibrary();
+        renderShortcutHelp();
+        loadSettings();
+        showLibraryTab(state.settings.libraryTab || 'nodes');
         load(); renderCanvasOnly(); fitToView();
     </script>
 <script src="carino-navbar.js" data-app="NetTopology" defer></script>
