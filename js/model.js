@@ -95,6 +95,81 @@ function createIfaceFor(node, opts = {}) {
     return iface;
 }
 
+// ---- Bonds ----
+// A bond is a virtual interface that owns member NICs. The bond carries the
+// address; its members carry none. Cables still plug into the members, because
+// a bond has no socket to plug into — which is the whole point of the shape:
+// two cables, two NICs, one MAC and one IP, so nothing has cause to ARP twice.
+// That is why bonding cures the flapping that evaluateMultiHoming reports.
+const BOND_MODES = {
+    'active-backup': 'Active-Backup',   // one link carries traffic, the other waits — works to two switches
+    '802.3ad': 'LACP (802.3ad)'         // both links carry traffic — needs one switch, or MLAG/stacking
+};
+const isBond = (iface) => !!(iface && iface.bond);
+const bondOf = (node, ifaceId) =>
+    (node?.interfaces || []).find((i) => isBond(i) && (i.bond.members || []).includes(ifaceId)) || null;
+const isBondMember = (node, ifaceId) => !!bondOf(node, ifaceId);
+const bondMembers = (node, bond) => (bond?.bond?.members || []).map((id) => ifaceOn(node, id)).filter(Boolean);
+// The interface whose address applies to a cable landing here: a member defers
+// to its bond, everything else speaks for itself.
+const l3IfaceFor = (node, ifaceId) => bondOf(node, ifaceId) || ifaceOn(node, ifaceId);
+
+// Fold every free wired NIC on `node` into one bond. This is the remedy the
+// MAC-flapping diagnostic names, so it has to move the address off the members
+// and onto the bond — leaving it behind is the misconfiguration, not the fix.
+function createBond(node, opts = {}) {
+    if (!node) return null;
+    const candidates = getInterfaces(node).filter(
+        (i) => !i.implicit && !isBond(i) && !isBondMember(node, i.id) && !ifaceIsWireless(i));
+    if (candidates.length < 2) return null;
+
+    const donor = candidates.find((i) => parseValidCIDR(i.ip)) || candidates[0];
+    const bond = {
+        id: nextId('b'),
+        name: opts.name || `bond${(node.interfaces || []).filter(isBond).length}`,
+        ip: donor.ip || '',
+        drawZone: donor.drawZone,
+        bond: { mode: opts.mode || 'active-backup', members: candidates.map((i) => i.id) }
+    };
+    candidates.forEach((i) => {
+        const real = (node.interfaces || []).find((x) => x.id === i.id);
+        if (real) { real.ip = ''; delete real.drawZone; }
+    });
+    node.interfaces.push(bond);
+    return bond;
+}
+
+// Dissolve a bond, handing its address back to the first member so the node
+// does not silently lose its L3 identity.
+function removeBond(node, bondId) {
+    const bond = (node?.interfaces || []).find((i) => i.id === bondId && isBond(i));
+    if (!bond) return false;
+    const first = bondMembers(node, bond)[0];
+    if (first) {
+        const real = node.interfaces.find((x) => x.id === first.id);
+        if (real) { real.ip = bond.ip || ''; if (bond.drawZone !== undefined) real.drawZone = bond.drawZone; }
+    }
+    node.interfaces = node.interfaces.filter((i) => i.id !== bondId);
+    return true;
+}
+
+// Deleting a NIC takes its cables with it: a cable into a socket that no longer
+// exists is not a cable. Node deletion already drops attached links this way.
+// Without it the link keeps a dangling interface id, and the node badges red
+// over a NIC the sidebar can no longer show you.
+function deleteIface(node, ifaceId) {
+    if (!node) return;
+    const bond = bondOf(node, ifaceId);
+    if (bond) {
+        bond.bond.members = (bond.bond.members || []).filter((id) => id !== ifaceId);
+        if (!bond.bond.members.length) removeBond(node, bond.id);
+    }
+    state.links = state.links.filter((l) => !(
+        (l.source === node.id && l.sourceIface === ifaceId) ||
+        (l.target === node.id && l.targetIface === ifaceId)));
+    node.interfaces = (node.interfaces || []).filter((i) => i.id !== ifaceId);
+}
+
 // Which interface a link lands on at a given node.
 const ifaceKeyFor = (link, nodeId) => (link.source === nodeId ? 'sourceIface' : 'targetIface');
 const ifaceIdOn = (link, nodeId) => link[ifaceKeyFor(link, nodeId)] || null;
@@ -149,13 +224,16 @@ function autoPickIface(node, otherNode, opts = {}) {
     // Kind comes first and is non-negotiable: a Wi-Fi association belongs on a
     // radio and a cable belongs on a socket, whatever the addressing says.
     const wantWireless = opts.medium === 'wireless';
-    const interfaces = getInterfaces(node).filter((i) => ifaceIsWireless(i) === wantWireless);
+    // A bond is not a socket: it has no faceplate, so a cable cannot land on it.
+    // Its members are the real NICs, and they stay pickable.
+    const interfaces = getInterfaces(node).filter((i) => !isBond(i) && ifaceIsWireless(i) === wantWireless);
     if (!interfaces.length) return createIfaceFor(node, { grow: true, wireless: wantWireless }).id;
 
     const isFree = (i) => !ifaceIsOccupied(node.id, i.id, opts.excludeLinkId);
     const otherNets = new Set(getValidIps(otherNode).map((i) => i.networkStr));
     const onOtherSubnet = (i) => {
-        const parsed = parseValidCIDR(i.ip);
+        // A member holds no address of its own; ask the bond it answers to.
+        const parsed = parseValidCIDR((l3IfaceFor(node, i.id) || i).ip);
         return parsed && otherNets.has(parsed.networkStr);
     };
 

@@ -75,6 +75,40 @@ window.addEventListener('load', () => { setTimeout(() => {
   ok('animations are real CSS, not dead classes', styles.every(s => !/\bnone\b/.test(s)));
   styles.forEach(s => out.push('    ' + s));
 
+  // ---- Interface rows stay readable in a 281px sidebar ----
+  // This has broken twice: once when a cable indicator squeezed the name field to
+  // nothing, once when a bond's mode dropdown squeezed the CIDR down to "10".
+  // Both times a passing test suite said nothing and only a screenshot showed it.
+  state.nodes = [normalizeLoadedNode({ id: 'b', type: 'server', name: 'Bonded', x: 0, y: 0,
+    interfaces: [
+      { id: 'i1', name: 'eno1', ip: '' },
+      { id: 'i2', name: 'enp4s0', ip: '' },
+      { id: 'i3', name: 'bond0', ip: '192.168.100.200/24', bond: { mode: '802.3ad', members: ['i1', 'i2'] } }
+    ] })];
+  state.links = [];
+  select('b', 'node');
+  // Measure a tick later, never in select()'s own tick. Tailwind's browser JIT
+  // generates arbitrary values like w-[74px] only once it sees them in the DOM,
+  // and until it does the input falls back to its ~170px default — which reads
+  // as a squeezed layout that will not exist by the time anyone looks.
+  setTimeout(() => {
+  const rows = [...document.querySelectorAll('#ifaceListContainer input[type=text]')];
+  const named = rows.filter(r => r.value === 'bond0' || r.value === 'eno1');
+  ok('interface name fields are rendered', named.length === 2, rows.map(r => r.value).join('|'));
+  named.forEach(r => ok(`${r.value} name field is wide enough to read`, r.getBoundingClientRect().width >= 40,
+                        `${Math.round(r.getBoundingClientRect().width)}px`));
+  const ipBox = rows.find(r => r.value.startsWith('192.168.100.200'));
+  ok('the bond address field exists', !!ipBox);
+  // A /24 CIDR is 18 characters; anything under ~90px is showing "192.168..." at best.
+  ok('the bond address is not squeezed to nothing', ipBox && ipBox.getBoundingClientRect().width >= 90,
+     ipBox ? `${Math.round(ipBox.getBoundingClientRect().width)}px` : 'missing');
+  // The mode select must not be sharing the address's line.
+  const modeSel = document.querySelector('#ifaceListContainer select');
+  ok('the bond mode is on its own line, not beside the address', !!modeSel && !!ipBox &&
+     Math.abs(modeSel.getBoundingClientRect().top - ipBox.getBoundingClientRect().top) > 4,
+     modeSel && ipBox ? `mode@${Math.round(modeSel.getBoundingClientRect().top)} ip@${Math.round(ipBox.getBoundingClientRect().top)}` : 'missing');
+
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);
+  }, 50);
 }, 400); });

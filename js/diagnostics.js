@@ -215,6 +215,51 @@ function evaluateRadio(node) {
     return { level: 'good', text: radios ? `Links match their interface type (${radios} radio${radios === 1 ? '' : 's'}).` : 'Links match their interface type.' };
 }
 
+// Bonds are the remedy evaluateMultiHoming prescribes, so a half-built one has
+// to be called out rather than quietly accepted — a bond that still leaves the
+// address on its members has changed nothing about the flapping it was meant
+// to cure.
+function evaluateBond(node) {
+    const bonds = getInterfaces(node).filter(isBond);
+    if (!bonds.length) return { level: 'info', text: 'No bonded interfaces.' };
+
+    for (const bond of bonds) {
+        const ids = bond.bond.members || [];
+        const dangling = ids.filter((id) => !ifaceOn(node, id));
+        if (dangling.length) {
+            return { level: 'bad', text: `${bond.name} lists ${dangling.length} member interface${dangling.length === 1 ? '' : 's'} that no longer exist. Remove them from the bond, or recreate the NICs.` };
+        }
+
+        const members = bondMembers(node, bond);
+        if (members.length < 2) {
+            return { level: 'warn', text: `${bond.name} has ${members.length} member. A bond of one is a NIC with extra steps — it buys no redundancy and no bandwidth. Add a second member or unbond it.` };
+        }
+
+        const addressed = members.filter((m) => parseValidCIDR(m.ip));
+        if (addressed.length) {
+            return { level: 'bad', text: `${addressed.map((m) => m.name).join(', ')} still hold an address inside ${bond.name}. Members are L2 only — the address belongs on the bond. Leave it on the members and the kernel answers ARP on each of them, which is the flux the bond was supposed to fix.` };
+        }
+
+        const radios = members.filter(ifaceIsWireless);
+        if (radios.length) {
+            return { level: 'bad', text: `${radios.map((m) => m.name).join(', ')} is a radio. A Wi-Fi association cannot be a bond member — the two ends negotiate a single association, not a trunk.` };
+        }
+
+        if (bond.bond.mode === '802.3ad') {
+            const segments = members
+                .map((m) => { const link = linkOnIface(node.id, m.id); return link ? segmentKeyOf(link, node.id) : null; })
+                .filter(Boolean);
+            if (segments.length > 1 && new Set(segments).size > 1) {
+                return { level: 'bad', text: `LACP: ${bond.name} members land in different broadcast domains. 802.3ad negotiates a LAG with one switch — split across two independent switches, the peers never bring the aggregate up. Use active-backup, or stack/MLAG the switches so they present as one.` };
+            }
+        }
+    }
+
+    const bond = bonds[0];
+    const count = (bond.bond.members || []).length;
+    return { level: 'good', text: `${bond.name} bonds ${count} NICs (${BOND_MODES[bond.bond.mode] || bond.bond.mode}). One MAC, one address — no ARP flux to answer for.` };
+}
+
 // Interface-level problems only — this is what the canvas badge reflects, so it
 // deliberately ignores gateway/DNS/trace concerns that are not about the NICs.
 function interfaceIssues(node) {
@@ -226,7 +271,7 @@ function interfaceIssues(node) {
         issues.push({ label: 'Interfaces', level: 'bad', text: `Invalid CIDR on: ${invalid.map((i) => i.name || 'interface').join(', ')}` });
     }
 
-    [['Multi-Homing', evaluateMultiHoming(node)], ['Ports', evaluatePorts(node)], ['Radio', evaluateRadio(node)]].forEach(([label, result]) => {
+    [['Multi-Homing', evaluateMultiHoming(node)], ['Bond', evaluateBond(node)], ['Ports', evaluatePorts(node)], ['Radio', evaluateRadio(node)]].forEach(([label, result]) => {
         if (result.level === 'bad' || result.level === 'warn') issues.push({ label, ...result });
     });
 
@@ -410,6 +455,7 @@ function renderNodeDiagnostics(node) {
     const checks = [
         ['Interfaces', evaluateInterfaces(node)],
         ['Multi-Homing', evaluateMultiHoming(node)],
+        ['Bond', evaluateBond(node)],
         ['Ports', evaluatePorts(node)],
         ['Radio', evaluateRadio(node)],
         ['Gateway', evaluateGateway(node)],

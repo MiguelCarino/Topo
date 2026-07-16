@@ -424,11 +424,22 @@ function renderSidebarData(node) {
 
     if (hasPortGrid(node)) renderFaceplate(node, ifCont);
 
+    // The bond button only makes sense with two wired NICs to fold together.
+    const bondBtn = document.getElementById('bondIfaceBtn');
+    if (bondBtn) {
+        const bondable = getInterfaces(node).filter(
+            (i) => !i.implicit && !isBond(i) && !isBondMember(node, i.id) && !ifaceIsWireless(i));
+        bondBtn.classList.toggle('hidden', bondable.length < 2);
+    }
+
     if (!node.interfaces.length) {
         if (!hasPortGrid(node)) ifCont.innerHTML = '<span class="text-[10px] text-slate-400 italic">No interfaces defined.</span>';
     }
     else {
         node.interfaces.forEach((iface, i) => {
+            // Members are drawn beneath the bond that owns them, not in place.
+            if (isBondMember(node, iface.id)) return;
+
             const div = document.createElement('div'); div.className = 'flex items-center gap-1 min-w-0';
             const nameInp = document.createElement('input'); nameInp.type = 'text'; nameInp.value = iface.name; nameInp.placeholder = 'eth0';
             nameInp.className = 'w-[74px] shrink-0 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500 bg-slate-50';
@@ -476,8 +487,12 @@ function renderSidebarData(node) {
             });
 
             const del = document.createElement('button'); del.innerHTML = '✖'; del.className = 'text-slate-400 hover:text-red-500 px-1 shrink-0';
+            del.title = isBond(iface) ? `Unbond ${iface.name} (members keep their cables)` : `Delete ${iface.name || 'interface'} and any cable in it`;
             del.onclick = () => {
-                node.interfaces.splice(i, 1);
+                // Unbonding is not deletion: the members outlive it, so the
+                // address has to be handed back rather than dropped.
+                if (isBond(iface)) removeBond(node, iface.id);
+                else deleteIface(node, iface.id);
                 save();
                 renderCanvasOnly();
                 renderSidebarData(node);
@@ -495,9 +510,97 @@ function renderSidebarData(node) {
             wire.title = peer ? `${radio ? 'Associated' : 'Linked'} to ${peer.name}` : `${radio ? 'Radio' : 'Interface'} not linked`;
             if (link) wire.onclick = () => select(link.id, 'link');
 
-            div.appendChild(nameInp); div.appendChild(ipInp); div.appendChild(zoneLabel); div.appendChild(wire); div.appendChild(del); ifCont.appendChild(div);
+            div.appendChild(nameInp); div.appendChild(ipInp); div.appendChild(zoneLabel);
+
+            // A bond has no socket, so the cable indicator would be a lie.
+            if (isBond(iface)) nameInp.classList.add('border-indigo-300', 'bg-indigo-50', 'font-bold');
+            else div.appendChild(wire);
+            div.appendChild(del); ifCont.appendChild(div);
+
+            if (isBond(iface)) {
+                // The mode gets its own line. It will not fit beside the address
+                // in a 281px sidebar, and squeezing the CIDR down to "10" to make
+                // room is how the interface fields became unreadable last time.
+                ifCont.appendChild(renderBondMode(node, iface));
+                bondMembers(node, iface).forEach((m) => renderBondMember(node, m, iface, ifCont));
+            }
         });
     }
+}
+
+// The bond's mode, on its own line beneath it. Active-backup and LACP differ in
+// one way that matters on a diagram: whether the members may land on two
+// different switches, which is what evaluateBond checks.
+function renderBondMode(node, bond) {
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-1 min-w-0 pl-3';
+
+    const tick = document.createElement('span');
+    tick.className = 'text-[10px] text-indigo-400 shrink-0'; tick.textContent = '↳';
+
+    const label = document.createElement('span');
+    label.className = 'text-[9px] text-slate-400 shrink-0'; label.textContent = 'mode';
+
+    const mode = document.createElement('select');
+    mode.className = 'flex-1 min-w-0 border border-indigo-300 bg-indigo-50 rounded px-1 py-1 text-[10px] focus:outline-indigo-500';
+    mode.title = 'Active-Backup survives a switch failure; LACP needs both cables on one switch (or MLAG)';
+    Object.entries(BOND_MODES).forEach(([value, text]) => {
+        const opt = document.createElement('option'); opt.value = value; opt.textContent = text;
+        if (bond.bond.mode === value) opt.selected = true;
+        mode.appendChild(opt);
+    });
+    mode.onchange = (e) => {
+        bond.bond.mode = e.target.value;
+        save(); renderCanvasOnly(); renderNodeDiagnostics(node);
+    };
+
+    row.appendChild(tick); row.appendChild(label); row.appendChild(mode);
+    return row;
+}
+
+// One member of a bond. It gets no IP field on purpose: the address lives on
+// the bond, and offering a box here would invite the exact misconfiguration
+// evaluateBond exists to catch.
+function renderBondMember(node, member, bond, container) {
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-1 min-w-0 pl-3';
+
+    const tick = document.createElement('span');
+    tick.className = 'text-[10px] text-indigo-400 shrink-0'; tick.textContent = '↳';
+
+    const nameInp = document.createElement('input');
+    nameInp.type = 'text'; nameInp.value = member.name; nameInp.placeholder = 'eno1';
+    nameInp.className = 'w-[74px] shrink-0 border border-slate-200 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500 bg-white';
+    nameInp.addEventListener('input', (e) => {
+        const real = node.interfaces.find((x) => x.id === member.id);
+        if (real) real.name = e.target.value;
+        save(); renderCanvasOnly(); renderNodeDiagnostics(node);
+    });
+
+    const note = document.createElement('span');
+    note.className = 'flex-1 min-w-0 text-[9px] text-slate-400 italic truncate px-1';
+    note.textContent = `member of ${bond.name}`;
+
+    const link = linkOnIface(node.id, member.id);
+    const peer = link ? getNode(link.source === node.id ? link.target : link.source) : null;
+    const wire = document.createElement('button');
+    wire.className = 'text-[9px] shrink-0 px-0.5 ' + (peer ? 'text-slate-400 hover:text-blue-600' : 'text-slate-300 cursor-default');
+    wire.textContent = peer ? '🔌' : '○';
+    wire.title = peer ? `Linked to ${peer.name}` : 'Not linked';
+    if (link) wire.onclick = () => select(link.id, 'link');
+
+    const pull = document.createElement('button');
+    pull.innerHTML = '✖'; pull.className = 'text-slate-400 hover:text-red-500 px-1 shrink-0';
+    pull.title = `Remove ${member.name} from ${bond.name}`;
+    pull.onclick = () => {
+        bond.bond.members = (bond.bond.members || []).filter((id) => id !== member.id);
+        if (bond.bond.members.length === 0) removeBond(node, bond.id);
+        save(); renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node);
+    };
+
+    row.appendChild(tick); row.appendChild(nameInp); row.appendChild(note);
+    row.appendChild(wire); row.appendChild(pull);
+    container.appendChild(row);
 }
 
 // Interface picker for a selected link: one row per end, chips for each

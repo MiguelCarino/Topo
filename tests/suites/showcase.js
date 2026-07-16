@@ -45,6 +45,22 @@ window.addEventListener('load', () => { setTimeout(() => {
   ok('no node is badged', state.nodes.filter(n => nodeSeverity(n)).length === 0,
      state.nodes.filter(n => nodeSeverity(n)).map(n => n.name + ':' + nodeSeverity(n)).join(', '));
 
+  // The NAS demonstrates the bond. It is the same two-NICs-one-subnet-one-switch
+  // shape as the flapping PACS server in Common Errors, so it is only clean if
+  // the bond is really modelled rather than drawn.
+  const nas = getNode('nas');
+  const nasBond = (nas.interfaces || []).find(isBond);
+  ok('the NAS is bonded', !!nasBond, (nas.interfaces || []).map(i => i.name).join(','));
+  ok('its bond holds the address', nasBond && nasBond.ip === '10.31.0.10/24', nasBond && nasBond.ip);
+  ok('its members hold none', (nas.interfaces || []).filter(i => !isBond(i)).every(i => !i.ip));
+  ok('two cables reach it, one per member', state.links.filter(l => l.source === 'nas' || l.target === 'nas').length === 2);
+  ok('the bond reads healthy', evaluateBond(nas).level === 'good', evaluateBond(nas).text.slice(0, 60));
+  // Same two NICs, same subnet, unbonded: the contrast the template is making.
+  ok('while the unbonded PACS in Common Errors still flaps', (() => {
+    loadTemplateState(templatesData.errors); autoBindLinks();
+    return state.nodes.some(n => evaluateMultiHoming(n).level === 'bad');
+  })());
+
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);
 }, 400); });

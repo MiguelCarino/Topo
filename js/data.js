@@ -255,7 +255,17 @@ const templatesData = {
               interfaces: [{ id: 'a1', name: 'eth0', ip: '10.30.0.11/24' }, { id: 'a2', name: 'eth1', ip: '10.31.0.11/24' }, { id: 'a3', name: 'eth2', ip: '' }] },
             { id: 'pvm',  type: 'vm',           name: 'GPU VM (passthrough)', x: 620, y: 630, ips: ['10.30.0.14/24'], gw: '10.30.0.1' },
             { id: 'bsw',  type: 'switch',       name: 'Storage Switch',      x: 780,  y: 630, portCount: 8, ips: [] },
-            { id: 'nas',  type: 'server',       name: 'NAS',                 x: 780,  y: 730, ips: ['10.31.0.10/24'], ports: '2049, 445' },
+            // Two NICs on one subnet into one switch — the same shape as the PACS
+            // server in Common Errors, except bonded. The address sits on bond0 and
+            // the members carry only cables, so there is one MAC to learn and
+            // nothing flaps. LACP is legal here precisely because both cables land
+            // on the same switch.
+            { id: 'nas',  type: 'server',       name: 'NAS (LACP bond)',     x: 780,  y: 730, ports: '2049, 445',
+              interfaces: [
+                  { id: 'n1', name: 'eno1', ip: '' },
+                  { id: 'n2', name: 'eno2', ip: '' },
+                  { id: 'nb', name: 'bond0', ip: '10.31.0.10/24', bond: { mode: '802.3ad', members: ['n1', 'n2'] } }
+              ] },
             { id: 'wvm',  type: 'vm',           name: 'Web VM',              x: 650,  y: 510, ips: ['10.30.0.12/24'], gw: '10.30.0.1' },
             { id: 'ctr',  type: 'container',    name: 'API Container',       x: 740,  y: 510, ips: ['10.30.0.13/24'], gw: '10.30.0.1', ports: '8080' },
             // --- Hospital tenant (VLAN 10) ---
@@ -304,7 +314,7 @@ const templatesData = {
             { id: 'k26', source: 'csw', target: 'cp1' },  { id: 'k27', source: 'csw', target: 'cp2' }, { id: 'k28', source: 'csw', target: 'capc' }, { id: 'k29', source: 'csw', target: 'pbx' },
             { id: 'k30', source: 'ro', target: 'rsw' },   { id: 'k31', source: 'rsw', target: 'rmtpc' }, { id: 'k32', source: 'rsw', target: 'rpr' },
             { id: 'k33', source: 'hm', target: 'hpc' },   { id: 'k34', source: 'hm', target: 'hiot', medium: 'powerline' },
-            { id: 'k35', source: 'as', target: 'bsw', sourceIface: 'a2' }, { id: 'k36', source: 'bsw', target: 'nas' },
+            { id: 'k35', source: 'as', target: 'bsw', sourceIface: 'a2' }, { id: 'k36', source: 'bsw', target: 'nas', targetIface: 'n1' }, { id: 'k36b', source: 'bsw', target: 'nas', targetIface: 'n2' },
             { id: 'k37', source: 'as', target: 'pvm', sourceIface: 'a3', attachment: 'passthrough' }
         ]
     },

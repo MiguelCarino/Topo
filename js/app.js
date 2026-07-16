@@ -226,7 +226,7 @@ function updateOsDatalist() {
 function save() {
     try {
         // Allowlist: any field not named here is dropped on the next save.
-        const cleanNodes = state.nodes.map((n) => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', nat: !!n.nat, portCount: Number.isFinite(n.portCount) ? n.portCount : undefined, interfaces: (n.interfaces || []).map(i => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone })) }));
+        const cleanNodes = state.nodes.map((n) => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', nat: !!n.nat, portCount: Number.isFinite(n.portCount) ? n.portCount : undefined, interfaces: (n.interfaces || []).map(i => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone, wireless: i.wireless, bond: i.bond })) }));
         const cleanLinks = state.links.map((l) => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium, sourceIface: l.sourceIface || undefined, targetIface: l.targetIface || undefined }));
         const encoded = btoa(encodeURIComponent(JSON.stringify({ nodes: cleanNodes, links: cleanLinks })));
         window.history.replaceState(null, '', `#${encoded}`); updateOsDatalist();
@@ -510,6 +510,12 @@ propertyBindings.forEach((binding) => {
 document.getElementById('addIfaceBtn').onclick = () => { if (!state.selectedId || state.selectedType !== 'node') return; const node = getNode(state.selectedId); if (!node) return; createIfaceFor(node); renderSidebarData(node); save();
 renderCanvasOnly();
 renderNodeDiagnostics(node); };
+document.getElementById('bondIfaceBtn').onclick = () => {
+    if (!state.selectedId || state.selectedType !== 'node') return;
+    const node = getNode(state.selectedId); if (!node) return;
+    if (!createBond(node)) return;
+    renderSidebarData(node); save(); renderCanvasOnly(); renderNodeDiagnostics(node);
+};
 document.getElementById('deleteElementBtn').onclick = deleteSelected;
 document.getElementById('zoomInBtn').onclick = () => { state.camera.zoom = Math.min(5, state.camera.zoom * 1.2); applyCamera(); };
 document.getElementById('zoomOutBtn').onclick = () => { state.camera.zoom = Math.max(0.2, state.camera.zoom / 1.2); applyCamera(); };
