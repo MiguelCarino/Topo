@@ -1,0 +1,2 @@
+# Instrumented copy of index.html that tests/run.sh builds and deletes.
+.testrun.html
