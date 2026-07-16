@@ -449,6 +449,11 @@ function renderSidebarData(node) {
 
             const ipInp = document.createElement('input'); ipInp.type = 'text'; ipInp.value = iface.ip; ipInp.placeholder = 'CIDR';
             ipInp.className = 'flex-1 min-w-0 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500';
+            // A full /24 CIDR needs ~146px and the row can spare ~102, so a long
+            // address scrolls out of sight — and "192.168.1.70/24" clipped to
+            // "192.168.1.7" reads as a different, entirely valid address. Until
+            // the row earns more width, the hover says what it really holds.
+            ipInp.title = iface.ip || '';
             if (iface.ip.trim() !== '' && !parseValidCIDR(iface.ip)) ipInp.classList.add('border-red-400', 'bg-red-50');
             const zoneLabel = document.createElement('label');
             zoneLabel.className = 'flex items-center gap-0.5 shrink-0 text-[9px] text-slate-500 font-bold cursor-pointer mx-1';
@@ -470,8 +475,30 @@ function renderSidebarData(node) {
             zoneLabel.appendChild(zoneCb);
             zoneLabel.appendChild(document.createTextNode('Zone'));
 
+            // Wirelessness is normally read off the name (wlan0, wlp1s0), but that
+            // inference cannot see every case — macOS calls its Wi-Fi NIC en0,
+            // which reads as wired — so it has to be overridable. A rarely-used
+            // control does not get to cost 25px of the address field, so this is
+            // one button cycling inferred -> radio -> wired, rather than a
+            // checkbox and a label. Dimmed means inferred; solid means you said so.
+            const kindBtn = document.createElement('button');
+            kindBtn.className = 'text-[9px] shrink-0 leading-none';
+            const explicit = iface.wireless !== undefined;
+            kindBtn.textContent = ifaceIsWireless(iface) ? '📡' : '🔌';
+            kindBtn.style.opacity = explicit ? '1' : '0.35';
+            kindBtn.title = explicit
+                ? `Forced ${iface.wireless ? 'wireless' : 'wired'} — click to cycle (inferred / radio / cable)`
+                : `Inferred ${ifaceIsWireless(iface) ? 'wireless' : 'wired'} from the name — click to override (macOS names Wi-Fi en0)`;
+            kindBtn.onclick = () => {
+                iface.wireless = iface.wireless === undefined ? true : (iface.wireless ? false : undefined);
+                // Kind decides what may land here, so a flip can invalidate a
+                // cable. Re-render the diagnostics rather than let it pass quietly.
+                save(); renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node);
+            };
+
             ipInp.addEventListener('input', (e) => { 
-                node.interfaces[i].ip = e.target.value; 
+                node.interfaces[i].ip = e.target.value;
+                ipInp.title = e.target.value; 
                 const parsedData = parseValidCIDR(e.target.value);
                 if (e.target.value.trim() !== '' && !parsedData) ipInp.classList.add('border-red-400', 'bg-red-50');
                 else ipInp.classList.remove('border-red-400', 'bg-red-50');
@@ -510,11 +537,16 @@ function renderSidebarData(node) {
             wire.title = peer ? `${radio ? 'Associated' : 'Linked'} to ${peer.name}` : `${radio ? 'Radio' : 'Interface'} not linked`;
             if (link) wire.onclick = () => select(link.id, 'link');
 
-            div.appendChild(nameInp); div.appendChild(ipInp); div.appendChild(zoneLabel);
+            div.appendChild(nameInp); div.appendChild(ipInp);
 
-            // A bond has no socket, so the cable indicator would be a lie.
-            if (isBond(iface)) nameInp.classList.add('border-indigo-300', 'bg-indigo-50', 'font-bold');
-            else div.appendChild(wire);
+            // A bond has no socket and no antenna: neither the cable indicator
+            // nor the radio override means anything on it.
+            if (isBond(iface)) {
+                nameInp.classList.add('border-indigo-300', 'bg-indigo-50', 'font-bold');
+                div.appendChild(zoneLabel);
+            } else {
+                div.appendChild(kindBtn); div.appendChild(zoneLabel); div.appendChild(wire);
+            }
             div.appendChild(del); ifCont.appendChild(div);
 
             if (isBond(iface)) {

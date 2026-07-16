@@ -79,6 +79,34 @@ window.addEventListener('load', () => {
   ok('radio naming survives save/load', getNode('pc').interfaces[0].name === 'wlan0', getNode('pc').interfaces[0].name);
   ok('wireless binding survives save/load', ifaceIsWireless(ifaceOn(getNode('ap'), getLink('a').targetIface)));
 
+  // ---- The macOS case: en0 is Wi-Fi, and no naming rule can know that ----
+  // This is the whole reason iface.wireless exists as an override.
+  reset([
+    { id: 'mac', type: 'pc', name: 'MacBook', x: 0, y: 0,
+      interfaces: [{ id: 'i1', name: 'en0', ip: '192.168.1.70/24' }] },
+    { id: 'ap', type: 'ap', name: 'AP', x: 0, y: 100, interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] }
+  ], []);
+  const mac = getNode('mac');
+  ok('en0 reads as wired by name alone', !ifaceIsWireless(ifaceOn(mac, 'i1')));
+  mac.interfaces[0].wireless = true;
+  ok('the override makes en0 a radio', ifaceIsWireless(ifaceOn(mac, 'i1')));
+
+  // And the override has to reach the parts that care about kind.
+  state.links = [normalizeLoadedLink({ id: 'wl', source: 'mac', target: 'ap', medium: 'wireless' })];
+  autoBindLinks();
+  ok('a Wi-Fi link now binds to the overridden en0', getLink('wl').sourceIface === 'i1', String(getLink('wl').sourceIface));
+  ok('and the node is not flagged for radio/cable mismatch', evaluateRadio(mac).level !== 'bad', evaluateRadio(mac).text.slice(0, 60));
+
+  // It must also survive a round trip — it was dropped by save()'s allowlist.
+  save(); load();
+  ok('the wireless override survives save/load', ifaceIsWireless(ifaceOn(getNode('mac'), 'i1')),
+     JSON.stringify(getNode('mac').interfaces[0]));
+
+  // Forcing the other way: a wl* NIC the user insists is wired.
+  reset([{ id: 'odd', type: 'pc', name: 'Odd', x: 0, y: 0,
+           interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.0.0.9/24', wireless: false }] }], []);
+  ok('an explicit false beats the wl* name', !ifaceIsWireless(ifaceOn(getNode('odd'), 'i1')));
+
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);
 });

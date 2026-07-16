@@ -83,7 +83,8 @@ window.addEventListener('load', () => { setTimeout(() => {
     interfaces: [
       { id: 'i1', name: 'eno1', ip: '' },
       { id: 'i2', name: 'enp4s0', ip: '' },
-      { id: 'i3', name: 'bond0', ip: '192.168.100.200/24', bond: { mode: '802.3ad', members: ['i1', 'i2'] } }
+      { id: 'i3', name: 'bond0', ip: '192.168.100.200/24', bond: { mode: '802.3ad', members: ['i1', 'i2'] } },
+      { id: 'i4', name: 'eth9', ip: '10.7.7.7/24' }
     ] })];
   state.links = [];
   select('b', 'node');
@@ -102,6 +103,12 @@ window.addEventListener('load', () => { setTimeout(() => {
   // A /24 CIDR is 18 characters; anything under ~90px is showing "192.168..." at best.
   ok('the bond address is not squeezed to nothing', ipBox && ipBox.getBoundingClientRect().width >= 90,
      ipBox ? `${Math.round(ipBox.getBoundingClientRect().width)}px` : 'missing');
+
+  // The ordinary row carries more controls than the bond row (kind toggle, zone,
+  // cable indicator), so it is the one that squeezes first — guard it too.
+  const plainIp = rows.find(r => r.value === '10.7.7.7/24');
+  ok('a plain interface address is not squeezed either', plainIp && plainIp.getBoundingClientRect().width >= 90,
+     plainIp ? `${Math.round(plainIp.getBoundingClientRect().width)}px` : 'missing');
   // The mode select must not be sharing the address's line.
   const modeSel = document.querySelector('#ifaceListContainer select');
   ok('the bond mode is on its own line, not beside the address', !!modeSel && !!ipBox &&
