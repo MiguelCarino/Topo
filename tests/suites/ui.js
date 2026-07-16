@@ -83,8 +83,10 @@ window.addEventListener('load', () => { setTimeout(() => {
     interfaces: [
       { id: 'i1', name: 'eno1', ip: '' },
       { id: 'i2', name: 'enp4s0', ip: '' },
-      { id: 'i3', name: 'bond0', ip: '192.168.100.200/24', bond: { mode: '802.3ad', members: ['i1', 'i2'] } },
-      { id: 'i4', name: 'eth9', ip: '10.7.7.7/24' }
+      // 255.255.255.255/32 is the longest an IPv4 CIDR can get (18 chars). If the
+      // worst case fits, every real address does.
+      { id: 'i3', name: 'bond0', ip: '255.255.255.255/32', bond: { mode: '802.3ad', members: ['i1', 'i2'] } },
+      { id: 'i4', name: 'wlp1s0', ip: '255.255.255.255/32' }
     ] })];
   state.links = [];
   select('b', 'node');
@@ -98,22 +100,24 @@ window.addEventListener('load', () => { setTimeout(() => {
   ok('interface name fields are rendered', named.length === 2, rows.map(r => r.value).join('|'));
   named.forEach(r => ok(`${r.value} name field is wide enough to read`, r.getBoundingClientRect().width >= 40,
                         `${Math.round(r.getBoundingClientRect().width)}px`));
-  const ipBox = rows.find(r => r.value.startsWith('192.168.100.200'));
-  ok('the bond address field exists', !!ipBox);
-  // A /24 CIDR is 18 characters; anything under ~90px is showing "192.168..." at best.
-  ok('the bond address is not squeezed to nothing', ipBox && ipBox.getBoundingClientRect().width >= 90,
-     ipBox ? `${Math.round(ipBox.getBoundingClientRect().width)}px` : 'missing');
-
-  // The ordinary row carries more controls than the bond row (kind toggle, zone,
-  // cable indicator), so it is the one that squeezes first — guard it too.
-  const plainIp = rows.find(r => r.value === '10.7.7.7/24');
-  ok('a plain interface address is not squeezed either', plainIp && plainIp.getBoundingClientRect().width >= 90,
-     plainIp ? `${Math.round(plainIp.getBoundingClientRect().width)}px` : 'missing');
-  // The mode select must not be sharing the address's line.
+  // Ask the real question — is the text clipped? — rather than guess a pixel
+  // threshold. A field can clear "wide enough" and still hide half an address,
+  // and "192.168.1.70/24" clipped to "192.168.1.7" reads as a valid, different
+  // address, which is worse than an obviously truncated one.
+  const fits = (el) => el.scrollWidth <= el.clientWidth;
+  const ipBoxes = rows.filter(r => r.value === '255.255.255.255/32');
+  ok('both worst-case address fields are rendered', ipBoxes.length === 2, rows.map(r => r.value).join('|'));
+  // The plain row carries more controls than the bond row (kind toggle, zone,
+  // cable indicator), so it is the one that runs out of width first.
+  ipBoxes.forEach((el, i) => ok(`the longest IPv4 CIDR is fully visible (field ${i + 1})`, fits(el),
+    `${Math.round(el.clientWidth)}px available, needs ${el.scrollWidth}px`));
+  // The mode select must not be sharing the address's line — that pairing is
+  // what squeezed the CIDR down to "10" when bonds first landed.
   const modeSel = document.querySelector('#ifaceListContainer select');
-  ok('the bond mode is on its own line, not beside the address', !!modeSel && !!ipBox &&
-     Math.abs(modeSel.getBoundingClientRect().top - ipBox.getBoundingClientRect().top) > 4,
-     modeSel && ipBox ? `mode@${Math.round(modeSel.getBoundingClientRect().top)} ip@${Math.round(ipBox.getBoundingClientRect().top)}` : 'missing');
+  const bondIp = ipBoxes[0];
+  ok('the bond mode is on its own line, not beside the address', !!modeSel && !!bondIp &&
+     Math.abs(modeSel.getBoundingClientRect().top - bondIp.getBoundingClientRect().top) > 4,
+     modeSel && bondIp ? `mode@${Math.round(modeSel.getBoundingClientRect().top)} ip@${Math.round(bondIp.getBoundingClientRect().top)}` : 'missing');
 
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);

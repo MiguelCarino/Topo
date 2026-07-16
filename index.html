@@ -44,7 +44,10 @@
     </header>
 
     <div class="flex flex-1 overflow-hidden relative">
-        <aside class="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-sm z-10 h-full">
+        <!-- w-96, not w-80: an interface row has to fit a name, a full /24 CIDR
+             (~146px) and its toggles, and 320px could not do it — long addresses
+             clipped to a shorter, still-valid-looking address. -->
+        <aside class="w-96 bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-sm z-10 h-full">
             
             <div class="flex border-b border-slate-200 shrink-0" id="libraryTabs" role="tablist">
                 <button data-tab="nodes" class="lib-tab flex-1 px-2 py-2.5 text-[11px] font-bold uppercase tracking-wider" role="tab">Nodes <span class="lib-key">1</span></button>
