@@ -162,6 +162,9 @@
     padding: 0 10px; height: 32px; border-radius: 4px; cursor: pointer; transition: 0.2s; white-space: nowrap;
 }
 .cs-btn:hover { border-color: var(--cs-accent); color: var(--cs-accent); background: var(--cs-accent-faint); }
+/* Disabled Undo/Redo read as unavailable, not clickable — dim, muted, no hover. */
+.cs-btn:disabled { opacity: 0.4; cursor: default; }
+.cs-btn:disabled:hover { border-color: var(--cs-border); color: var(--cs-text-sec); background: transparent; }
 
 .cs-export-group {
     display: flex; align-items: center;

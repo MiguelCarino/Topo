@@ -32,6 +32,9 @@ for the wrong reason.
 | `military` | NIPR/SIPR air gap — asserted as a negative, in both directions |
 | `tabs` | Library tabs, keyboard shortcuts, settings persistence |
 | `smoke` | Every template and snippet loads, renders, traces, and stays clean |
+| `bonds` | NIC bonding: folding NICs into one MAC/IP, mode + member survival, the flapping cure |
+| `persistence` | "Save as template" round-trips the network intact — portCount, socket bindings, and the nat field that used to invert |
+| `history` | Undo/redo on the shared serializer: the timeline rides `save()`, identical saves add no step, a fresh edit forks the future, Ctrl+Z acts on the canvas |
 
 ## Writing one
 

@@ -175,22 +175,15 @@ const USER_TPL_KEY = 'nettopo_user_templates';
 function loadUserTemplates() { try { return JSON.parse(localStorage.getItem(USER_TPL_KEY) || '{}'); } catch (e) { return {}; } }
 // What "save as template" actually stores. Split out from saveUserTemplate so it
 // can be tested without a prompt() in the way — the round trip is the part that
-// can lose your network, not the naming.
-//
-// This mirrors save()'s allowlist deliberately. It used to carry a shorter list
-// of its own and quietly dropped three things: portCount (a 24-port switch came
-// back with 8, and auto-bind then re-grew it to fit whatever cables landed),
-// sourceIface/targetIface (every cable re-guessed into a different socket, which
-// is exactly what the shipped templates set explicitly to avoid), and nat —
-// which did not merely reset but inverted, since normalizeLoadedNode reapplies
-// the type default when nat is undefined. A router you turned NAT on for came
-// back off; a VPN you turned it off for came back on.
-function templateSnapshot() {
-    return {
-        nodes: state.nodes.map(n => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw, dns: n.dns, os: n.os, ports: n.ports, notes: n.notes, nat: !!n.nat, portCount: Number.isFinite(n.portCount) ? n.portCount : undefined, interfaces: cloneData(n.interfaces) })),
-        links: state.links.map(l => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium, sourceIface: l.sourceIface || undefined, targetIface: l.targetIface || undefined }))
-    };
-}
+// can lose your network, not the naming. It is the same serializer save() uses,
+// so the two cannot drift: templateSnapshot once carried a shorter allowlist of
+// its own and quietly dropped three things — portCount (a 24-port switch came
+// back with 8, and auto-bind re-grew it to fit whatever cables landed),
+// sourceIface/targetIface (every cable re-guessed into a different socket, the
+// thing shipped templates set explicitly to avoid), and nat — which did not
+// merely reset but inverted, since normalizeLoadedNode reapplies the type
+// default when nat is undefined. Now there is one list, in serializeDoc().
+function templateSnapshot() { return serializeDoc(); }
 
 function saveUserTemplate() {
     if (!state.nodes.length) { alert('Nothing to save — add some nodes first.'); return; }
@@ -239,14 +232,94 @@ function updateOsDatalist() {
     new Set(state.nodes.map((n) => n.os).filter(Boolean)).forEach((os) => { dl.appendChild(new Option(os, os)); });
 }
 
+// ---- The one document serializer ----
+// Everything that persists the canvas — the URL hash, "save as template", and
+// undo/redo — goes through here, so there is a single allowlist to keep honest.
+// Any node/link/interface field not named here is dropped on the next save.
+function serializeNode(n) {
+    return { id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', nat: !!n.nat, portCount: Number.isFinite(n.portCount) ? n.portCount : undefined, interfaces: (n.interfaces || []).map((i) => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone, wireless: i.wireless, bond: i.bond })) };
+}
+function serializeLink(l) {
+    return { id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium, sourceIface: l.sourceIface || undefined, targetIface: l.targetIface || undefined };
+}
+function serializeDoc() {
+    return { nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink) };
+}
+function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
+
 function save() {
     try {
-        // Allowlist: any field not named here is dropped on the next save.
-        const cleanNodes = state.nodes.map((n) => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', nat: !!n.nat, portCount: Number.isFinite(n.portCount) ? n.portCount : undefined, interfaces: (n.interfaces || []).map(i => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone, wireless: i.wireless, bond: i.bond })) }));
-        const cleanLinks = state.links.map((l) => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium, sourceIface: l.sourceIface || undefined, targetIface: l.targetIface || undefined }));
-        const encoded = btoa(encodeURIComponent(JSON.stringify({ nodes: cleanNodes, links: cleanLinks })));
-        window.history.replaceState(null, '', `#${encoded}`); updateOsDatalist();
+        const doc = serializeDoc();
+        recordHistory(JSON.stringify(doc));            // ride the one chokepoint every mutation already calls
+        window.history.replaceState(null, '', `#${encodeDoc(doc)}`);
+        updateOsDatalist();
     } catch (err) { console.warn('Could not save diagram state:', err); }
+}
+
+// ---- Undo / redo ----
+// The document is exactly {nodes, links}, and save() already reserializes it
+// after every mutation — while camera pans and selection clicks never reach
+// save(). So history rides that chokepoint: we hold the last committed snapshot
+// (_present, a JSON string) plus a stack of prior ones and a stack of undone
+// ones. A save() whose JSON equals _present is a no-op (e.g. a redundant save)
+// and does not push a duplicate step; a save() that differs forks the timeline,
+// discarding any redo future.
+const UNDO_LIMIT = 100;
+let _present = null;
+let _undoStack = [];
+let _redoStack = [];
+
+// Call once the initial document is on screen: makes the loaded state the floor
+// of the timeline without itself being an undoable step.
+function initHistory() {
+    _present = JSON.stringify(serializeDoc());
+    _undoStack = []; _redoStack = [];
+    updateUndoButtons();
+}
+
+function recordHistory(json) {
+    if (_present === null) { _present = json; updateUndoButtons(); return; }
+    if (json === _present) return;                     // nothing about the document changed
+    _undoStack.push(_present);
+    if (_undoStack.length > UNDO_LIMIT) _undoStack.shift();
+    _present = json;
+    _redoStack = [];                                   // a fresh edit invalidates the redo future
+    updateUndoButtons();
+}
+
+// Rebuild the canvas from a snapshot without touching the history stacks — undo
+// and redo move _present themselves. Mirrors load()'s reset of transient ids so
+// a stale selection or armed link cannot survive the swap.
+function applyDoc(json) {
+    const parsed = JSON.parse(json);
+    state.selectedId = null; state.selectedType = null; state.linkSourceId = null;
+    state.nodes = (parsed.nodes || []).map(normalizeLoadedNode);
+    state.links = (Array.isArray(parsed.links) ? parsed.links : []).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
+    autoBindLinks();
+    window.history.replaceState(null, '', `#${encodeDoc(serializeDoc())}`);
+    updateOsDatalist();
+    select(null, null); invalidateTidy();
+    renderCanvasOnly();
+    updateUndoButtons();
+}
+
+function undo() {
+    if (!_undoStack.length) return;
+    _redoStack.push(_present);
+    _present = _undoStack.pop();
+    applyDoc(_present);
+}
+function redo() {
+    if (!_redoStack.length) return;
+    _undoStack.push(_present);
+    _present = _redoStack.pop();
+    applyDoc(_present);
+}
+
+function updateUndoButtons() {
+    const u = document.getElementById('undoBtn'), r = document.getElementById('redoBtn');
+    if (u) { u.disabled = !_undoStack.length; u.title = _undoStack.length ? `Undo (${_undoStack.length}) — Ctrl+Z` : 'Nothing to undo'; }
+    if (r) { r.disabled = !_redoStack.length; r.title = _redoStack.length ? `Redo (${_redoStack.length}) — Ctrl+Shift+Z` : 'Nothing to redo'; }
 }
 
 function normalizeLoadedNode(node) {
@@ -392,6 +465,18 @@ const SHORTCUTS = [
 ];
 
 window.addEventListener('keydown', (event) => {
+    const activeTag = document.activeElement?.tagName || '';
+    const inField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag);
+
+    // Undo/redo are the exception to "leave Ctrl/Cmd combos alone" below. Inside a
+    // field we defer to the browser's own text undo; on the canvas they act on the
+    // diagram. Ctrl+Z, and either Ctrl+Shift+Z or Ctrl+Y to redo.
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !inField) {
+        const k = event.key.toLowerCase();
+        if (k === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
+        if (k === 'y') { event.preventDefault(); redo(); return; }
+    }
+
     if (event.ctrlKey || event.metaKey || event.altKey) return; // leave browser/OS combos alone
 
     const tag = document.activeElement?.tagName || '';
@@ -492,6 +577,8 @@ function renderUserTemplates() {
 
 document.getElementById('tidyBtn').onclick = tidyLayout;
 document.getElementById('saveTemplateBtn').onclick = saveUserTemplate;
+document.getElementById('undoBtn').onclick = undo;
+document.getElementById('redoBtn').onclick = redo;
 
 // Drag a palette item and drop it onto the canvas at the cursor
 (function () {
@@ -622,7 +709,9 @@ document.getElementById('canvasFilter').addEventListener('input', (event) => {
 document.getElementById('exportPngBtn').onclick = () => handleExport('png');
 document.getElementById('exportWebpBtn').onclick = () => handleExport('webp');
 
-window.addEventListener('popstate', () => { load(); renderCanvasOnly(); fitToView(); });
+// Browser back/forward swaps the document wholesale (a shared URL, say), so the
+// edit timeline for the old document no longer applies — start a fresh one.
+window.addEventListener('popstate', () => { load(); renderCanvasOnly(); fitToView(); initHistory(); });
 
 document.getElementById('conflictHideBtn').onclick = () => {
     state.settings.alertsHidden = true; saveSettings(); validateTopology();
@@ -641,3 +730,4 @@ renderShortcutHelp();
 loadSettings();
 showLibraryTab(state.settings.libraryTab || 'nodes');
 load(); renderCanvasOnly(); fitToView();
+initHistory(); // the loaded document is the floor of the undo timeline, not a step

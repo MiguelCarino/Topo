@@ -60,18 +60,6 @@ function getInterfaces(node) {
 function ifaceOn(node, ifaceId) { return getInterfaces(node).find((i) => i.id === ifaceId) || null; }
 function ifaceLabel(node, ifaceId) { return ifaceOn(node, ifaceId)?.name || ifaceId || '—'; }
 
-// Promote an implicit faceplate port into node.interfaces so it can hold a name/IP.
-function materializeIface(node, ifaceId) {
-    node.interfaces = node.interfaces || [];
-    const existing = node.interfaces.find((i) => i.id === ifaceId);
-    if (existing) return existing;
-    const virt = ifaceOn(node, ifaceId);
-    if (!virt) return null;
-    const real = { id: virt.id, name: virt.name, ip: '' };
-    node.interfaces.push(real);
-    return real;
-}
-
 // Give a node somewhere to plug a link in. opts.wireless yields a radio, since a
 // Wi-Fi association cannot land on a socket. Otherwise opts.grow gains a switch a
 // faceplate port, and everything else gains an addressed NIC — a switch's
