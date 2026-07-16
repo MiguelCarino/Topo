@@ -1,0 +1,285 @@
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+.grid-bg {
+    background-color: #f8fafc;
+    background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+    background-size: 20px 20px;
+}
+
+/* Trace flow. Each medium moves signal differently, so each animates differently:
+   fibre sprints in long streaks, copper walks, powerline crawls over a noisy
+   dash-dot-dot line, a tunnel marches in encrypted blocks, and radio does not
+   flow down a cable at all — it emits ))) arcs instead.
+   Travel speed is held constant per medium while the patterns differ, so each
+   duration below is (dashoffset ÷ speed): copper 40 px/s, fibre 112.5, VPN 35.6,
+   powerline 22.5. Change a pattern and the duration must be recomputed to match.
+   Every dashoffset is a whole multiple of its dash period, so the loop is seamless. */
+@keyframes flow-utp { to { stroke-dashoffset: -24; } }              /* period 12 */
+.flow-utp { stroke-dasharray: 7 5; animation: flow-utp 0.6s linear infinite; }
+
+/* Long streaks of light. */
+@keyframes flow-fiber { to { stroke-dashoffset: -60; } }            /* period 30 */
+.flow-fiber { stroke-dasharray: 22 8; animation: flow-fiber 0.533s linear infinite; }
+
+/* Dash-dot-dot: a cluttered, noisy carrier. */
+@keyframes flow-powerline { to { stroke-dashoffset: -44; } }        /* period 22 */
+.flow-powerline { stroke-dasharray: 9 3 2 3 2 3; animation: flow-powerline 1.956s linear infinite; }
+
+/* Dash-dot: encrypted blocks with a marker between them. */
+@keyframes flow-vpn { to { stroke-dashoffset: -44; } }              /* period 22 */
+.flow-vpn { stroke-dasharray: 12 4 2 4; animation: flow-vpn 1.238s linear infinite; }
+
+/* Radio carries no dashes at all: the ))) arcs ride the link as glyphs on a
+   textPath (see renderCanvasOnly), and this faint base line is just the
+   association itself showing through underneath. */
+.flow-wireless { stroke-dasharray: none; opacity: 0.3; }
+.flow-wave { pointer-events: none; }
+
+/* Respect users who ask the OS for less motion: keep each identity, drop the loop. */
+@media (prefers-reduced-motion: reduce) {
+    .flow-utp, .flow-fiber, .flow-powerline, .flow-vpn { animation: none; }
+}
+
+@keyframes pulse-glow { 
+    0%, 100% { filter: drop-shadow(0 0 4px #f97316); stroke: #ea580c; } 
+    50% { filter: drop-shadow(0 0 12px #fb923c); stroke: #f97316; } 
+}
+.linking-glow rect { animation: pulse-glow 1.5s infinite ease-in-out; stroke-width: 3px !important; }
+
+.fade-inactive { opacity: 0.25; filter: grayscale(100%); transition: opacity 0.3s, filter 0.3s; }
+.zone-bubble { transition: all 0.2s ease-out; pointer-events: none; }
+
+/* === Carino Systems Header === */
+:root {
+    --cs-bg: #050505;
+    --cs-bg-card: #0b0b0b;
+    --cs-bg-elev: #0d0d0d;
+    --cs-accent: #eab308;
+    --cs-accent-faint: rgba(234, 179, 8, 0.05);
+    --cs-accent-glow: rgba(234, 179, 8, 0.15);
+    --cs-accent-dim: rgba(234, 179, 8, 0.3);
+    --cs-border: #262626;
+    --cs-text: #ffffff;
+    --cs-text-sec: #a3a3a3;
+    --cs-text-muted: #666666;
+}
+
+.cs-header {
+    height: 70px;
+    flex-shrink: 0;
+    background: linear-gradient(180deg, #0f0f0f 0%, #050505 100%);
+    border-bottom: 1px solid var(--cs-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    gap: 12px;
+    position: relative;
+    z-index: 20;
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.cs-left { display: flex; align-items: center; gap: 14px; min-width: 0; flex-shrink: 0; }
+.cs-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+.cs-page-name {
+    font-family: 'Red Hat Display', sans-serif;
+    font-size: 1.4rem; font-weight: 900; line-height: 1;
+    background: linear-gradient(130deg, #fef08a 0%, #eab308 50%, #b45309 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    white-space: nowrap; flex-shrink: 0;
+}
+
+.cs-info {
+    display: flex; align-items: baseline; gap: 10px;
+    border-left: 1px solid var(--cs-border); padding-left: 14px;
+}
+.cs-info-title {
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; font-weight: 700;
+    color: var(--cs-text); white-space: nowrap; text-transform: uppercase; letter-spacing: 0.06em;
+}
+.cs-info-desc {
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem;
+    color: var(--cs-text-muted); white-space: nowrap;
+}
+
+.cs-icon-btn {
+    width: 32px; height: 32px;
+    border: 1px solid var(--cs-border); border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--cs-text-muted); transition: 0.2s;
+    text-decoration: none; background: transparent; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; font-weight: 700;
+}
+.cs-icon-btn:hover {
+    border-color: var(--cs-accent); color: #050505; background: var(--cs-accent);
+    transform: translateY(-2px); box-shadow: 0 4px 12px var(--cs-accent-glow);
+}
+.cs-icon-btn svg { width: 15px; height: 15px; }
+
+.cs-vdiv { width: 1px; height: 22px; background: var(--cs-border); flex-shrink: 0; }
+
+.cs-control-group {
+    display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--cs-border); border-radius: 4px;
+    padding: 0 10px; height: 32px; background: transparent;
+}
+.cs-trace-lbl {
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
+    color: var(--cs-accent); text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap;
+}
+.cs-trace-lbl input[type="checkbox"] { width: 13px; height: 13px; accent-color: var(--cs-accent); cursor: pointer; }
+.cs-hdiv { width: 1px; height: 14px; background: var(--cs-border); }
+.cs-trace-port {
+    width: 90px; background: transparent; border: none; outline: none;
+    color: var(--cs-text); font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
+}
+.cs-trace-port::placeholder { color: var(--cs-text-muted); }
+.cs-trace-port:focus { color: var(--cs-accent); }
+
+.cs-trace-status {
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem;
+    color: var(--cs-text-muted); white-space: nowrap; min-width: 90px;
+}
+.cs-trace-status.active { color: var(--cs-accent); font-weight: 700; }
+
+.cs-select {
+    background: transparent; border: 1px solid var(--cs-border); color: var(--cs-text);
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem;
+    padding: 0 8px; height: 32px; border-radius: 4px; cursor: pointer; outline: none; transition: 0.2s;
+}
+.cs-select:hover, .cs-select:focus { border-color: var(--cs-accent); }
+.cs-select option { background: #111; color: var(--cs-text); }
+
+.cs-btn {
+    display: flex; align-items: center; gap: 5px;
+    background: transparent; border: 1px solid var(--cs-border);
+    color: var(--cs-text-sec); font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 0 10px; height: 32px; border-radius: 4px; cursor: pointer; transition: 0.2s; white-space: nowrap;
+}
+.cs-btn:hover { border-color: var(--cs-accent); color: var(--cs-accent); background: var(--cs-accent-faint); }
+
+.cs-export-group {
+    display: flex; align-items: center;
+    border: 1px solid var(--cs-accent-dim); border-radius: 4px; overflow: hidden; height: 32px;
+}
+.cs-export-lbl {
+    padding: 0 10px; background: rgba(234,179,8,0.07);
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem;
+    color: var(--cs-accent); text-transform: uppercase; letter-spacing: 0.08em;
+    display: flex; align-items: center; height: 100%;
+    border-right: 1px solid var(--cs-accent-dim);
+}
+.cs-export-btn {
+    padding: 0 10px; background: transparent; border: none;
+    border-right: 1px solid var(--cs-accent-dim);
+    color: var(--cs-text-sec); font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem; text-transform: uppercase; cursor: pointer; transition: 0.2s; height: 100%;
+}
+.cs-export-btn:last-child { border-right: none; }
+.cs-export-btn:hover { background: var(--cs-accent-faint); color: var(--cs-accent); }
+
+/* ============================================================
+   Carino branding pass — rebrand the app CHROME (sidebar +
+   floating controls) to gold-on-black so it matches the navbar.
+   The diagram canvas stays light: it is the exportable document.
+   Scoped overrides of the Tailwind light utilities used inline.
+   ============================================================ */
+body { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+aside {
+    background: var(--cs-bg-card) !important;
+    border-right: 1px solid var(--cs-border) !important;
+    color: var(--cs-text-sec);
+}
+aside .bg-white, aside .bg-slate-50 { background: transparent !important; }
+aside .border-slate-100, aside .border-slate-200, aside .border-slate-300 { border-color: var(--cs-border) !important; }
+aside h2 { color: var(--cs-text-muted) !important; font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.1em; }
+aside .text-slate-800, aside .text-slate-700 { color: var(--cs-text) !important; }
+aside .text-slate-600, aside .text-slate-500 { color: var(--cs-text-sec) !important; }
+aside .text-slate-400 { color: var(--cs-text-muted) !important; }
+aside .text-orange-600 { color: var(--cs-accent) !important; }
+aside ul li .border { border-color: var(--cs-border) !important; background: var(--cs-bg-elev) !important; color: var(--cs-text-sec) !important; }
+/* form controls */
+aside input, aside select, aside textarea {
+    background: var(--cs-bg-elev) !important;
+    border: 1px solid var(--cs-border) !important;
+    color: var(--cs-text) !important;
+    border-radius: 6px !important;
+}
+aside input::placeholder { color: var(--cs-text-muted) !important; }
+aside input:focus, aside select:focus, aside textarea:focus {
+    outline: none !important;
+    border-color: var(--cs-accent) !important;
+    box-shadow: 0 0 0 3px var(--cs-accent-faint) !important;
+}
+aside select option { background: #111; color: var(--cs-text); }
+/* semantic accent labels/selects → gold family */
+aside .text-indigo-600, aside .text-emerald-600, aside .text-blue-600 { color: var(--cs-accent) !important; }
+aside .border-indigo-300, aside .border-emerald-300 { border-color: var(--cs-border) !important; }
+aside .bg-indigo-50, aside .bg-emerald-50 { background: var(--cs-bg-elev) !important; }
+aside .focus\:outline-blue-500:focus, aside .focus\:outline-indigo-500:focus { outline-color: var(--cs-accent) !important; }
+aside a { color: var(--cs-accent) !important; }
+/* node-palette hardware buttons */
+#nodePalette button {
+    background: var(--cs-bg-elev) !important;
+    border: 1px solid var(--cs-border) !important;
+    color: var(--cs-text-sec) !important;
+    border-radius: 8px !important;
+    transition: 0.15s;
+}
+#nodePalette button:hover { border-color: var(--cs-accent) !important; color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
+#nodePalette button svg { stroke: currentColor !important; }
+
+/* Library tabs: Nodes / Networks / Blocks */
+.lib-tab {
+    background: transparent; border: none; border-bottom: 2px solid transparent;
+    color: var(--cs-text-muted); font-family: 'IBM Plex Mono', monospace;
+    cursor: pointer; transition: 0.15s; display: flex; align-items: center; justify-content: center; gap: 5px;
+}
+.lib-tab:hover { color: var(--cs-text-sec); background: var(--cs-accent-faint); }
+.lib-tab[aria-selected="true"] { color: var(--cs-accent); border-bottom-color: var(--cs-accent); background: var(--cs-accent-faint); }
+.lib-key, .kbd {
+    font-family: 'IBM Plex Mono', monospace; font-size: 8px; line-height: 1;
+    border: 1px solid var(--cs-border); border-radius: 3px; padding: 2px 3px;
+    color: var(--cs-text-muted); background: var(--cs-bg-elev);
+}
+.lib-tab[aria-selected="true"] .lib-key { border-color: var(--cs-accent-dim); color: var(--cs-accent); }
+
+/* One row per template/block */
+.lib-item {
+    display: flex; align-items: flex-start; gap: 8px; width: 100%; text-align: left;
+    background: var(--cs-bg-elev); border: 1px solid var(--cs-border); border-radius: 6px;
+    padding: 7px 8px; cursor: pointer; transition: 0.15s;
+}
+.lib-item:hover { border-color: var(--cs-accent); background: var(--cs-accent-faint); }
+.lib-item-icon { font-size: 14px; line-height: 1.1; flex-shrink: 0; }
+.lib-item-name { font-size: 11px; font-weight: 700; color: var(--cs-text); }
+.lib-item:hover .lib-item-name { color: var(--cs-accent); }
+.lib-item-blurb { font-size: 9px; color: var(--cs-text-muted); line-height: 1.3; margin-top: 1px; }
+.lib-item-del { color: var(--cs-text-muted); font-size: 10px; padding: 0 2px; background: none; border: none; cursor: pointer; }
+.lib-item-del:hover { color: #dc2626; }
+
+/* Shortcut cheatsheet */
+#shortcutHelp kbd {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+    border: 1px solid var(--cs-border); border-radius: 4px; padding: 2px 6px;
+    color: var(--cs-accent); background: var(--cs-bg-elev); white-space: nowrap;
+}
+/* jump-to-gateway (dark slate button) → outline gold */
+#jumpGwBtn { background: transparent !important; border: 1px solid var(--cs-border) !important; color: var(--cs-text-sec) !important; border-radius: 6px !important; }
+#jumpGwBtn:hover { border-color: var(--cs-accent) !important; color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
+/* floating zoom controls over the light canvas → dark card */
+#canvasContainer > .absolute.bottom-4.right-4 { background: var(--cs-bg-card) !important; border: 1px solid var(--cs-border) !important; color: var(--cs-text-sec) !important; border-radius: 8px; overflow: hidden; }
+#canvasContainer > .absolute.bottom-4.right-4 button { border-color: var(--cs-border) !important; }
+#canvasContainer > .absolute.bottom-4.right-4 button:hover { background: var(--cs-accent-faint) !important; color: var(--cs-accent) !important; }
+/* validation alert → solid dark card so it reads on the light canvas */
+#conflictAlert { background: var(--cs-bg-card) !important; border: 1px solid var(--cs-border) !important; border-left: 4px solid var(--cs-accent) !important; box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important; }
+#conflictAlert h4 { color: var(--cs-accent) !important; }
+#conflictAlert .text-amber-800, #conflictAlert ul { color: #fde68a !important; }
+#conflictPill { background: var(--cs-bg-card) !important; border: 1px solid var(--cs-accent-dim) !important; color: var(--cs-accent) !important; box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important; }
+#conflictPill:hover { border-color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
+#conflictAlert .text-amber-500 { color: var(--cs-accent) !important; }

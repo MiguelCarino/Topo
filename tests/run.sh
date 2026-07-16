@@ -9,14 +9,31 @@
 # out of the dumped DOM. The copy has to sit in the repo root: index.html pulls
 # css/ and js/ by relative path, so running it from /tmp would silently load a
 # page with no app on it and every assertion would fail for the wrong reason.
+#
+# Served over HTTP, not opened as file://, because file:// treats every external
+# script and stylesheet as a foreign origin. That costs us the two things a test
+# run most needs: real messages (errors collapse to "Script error." with no file
+# or line) and CSSOM access (reading @keyframes out of css/app.css throws, so the
+# animation suite silently measures zero). GitHub Pages serves this over HTTP —
+# so should we.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 CHROME="${CHROME:-chromium-browser}"
+PORT="${PORT:-8731}"
 RUNFILE=".testrun.html"
-trap 'rm -f "$RUNFILE"' EXIT
 
 command -v "$CHROME" >/dev/null || { echo "no $CHROME on PATH; set CHROME=..." >&2; exit 127; }
+
+python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1 &
+SERVER=$!
+trap 'rm -f "$RUNFILE"; kill $SERVER 2>/dev/null' EXIT
+
+for _ in $(seq 50); do
+    if (exec 3<>/dev/tcp/127.0.0.1/"$PORT") 2>/dev/null; then exec 3<&-; break; fi
+    sleep 0.1
+done
+kill -0 $SERVER 2>/dev/null || { echo "could not start a server on :$PORT (set PORT=...)" >&2; exit 1; }
 
 if [ $# -gt 0 ]; then
     suites=("$@")
@@ -37,14 +54,21 @@ for suite in "${suites[@]}"; do
 import sys
 suite, runfile = sys.argv[1], sys.argv[2]
 html = open('index.html').read()
-tag = f'<script src="{suite}"></script>\n</body>'
-if '</body>' not in html:
-    sys.exit('index.html has no </body> to inject before')
-open(runfile, 'w').write(html.replace('</body>', tag, 1))
+# Record the first boot error, so a suite that never reports can say why it died
+# instead of leaving us to guess. Goes in <head>, ahead of every app script.
+probe = ('<script>window.addEventListener("error", (e) => {'
+         'if (document.getElementById("BOOTERR")) return;'
+         'const p = document.createElement("pre"); p.id = "BOOTERR";'
+         'p.textContent = e.message + " @ " + (e.filename || "").split("/").pop() + ":" + e.lineno;'
+         'document.documentElement.appendChild(p); });</script>')
+if '</head>' not in html or '</body>' not in html:
+    sys.exit('index.html is missing </head> or </body> to inject into')
+html = html.replace('</head>', probe + '</head>', 1)
+open(runfile, 'w').write(html.replace('</body>', f'<script src="{suite}"></script>\n</body>', 1))
 PY
 
     dom=$("$CHROME" --headless --disable-gpu --no-sandbox \
-          --virtual-time-budget=8000 --dump-dom "file://$PWD/$RUNFILE" 2>/dev/null)
+          --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:$PORT/$RUNFILE" 2>/dev/null)
 
     results=$(printf '%s' "$dom" | python3 -c '
 import sys, re, html
@@ -54,7 +78,13 @@ print(html.unescape(m.group(1)).strip() if m else "")
 ')
 
     if [ -z "$results" ]; then
-        echo "FAIL ${suite}: suite produced no output (crashed before reporting?)"
+        boot=$(printf '%s' "$dom" | python3 -c '
+import sys, re, html
+m = re.search(r"<pre id=\"BOOTERR\">(.*?)</pre>", sys.stdin.read(), re.S)
+print(html.unescape(m.group(1)).strip() if m else "")
+')
+        echo "FAIL ${suite}: reported nothing${boot:+ -- ${boot}}"
+        [ -z "$boot" ] && echo "       (no boot error either; suite may not have run)"
         failed=$((failed + 1)); continue
     fi
 
