@@ -117,6 +117,23 @@ window.addEventListener('load', () => {
      p7.interfaces.map((i) => `${i.name}=${i.ip || '-'}`).join(' '));
   ok('unbond leaves no bond behind', !p7.interfaces.some(isBond));
 
+  // ---- 7b: pulling members out one at a time must not eat the address ----
+  // Emptying the bond and then dissolving it is the same intent as unbonding,
+  // so it has to end the same way: somebody still holds the IP.
+  pacsScenario();
+  const p7b = getNode('pacs');
+  const b7b = createBond(p7b);
+  const members7b = [...b7b.bond.members];
+  b7b.bond.members = b7b.bond.members.filter((id) => id !== members7b[0]);
+  ok('pulling one member leaves the bond holding the address', (p7b.interfaces.find(isBond) || {}).ip === '192.168.1.10/24');
+  // Now pull the last one, the way the sidebar's ✖ does.
+  b7b.bond.members = b7b.bond.members.filter((id) => id !== members7b[1]);
+  if (!b7b.bond.members.length) removeBond(p7b, b7b.id);
+  ok('pulling the last member hands the address back, not into the bin',
+     p7b.interfaces.some((i) => i.ip === '192.168.1.10/24'),
+     p7b.interfaces.map((i) => `${i.name}=${i.ip || '-'}`).join(' '));
+  ok('and the node still has an L3 identity', getValidIps(p7b).length > 0, String(getValidIps(p7b).length));
+
   // ---- 8: deleting a NIC takes its cable, and does not orphan the link ----
   pacsScenario();
   const p8 = getNode('pacs');

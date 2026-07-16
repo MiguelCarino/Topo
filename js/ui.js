@@ -339,7 +339,10 @@ function renderCanvasOnly() {
         g.addEventListener('click', (event) => {
             event.stopPropagation();
             if (state.linkSourceId) {
-                if (state.linkSourceId !== node.id) {
+                // The armed node can be gone by now — loading a shared URL swaps
+                // state.nodes out from under link mode without disarming it — and
+                // a null here would throw and leave the canvas stuck in crosshair.
+                if (state.linkSourceId !== node.id && getNode(state.linkSourceId)) {
                     const sNode = getNode(state.linkSourceId);
                     // A second cable between the same pair is legitimate (redundant
                     // NICs, LAG), so only an identical port-to-port run is a duplicate.
@@ -352,7 +355,16 @@ function renderCanvasOnly() {
                 }
                 state.linkSourceId = null; save();
                 renderCanvasOnly();
-                renderNodeDiagnostics(node);
+                // Show the diagnostics for whatever is actually selected. Link
+                // mode does not change the selection, so linking B to A while C
+                // is selected would otherwise put A's verdicts under C's details.
+                // Re-render the sidebar too: binding the link can have grown this
+                // node a NIC, which would not show until it was reselected.
+                if (state.selectedType === 'node' && state.selectedId) {
+                    const selected = getNode(state.selectedId);
+                    if (selected) renderSidebarData(selected);
+                }
+                refreshSelectedNodeDiagnostics();
             }
         });
 
@@ -381,14 +393,21 @@ function renderFaceplate(node, container) {
     head.innerHTML = '<span class="text-[9px] font-bold text-slate-500 uppercase">Physical Ports</span>';
 
     const count = document.createElement('input');
+    count.id = 'portCountInput';
     count.type = 'number'; count.min = '0'; count.max = '96';
     count.value = String(portCountOf(node));
     count.className = 'w-14 border border-slate-300 rounded px-1 py-0.5 text-[10px] font-mono text-right focus:outline-blue-500';
     count.oninput = (e) => {
         const next = parseInt(e.target.value, 10);
         if (!Number.isFinite(next) || next < 0) return;
+        const caret = e.target.selectionStart;
         node.portCount = Math.min(next, 96);
         save(); renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node);
+        // Redrawing the faceplate destroys the very field being typed into, so
+        // focus lands on <body> and the second digit of "24" goes nowhere. Put
+        // the cursor back on the replacement.
+        const live = document.getElementById('portCountInput');
+        if (live) { live.focus(); try { live.setSelectionRange(caret, caret); } catch (err) { /* number inputs */ } }
     };
     head.appendChild(count);
     wrap.appendChild(head);
@@ -625,8 +644,14 @@ function renderBondMember(node, member, bond, container) {
     pull.innerHTML = '✖'; pull.className = 'text-slate-400 hover:text-red-500 px-1 shrink-0';
     pull.title = `Remove ${member.name} from ${bond.name}`;
     pull.onclick = () => {
-        bond.bond.members = (bond.bond.members || []).filter((id) => id !== member.id);
-        if (bond.bond.members.length === 0) removeBond(node, bond.id);
+        const remaining = (bond.bond.members || []).filter((id) => id !== member.id);
+        if (remaining.length) {
+            bond.bond.members = remaining;
+        } else {
+            // Last one out. Dissolve before unlisting, so removeBond still has a
+            // member to hand the address to — unlist first and it goes in the bin.
+            removeBond(node, bond.id);
+        }
         save(); renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node);
     };
 

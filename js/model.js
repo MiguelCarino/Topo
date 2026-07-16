@@ -139,14 +139,18 @@ function createBond(node, opts = {}) {
     return bond;
 }
 
-// Dissolve a bond, handing its address back to the first member so the node
-// does not silently lose its L3 identity.
+// Dissolve a bond, handing its address back to the first member so the node does
+// not silently lose its L3 identity. If the bond has already been emptied, fall
+// back to any plain NIC rather than bin the address: losing a node's only
+// address is the one outcome this function exists to prevent, so it should not
+// depend on the caller unlisting members in the right order.
 function removeBond(node, bondId) {
     const bond = (node?.interfaces || []).find((i) => i.id === bondId && isBond(i));
     if (!bond) return false;
-    const first = bondMembers(node, bond)[0];
-    if (first) {
-        const real = node.interfaces.find((x) => x.id === first.id);
+    const heir = bondMembers(node, bond)[0]
+        || getInterfaces(node).find((i) => !isBond(i) && !i.implicit && !parseValidCIDR(i.ip));
+    if (heir) {
+        const real = node.interfaces.find((x) => x.id === heir.id);
         if (real) { real.ip = bond.ip || ''; if (bond.drawZone !== undefined) real.drawZone = bond.drawZone; }
     }
     node.interfaces = node.interfaces.filter((i) => i.id !== bondId);

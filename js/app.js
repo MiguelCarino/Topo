@@ -173,14 +173,30 @@ function saveSettings() {
 
 const USER_TPL_KEY = 'nettopo_user_templates';
 function loadUserTemplates() { try { return JSON.parse(localStorage.getItem(USER_TPL_KEY) || '{}'); } catch (e) { return {}; } }
+// What "save as template" actually stores. Split out from saveUserTemplate so it
+// can be tested without a prompt() in the way — the round trip is the part that
+// can lose your network, not the naming.
+//
+// This mirrors save()'s allowlist deliberately. It used to carry a shorter list
+// of its own and quietly dropped three things: portCount (a 24-port switch came
+// back with 8, and auto-bind then re-grew it to fit whatever cables landed),
+// sourceIface/targetIface (every cable re-guessed into a different socket, which
+// is exactly what the shipped templates set explicitly to avoid), and nat —
+// which did not merely reset but inverted, since normalizeLoadedNode reapplies
+// the type default when nat is undefined. A router you turned NAT on for came
+// back off; a VPN you turned it off for came back on.
+function templateSnapshot() {
+    return {
+        nodes: state.nodes.map(n => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw, dns: n.dns, os: n.os, ports: n.ports, notes: n.notes, nat: !!n.nat, portCount: Number.isFinite(n.portCount) ? n.portCount : undefined, interfaces: cloneData(n.interfaces) })),
+        links: state.links.map(l => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium, sourceIface: l.sourceIface || undefined, targetIface: l.targetIface || undefined }))
+    };
+}
+
 function saveUserTemplate() {
     if (!state.nodes.length) { alert('Nothing to save — add some nodes first.'); return; }
     const name = prompt('Save current canvas as template — name:'); if (!name) return;
     const tpls = loadUserTemplates();
-    tpls[name.trim()] = {
-        nodes: state.nodes.map(n => ({ id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw, dns: n.dns, os: n.os, ports: n.ports, notes: n.notes, interfaces: cloneData(n.interfaces) })),
-        links: state.links.map(l => ({ id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium }))
-    };
+    tpls[name.trim()] = templateSnapshot();
     localStorage.setItem(USER_TPL_KEY, JSON.stringify(tpls));
     renderUserTemplates();
     alert(`Saved template "${name.trim()}".`);
@@ -265,6 +281,10 @@ function loadTemplateState(tpl) {
 }
 
 function load() {
+    // Every node about to be replaced, so any id still held is about to dangle.
+    // popstate reaches here without a reload — paste a shared URL while link mode
+    // is armed and the next canvas click looked up a node that no longer exists.
+    state.selectedId = null; state.selectedType = null; state.linkSourceId = null;
     const hash = window.location.hash.substring(1);
     if (!hash) { loadTemplateState(templatesData.house); autoBindLinks(); updateOsDatalist(); return; }
     try {

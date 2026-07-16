@@ -119,6 +119,35 @@ window.addEventListener('load', () => { setTimeout(() => {
      Math.abs(modeSel.getBoundingClientRect().top - bondIp.getBoundingClientRect().top) > 4,
      modeSel && bondIp ? `mode@${Math.round(modeSel.getBoundingClientRect().top)} ip@${Math.round(bondIp.getBoundingClientRect().top)}` : 'missing');
 
+  // ---- Typing a two-digit port count must be possible ----
+  // The field re-rendered the whole sidebar on every keystroke, which destroyed
+  // the input being typed into: after "2" the element is detached, focus falls to
+  // <body>, and the "4" of "24" never arrives.
+  state.nodes = [normalizeLoadedNode({ id: 'sw', type: 'switch', name: 'Core', x: 0, y: 0, portCount: 8, interfaces: [] })];
+  state.links = [];
+  select('sw', 'node');
+  const portInput = [...document.querySelectorAll('#ifaceListContainer input')]
+    .find(el => el.value === '8' && el.type !== 'checkbox');
+  ok('the port-count field is rendered', !!portInput, portInput ? portInput.value : 'missing');
+  if (portInput) {
+    // Type "2". The row is rebuilt, so the live field is a new element — what
+    // matters is that focus follows it, not that the old object survives.
+    portInput.focus();
+    portInput.value = '2';
+    portInput.dispatchEvent(new Event('input', { bubbles: true }));
+    const live = document.getElementById('portCountInput');
+    ok('focus follows the port-count field across its re-render',
+       !!live && document.activeElement === live,
+       `focus is on ${document.activeElement.tagName}${document.activeElement.id ? '#' + document.activeElement.id : ''}`);
+    // Now the "4", into whatever is focused — as a keyboard would.
+    if (live) {
+      live.value = '24';
+      live.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    ok('so a two-digit port count can actually be typed', portCountOf(getNode('sw')) === 24,
+       String(portCountOf(getNode('sw'))));
+  }
+
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);
   }, 50);
