@@ -254,6 +254,57 @@ function serializeDoc() {
 }
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
+// ---- URL fragment codec ----
+// The diagram rides in the URL fragment: never sent to a server (so no proxy
+// length cap, and private by construction — it stays out of logs and Referer).
+// Its one weakness is size, so the *shareable* form (Copy URL) is compressed.
+// Two fragment formats, told apart by a leading marker so old links keep opening:
+//   ~<base64url>   deflate-raw compressed  — 7–10x smaller, the form Copy URL emits
+//   <base64>       legacy btoa(encodeURIComponent(json)) — what save() writes live
+// "~" is unreserved in URLs and absent from both base64 alphabets, so it is an
+// unambiguous discriminator. Compression is async (native CompressionStream), so
+// only the compressed path awaits; the legacy path stays synchronous, which is
+// why load() can still be called synchronously with a legacy hash.
+const FRAG_SCHEME = '~';
+const _canCompress = typeof CompressionStream !== 'undefined';
+const _canDecompress = typeof DecompressionStream !== 'undefined';
+
+function _b64urlFromBytes(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function _bytesFromB64url(s) {
+    const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4);
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+}
+async function _pipeStream(stream, bytes) {
+    const w = stream.writable.getWriter(); w.write(bytes); w.close();
+    return new Uint8Array(await new Response(stream.readable).arrayBuffer());
+}
+
+// json string -> the compact shareable fragment (no leading '#'). Falls back to
+// the legacy encoding on a browser without CompressionStream, or whenever the
+// compressed form would somehow be larger (tiny docs can inflate under deflate).
+async function encodeShareFragment(json) {
+    const legacy = btoa(encodeURIComponent(json));
+    if (!_canCompress) return legacy;
+    const packed = await _pipeStream(new CompressionStream('deflate-raw'), new TextEncoder().encode(json));
+    const compressed = FRAG_SCHEME + _b64urlFromBytes(packed);
+    return compressed.length < legacy.length + 1 ? compressed : legacy;
+}
+// fragment (no '#') -> json string. Async only for the compressed form.
+async function decodeFragment(frag) {
+    if (frag[0] === FRAG_SCHEME) {
+        if (!_canDecompress) throw new Error('This link is compressed, but this browser cannot decompress it.');
+        return new TextDecoder().decode(await _pipeStream(new DecompressionStream('deflate-raw'), _bytesFromB64url(frag.slice(1))));
+    }
+    return decodeURIComponent(atob(frag)); // legacy
+}
+
 function save() {
     try {
         const doc = serializeDoc();
@@ -360,7 +411,11 @@ function loadTemplateState(tpl) {
     state.links = cloneData(tpl.links).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
 }
 
-function load() {
+// Async so it can decompress a shared "~" link, but the legacy path evaluates no
+// await — an async function runs synchronously until its first awaited expression
+// — so load() with a legacy hash still completes in one tick, and callers that do
+// `save(); load();` keep working without change.
+async function load() {
     // Every node about to be replaced, so any id still held is about to dangle.
     // popstate reaches here without a reload — paste a shared URL while link mode
     // is armed and the next canvas click looked up a node that no longer exists.
@@ -368,7 +423,8 @@ function load() {
     const hash = window.location.hash.substring(1);
     if (!hash) { loadTemplateState(templatesData.house); autoBindLinks(); updateOsDatalist(); return; }
     try {
-        const parsed = JSON.parse(decodeURIComponent(atob(hash)));
+        const json = hash[0] === FRAG_SCHEME ? await decodeFragment(hash) : decodeURIComponent(atob(hash));
+        const parsed = JSON.parse(json);
         state.nodes = (parsed.nodes || []).map(normalizeLoadedNode);
         state.links = (Array.isArray(parsed.links) ? parsed.links : []).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
     } catch (e) {
@@ -534,6 +590,15 @@ function showLibraryTab(name) {
 }
 document.querySelectorAll('.lib-tab').forEach((t) => { t.onclick = () => showLibraryTab(t.dataset.tab); });
 
+// The selection panel splits into Configuration (primary) and Diagnostics tabs.
+// Purely presentational — it flips which panel shows; the panes inside keep their
+// own selected/empty states, so no render logic needs to know which tab is up.
+function showConfigTab(name) {
+    document.querySelectorAll('.cfg-tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.cfgtab === name)));
+    document.querySelectorAll('.cfg-panel').forEach((p) => p.classList.toggle('hidden', p.id !== `cfgPanel-${name}`));
+}
+document.querySelectorAll('.cfg-tab').forEach((t) => { t.onclick = () => showConfigTab(t.dataset.cfgtab); });
+
 function libraryItem({ icon, name, blurb }, onPick, onDelete) {
     const row = document.createElement('div');
     row.className = 'lib-item';
@@ -653,7 +718,19 @@ document.getElementById('zoomInBtn').onclick = () => { state.camera.zoom = Math.
 document.getElementById('zoomOutBtn').onclick = () => { state.camera.zoom = Math.max(0.2, state.camera.zoom / 1.2); applyCamera(); };
 document.getElementById('zoomResetBtn').onclick = () => { state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera(); };
 document.getElementById('clearCanvasBtn').onclick = () => { if (!confirm('Clear canvas?')) return; state.nodes = []; state.links = []; state.selectedId = null; state.selectedType = null; state.linkSourceId = null; save(); invalidateTidy(); select(null, null); renderCanvasOnly(); };
-document.getElementById('copyUrlBtn').onclick = async () => { save(); try { await navigator.clipboard.writeText(window.location.href); alert('URL copied.'); } catch (e) { prompt('Copy this URL:', window.location.href); } };
+// Copy URL is the share path, so it emits the compressed "~" fragment (7–10x
+// shorter) and writes it to the address bar too, so what you copy and what you
+// see match. Live editing keeps the fast uncompressed hash; this upgrades it.
+document.getElementById('copyUrlBtn').onclick = async () => {
+    save();
+    try {
+        const frag = await encodeShareFragment(JSON.stringify(serializeDoc()));
+        window.history.replaceState(null, '', `#${frag}`);
+    } catch (e) { /* fall back to whatever save() already wrote */ }
+    const url = window.location.href;
+    try { await navigator.clipboard.writeText(url); alert('Shareable URL copied.'); }
+    catch (e) { prompt('Copy this URL:', url); }
+};
 
 document.getElementById('toggleTrace').addEventListener('change', (event) => {
     state.settings.traceMode = event.target.checked;
@@ -701,6 +778,52 @@ function encodeCanvas(canvas, requested) {
     const got = /^data:image\/([a-z0-9.+-]+)/i.exec(url);
     const actual = got ? got[1].toLowerCase() : 'png';
     return { url, ext: actual === 'jpeg' ? 'jpg' : actual };
+}
+
+// ---- Portable build files (.nettopo) ----
+// The escape hatch for builds too big or too archival for a URL: a file has no
+// length ceiling, travels as an email/chat attachment, and diffs in git. Same
+// serializer as everything else, wrapped in a tiny self-identifying envelope so
+// the file can be recognised and can carry a schema version later.
+function exportJsonFile() {
+    if (!state.nodes.length) { alert('Nothing to export. Add at least one node first.'); return; }
+    const payload = { kind: 'nettopology', version: 1, doc: serializeDoc() };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'network-build.nettopo.json'; a.click();
+    URL.revokeObjectURL(url);
+}
+
+// Accept both the enveloped file we write and a bare { nodes, links } — the same
+// shape a decoded share URL holds — so a build is importable however it was saved.
+function docFromImported(parsed) {
+    if (parsed && parsed.doc && Array.isArray(parsed.doc.nodes)) return parsed.doc;
+    if (parsed && Array.isArray(parsed.nodes)) return parsed;
+    return null;
+}
+
+// Load a parsed build object onto the canvas. Split from the file reading so the
+// swap logic is testable without a FileReader in the way. Returns whether it took.
+function applyImportedDoc(parsed) {
+    const doc = docFromImported(parsed);
+    if (!doc) { alert('That file does not look like a NetTopology build.'); return false; }
+    if (state.nodes.length && !confirm('Replace the current canvas with this build?')) return false;
+    loadTemplateState(doc); autoBindLinks();
+    state.selectedId = null; state.selectedType = null; state.linkSourceId = null;
+    select(null, null); save(); invalidateTidy();
+    renderCanvasOnly(); fitToView();
+    return true;
+}
+
+function importJsonFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+        let parsed;
+        try { parsed = JSON.parse(reader.result); } catch (e) { alert('That file is not valid JSON.'); return; }
+        applyImportedDoc(parsed);
+    };
+    reader.onerror = () => alert('Could not read that file.');
+    reader.readAsText(file);
 }
 
 function handleExport(format) {
@@ -767,10 +890,33 @@ document.getElementById('canvasFilter').addEventListener('input', (event) => {
 
 document.getElementById('exportPngBtn').onclick = () => handleExport('png');
 document.getElementById('exportWebpBtn').onclick = () => handleExport('webp');
+document.getElementById('exportJsonBtn').onclick = exportJsonFile;
+document.getElementById('importFileBtn').onclick = () => document.getElementById('importFileInput').click();
+
+// Export/share/import dropdown: open on the trigger, close on choosing an item,
+// clicking away, or Escape. Items keep their own handlers (wired just above); the
+// menu only governs visibility.
+(function () {
+    const btn = document.getElementById('exportMenuBtn');
+    const menu = document.getElementById('exportMenu');
+    if (!btn || !menu) return;
+    const isOpen = () => !menu.classList.contains('hidden');
+    const close = () => { menu.classList.add('hidden'); btn.setAttribute('aria-expanded', 'false'); };
+    const open = () => { menu.classList.remove('hidden'); btn.setAttribute('aria-expanded', 'true'); };
+    btn.addEventListener('click', (e) => { e.stopPropagation(); isOpen() ? close() : open(); });
+    menu.addEventListener('click', (e) => { if (e.target.closest('.cs-menu-item')) close(); });
+    document.addEventListener('click', (e) => { if (isOpen() && !menu.contains(e.target) && e.target !== btn) close(); });
+    window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isOpen()) { close(); btn.focus(); } });
+})();
+document.getElementById('importFileInput').onchange = (event) => {
+    const file = event.target.files[0];
+    if (file) importJsonFile(file);
+    event.target.value = ''; // let the same file be re-picked
+};
 
 // Browser back/forward swaps the document wholesale (a shared URL, say), so the
 // edit timeline for the old document no longer applies — start a fresh one.
-window.addEventListener('popstate', () => { load(); renderCanvasOnly(); fitToView(); initHistory(); });
+window.addEventListener('popstate', async () => { await load(); renderCanvasOnly(); fitToView(); initHistory(); });
 
 document.getElementById('conflictHideBtn').onclick = () => {
     state.settings.alertsHidden = true; saveSettings(); validateTopology();
@@ -789,6 +935,9 @@ renderLibrary();
 renderShortcutHelp();
 loadSettings();
 showLibraryTab(state.settings.libraryTab || 'nodes');
-load(); renderCanvasOnly(); fitToView();
-initHistory(); // the loaded document is the floor of the undo timeline, not a step
-updateTracePortUi();
+// Boot may need to decompress a shared "~" link, so await it before drawing.
+(async () => {
+    await load(); renderCanvasOnly(); fitToView();
+    initHistory(); // the loaded document is the floor of the undo timeline, not a step
+    updateTracePortUi();
+})();

@@ -461,16 +461,21 @@ function renderNodeDiagnostics(node) {
     const panel = document.getElementById('nodeDiagnosticsPanel');
     const body = document.getElementById('nodeDiagnosticsBody');
     const summary = document.getElementById('nodeDiagnosticsSummary');
+    // Placeholder shown in the Diagnostics tab when there is no node to diagnose.
+    const placeholder = document.getElementById('diagNoSelection');
 
     if (!panel || !body || !summary) return;
 
     if (!node || state.selectedType !== 'node') {
         panel.classList.add('hidden');
+        if (placeholder) placeholder.classList.remove('hidden');
         body.innerHTML = '';
         summary.textContent = 'Idle';
         summary.className = 'text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold';
         return;
     }
+
+    if (placeholder) placeholder.classList.add('hidden');
 
     const checks = [
         ['Interfaces', evaluateInterfaces(node)],

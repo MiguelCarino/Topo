@@ -37,14 +37,22 @@
             <div class="cs-vdiv"></div>
 
             <button id="tidyBtn" class="cs-btn" title="Auto-arrange the topology into tiers">⤢ Tidy</button>
-            <button id="saveTemplateBtn" class="cs-btn" title="Save the current canvas as a reusable template">💾 Save</button>
 
-            <button id="copyUrlBtn" class="cs-btn" title="Copy the shareable URL">🔗 Copy URL</button>
-
-            <div class="cs-export-group">
-                <span class="cs-export-lbl">Export</span>
-                <button id="exportPngBtn" class="cs-export-btn">PNG</button>
-                <button id="exportWebpBtn" class="cs-export-btn">WEBP</button>
+            <!-- One menu for every get-data-in/out action, so the bar stays lean.
+                 Items keep their original ids, so their handlers wire up unchanged. -->
+            <div class="cs-menu">
+                <button id="exportMenuBtn" class="cs-btn" aria-haspopup="true" aria-expanded="false" title="Share, export & import builds">⤓ Export <span class="cs-caret">▾</span></button>
+                <div id="exportMenu" class="cs-menu-panel hidden" role="menu" aria-labelledby="exportMenuBtn">
+                    <button id="copyUrlBtn" class="cs-menu-item" role="menuitem">🔗 Copy link <span class="cs-menu-note">short URL</span></button>
+                    <div class="cs-menu-div"></div>
+                    <button id="exportPngBtn" class="cs-menu-item" role="menuitem">🖼️ PNG image</button>
+                    <button id="exportWebpBtn" class="cs-menu-item" role="menuitem">🖼️ WEBP image</button>
+                    <button id="exportJsonBtn" class="cs-menu-item" role="menuitem">📄 Build file <span class="cs-menu-note">.nettopo</span></button>
+                    <div class="cs-menu-div"></div>
+                    <button id="importFileBtn" class="cs-menu-item" role="menuitem">📂 Import build…</button>
+                    <button id="saveTemplateBtn" class="cs-menu-item" role="menuitem">💾 Save as template</button>
+                </div>
+                <input type="file" id="importFileInput" accept=".json,.nettopo,application/json" hidden>
             </div>
 
             <button id="clearCanvasBtn" class="cs-btn">Clear</button>
@@ -87,12 +95,19 @@
             </div>
 
             <div class="p-4 border-t border-slate-100 bg-white flex flex-col shrink-0 max-h-[50%] overflow-y-auto relative">
-                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Configuration</h2>
-                <div class="p-4 border-t border-slate-100 bg-slate-50">
+                <!-- Global canvas filter — independent of what's selected, so it sits above the tabs. -->
+                <div class="mb-3 pb-3 border-b border-slate-100">
                     <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filter Canvas</h2>
                     <input type="text" id="canvasFilter" placeholder="Search by name or IP..." class="w-full border border-slate-300 rounded px-2 py-1.5 text-xs focus:outline-blue-500" />
                 </div>
-                
+
+                <!-- Configuration is the primary tab; Node Diagnostics is secondary. -->
+                <div class="flex gap-1 border-b border-slate-200 mb-3" role="tablist" aria-label="Selection panel">
+                    <button id="configTabBtn" class="cfg-tab" data-cfgtab="config" role="tab" aria-selected="true">Configuration</button>
+                    <button id="diagTabBtn" class="cfg-tab" data-cfgtab="diagnostics" role="tab" aria-selected="false">Diagnostics</button>
+                </div>
+
+                <div id="cfgPanel-config" class="cfg-panel flex flex-col flex-1">
                 <div id="noSelectionPane" class="text-center py-8 text-slate-400 text-xs italic">Select a node or link to configure.</div>
 
                 <div id="propertiesPane" class="hidden flex-col gap-3 pb-6">
@@ -177,19 +192,23 @@
                                 </div>
                             </div>
                         
-                            <div id="nodeDiagnosticsPanel" class="hidden pt-3 border-t border-slate-100">
-                                <div class="flex items-center justify-between mb-2">
-                                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Node Diagnostics</h3>
-                                    <span id="nodeDiagnosticsSummary" class="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold">Idle</span>
-                                </div>
-                                <div id="nodeDiagnosticsBody" class="space-y-1.5 text-[10px]"></div>
-                            </div>
-                        
                             <div class="pt-2 mt-auto">
                                 <button id="deleteElementBtn" class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-1.5 rounded text-xs font-bold transition flex justify-center items-center gap-1">
                                     Delete Selected
                                 </button>
                             </div>
+                </div>
+                </div>
+
+                <div id="cfgPanel-diagnostics" class="cfg-panel hidden">
+                    <div id="diagNoSelection" class="text-center py-8 text-slate-400 text-xs italic">Select a node to see its diagnostics.</div>
+                    <div id="nodeDiagnosticsPanel" class="hidden">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Node Diagnostics</h3>
+                            <span id="nodeDiagnosticsSummary" class="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold">Idle</span>
+                        </div>
+                        <div id="nodeDiagnosticsBody" class="space-y-1.5 text-[10px]"></div>
+                    </div>
                 </div>
             </div>
         </aside>

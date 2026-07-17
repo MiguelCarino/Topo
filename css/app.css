@@ -170,25 +170,44 @@
 .cs-btn:disabled { opacity: 0.4; cursor: default; }
 .cs-btn:disabled:hover { border-color: var(--cs-border); color: var(--cs-text-sec); background: transparent; }
 
-.cs-export-group {
-    display: flex; align-items: center;
-    border: 1px solid var(--cs-accent-dim); border-radius: 4px; overflow: hidden; height: 32px;
+/* Export / share / import dropdown — collapses six top-level buttons into one. */
+.cs-menu { position: relative; display: flex; }
+.cs-caret { font-size: 0.55rem; opacity: 0.7; margin-left: 1px; }
+.cs-menu-panel {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+    min-width: 210px; padding: 6px;
+    background: var(--cs-bg-card); border: 1px solid var(--cs-border);
+    border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.55);
+    display: flex; flex-direction: column; gap: 1px;
 }
-.cs-export-lbl {
-    padding: 0 10px; background: rgba(234,179,8,0.07);
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem;
-    color: var(--cs-accent); text-transform: uppercase; letter-spacing: 0.08em;
-    display: flex; align-items: center; height: 100%;
-    border-right: 1px solid var(--cs-accent-dim);
+.cs-menu-item {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    background: transparent; border: none; border-radius: 5px;
+    padding: 7px 10px; text-align: left; cursor: pointer; transition: 0.15s;
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 0.72rem;
+    color: var(--cs-text-sec); white-space: nowrap;
 }
-.cs-export-btn {
-    padding: 0 10px; background: transparent; border: none;
-    border-right: 1px solid var(--cs-accent-dim);
-    color: var(--cs-text-sec); font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.65rem; text-transform: uppercase; cursor: pointer; transition: 0.2s; height: 100%;
+.cs-menu-item:hover { background: var(--cs-accent-faint); color: var(--cs-accent); }
+.cs-menu-note {
+    margin-left: auto; padding-left: 14px; font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.6rem; color: var(--cs-text-muted);
 }
-.cs-export-btn:last-child { border-right: none; }
-.cs-export-btn:hover { background: var(--cs-accent-faint); color: var(--cs-accent); }
+.cs-menu-item:hover .cs-menu-note { color: var(--cs-accent-dim); }
+.cs-menu-div { height: 1px; background: var(--cs-border); margin: 4px 4px; }
+/* The panel forces display:flex, which would beat Tailwind's .hidden (equal
+   specificity, and app.css can load last) and leave the menu open on first paint.
+   This two-class rule outranks both, so `hidden` genuinely hides it. */
+.cs-menu-panel.hidden { display: none; }
+
+/* Configuration / Diagnostics sub-tabs in the selection panel. */
+.cfg-tab {
+    flex: 1; padding: 6px 4px; background: transparent;
+    border: none; border-bottom: 2px solid transparent; cursor: pointer;
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em; color: #94a3b8; transition: 0.15s;
+}
+.cfg-tab:hover { color: #475569; }
+.cfg-tab[aria-selected="true"] { color: #2563eb; border-bottom-color: #2563eb; }
 
 /* ============================================================
    Carino branding pass — rebrand the app CHROME (sidebar +

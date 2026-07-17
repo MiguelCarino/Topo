@@ -90,6 +90,48 @@ window.addEventListener('load', () => { setTimeout(() => {
   ok('the interactions no longer clutter the Nodes palette',
      !/Right Click/i.test(document.getElementById('tabPanel-nodes').textContent));
 
+  // ---- Export/share/import dropdown ----
+  // Six top-level buttons collapsed into one menu. The actions must actually live
+  // inside it now (not just visually), and it must open and close predictably.
+  const menuBtn = document.getElementById('exportMenuBtn');
+  const menu = document.getElementById('exportMenu');
+  const menuOpen = () => menu && !menu.classList.contains('hidden');
+  ok('the export menu exists and starts closed', !!menuBtn && !!menu && !menuOpen());
+  // The panel sets display:flex, which once beat Tailwind's .hidden and left the
+  // menu open on first paint. It must be *computed* hidden, not just class-flagged.
+  ok('the export panel is genuinely hidden at load (not open behind display:flex)',
+     getComputedStyle(menu).display === 'none', getComputedStyle(menu).display);
+  ['copyUrlBtn', 'exportPngBtn', 'exportWebpBtn', 'exportJsonBtn', 'importFileBtn', 'saveTemplateBtn'].forEach((id) => {
+    const el = document.getElementById(id);
+    ok(`${id} now lives inside the menu`, !!el && menu.contains(el));
+  });
+  menuBtn.click();
+  ok('clicking the trigger opens the menu', menuOpen() && menuBtn.getAttribute('aria-expanded') === 'true');
+  key('Escape');
+  ok('Escape closes the menu', !menuOpen() && menuBtn.getAttribute('aria-expanded') === 'false');
+  menuBtn.click();
+  ok('it reopens', menuOpen());
+  document.body.click(); // a click outside the menu
+  ok('clicking away closes it', !menuOpen());
+
+  // ---- Configuration / Diagnostics sub-tabs ----
+  // Diagnostics moved out of the properties pane into its own secondary tab, with
+  // Configuration as the primary. Switching flips the panels; the diagnostics
+  // markup must actually live under the Diagnostics tab now.
+  const cfgP = document.getElementById('cfgPanel-config');
+  const diagP = document.getElementById('cfgPanel-diagnostics');
+  const hid = (el) => el.classList.contains('hidden');
+  ok('both selection sub-tabs exist', !!document.getElementById('configTabBtn') && !!document.getElementById('diagTabBtn'));
+  ok('Configuration is the default (primary) tab',
+     document.getElementById('configTabBtn').getAttribute('aria-selected') === 'true' && !hid(cfgP) && hid(diagP));
+  ok('node diagnostics now live under the Diagnostics tab',
+     diagP.contains(document.getElementById('nodeDiagnosticsPanel')));
+  document.getElementById('diagTabBtn').click();
+  ok('clicking Diagnostics reveals it and hides Configuration',
+     hid(cfgP) && !hid(diagP) && document.getElementById('diagTabBtn').getAttribute('aria-selected') === 'true');
+  document.getElementById('configTabBtn').click();
+  ok('clicking Configuration switches back', !hid(cfgP) && hid(diagP));
+
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);
 }, 500); });
