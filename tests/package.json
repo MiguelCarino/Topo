@@ -1,0 +1,8 @@
+{
+  "name": "nettopo-tests",
+  "private": true,
+  "type": "module",
+  "description": "Cross-engine test runner (Playwright) for the NetworkTopology editor.",
+  "scripts": { "cross": "node run-cross.mjs" },
+  "devDependencies": { "playwright": "^1.40.0" }
+}

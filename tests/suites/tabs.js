@@ -51,8 +51,14 @@ window.addEventListener('load', () => { setTimeout(() => {
   key('a'); ok('A hides alerts', state.settings.alertsHidden === true);
   key('a'); ok('A shows them again', state.settings.alertsHidden === false);
 
-  key('?'); ok('? opens the shortcut list', vis('shortcutHelp'));
+  key('?'); ok('? opens the help panel', vis('shortcutHelp'));
   key('Escape'); ok('Esc closes it', !vis('shortcutHelp'));
+
+  // The ? header button opens the same panel — the help must be reachable by
+  // click, not only by a key you have to already know.
+  document.getElementById('helpBtn').click();
+  ok('the ? header button opens the help panel', vis('shortcutHelp'));
+  document.getElementById('shortcutClose').click();
 
   document.activeElement.blur();
   key('/');
@@ -73,8 +79,16 @@ window.addEventListener('load', () => { setTimeout(() => {
   ok('Ctrl+T is left to the browser', state.settings.traceMode === before);
 
   // The cheatsheet is generated from the same table that fires.
-  const listed = [...document.querySelectorAll('#shortcutBody > div')].length;
+  const listed = document.querySelectorAll('#shortcutBody .shortcut-row').length;
   ok('cheatsheet documents every shortcut', listed === SHORTCUTS.length, `${listed} rows / ${SHORTCUTS.length} shortcuts`);
+
+  // The mouse interactions moved out of the Nodes palette and into this one help
+  // surface, so they must be here — and gone from the palette.
+  const helpText = document.getElementById('shortcutBody').textContent;
+  ok('help lists the click / drag / right-click interactions',
+     /Click/.test(helpText) && /Drag/.test(helpText) && /Right-click/i.test(helpText));
+  ok('the interactions no longer clutter the Nodes palette',
+     !/Right Click/i.test(document.getElementById('tabPanel-nodes').textContent));
 
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);

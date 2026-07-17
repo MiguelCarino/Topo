@@ -53,8 +53,14 @@ window.addEventListener('load', () => { setTimeout(() => {
   const advance = waves[0].getComputedTextLength() / reps;
   ok('loop span equals one repeat (seamless)', Math.abs(Math.abs(parseFloat(anim.getAttribute('from'))) - advance) < 0.01,
      `span=${Math.abs(parseFloat(anim.getAttribute('from'))).toFixed(3)} advance=${advance.toFixed(3)}`);
-  ok('waves cover the whole link', reps * advance >= document.getElementById('ui-link-'+wl.id).getTotalLength(),
-     `covered=${(reps*advance).toFixed(0)}px link=${document.getElementById('ui-link-'+wl.id).getTotalLength().toFixed(0)}px`);
+  // getComputedTextLength() on a textPath is clamped to the path near its end,
+  // and engines report that last pixel differently (Chromium lands on the length,
+  // Gecko a pixel under). The code already emits ceil(total/advance)+2 repeats, so
+  // the arcs genuinely overshoot and clip — allow a 2px metric tolerance so a
+  // sub-pixel reporting quirk is not read as a bare tail.
+  const linkLen = document.getElementById('ui-link-'+wl.id).getTotalLength();
+  ok('waves cover the whole link', reps * advance >= linkLen - 2,
+     `covered=${(reps*advance).toFixed(0)}px link=${linkLen.toFixed(0)}px`);
 
   // SMIL must actually be running, not merely present.
   const t0 = tp.startOffset.animVal.value;

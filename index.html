@@ -20,7 +20,11 @@
                     🔍 Trace
                 </label>
                 <div class="cs-hdiv"></div>
-                <input type="text" id="tracePort" placeholder="Port (e.g. 443)" class="cs-trace-port" title="Leave blank for pure IP reachability">
+                <label class="cs-trace-lbl" title="Filter the trace by a port. Off = IP reachability only — the port stays typed in, just ignored.">
+                    <input type="checkbox" id="tracePortToggle" />
+                    Port
+                </label>
+                <input type="text" id="tracePort" placeholder="e.g. 443" class="cs-trace-port" title="Port to test when the Port filter is on">
             </div>
 
             <span id="traceStatus" class="cs-trace-status">Trace off</span>
@@ -44,6 +48,9 @@
             </div>
 
             <button id="clearCanvasBtn" class="cs-btn">Clear</button>
+
+            <div class="cs-vdiv"></div>
+            <button id="helpBtn" class="cs-btn" title="How to use — mouse & keyboard (press ?)" aria-label="Help">?</button>
         </div>
     </header>
 
@@ -62,12 +69,6 @@
             <div class="p-4 border-b border-slate-100 flex-1 overflow-y-auto min-h-[200px]">
                 <div id="tabPanel-nodes" class="lib-panel">
                     <div class="grid grid-cols-3 gap-2" id="nodePalette"></div>
-                    <ul class="text-[10px] text-slate-600 space-y-1.5 font-medium mt-4 pt-3 border-t border-slate-100">
-                        <li>🖱️ <span class="font-bold text-slate-800">Click:</span> Select a node/link to edit.</li>
-                        <li>✋ <span class="font-bold text-slate-800">Drag:</span> Move nodes, or pan the canvas.</li>
-                        <li>⚡ <span class="font-bold text-orange-600">Right Click:</span> Link mode — click another node to connect.</li>
-                        <li>⌨️ <span class="font-bold text-slate-800">Press <span class="kbd">?</span></span> for keyboard shortcuts.</li>
-                    </ul>
                 </div>
 
                 <div id="tabPanel-templates" class="lib-panel hidden">
@@ -232,7 +233,7 @@
             <div id="shortcutHelp" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
                 <div class="rounded-lg shadow-2xl p-5 w-full max-w-sm" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
                     <div class="flex justify-between items-center mb-3">
-                        <h4 class="text-[11px] font-bold uppercase tracking-wider" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">Keyboard Shortcuts</h4>
+                        <h4 class="text-[11px] font-bold uppercase tracking-wider" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">How to use</h4>
                         <button id="shortcutClose" class="text-sm leading-none" style="color: var(--cs-text-muted)">✕</button>
                     </div>
                     <div id="shortcutBody" class="text-[11px]"></div>

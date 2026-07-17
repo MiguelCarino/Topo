@@ -18,6 +18,27 @@ The instrumented copy is written to the repo root as `.testrun.html`, not to
 elsewhere and you get a blank page with no app on it, and every assertion fails
 for the wrong reason.
 
+## Cross-engine (Chromium + Gecko + WebKit)
+
+`run.sh` proves the suites on Chromium only — it depends on `--dump-dom`, which
+Firefox and WebKit have no equivalent for. `run-cross.mjs` runs the **same**
+suites on every Playwright engine that will launch, so "works cross-browser" is
+checked, not hoped:
+
+    cd tests
+    npm install
+    npx playwright install chromium firefox webkit   # one-time engine download
+    node run-cross.mjs             # every suite on every available engine
+    node run-cross.mjs wifi bonds  # named suites only
+
+An engine that will not start is reported **skipped, not failed** — Playwright's
+WebKit needs system libraries it ships for Ubuntu, so on other distros (Fedora,
+etc.) it may not launch; Chromium and Firefox do. This is how the wave suite's
+`getComputedTextLength()` tolerance was found: Gecko reports a textPath's clamped
+length a pixel under Chromium, and the strict assertion caught it.
+
+`tests/node_modules/` and the transient `.crossrun.html` are gitignored.
+
 ## The suites
 
 | Suite | Covers |
@@ -35,6 +56,8 @@ for the wrong reason.
 | `bonds` | NIC bonding: folding NICs into one MAC/IP, mode + member survival, the flapping cure |
 | `persistence` | "Save as template" round-trips the network intact — portCount, socket bindings, and the nat field that used to invert |
 | `history` | Undo/redo on the shared serializer: the timeline rides `save()`, identical saves add no step, a fresh edit forks the future, Ctrl+Z acts on the canvas |
+| `trace` | The trace port-filter toggle: `activeTracePort()` gates reachability pruning, a suspended port is kept not cleared, the three diagnostic messages |
+| `compat` | Cross-engine safeguards: image export named for the MIME the canvas produced (old-WebKit WebP→PNG), storage writes that survive a throwing `setItem`, every SVG label carries an explicit font-family |
 
 ## Writing one
 

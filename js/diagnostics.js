@@ -1,6 +1,16 @@
 // Reachability and the checks behind the node badges.
 // Load order: state -> model -> data -> diagnostics -> ui -> app
 
+// The port the trace is actually filtering by. A port only applies when it is
+// both typed in AND its toggle is on, so a user can suspend port filtering
+// without clearing the port they entered. Blank string means "IP reachability
+// only" — every reader below already treats that as no filter.
+function activeTracePort() {
+    const toggle = document.getElementById('tracePortToggle');
+    if (toggle && !toggle.checked) return '';
+    return document.getElementById('tracePort')?.value?.trim() || '';
+}
+
 function calculateBaseReachability(startNodeId) {
     const traceInput = document.getElementById('tracePort');
     const oldTracePort = traceInput ? traceInput.value : '';
@@ -425,16 +435,26 @@ function evaluateDns(node) {
 }
 
 function evaluateTracePort(node) {
-    const tracePort = document.getElementById('tracePort')?.value?.trim() || '';
+    const typed = document.getElementById('tracePort')?.value?.trim() || '';
+    const toggle = document.getElementById('tracePortToggle');
+    const filterOn = !toggle || toggle.checked;
 
-    if (!tracePort) {
+    // Distinguish "no port typed" from "port typed but filter switched off" — the
+    // second must not claim there is no port, or the toggle looks broken.
+    if (!filterOn && typed) {
+        return {
+            level: 'info',
+            text: `Port filter off — trace is evaluating IP reachability only (port ${typed} ignored).`
+        };
+    }
+    if (!typed) {
         return {
             level: 'info',
             text: 'No trace port entered. Trace is evaluating IP reachability only.'
         };
     }
 
-    return getPortStatus(node, tracePort);
+    return getPortStatus(node, typed);
 }
 
 function renderNodeDiagnostics(node) {
@@ -497,7 +517,7 @@ function calculateReachability(startNodeId) {
     // Queue entries carry viaNet: the subnet we arrived on (or a sentinel),
     // so NAT can tell inside↔outside direction.
     const reachableNodes = new Set([startNodeId]), reachableLinks = new Set(), queue = [{ id: startNodeId, viaNet: null }], processedMode = {};
-    const targetPort = document.getElementById('tracePort').value.trim();
+    const targetPort = activeTracePort();
     const _natCache = {};
 
     // Returns the shared subnet's networkStr, '__cloud__' if either is the

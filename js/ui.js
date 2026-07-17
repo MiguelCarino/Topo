@@ -277,6 +277,9 @@ function renderCanvasOnly() {
 
         const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         label.setAttribute('text-anchor', 'middle'); label.setAttribute('y', '36'); label.setAttribute('font-size', '10');
+        // Explicit generic family so the PNG/WEBP export — rasterized without the
+        // page's CSS — renders in sans, not each engine's default serif.
+        label.setAttribute('font-family', 'sans-serif');
         label.setAttribute('font-weight', '600'); label.setAttribute('fill', '#334155'); label.textContent = node.name; label.style.pointerEvents = 'none';
         g.appendChild(label);
 
@@ -297,6 +300,7 @@ function renderCanvasOnly() {
             const mark = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             mark.setAttribute('text-anchor', 'middle'); mark.setAttribute('y', '3.5');
             mark.setAttribute('font-size', '10'); mark.setAttribute('font-weight', '900'); mark.setAttribute('fill', '#ffffff');
+            mark.setAttribute('font-family', 'sans-serif');
             mark.textContent = '!';
             badge.appendChild(mark);
 
@@ -310,6 +314,7 @@ function renderCanvasOnly() {
         if (isLinkSource) {
             const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             hint.setAttribute('text-anchor', 'middle'); hint.setAttribute('y', '-34'); hint.setAttribute('font-size', '9');
+            hint.setAttribute('font-family', 'sans-serif');
             hint.setAttribute('font-weight', '700'); hint.setAttribute('fill', '#ea580c'); hint.textContent = 'LINK TARGET...'; hint.style.pointerEvents = 'none';
             g.appendChild(hint);
         }

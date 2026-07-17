@@ -1,2 +1,5 @@
 # Instrumented copy of index.html that tests/run.sh builds and deletes.
 .testrun.html
+tests/node_modules/
+tests/package-lock.json
+.crossrun.html

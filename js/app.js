@@ -173,6 +173,13 @@ function saveSettings() {
 
 const USER_TPL_KEY = 'nettopo_user_templates';
 function loadUserTemplates() { try { return JSON.parse(localStorage.getItem(USER_TPL_KEY) || '{}'); } catch (e) { return {}; } }
+// The one guarded write for saved templates. Safari private browsing throws on
+// setItem (as does a full quota); returning a boolean lets callers report the
+// failure instead of dying on an uncaught exception mid-alert.
+function persistUserTemplates(tpls) {
+    try { localStorage.setItem(USER_TPL_KEY, JSON.stringify(tpls)); return true; }
+    catch (e) { return false; }
+}
 // What "save as template" actually stores. Split out from saveUserTemplate so it
 // can be tested without a prompt() in the way — the round trip is the part that
 // can lose your network, not the naming. It is the same serializer save() uses,
@@ -190,7 +197,7 @@ function saveUserTemplate() {
     const name = prompt('Save current canvas as template — name:'); if (!name) return;
     const tpls = loadUserTemplates();
     tpls[name.trim()] = templateSnapshot();
-    localStorage.setItem(USER_TPL_KEY, JSON.stringify(tpls));
+    if (!persistUserTemplates(tpls)) { alert('Could not save — browser storage is unavailable (private mode or full).'); return; }
     renderUserTemplates();
     alert(`Saved template "${name.trim()}".`);
 }
@@ -492,12 +499,30 @@ window.addEventListener('keydown', (event) => {
     hit.run(event);
 });
 
+// Mouse interactions used to live at the bottom of the Nodes palette, where they
+// were easy to miss and took space from the palette. They belong here, in the
+// one help surface, reachable from the ? button and the ? key.
+const MOUSE_HINTS = [
+    { icon: '🖱️', verb: 'Click', text: 'Select a node or link to edit it.' },
+    { icon: '✋', verb: 'Drag', text: 'Move a node, or pan the empty canvas.' },
+    { icon: '⚡', verb: 'Right-click', text: 'Link mode — then click another node to connect.' }
+];
+
 function renderShortcutHelp() {
-    document.getElementById('shortcutBody').innerHTML = SHORTCUTS.map((sc) => `
-        <div class="flex items-center justify-between gap-3 py-1">
+    const subhead = (t) => `<div class="text-[9px] font-bold uppercase tracking-wider mb-1.5 mt-1" style="color: var(--cs-text-muted)">${t}</div>`;
+    const mouse = MOUSE_HINTS.map((h) => `
+        <div class="flex items-baseline gap-2 py-1">
+            <span class="shrink-0">${h.icon}</span>
+            <span style="color: var(--cs-text-sec)"><span class="font-bold" style="color: var(--cs-text)">${escapeHtml(h.verb)}:</span> ${escapeHtml(h.text)}</span>
+        </div>`).join('');
+    const keys = SHORTCUTS.map((sc) => `
+        <div class="shortcut-row flex items-center justify-between gap-3 py-1">
             <span style="color: var(--cs-text-sec)">${escapeHtml(sc.label)}</span>
             <span class="flex gap-1 shrink-0">${sc.keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join('')}</span>
         </div>`).join('');
+    document.getElementById('shortcutBody').innerHTML =
+        subhead('Mouse') + mouse +
+        `<div class="mt-2 pt-2" style="border-top: 1px solid var(--cs-border)">${subhead('Keyboard')}${keys}</div>`;
 }
 
 // ---- Library tabs ----
@@ -568,7 +593,7 @@ function renderUserTemplates() {
             () => {
                 if (!confirm(`Delete saved network "${name}"?`)) return;
                 const all = loadUserTemplates(); delete all[name];
-                try { localStorage.setItem(USER_TPL_KEY, JSON.stringify(all)); } catch (e) { /* private mode */ }
+                persistUserTemplates(all);
                 renderUserTemplates();
             }
         ));
@@ -640,10 +665,43 @@ document.getElementById('toggleTrace').addEventListener('change', (event) => {
     }
     renderCanvasOnly();
 });
-document.getElementById('tracePort').addEventListener('input', () => {
+// Dim the port field when a port is typed but the filter is switched off, so the
+// "typed but ignored" state is visible rather than a silent no-op.
+function updateTracePortUi() {
+    const box = document.getElementById('tracePortToggle');
+    const port = document.getElementById('tracePort');
+    if (!box || !port) return;
+    const suspended = !box.checked && port.value.trim() !== '';
+    port.style.opacity = suspended ? '0.45' : '1';
+    port.title = suspended
+        ? 'Port filter is off — this port is ignored. Toggle Port on to apply it.'
+        : 'Port to test when the Port filter is on';
+}
+function onTraceControlsChanged() {
+    updateTracePortUi();
     if (state.settings.traceMode) renderCanvasOnly();
     refreshSelectedNodeDiagnostics();
+}
+document.getElementById('tracePort').addEventListener('input', (event) => {
+    // Typing a port arms the filter; emptying it disarms. The toggle then only
+    // suspends/resumes, so you never lose what you typed.
+    const box = document.getElementById('tracePortToggle');
+    if (box) box.checked = event.target.value.trim() !== '';
+    onTraceControlsChanged();
 });
+document.getElementById('tracePortToggle').addEventListener('change', onTraceControlsChanged);
+
+// Encode a canvas to the requested image type, but name the file for what the
+// canvas ACTUALLY produced. Safari gained canvas WebP only in v17 (2023); older
+// WebKit silently hands back a PNG data URL for an unsupported type, so a naive
+// "webp" export would save a PNG under a .webp name that some tools then refuse.
+// Trust the returned MIME, not the request.
+function encodeCanvas(canvas, requested) {
+    const url = canvas.toDataURL(`image/${requested}`);
+    const got = /^data:image\/([a-z0-9.+-]+)/i.exec(url);
+    const actual = got ? got[1].toLowerCase() : 'png';
+    return { url, ext: actual === 'jpeg' ? 'jpg' : actual };
+}
 
 function handleExport(format) {
     if (!state.nodes.length) { alert('Nothing to export. Add at least one node first.'); return; }
@@ -681,7 +739,8 @@ function handleExport(format) {
             }
         }
         ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0, exportWidth * SCALE, exportHeight * SCALE);
-        const a = document.createElement('a'); a.href = canvas.toDataURL(`image/${format}`); a.download = `network-diagram.${format}`; a.click();
+        const out = encodeCanvas(canvas, format);
+        const a = document.createElement('a'); a.href = out.url; a.download = `network-diagram.${out.ext}`; a.click();
         URL.revokeObjectURL(url);
     };
     img.onerror = () => { URL.revokeObjectURL(url); alert('Could not export image.'); };
@@ -720,6 +779,7 @@ document.getElementById('conflictPill').onclick = () => {
     state.settings.alertsHidden = false; saveSettings(); validateTopology();
 };
 
+document.getElementById('helpBtn').onclick = () => toggleShortcutHelp();
 document.getElementById('shortcutClose').onclick = () => toggleShortcutHelp(false);
 document.getElementById('shortcutHelp').onclick = (e) => {
     if (e.target.id === 'shortcutHelp') toggleShortcutHelp(false); // click the backdrop to dismiss
@@ -731,3 +791,4 @@ loadSettings();
 showLibraryTab(state.settings.libraryTab || 'nodes');
 load(); renderCanvasOnly(); fitToView();
 initHistory(); // the loaded document is the floor of the undo timeline, not a step
+updateTracePortUi();
