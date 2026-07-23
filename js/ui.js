@@ -311,6 +311,37 @@ function renderCanvasOnly() {
             g.appendChild(badge);
         }
 
+        // Little ✕ on the selected node — the touch twin of the Delete key and
+        // the sidebar's Delete button. Top-LEFT corner: the severity badge owns
+        // the top-right, and a warning must never hide behind a delete control.
+        // Suppressed while link mode is armed so a mis-tap cannot destroy the
+        // node someone is aiming a cable at.
+        if (isSelected && !state.linkSourceId) {
+            const del = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            del.setAttribute('transform', 'translate(-19, -19)');
+            del.setAttribute('class', 'node-delete');
+
+            const disc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            disc.setAttribute('r', '7.5');
+            disc.setAttribute('fill', '#dc2626'); disc.setAttribute('stroke', '#ffffff'); disc.setAttribute('stroke-width', '1.5');
+            del.appendChild(disc);
+
+            const mark = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            mark.setAttribute('text-anchor', 'middle'); mark.setAttribute('y', '3');
+            mark.setAttribute('font-size', '9'); mark.setAttribute('font-weight', '900'); mark.setAttribute('fill', '#ffffff');
+            mark.setAttribute('font-family', 'sans-serif');
+            mark.textContent = '✕'; mark.style.pointerEvents = 'none';
+            del.appendChild(mark);
+
+            const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            tip.textContent = 'Delete node';
+            del.appendChild(tip);
+
+            del.addEventListener('mousedown', (e) => e.stopPropagation()); // no drag from the ✕
+            del.addEventListener('click', (e) => { e.stopPropagation(); deleteSelected(); });
+            g.appendChild(del);
+        }
+
         if (isLinkSource) {
             const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             hint.setAttribute('text-anchor', 'middle'); hint.setAttribute('y', '-34'); hint.setAttribute('font-size', '9');
@@ -743,8 +774,60 @@ function clearPropertyInputs() {
     document.getElementById('propNotes').value = '';
     document.getElementById('ifaceListContainer').innerHTML = '';
     document.getElementById('jumpGwBtn').classList.add('hidden');
+    document.getElementById('propNetcfg').checked = false;
+    document.getElementById('netcfgHint').classList.add('hidden');
+    refreshNetcfgLink(null);
     renderNodeDiagnostics(null);
 }
+
+// ---- Netplan bridge link (docs/netplan-bridge-design.md) ----
+// Node types that usually run vendor firmware rather than a netplan-managed
+// Linux — the toggle stays available (the user may know better), it just gets
+// a one-line advisory. This array is all that survives of the old tier map.
+const NETCFG_ADVISORY = ['switch', 'camera', 'printer', 'cloud'];
+
+// The link is a plain <a href> pre-encoded ahead of the click — encoding is
+// async (CompressionStream), and a popup opened after an await would be eaten
+// by the blocker. Refreshed on select, on toggle, and on any sidebar edit; the
+// sequence counter drops stale encodings that resolve out of order.
+let _netcfgSeq = 0;
+function refreshNetcfgLink(node) {
+    const a = document.getElementById('openNetcfgBtn');
+    _netcfgSeq++;
+    if (!node || !node.netcfg) { a.classList.add('hidden'); a.removeAttribute('href'); return; }
+    const intent = bridgeIntent(node);
+    // A node whose ports are all implicit faceplate slots or bonded members
+    // projects to nothing — landing the user on an empty generator would only
+    // confuse. Keep the link away until a real interface exists.
+    if (!intent.ifaces.length) { a.classList.add('hidden'); a.removeAttribute('href'); return; }
+    a.classList.remove('hidden');
+    a.removeAttribute('href'); // a tap during the re-encode must do nothing, not open the OLD node's config
+    const seq = _netcfgSeq;
+    encodeShareFragment(JSON.stringify(intent)).then((frag) => {
+        if (seq !== _netcfgSeq) return; // superseded by a newer refresh
+        a.href = `https://netplan.carino.systems/#${frag}`;
+    }).catch(() => { a.classList.add('hidden'); }); // never leave a stale href behind a failed encode
+}
+
+// Keep the pre-encoded link fresh while the user edits the selected node.
+// Two event kinds cover every sidebar edit: text edits arrive as 'input';
+// structural edits (add/delete interface, wired/wireless kind toggle, bonding)
+// are button clicks that fire no input event — the pane-level bubble listener
+// runs after the button's own handler has mutated the node, so the re-encode
+// always sees fresh state.
+function _netcfgSidebarChanged() {
+    if (state.selectedType !== 'node' || !state.selectedId) return;
+    const node = getNode(state.selectedId);
+    if (node && node.netcfg) refreshNetcfgLink(node);
+}
+const _propsPane = document.getElementById('propertiesPane');
+_propsPane.addEventListener('input', _netcfgSidebarChanged);
+_propsPane.addEventListener('click', (e) => {
+    // Not on the link itself: yanking its href mid-dispatch would cancel the
+    // very navigation the user just asked for.
+    if (e.target.closest && e.target.closest('#openNetcfgBtn')) return;
+    _netcfgSidebarChanged();
+});
 
 function select(id, type) {
     state.selectedId = id; state.selectedType = type; state.linkSourceId = null;
@@ -771,6 +854,14 @@ function select(id, type) {
             propNat.checked = !!node.nat;
             propNat.onchange = (e) => { node.nat = e.target.checked; save(); renderCanvasOnly(); renderNodeDiagnostics(node); };
         } else { natRow.classList.add('hidden'); natRow.classList.remove('flex'); }
+        // Netplan bridge toggle — on every node type, default off. Explicit
+        // user intent, so nothing is gated; the hint below just flags devices
+        // that usually run vendor firmware. See docs/netplan-bridge-design.md.
+        const netcfgCb = document.getElementById('propNetcfg');
+        netcfgCb.checked = !!node.netcfg;
+        document.getElementById('netcfgHint').classList.toggle('hidden', !NETCFG_ADVISORY.includes(node.type));
+        netcfgCb.onchange = (e) => { node.netcfg = e.target.checked; save(); refreshNetcfgLink(node); };
+        refreshNetcfgLink(node);
         if (node.gw && node.gw.trim() !== '') {
             jumpGwBtn.classList.remove('hidden');
             jumpGwBtn.onclick = () => {

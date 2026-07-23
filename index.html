@@ -173,6 +173,17 @@
                             <input type="checkbox" id="propNat" class="accent-amber-500">
                             <span class="text-[10px] font-bold text-slate-500 uppercase">NAT / Masquerade</span>
                         </label>
+
+                        <!-- Netplan bridge: one stored boolean; the link itself is derived
+                             from the fields above at click time. docs/netplan-bridge-design.md -->
+                        <div class="pt-2 mt-2 border-t border-slate-100">
+                            <label class="flex items-center gap-2 cursor-pointer" title="This host keeps a network config file (netplan / systemd-networkd / NetworkManager). Opens the generator pre-filled from this node — review the guessed fields before applying anything.">
+                                <input type="checkbox" id="propNetcfg" class="accent-amber-500">
+                                <span class="text-[10px] font-bold text-slate-500 uppercase">Network config file</span>
+                            </label>
+                            <p id="netcfgHint" class="hidden text-[9px] text-slate-400 mt-1 leading-tight">These usually run vendor firmware, not netplan.</p>
+                            <a id="openNetcfgBtn" target="_blank" rel="noopener" class="hidden w-full mt-2 py-1 rounded text-[10px] font-bold transition text-center">⚙️ Open config → netplan.carino.systems</a>
+                        </div>
                     </div>
 
                     <div id="nodeGeneralProps" class="pt-3 border-t border-slate-100">

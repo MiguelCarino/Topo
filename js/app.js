@@ -244,7 +244,10 @@ function updateOsDatalist() {
 // undo/redo — goes through here, so there is a single allowlist to keep honest.
 // Any node/link/interface field not named here is dropped on the next save.
 function serializeNode(n) {
-    return { id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', nat: !!n.nat, portCount: Number.isFinite(n.portCount) ? n.portCount : undefined, interfaces: (n.interfaces || []).map((i) => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone, wireless: i.wireless, bond: i.bond })) };
+    // netcfg rides the same `|| undefined` trick as sourceIface: JSON.stringify
+    // drops it, so documents that never touch the netplan toggle stay
+    // byte-identical to what they were before the field existed.
+    return { id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', nat: !!n.nat, netcfg: n.netcfg || undefined, portCount: Number.isFinite(n.portCount) ? n.portCount : undefined, interfaces: (n.interfaces || []).map((i) => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone, wireless: i.wireless, bond: i.bond })) };
 }
 function serializeLink(l) {
     return { id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium, sourceIface: l.sourceIface || undefined, targetIface: l.targetIface || undefined };
@@ -303,6 +306,53 @@ async function decodeFragment(frag) {
         return new TextDecoder().decode(await _pipeStream(new DecompressionStream('deflate-raw'), _bytesFromB64url(frag.slice(1))));
     }
     return decodeURIComponent(atob(frag)); // legacy
+}
+
+// ---- Topology → netplan bridge ----
+// Projects a node onto netplan.carino.systems' interface-intent model, computed
+// fresh every time so the link always reflects the node as it is *now* — the
+// toggle stores one boolean, never a config snapshot. Wire format is the same
+// fragment codec above wrapped in a {v:1, ifaces, fam} envelope; the receiver
+// keeps a byte-identical decoder. Full rationale: docs/netplan-bridge-design.md.
+function bridgeIntent(node) {
+    // Faceplate ports and bonded members are topology bookkeeping, not hosts'
+    // configurable interfaces — netplan would render nonsense for them.
+    const bondMembers = new Set();
+    (node.interfaces || []).forEach((i) => { if (i.bond && Array.isArray(i.bond.members)) i.bond.members.forEach((m) => bondMembers.add(m)); });
+    const real = (node.interfaces || []).filter((i) => !i.implicit && !bondMembers.has(i.id));
+
+    // The node-level gateway/DNS belong to exactly one interface on the netplan
+    // side: the one whose subnet contains the gateway, else the first addressed
+    // one. A heuristic — the hydrated form is meant to be reviewed, not applied.
+    let gwOwner = null;
+    if (node.gw && node.gw.trim()) {
+        const gwStr = node.gw.trim();
+        gwOwner = real.find((i) => {
+            const parsed = parseValidCIDR(i.ip);
+            try { return parsed && ipaddr.parse(gwStr).match(parsed.cidrObj); } catch (e) { return false; }
+        }) || real.find((i) => i.ip) || real[0] || null;
+    }
+
+    const ifaces = real.map((i) => {
+        const wifi = ifaceIsWireless(i);
+        const entry = {
+            name: i.name || 'eth0',
+            type: wifi ? 'wifi' : 'ethernet',
+            dhcp4: !i.ip,                                              // blank IP → assume a DHCP client
+            dhcp6: false,
+            addr: i.ip ? (i.ip.includes('/') ? i.ip : `${i.ip}${i.ip.includes(':') ? '/64' : '/24'}`) : '', // prefix-less topology IPs get a guessed /24 (v4) or /64 (v6)
+            gw: i === gwOwner ? node.gw.trim() : '',
+            dns: i === gwOwner ? (node.dns || '') : '',
+            search: '',
+            routes: [],
+        };
+        // SSID is a placeholder from the node name; the passphrase never rides
+        // a URL — fragments land in browser history.
+        if (wifi) entry.ssid = node.name || 'MyWiFi';
+        return entry;
+    });
+    const anyV6 = ifaces.some((i) => i.addr.includes(':'));
+    return { v: 1, ifaces, fam: [true, anyV6] };
 }
 
 function save() {
@@ -397,6 +447,7 @@ function normalizeLoadedNode(node) {
 
     const normalized = { id: node.id || `n_${Date.now()}_${Math.random().toString(16).slice(2)}`, type: node.type || 'custom', name: node.name || 'Unnamed Node', x: Number.isFinite(node.x) ? node.x : 200, y: Number.isFinite(node.y) ? node.y : 200, gw: node.gw || '', dns: node.dns || '', os: node.os || '', ports: node.ports || '', notes: node.notes || '', nat: !!(node.nat || (initialDataDefaults[node.type] && initialDataDefaults[node.type].nat && node.nat === undefined)), interfaces: normalizedInterfaces };
     if (Number.isFinite(node.portCount)) normalized.portCount = node.portCount;
+    if (node.netcfg) normalized.netcfg = true;
     return normalized;
 }
 

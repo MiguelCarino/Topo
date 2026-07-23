@@ -298,6 +298,17 @@ aside a { color: var(--cs-accent) !important; }
 /* jump-to-gateway (dark slate button) → outline gold */
 #jumpGwBtn { background: transparent !important; border: 1px solid var(--cs-border) !important; color: var(--cs-text-sec) !important; border-radius: 6px !important; }
 #jumpGwBtn:hover { border-color: var(--cs-accent) !important; color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
+
+/* ✕ delete control on the selected canvas node */
+.node-delete { cursor: pointer; }
+.node-delete:hover circle { fill: #b91c1c; }
+
+/* netplan-bridge "Open config" link — styled like jumpGwBtn, gold outline.
+   display:block would outrank Tailwind's .hidden (same trap as .cs-menu-panel),
+   so the two-class guard below keeps `hidden` honest. */
+#openNetcfgBtn { display: block; background: transparent; border: 1px solid var(--cs-border); color: var(--cs-text-sec); border-radius: 6px; }
+#openNetcfgBtn:hover { border-color: var(--cs-accent); color: var(--cs-accent); background: var(--cs-accent-faint); }
+#openNetcfgBtn.hidden { display: none; }
 /* floating zoom controls over the light canvas → dark card */
 #canvasContainer > .absolute.bottom-4.right-4 { background: var(--cs-bg-card) !important; border: 1px solid var(--cs-border) !important; color: var(--cs-text-sec) !important; border-radius: 8px; overflow: hidden; }
 #canvasContainer > .absolute.bottom-4.right-4 button { border-color: var(--cs-border) !important; }
@@ -317,24 +328,16 @@ aside a { color: var(--cs-accent) !important; }
    screen the sidebar becomes an off-canvas drawer opened by ☰,
    and the navbar's action cluster folds into a section at the
    top of that drawer — the same pattern as netplan.carino.systems.
-   All three helper elements are hidden by default and only the
-   media query below turns them on.
+   The drawer is opened from the floating "handy" bar (bottom
+   center, same pattern as quotation.carino.systems), which also
+   carries trace / undo / redo / clear. All helper elements are
+   hidden by default and only the media query below turns them on.
    ============================================================ */
-#mobileMenuBtn {
-    display: none; flex-shrink: 0;
-    width: 38px; height: 38px;
-    align-items: center; justify-content: center;
-    background: transparent; border: 1px solid var(--cs-border);
-    border-radius: 6px; color: var(--cs-accent);
-    font-size: 1.15rem; line-height: 1; cursor: pointer; transition: 0.2s;
-}
-#mobileMenuBtn:hover { border-color: var(--cs-accent); background: var(--cs-accent-faint); }
 #mobileActions { display: none; }
 #mobileScrim { display: none; }
+.handy-bar { display: none; }
 
 @media (max-width: 1024px) {
-    #mobileMenuBtn { display: flex; }
-
     /* aside → off-canvas left drawer, tucked under the 60px navbar. !important
        overrides the inline Tailwind width (w-96) and z-index (z-10). */
     aside {
@@ -380,4 +383,32 @@ aside a { color: var(--cs-accent) !important; }
 
     /* Canvas takes the full width now that the sidebar floats above it. */
     body.drawer-lock { overflow: hidden; }
+
+    /* Floating handy bar — bottom center, thumb reach. Sits below the scrim
+       layer, and drawer-lock hides it outright so it never floats over an
+       open drawer. */
+    .handy-bar {
+        display: flex; align-items: center; gap: 4px;
+        position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+        z-index: 2147480000;
+        padding: 6px;
+        background: rgba(13, 13, 13, 0.92);
+        border: 1px solid var(--cs-border); border-radius: 12px;
+        box-shadow: 0 14px 38px rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(8px);
+        max-width: calc(100vw - 24px);
+    }
+    body.drawer-lock .handy-bar { display: none; }
+    .handy-btn {
+        width: 38px; height: 38px; flex-shrink: 0;
+        display: inline-flex; align-items: center; justify-content: center;
+        background: transparent; border: 1px solid transparent; border-radius: 8px;
+        color: var(--cs-text); font-size: 1.05rem; line-height: 1;
+        cursor: pointer; transition: 0.2s;
+    }
+    .handy-btn:hover { border-color: var(--cs-accent); color: var(--cs-accent); background: var(--cs-accent-faint); }
+    .handy-btn.active { border-color: var(--cs-accent); color: var(--cs-accent); background: var(--cs-accent-faint); }
+    .handy-btn:disabled { opacity: 0.35; cursor: default; }
+    .handy-btn:disabled:hover { border-color: transparent; color: var(--cs-text); background: transparent; }
+    .handy-div { width: 1px; height: 22px; background: var(--cs-border); flex-shrink: 0; }
 }
