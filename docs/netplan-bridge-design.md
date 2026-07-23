@@ -95,8 +95,14 @@ nothing to fight.
 - Assign to `ifaces`; existing rendering handles the rest — `buildNetplanFiles`
   (`index.html:874-886`) already suppresses example modules when custom ifaces
   exist, and all three backends consume the same array.
-- `history.replaceState` to clear the hash after successful hydration, so reloads
-  don't re-trigger and the URL doesn't linger with intent in it.
+- **The hash is live, not cleared.** After hydration — and after every edit — the
+  receiver re-encodes the current `ifaces` + family toggles back into the URL
+  fragment (same codec, every mutation funnels through `rebuildYamlFromModules`).
+  The address bar is therefore always a copyable snapshot: refine the config on
+  the netplan side, copy the URL, and paste it into the topology node's **notes**
+  to keep the refined config with the node. `psk` is stripped before every encode
+  — a passphrase typed into the form never reaches a URL. An empty interface list
+  clears the hash (nothing worth sharing).
 
 ## 5. What the user gets
 
@@ -111,7 +117,10 @@ DHCP, placeholder SSID) should be visually marked for review on the netplan side
 
 ## 6. Known limits (accepted)
 
-- **One-way.** No round-trip; netplan-side refinements are discarded on re-click.
+- **No automatic round-trip.** The ⚙️ button always regenerates from the node's
+  current fields; netplan-side refinements don't flow back into the topology
+  model. The escape hatch is manual: the receiver's URL hash stays live under
+  edits, so a refined config can be copied and kept in the node's notes.
 - **Ethernet + wifi only.** `backends.js` parameterizes only these two custom
   types; bond/VLAN/VRF/bridge/tunnel are hardcoded example modules. A bonded or
   VLAN-named topology interface degrades to a generic example. Extending
