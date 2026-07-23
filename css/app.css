@@ -309,3 +309,75 @@ aside a { color: var(--cs-accent) !important; }
 #conflictPill { background: var(--cs-bg-card) !important; border: 1px solid var(--cs-accent-dim) !important; color: var(--cs-accent) !important; box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important; }
 #conflictPill:hover { border-color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
 #conflictAlert .text-amber-500 { color: var(--cs-accent) !important; }
+
+/* ============================================================
+   Mobile / tablet adaptation (≤1024px). Logic lives in
+   js/mobile.js. The desktop layout keeps a fixed sidebar beside
+   the canvas and the app controls in the navbar; on a narrow
+   screen the sidebar becomes an off-canvas drawer opened by ☰,
+   and the navbar's action cluster folds into a section at the
+   top of that drawer — the same pattern as netplan.carino.systems.
+   All three helper elements are hidden by default and only the
+   media query below turns them on.
+   ============================================================ */
+#mobileMenuBtn {
+    display: none; flex-shrink: 0;
+    width: 38px; height: 38px;
+    align-items: center; justify-content: center;
+    background: transparent; border: 1px solid var(--cs-border);
+    border-radius: 6px; color: var(--cs-accent);
+    font-size: 1.15rem; line-height: 1; cursor: pointer; transition: 0.2s;
+}
+#mobileMenuBtn:hover { border-color: var(--cs-accent); background: var(--cs-accent-faint); }
+#mobileActions { display: none; }
+#mobileScrim { display: none; }
+
+@media (max-width: 1024px) {
+    #mobileMenuBtn { display: flex; }
+
+    /* aside → off-canvas left drawer, tucked under the 60px navbar. !important
+       overrides the inline Tailwind width (w-96) and z-index (z-10). */
+    aside {
+        position: fixed !important;
+        top: 60px; left: 0; bottom: 0;
+        width: min(88vw, 360px) !important;
+        max-width: none !important;
+        z-index: 2147482000 !important; /* below navbar (2147483000), above canvas */
+        transform: translateX(-100%);
+        transition: transform 0.25s ease;
+        box-shadow: 0 0 44px rgba(0, 0, 0, 0.6);
+    }
+    aside.drawer-open { transform: translateX(0); }
+
+    #mobileScrim {
+        display: block; position: fixed; inset: 60px 0 0 0;
+        background: rgba(0, 0, 0, 0.55); opacity: 0;
+        pointer-events: none; transition: opacity 0.25s ease;
+        z-index: 2147481000;
+    }
+    #mobileScrim.open { opacity: 1; pointer-events: auto; }
+
+    /* Actions section pinned at the top of the drawer. */
+    #mobileActions {
+        display: block; flex-shrink: 0;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--cs-border);
+        background: var(--cs-bg-elev);
+    }
+    .mobile-actions-title {
+        font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.1em;
+        color: var(--cs-text-muted); margin-bottom: 10px;
+    }
+    #mobileActionsSlot .cn-actions {
+        display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    }
+    /* Vertical dividers make no sense once the cluster wraps onto several rows. */
+    #mobileActionsSlot .cs-vdiv { display: none; }
+    /* Let the Trace group and status line stretch instead of clipping. */
+    #mobileActionsSlot .cs-control-group { height: auto; padding: 6px 10px; flex-wrap: wrap; }
+    #mobileActionsSlot .cs-trace-status { min-width: 0; }
+
+    /* Canvas takes the full width now that the sidebar floats above it. */
+    body.drawer-lock { overflow: hidden; }
+}
