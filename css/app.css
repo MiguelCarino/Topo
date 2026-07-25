@@ -85,43 +85,7 @@
     font-family: 'IBM Plex Sans', sans-serif;
 }
 
-.cs-left { display: flex; align-items: center; gap: 14px; min-width: 0; flex-shrink: 0; }
 .cs-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-
-.cs-page-name {
-    font-family: 'Red Hat Display', sans-serif;
-    font-size: 1.4rem; font-weight: 900; line-height: 1;
-    background: linear-gradient(130deg, #fef08a 0%, #eab308 50%, #b45309 100%);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-    white-space: nowrap; flex-shrink: 0;
-}
-
-.cs-info {
-    display: flex; align-items: baseline; gap: 10px;
-    border-left: 1px solid var(--cs-border); padding-left: 14px;
-}
-.cs-info-title {
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; font-weight: 700;
-    color: var(--cs-text); white-space: nowrap; text-transform: uppercase; letter-spacing: 0.06em;
-}
-.cs-info-desc {
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem;
-    color: var(--cs-text-muted); white-space: nowrap;
-}
-
-.cs-icon-btn {
-    width: 32px; height: 32px;
-    border: 1px solid var(--cs-border); border-radius: 4px;
-    display: flex; align-items: center; justify-content: center;
-    color: var(--cs-text-muted); transition: 0.2s;
-    text-decoration: none; background: transparent; cursor: pointer;
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; font-weight: 700;
-}
-.cs-icon-btn:hover {
-    border-color: var(--cs-accent); color: #050505; background: var(--cs-accent);
-    transform: translateY(-2px); box-shadow: 0 4px 12px var(--cs-accent-glow);
-}
-.cs-icon-btn svg { width: 15px; height: 15px; }
 
 .cs-vdiv { width: 1px; height: 22px; background: var(--cs-border); flex-shrink: 0; }
 
@@ -149,14 +113,6 @@
     color: var(--cs-text-muted); white-space: nowrap; min-width: 90px;
 }
 .cs-trace-status.active { color: var(--cs-accent); font-weight: 700; }
-
-.cs-select {
-    background: transparent; border: 1px solid var(--cs-border); color: var(--cs-text);
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem;
-    padding: 0 8px; height: 32px; border-radius: 4px; cursor: pointer; outline: none; transition: 0.2s;
-}
-.cs-select:hover, .cs-select:focus { border-color: var(--cs-accent); }
-.cs-select option { background: #111; color: var(--cs-text); }
 
 .cs-btn {
     display: flex; align-items: center; gap: 5px;
@@ -204,10 +160,10 @@
     flex: 1; padding: 6px 4px; background: transparent;
     border: none; border-bottom: 2px solid transparent; cursor: pointer;
     font-family: 'IBM Plex Sans', sans-serif; font-size: 10px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.04em; color: #94a3b8; transition: 0.15s;
+    text-transform: uppercase; letter-spacing: 0.04em; color: var(--cs-text-muted); transition: 0.15s;
 }
-.cfg-tab:hover { color: #475569; }
-.cfg-tab[aria-selected="true"] { color: #2563eb; border-bottom-color: #2563eb; }
+.cfg-tab:hover { color: var(--cs-text-sec); background: var(--cs-accent-faint); }
+.cfg-tab[aria-selected="true"] { color: var(--cs-accent); border-bottom-color: var(--cs-accent); background: var(--cs-accent-faint); }
 
 /* ============================================================
    Carino branding pass — rebrand the app CHROME (sidebar +
@@ -244,7 +200,8 @@ aside input:focus, aside select:focus, aside textarea:focus {
 }
 aside select option { background: #111; color: var(--cs-text); }
 /* semantic accent labels/selects → gold family */
-aside .text-indigo-600, aside .text-emerald-600, aside .text-blue-600 { color: var(--cs-accent) !important; }
+aside .text-indigo-600, aside .text-emerald-600, aside .text-blue-600,
+aside .text-amber-600, aside .text-indigo-400 { color: var(--cs-accent) !important; }
 aside .border-indigo-300, aside .border-emerald-300 { border-color: var(--cs-border) !important; }
 aside .bg-indigo-50, aside .bg-emerald-50 { background: var(--cs-bg-elev) !important; }
 aside .focus\:outline-blue-500:focus, aside .focus\:outline-indigo-500:focus { outline-color: var(--cs-accent) !important; }
@@ -268,7 +225,7 @@ aside a { color: var(--cs-accent) !important; }
 }
 .lib-tab:hover { color: var(--cs-text-sec); background: var(--cs-accent-faint); }
 .lib-tab[aria-selected="true"] { color: var(--cs-accent); border-bottom-color: var(--cs-accent); background: var(--cs-accent-faint); }
-.lib-key, .kbd {
+.lib-key {
     font-family: 'IBM Plex Mono', monospace; font-size: 8px; line-height: 1;
     border: 1px solid var(--cs-border); border-radius: 3px; padding: 2px 3px;
     color: var(--cs-text-muted); background: var(--cs-bg-elev);
@@ -287,7 +244,7 @@ aside a { color: var(--cs-accent) !important; }
 .lib-item:hover .lib-item-name { color: var(--cs-accent); }
 .lib-item-blurb { font-size: 9px; color: var(--cs-text-muted); line-height: 1.3; margin-top: 1px; }
 .lib-item-del { color: var(--cs-text-muted); font-size: 10px; padding: 0 2px; background: none; border: none; cursor: pointer; }
-.lib-item-del:hover { color: #dc2626; }
+.lib-item-del:hover { color: #ef4444; }
 
 /* Shortcut cheatsheet */
 #shortcutHelp kbd {
@@ -298,6 +255,29 @@ aside a { color: var(--cs-accent) !important; }
 /* jump-to-gateway (dark slate button) → outline gold */
 #jumpGwBtn { background: transparent !important; border: 1px solid var(--cs-border) !important; color: var(--cs-text-sec) !important; border-radius: 6px !important; }
 #jumpGwBtn:hover { border-color: var(--cs-accent) !important; color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
+
+/* Status + selection tints emitted by js/ui.js and js/diagnostics.js are the
+   light Tailwind ones; on the dark chrome they map to the ok/warn/err tokens
+   (#22c55e / gold / #ef4444) as faint fills with readable text. */
+aside .bg-slate-100 { background: var(--cs-bg-elev) !important; }
+aside .text-emerald-700 { color: #22c55e !important; }
+/* div/button only: the Link Material select also carries bg-emerald-50 and must
+   keep the bg-elev the form-control rules above give it. */
+aside div.bg-emerald-50, aside button.bg-emerald-50, aside .bg-emerald-100 { background: rgba(34, 197, 94, 0.1) !important; }
+aside .border-emerald-200, aside .border-emerald-400 { border-color: rgba(34, 197, 94, 0.4) !important; }
+aside .hover\:border-emerald-600:hover { border-color: #22c55e !important; }
+aside .text-red-600, aside .text-red-700 { color: #ef4444 !important; }
+aside .bg-red-50, aside .bg-red-100 { background: rgba(239, 68, 68, 0.12) !important; }
+aside .border-red-200, aside .border-red-400 { border-color: rgba(239, 68, 68, 0.5) !important; }
+aside .hover\:bg-red-100:hover { background: rgba(239, 68, 68, 0.2) !important; }
+aside .text-amber-700, aside .text-amber-800 { color: var(--cs-accent) !important; }
+aside .bg-amber-50, aside .bg-amber-100 { background: var(--cs-accent-faint) !important; }
+aside .border-amber-200, aside .border-amber-500 { border-color: var(--cs-accent-dim) !important; }
+/* stray blue hovers → gold */
+aside .hover\:text-blue-600:hover { color: var(--cs-accent) !important; }
+aside .hover\:border-blue-400:hover { border-color: var(--cs-accent) !important; }
+/* every sidebar checkbox ticks gold, whatever accent-* utility it carries */
+aside input[type="checkbox"] { accent-color: var(--cs-accent); }
 
 /* ✕ delete control on the selected canvas node */
 .node-delete { cursor: pointer; }
