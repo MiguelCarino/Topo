@@ -1,4 +1,4 @@
-# NetworkTopology
+# Topo
 Simple network topology editor
 
 ## License

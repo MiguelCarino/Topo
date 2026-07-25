@@ -2,7 +2,7 @@
   "name": "nettopo-tests",
   "private": true,
   "type": "module",
-  "description": "Cross-engine test runner (Playwright) for the NetworkTopology editor.",
+  "description": "Cross-engine test runner (Playwright) for the Topo editor.",
   "scripts": { "cross": "node run-cross.mjs" },
   "devDependencies": { "playwright": "^1.40.0" }
 }

@@ -31,7 +31,7 @@ current node**, computed on demand.
 - **Only the deployed pair must agree on the encoding.** Because URLs are generated
   fresh at click time, there are no historical links to keep compatible.
 
-## 3. Sender — NetworkTopology changes (~60–80 LOC)
+## 3. Sender — Topo changes (~60–80 LOC)
 
 All cloned from existing patterns:
 
@@ -86,7 +86,7 @@ nothing to fight.
 
 - Insert `hydrateFromHash()` in the bottom-of-body init sequence **between
   `renderTemplateGrid()` and `renderIfaces()`** (`index.html:1533/1534`).
-- Decode the `~` fragment (mirror of NetworkTopology's `decodeFragment`; keep the
+- Decode the `~` fragment (mirror of Topo's `decodeFragment`; keep the
   ~20-LOC helper **byte-identical** in both repos, with a comment in each pointing
   at the other file).
 - Sanitize every entry through the existing `loadExample` defaults-merge
@@ -149,7 +149,7 @@ DHCP, placeholder SSID) should be visually marked for review on the netplan side
 
 ## 8. Implementation checklist
 
-1. NetworkTopology: toggle row + advisory hint + Open-config `<a>` (clone
+1. Topo: toggle row + advisory hint + Open-config `<a>` (clone
    `natRow`/`jumpGwBtn`), `select()`/`clearPropertyInputs` wiring, 2-line
    serialization edit, `bridgeIntent()` + envelope encoder.
 2. NetplanConfig: `hydrateFromHash()` + shared decode helper + `replaceState`.

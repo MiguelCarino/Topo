@@ -857,7 +857,7 @@ function docFromImported(parsed) {
 // swap logic is testable without a FileReader in the way. Returns whether it took.
 function applyImportedDoc(parsed) {
     const doc = docFromImported(parsed);
-    if (!doc) { alert('That file does not look like a NetTopology build.'); return false; }
+    if (!doc) { alert('That file does not look like a Topo build.'); return false; }
     if (state.nodes.length && !confirm('Replace the current canvas with this build?')) return false;
     loadTemplateState(doc); autoBindLinks();
     state.selectedId = null; state.selectedType = null; state.linkSourceId = null;

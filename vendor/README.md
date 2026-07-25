@@ -1,6 +1,6 @@
 # Vendored third-party code
 
-These files are **not** part of Carino NetworkTopology and are **not** covered by
+These files are **not** part of Carino Topo and are **not** covered by
 this repository's AGPL-3.0 licence. Each keeps its own MIT licence, reproduced in
 full alongside it, as MIT requires.
 
