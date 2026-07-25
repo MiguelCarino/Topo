@@ -1,5 +1,5 @@
 /* ============================================================
-   mobile.js — phone/tablet adaptation for network.carino.systems
+   mobile.js — phone/tablet adaptation for topo.carino.systems
    ------------------------------------------------------------
    The desktop layout is a fixed w-96 sidebar sitting beside the
    canvas, with the app's controls (Trace / Undo / Export / …)
@@ -83,7 +83,7 @@
     }
 
     // Floating "handy" bar, bottom-center, mobile only — the same pattern as
-    // quotation.carino.systems. It replaces the old navbar ☰: the five things a
+    // quote.carino.systems. It replaces the old navbar ☰: the five things a
     // phone actually needs mid-edit (drawer, trace, undo, redo, clear) ride in
     // one thumb-reach pill instead of hiding behind the drawer. Every button
     // delegates to the REAL control (`.click()` / checkbox toggle), so behavior

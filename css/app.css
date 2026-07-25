@@ -309,7 +309,7 @@ aside input[type="checkbox"] { accent-color: var(--cs-accent); }
    and the navbar's action cluster folds into a section at the
    top of that drawer — the same pattern as netplan.carino.systems.
    The drawer is opened from the floating "handy" bar (bottom
-   center, same pattern as quotation.carino.systems), which also
+   center, same pattern as quote.carino.systems), which also
    carries trace / undo / redo / clear. All helper elements are
    hidden by default and only the media query below turns them on.
    ============================================================ */
