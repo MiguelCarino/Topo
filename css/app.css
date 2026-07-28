@@ -47,8 +47,8 @@
 }
 
 @keyframes pulse-glow { 
-    0%, 100% { filter: drop-shadow(0 0 4px #f97316); stroke: #ea580c; } 
-    50% { filter: drop-shadow(0 0 12px #fb923c); stroke: #f97316; } 
+    0%, 100% { filter: drop-shadow(0 0 4px #eab308); stroke: #ca8a04; } 
+    50% { filter: drop-shadow(0 0 12px #fde047); stroke: #eab308; } 
 }
 .linking-glow rect { animation: pulse-glow 1.5s infinite ease-in-out; stroke-width: 3px !important; }
 
@@ -128,7 +128,7 @@
 
 /* Export / share / import dropdown — collapses six top-level buttons into one. */
 .cs-menu { position: relative; display: flex; }
-.cs-caret { font-size: 0.55rem; opacity: 0.7; margin-left: 1px; }
+.cs-caret { font-size: 0.6rem; opacity: 0.7; margin-left: 1px; }
 .cs-menu-panel {
     position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
     min-width: 210px; padding: 6px;
@@ -226,7 +226,7 @@ aside a { color: var(--cs-accent) !important; }
 .lib-tab:hover { color: var(--cs-text-sec); background: var(--cs-accent-faint); }
 .lib-tab[aria-selected="true"] { color: var(--cs-accent); border-bottom-color: var(--cs-accent); background: var(--cs-accent-faint); }
 .lib-key {
-    font-family: 'IBM Plex Mono', monospace; font-size: 8px; line-height: 1;
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px; line-height: 1;
     border: 1px solid var(--cs-border); border-radius: 3px; padding: 2px 3px;
     color: var(--cs-text-muted); background: var(--cs-bg-elev);
 }
@@ -242,7 +242,7 @@ aside a { color: var(--cs-accent) !important; }
 .lib-item-icon { font-size: 14px; line-height: 1.1; flex-shrink: 0; }
 .lib-item-name { font-size: 11px; font-weight: 700; color: var(--cs-text); }
 .lib-item:hover .lib-item-name { color: var(--cs-accent); }
-.lib-item-blurb { font-size: 9px; color: var(--cs-text-muted); line-height: 1.3; margin-top: 1px; }
+.lib-item-blurb { font-size: 10px; color: var(--cs-text-muted); line-height: 1.3; margin-top: 1px; }
 .lib-item-del { color: var(--cs-text-muted); font-size: 10px; padding: 0 2px; background: none; border: none; cursor: pointer; }
 .lib-item-del:hover { color: #ef4444; }
 
@@ -392,3 +392,7 @@ aside input[type="checkbox"] { accent-color: var(--cs-accent); }
     .handy-btn:disabled:hover { border-color: transparent; color: var(--cs-text); background: transparent; }
     .handy-div { width: 1px; height: 22px; background: var(--cs-border); flex-shrink: 0; }
 }
+
+/* branding pass: gateway-jump button in fleet gold, not slate */
+#jumpGwBtn { background: var(--cs-accent-dim); color: var(--cs-accent); border: 1px solid var(--cs-accent); }
+#jumpGwBtn:hover { background: var(--cs-accent); color: #050505; }

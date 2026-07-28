@@ -123,13 +123,13 @@
                             <option value="bridged">Bridged (Routed by Host)</option>
                             <option value="passthrough">PCI Passthrough (Direct L2)</option>
                         </select>
-                        <p class="text-[9px] text-slate-400 mt-1 leading-tight">Passthrough bypasses the host OS, connecting the VM directly to the physical switch logic.</p>
+                        <p class="text-[10px] text-slate-400 mt-1 leading-tight">Passthrough bypasses the host OS, connecting the VM directly to the physical switch logic.</p>
                     </div>
 
                     <div id="linkPortProps" class="hidden pt-2 border-t border-slate-100">
                         <label class="block text-[10px] font-bold text-amber-600 mb-1 uppercase">Plugged Into</label>
                         <div id="linkPortBody" class="flex flex-col gap-2"></div>
-                        <p class="text-[9px] text-slate-400 mt-1 leading-tight">Pick the interface this link uses on each end. Occupied ports are marked — you can still pick one, and the node will flag the conflict.</p>
+                        <p class="text-[10px] text-slate-400 mt-1 leading-tight">Pick the interface this link uses on each end. Occupied ports are marked — you can still pick one, and the node will flag the conflict.</p>
                     </div>
 
                     <div id="linkMediumProps" class="hidden pt-2 border-t border-slate-100">
@@ -153,7 +153,7 @@
                                 </div>
                             </div>
                             <div id="ifaceListContainer" class="flex flex-col gap-2"></div>
-                            <p class="text-[9px] text-slate-400 mt-1 leading-tight">Unassigned switches act as L2 Backplanes.</p>
+                            <p class="text-[10px] text-slate-400 mt-1 leading-tight">Unassigned switches act as L2 Backplanes.</p>
                         </div>
 
                         <div class="grid grid-cols-2 gap-2">
@@ -166,7 +166,7 @@
                                 <input type="text" id="propDns" placeholder="8.8.8.8" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500" />
                             </div>
                             <div class="col-span-2">
-                                <button id="jumpGwBtn" class="w-full hidden bg-slate-700 hover:bg-slate-600 text-white py-1 rounded text-[10px] font-bold transition">⏭️ Jump to Gateway</button>
+                                <button id="jumpGwBtn" class="w-full hidden py-1 rounded text-[10px] font-bold transition">⏭️ Jump to Gateway</button>
                             </div>
                         </div>
                         <label id="natRow" class="hidden items-center gap-2 mt-2 cursor-pointer" title="NAT hides this device's private (inside) subnets from the WAN side — only the gateway itself is reachable from outside.">
@@ -181,7 +181,7 @@
                                 <input type="checkbox" id="propNetcfg" class="accent-amber-500">
                                 <span class="text-[10px] font-bold text-slate-500 uppercase">Network config file</span>
                             </label>
-                            <p id="netcfgHint" class="hidden text-[9px] text-slate-400 mt-1 leading-tight">These usually run vendor firmware, not netplan.</p>
+                            <p id="netcfgHint" class="hidden text-[10px] text-slate-400 mt-1 leading-tight">These usually run vendor firmware, not netplan.</p>
                             <a id="openNetcfgBtn" target="_blank" rel="noopener" class="hidden w-full mt-2 py-1 rounded text-[10px] font-bold transition text-center">⚙️ Open config → netplan.carino.systems</a>
                         </div>
                     </div>
@@ -217,7 +217,7 @@
                     <div id="nodeDiagnosticsPanel" class="hidden">
                         <div class="flex items-center justify-between mb-2">
                             <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Node Diagnostics</h3>
-                            <span id="nodeDiagnosticsSummary" class="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold">Idle</span>
+                            <span id="nodeDiagnosticsSummary" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold">Idle</span>
                         </div>
                         <div id="nodeDiagnosticsBody" class="space-y-1.5 text-[10px]"></div>
                     </div>
