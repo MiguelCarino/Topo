@@ -202,6 +202,24 @@ function saveUserTemplate() {
     alert(`Saved template "${name.trim()}".`);
 }
 
+// A text annotation is document furniture, not a device: no interfaces, no
+// links — just words pinned to the canvas, saved with the diagram and
+// included in exports. See spawnNode for the placement conventions.
+function spawnAnnotation(opts = {}) {
+    let x, y;
+    if (opts.at) { x = opts.at.x; y = opts.at.y; }
+    else {
+        const rect = document.getElementById('networkCanvas').getBoundingClientRect();
+        x = (rect.width / 2 - state.camera.x) / state.camera.zoom;
+        y = (rect.height / 2 - state.camera.y) / state.camera.zoom;
+    }
+    const a = { id: nextId('t'), x: Math.round(x / GRID_SNAP) * GRID_SNAP, y: Math.round(y / GRID_SNAP) * GRID_SNAP, text: opts.text !== undefined ? opts.text : (opts.edit ? '' : 'Double-click to edit'), style: opts.style === 'note' ? 'note' : 'plain', size: 12, targets: [] };
+    state.annotations.push(a);
+    save(); select(a.id, 'annotation'); renderCanvasOnly();
+    if (opts.edit) openAnnotationEditor(a);
+    return a;
+}
+
 function getWorkspacePoint(clientX, clientY) {
     const rect = document.getElementById('networkCanvas').getBoundingClientRect();
     return { x: (clientX - rect.left - state.camera.x) / state.camera.zoom, y: (clientY - rect.top - state.camera.y) / state.camera.zoom };
@@ -252,8 +270,13 @@ function serializeNode(n) {
 function serializeLink(l) {
     return { id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium, sourceIface: l.sourceIface || undefined, targetIface: l.targetIface || undefined };
 }
+function serializeAnnotation(a) {
+    return { id: a.id, x: a.x, y: a.y, text: a.text, style: a.style === 'note' ? 'note' : undefined, size: a.size && a.size !== 12 ? a.size : undefined, targets: a.targets && a.targets.length ? a.targets : undefined };
+}
 function serializeDoc() {
-    return { nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink) };
+    // annotations rides the same `|| undefined` trick as netcfg: documents that
+    // never place a text note stay byte-identical to their pre-feature form.
+    return { nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined };
 }
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
@@ -403,6 +426,7 @@ function applyDoc(json) {
     state.selectedId = null; state.selectedType = null; state.linkSourceId = null;
     state.nodes = (parsed.nodes || []).map(normalizeLoadedNode);
     state.links = (Array.isArray(parsed.links) ? parsed.links : []).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
+    state.annotations = (Array.isArray(parsed.annotations) ? parsed.annotations : []).map(normalizeLoadedAnnotation);
     autoBindLinks();
     window.history.replaceState(null, '', `#${encodeDoc(serializeDoc())}`);
     updateOsDatalist();
@@ -457,9 +481,15 @@ function normalizeLoadedLink(link) {
     return { id: link.id || nextId('l'), source: link.source, target: link.target, attachment: link.attachment, medium: link.medium, sourceIface: link.sourceIface || null, targetIface: link.targetIface || null };
 }
 
+function normalizeLoadedAnnotation(a) {
+    // dangling targets (deleted nodes) are skipped at render time, not here —
+    // load order aside, that also self-heals docs edited by older builds.
+    return { id: a.id || `t_${Date.now()}_${Math.random().toString(16).slice(2)}`, x: Number.isFinite(a.x) ? a.x : 200, y: Number.isFinite(a.y) ? a.y : 200, text: typeof a.text === 'string' ? a.text : '', style: a.style === 'note' ? 'note' : 'plain', size: Number.isFinite(a.size) ? Math.min(36, Math.max(10, a.size)) : 12, targets: Array.isArray(a.targets) ? a.targets.filter((t) => typeof t === 'string') : [] };
+}
 function loadTemplateState(tpl) {
     state.nodes = cloneData(tpl.nodes).map(normalizeLoadedNode);
     state.links = cloneData(tpl.links).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
+    state.annotations = cloneData(tpl.annotations || []).map(normalizeLoadedAnnotation);
 }
 
 // Async so it can decompress a shared "~" link, but the legacy path evaluates no
@@ -478,6 +508,7 @@ async function load() {
         const parsed = JSON.parse(json);
         state.nodes = (parsed.nodes || []).map(normalizeLoadedNode);
         state.links = (Array.isArray(parsed.links) ? parsed.links : []).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
+        state.annotations = (Array.isArray(parsed.annotations) ? parsed.annotations : []).map(normalizeLoadedAnnotation);
     } catch (e) {
         loadTemplateState(templatesData.house);
     }
@@ -487,8 +518,9 @@ async function load() {
 
 function deleteSelected() {
     if (!state.selectedId) return;
-    if (state.selectedType === 'node') { state.nodes = state.nodes.filter((n) => n.id !== state.selectedId); state.links = state.links.filter((l) => l.source !== state.selectedId && l.target !== state.selectedId); } 
+    if (state.selectedType === 'node') { state.nodes = state.nodes.filter((n) => n.id !== state.selectedId); state.links = state.links.filter((l) => l.source !== state.selectedId && l.target !== state.selectedId); state.annotations.forEach((a) => { if (a.targets && a.targets.length) a.targets = a.targets.filter((t) => t !== state.selectedId); }); }
     else if (state.selectedType === 'link') { state.links = state.links.filter((l) => l.id !== state.selectedId); }
+    else if (state.selectedType === 'annotation') { state.annotations = state.annotations.filter((a) => a.id !== state.selectedId); }
     select(null, null); save();
     renderCanvasOnly();
 }
@@ -509,8 +541,8 @@ window.addEventListener('mousemove', (event) => {
         draggedNode.x = Math.round((pt.x - dragOffset.x) / GRID_SNAP) * GRID_SNAP; 
         draggedNode.y = Math.round((pt.y - dragOffset.y) / GRID_SNAP) * GRID_SNAP;
 
-        // Direct DOM update (Zero RAM overhead)
-        const nodeEl = document.getElementById(`ui-node-${draggedNode.id}`);
+        // Direct DOM update (Zero RAM overhead) — annotations drag the same way
+        const nodeEl = document.getElementById(`ui-node-${draggedNode.id}`) || document.getElementById(`ui-ann-${draggedNode.id}`);
         if (nodeEl) nodeEl.setAttribute('transform', `translate(${draggedNode.x}, ${draggedNode.y})`);
 
         state.links.forEach(l => {
@@ -519,6 +551,17 @@ window.addEventListener('mousemove', (event) => {
                 const geo = lineEl && linkGeometry(l);
                 if (geo) applyLinkGeometry(lineEl, geo);
             }
+        });
+
+        // Note leaders follow drags just as fluidly — the dragged thing may be
+        // the note itself or a node one of its red lines points at.
+        state.annotations.forEach((a) => {
+            (a.targets || []).forEach((tid) => {
+                if (a.id !== draggedNode.id && tid !== draggedNode.id) return;
+                const el = document.getElementById(`ui-annlink-${a.id}-${tid}`);
+                const n = getNode(tid);
+                if (el && n) applyNoteLinkGeometry(el, noteLinkGeometry(a, n));
+            });
         });
     }
 });
@@ -616,7 +659,7 @@ const MOUSE_HINTS = [
 ];
 
 function renderShortcutHelp() {
-    const subhead = (t) => `<div class="text-[9px] font-bold uppercase tracking-wider mb-1.5 mt-1" style="color: var(--cs-text-muted)">${t}</div>`;
+    const subhead = (t) => `<div class="text-[10px] font-bold uppercase tracking-wider mb-1.5 mt-1" style="color: var(--cs-text-muted)">${t}</div>`;
     const mouse = MOUSE_HINTS.map((h) => `
         <div class="flex items-baseline gap-2 py-1">
             <span class="shrink-0">${h.icon}</span>
@@ -724,12 +767,20 @@ document.getElementById('redoBtn').onclick = redo;
 // Drag a palette item and drop it onto the canvas at the cursor
 (function () {
     const cc = document.getElementById('canvasContainer');
-    cc.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('text/carino-node')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+    cc.addEventListener('dragover', (e) => { const t = [...e.dataTransfer.types]; if (t.includes('text/carino-node') || t.includes('text/carino-annotation')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
     cc.addEventListener('drop', (e) => {
+        const annStyle = e.dataTransfer.getData('text/carino-annotation');
+        if (annStyle) { e.preventDefault(); spawnAnnotation({ at: getWorkspacePoint(e.clientX, e.clientY), style: annStyle, edit: true }); return; }
         const type = e.dataTransfer.getData('text/carino-node'); if (!type) return;
         e.preventDefault(); spawnNode(type, { at: getWorkspacePoint(e.clientX, e.clientY) });
     });
 })();
+
+// Double-click on empty canvas: drop a text note right there, editor open.
+document.getElementById('networkCanvas').addEventListener('dblclick', (event) => {
+    if (event.target.id !== 'networkCanvas') return;
+    spawnAnnotation({ at: getWorkspacePoint(event.clientX, event.clientY), text: '', edit: true });
+});
 
 const propertyBindings = [
     { key: 'name', id: 'propName' },
@@ -885,6 +936,14 @@ function handleExport(format) {
     state.nodes.forEach((node) => {
         minX = Math.min(minX, node.x - NODE_HALF_SIZE); minY = Math.min(minY, node.y - NODE_HALF_SIZE);
         maxX = Math.max(maxX, node.x + NODE_HALF_SIZE); maxY = Math.max(maxY, node.y + NODE_HALF_SIZE + LABEL_EXTRA_BOTTOM);
+    });
+    // Text notes count toward the bounds too — measure the rendered group so a
+    // note sitting outside the node cluster is not cropped out of the export.
+    state.annotations.forEach((a) => {
+        const el = document.getElementById(`ui-ann-${a.id}`);
+        const bb = el ? el.getBBox() : { width: 120, height: 30 };
+        minX = Math.min(minX, a.x); minY = Math.min(minY, a.y);
+        maxX = Math.max(maxX, a.x + bb.width); maxY = Math.max(maxY, a.y + bb.height);
     });
 
     minX -= PADDING; minY -= PADDING; maxX += PADDING; maxY += PADDING;

@@ -2,7 +2,7 @@
 // Load order: state -> model -> data -> diagnostics -> ui -> app
 
 const state = {
-    nodes: [], links: [], selectedId: null, selectedType: null, linkSourceId: null,
+    nodes: [], links: [], annotations: [], selectedId: null, selectedType: null, linkSourceId: null,
     settings: { traceMode: false },
     camera: { x: 0, y: 0, zoom: 1 }
 };

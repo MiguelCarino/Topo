@@ -55,7 +55,7 @@ function diagnosticRow(label, level, text) {
                 <span class="font-bold">${escapeHtml(label)}</span>
                 <span>${icon}</span>
             </div>
-            <div class="text-[9px] leading-snug mt-0.5">${escapeHtml(text)}</div>
+            <div class="text-[10px] leading-snug mt-0.5">${escapeHtml(text)}</div>
         </div>
     `;
 }
@@ -471,7 +471,7 @@ function renderNodeDiagnostics(node) {
         if (placeholder) placeholder.classList.remove('hidden');
         body.innerHTML = '';
         summary.textContent = 'Idle';
-        summary.className = 'text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold';
+        summary.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold';
         return;
     }
 
@@ -495,10 +495,10 @@ function renderNodeDiagnostics(node) {
 
     summary.textContent = overall;
     summary.className = hasBad
-        ? 'text-[9px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold'
+        ? 'text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold'
         : hasWarn
-            ? 'text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold'
-            : 'text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold';
+            ? 'text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold'
+            : 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold';
 
     body.innerHTML = checks
         .map(([label, result]) => diagnosticRow(label, result.level, result.text))

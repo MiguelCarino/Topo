@@ -35,14 +35,14 @@ const paletteDefs = [
     { type: 'custom', name: 'Custom Node' }
 ];
 
-const lZones = document.getElementById('layer-zones'), lLinks = document.getElementById('layer-links'), lNodes = document.getElementById('layer-nodes');
+const lZones = document.getElementById('layer-zones'), lLinks = document.getElementById('layer-links'), lNodes = document.getElementById('layer-nodes'), lAnn = document.getElementById('layer-annotations');
 let isDraggingCanvas = false, isDraggingNode = false, draggedNode = null, dragOffset = { x: 0, y: 0 }, lastMouse = { x: 0, y: 0 };
 
 const paletteContainer = document.getElementById('nodePalette');
 paletteDefs.forEach((d) => {
     const btn = document.createElement('button');
     btn.className = 'palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer';
-    btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="#1e293b" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[d.type]}</svg><span class="text-[9px] font-medium mt-1 uppercase text-center leading-tight">${d.name}</span>`;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="#1e293b" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[d.type]}</svg><span class="text-[10px] font-medium mt-1 uppercase text-center leading-tight">${d.name}</span>`;
     btn.title = 'Click to add (connects to the selected node) — or drag onto the canvas';
     // Click: add connected to the current selection (fast tree building)
     btn.onclick = () => spawnNode(d.type, { connectTo: (state.selectedType === 'node' && state.selectedId) ? state.selectedId : null });
@@ -52,8 +52,278 @@ paletteDefs.forEach((d) => {
     paletteContainer.appendChild(btn);
 });
 
+// Text & Note tools — document furniture, not devices: they spawn annotations,
+// so they sit outside paletteDefs (no interfaces, no auto-IP, no network links).
+// Text = borderless words on the canvas; Note = the coloured sticky card.
+[
+    { style: 'plain', name: 'Text', title: 'Click or drag to place borderless text — double-clicking empty canvas also works',
+      icon: '<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/>' },
+    { style: 'note', name: 'Note', title: 'Click or drag to place a coloured sticky note — right-click it to link it to a node',
+      icon: '<path d="M4 4h16v12l-4 4H4z" fill="#fef9c3" stroke="#ca8a04"/><path d="M16 20v-4h4" fill="none" stroke="#ca8a04"/>' },
+].forEach((d) => {
+    const btn = document.createElement('button');
+    btn.className = 'palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer';
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="#1e293b" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${d.icon}</svg><span class="text-[10px] font-medium mt-1 uppercase text-center leading-tight">${d.name}</span>`;
+    btn.title = d.title;
+    btn.onclick = () => spawnAnnotation({ style: d.style, edit: true });
+    btn.setAttribute('draggable', 'true');
+    btn.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/carino-annotation', d.style); e.dataTransfer.effectAllowed = 'copy'; });
+    paletteContainer.appendChild(btn);
+});
+
+// ---- Text annotations: render + inline editor ----
+const getAnnotation = (id) => state.annotations.find((a) => a.id === id);
+
+// Leader geometry: border to border. The line leaves the card where the ray
+// to the node exits the rectangle and stops at the node's halo. Card size
+// comes from the transient _w/_h stamped at render time. Null = shapes overlap.
+function noteLinkGeometry(a, n) {
+    const w = a._w || 44, h = a._h || 26;
+    const cx = a.x + w / 2, cy = a.y + h / 2;
+    const dx = n.x - cx, dy = n.y - cy;
+    const dist = Math.hypot(dx, dy) || 1;
+    const tEdge = Math.min(dx !== 0 ? (w / 2) / Math.abs(dx) : Infinity,
+                           dy !== 0 ? (h / 2) / Math.abs(dy) : Infinity);
+    const sx = cx + dx * tEdge, sy = cy + dy * tEdge;
+    const ex = n.x - (dx / dist) * 30, ey = n.y - (dy / dist) * 30;
+    if ((ex - sx) * dx + (ey - sy) * dy <= 0) return null;
+    return { sx, sy, ex, ey };
+}
+
+function applyNoteLinkGeometry(el, geo) {
+    if (!geo) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.setAttribute('x1', geo.sx); el.setAttribute('y1', geo.sy);
+    el.setAttribute('x2', geo.ex); el.setAttribute('y2', geo.ey);
+}
+
+// Toggle a note↔node leader: linking an already-linked pair unlinks it.
+function toggleNoteLink(a, nodeId) {
+    a.targets = a.targets || [];
+    const i = a.targets.indexOf(nodeId);
+    if (i >= 0) a.targets.splice(i, 1); else a.targets.push(nodeId);
+    state.linkSourceId = null;
+    save(); renderCanvasOnly();
+}
+
+function renderAnnotation(a) {
+    const NS = 'http://www.w3.org/2000/svg';
+
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('id', `ui-ann-${a.id}`);
+    g.setAttribute('transform', `translate(${a.x}, ${a.y})`);
+    g.style.cursor = 'move';
+    if (state.linkSourceId === a.id) g.setAttribute('class', 'linking-glow');
+    const selected = state.selectedId === a.id;
+
+    const rect = document.createElementNS(NS, 'rect');
+    const text = document.createElementNS(NS, 'text');
+    text.setAttribute('font-size', String(a.size || 12));
+    text.setAttribute('font-family', "'IBM Plex Sans', sans-serif");
+    text.setAttribute('fill', '#1e293b');
+    (a.text || ' ').split('\n').forEach((ln) => {
+        const ts = document.createElementNS(NS, 'tspan');
+        ts.setAttribute('x', 10); ts.setAttribute('dy', '1.35em');
+        ts.textContent = ln === '' ? ' ' : ln;   // keep blank lines from collapsing
+        text.appendChild(ts);
+    });
+    g.appendChild(rect); g.appendChild(text);
+    lAnn.appendChild(g);   // must be in the DOM before getBBox works
+
+    const bb = text.getBBox();
+    const cardW = Math.max(bb.width + 20, 44), cardH = Math.max(bb.height + 12, 26);
+    a._w = cardW; a._h = cardH;   // transient, for live leader updates during drags
+    rect.setAttribute('x', 0); rect.setAttribute('y', 0); rect.setAttribute('rx', 4);
+    rect.setAttribute('width', cardW);
+    rect.setAttribute('height', cardH);
+
+    // Leader lines to linked nodes: pure ink — red, no medium, no ports, no
+    // diagnostics. Stable ids so the drag loop can move them fluidly, exactly
+    // like ui-link-* lines. Inserted under the card in the same layer.
+    (a.targets || []).forEach((tid) => {
+        const n = getNode(tid); if (!n) return;   // dangling target: skip, self-heals
+        const line = document.createElementNS(NS, 'line');
+        line.setAttribute('id', `ui-annlink-${a.id}-${tid}`);
+        line.setAttribute('stroke', '#ef4444'); line.setAttribute('stroke-width', '1.5');
+        line.setAttribute('opacity', '0.85'); line.style.pointerEvents = 'none';
+        applyNoteLinkGeometry(line, noteLinkGeometry(a, n));
+        lAnn.insertBefore(line, g);
+    });
+    rect.setAttribute('stroke-width', selected ? 2 : 1);
+    if (a.style === 'plain') {
+        rect.setAttribute('fill', 'transparent');
+        rect.setAttribute('stroke', selected ? '#eab308' : 'transparent');
+        rect.setAttribute('stroke-dasharray', '4 3');
+    } else {
+        rect.setAttribute('fill', '#fef9c3');
+        rect.setAttribute('stroke', selected ? '#ca8a04' : '#eab308');
+    }
+
+    // Selected: the same little ✕ nodes get (top-left, suppressed in link mode).
+    if (selected && !state.linkSourceId) {
+        const del = document.createElementNS(NS, 'g');
+        del.setAttribute('class', 'node-delete');
+        const disc = document.createElementNS(NS, 'circle');
+        disc.setAttribute('r', '7.5');
+        disc.setAttribute('fill', '#dc2626'); disc.setAttribute('stroke', '#ffffff'); disc.setAttribute('stroke-width', '1.5');
+        del.appendChild(disc);
+        const mark = document.createElementNS(NS, 'text');
+        mark.setAttribute('text-anchor', 'middle'); mark.setAttribute('y', '3');
+        mark.setAttribute('font-size', '9'); mark.setAttribute('font-weight', '900'); mark.setAttribute('fill', '#ffffff');
+        mark.setAttribute('font-family', 'sans-serif');
+        mark.textContent = '✕'; mark.style.pointerEvents = 'none';
+        del.appendChild(mark);
+        const tip = document.createElementNS(NS, 'title');
+        tip.textContent = 'Delete note';
+        del.appendChild(tip);
+        del.addEventListener('mousedown', (e) => e.stopPropagation()); // no drag from the ✕
+        del.addEventListener('click', (e) => { e.stopPropagation(); deleteSelected(); });
+        g.appendChild(del);
+
+        // Size controls, top-right: A− / A+ discs mirror the ✕'s look. They
+        // adjust the note's font size in 2px steps (10–36) and the card
+        // re-measures itself around the new text box. The pair is pinned in
+        // place from the first click until the pointer leaves it — otherwise
+        // every click would grow the card and slide the buttons out from
+        // under a user who wants to press them repeatedly.
+        const ctlX = a._ctlPin !== undefined ? a._ctlPin : cardW;
+        const ctlWrap = document.createElementNS(NS, 'g');
+        ctlWrap.setAttribute('transform', `translate(${ctlX}, 0)`);
+        [
+            { glyph: 'A−', dx: -18, step: -2, tipTxt: 'Smaller text' },
+            { glyph: 'A+', dx: 0,  step: 2,  tipTxt: 'Larger text' },
+        ].forEach((b) => {
+            const ctl = document.createElementNS(NS, 'g');
+            ctl.setAttribute('transform', `translate(${b.dx}, 0)`);
+            ctl.setAttribute('class', 'node-delete');
+            const disc2 = document.createElementNS(NS, 'circle');
+            disc2.setAttribute('r', '7.5');
+            disc2.setAttribute('fill', '#334155'); disc2.setAttribute('stroke', '#ffffff'); disc2.setAttribute('stroke-width', '1.5');
+            ctl.appendChild(disc2);
+            const lbl = document.createElementNS(NS, 'text');
+            lbl.setAttribute('text-anchor', 'middle'); lbl.setAttribute('y', '2.5');
+            lbl.setAttribute('font-size', '7'); lbl.setAttribute('font-weight', '900'); lbl.setAttribute('fill', '#ffffff');
+            lbl.setAttribute('font-family', 'sans-serif');
+            lbl.textContent = b.glyph; lbl.style.pointerEvents = 'none';
+            ctl.appendChild(lbl);
+            const tip2 = document.createElementNS(NS, 'title');
+            tip2.textContent = b.tipTxt;
+            ctl.appendChild(tip2);
+            ctl.addEventListener('mousedown', (e) => e.stopPropagation()); // no drag from the controls
+            ctl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (a._ctlPin === undefined) a._ctlPin = ctlX;   // freeze where the buttons are now
+                a.size = Math.min(36, Math.max(10, (a.size || 12) + b.step));
+                save(); renderCanvasOnly();
+            });
+            ctlWrap.appendChild(ctl);
+        });
+        // Pointer left the pair → let them snap to the card's new corner.
+        ctlWrap.addEventListener('mouseleave', () => {
+            if (a._ctlPin !== undefined) { delete a._ctlPin; renderCanvasOnly(); }
+        });
+        g.appendChild(ctlWrap);
+    }
+
+    // While this note's editor is open, any re-render (selection, mouseup,
+    // leader updates) must keep the card hidden — the overlay IS the card.
+    const openEd = document.getElementById('annEditor');
+    if (openEd && openEd.dataset.annId === a.id) g.style.visibility = 'hidden';
+
+    // Same drag contract as nodes: shared isDraggingNode/draggedNode globals,
+    // the mousemove handler finds this group via the ui-ann-<id> fallback.
+    g.addEventListener('mousedown', (event) => {
+        event.stopPropagation();
+        // Second press of a double-click: straight into typing. Handled here on
+        // mousedown (event.detail) rather than dblclick, because the first
+        // press re-renders the canvas and replaces this element mid-gesture —
+        // and it must not arm a drag either.
+        if (event.detail > 1) { openAnnotationEditor(a); return; }
+        if (state.linkSourceId) {
+            // Armed from a node → complete a red note-leader onto this card.
+            // Armed from this or another annotation → cancel (note↔note is noise).
+            const srcNode = getNode(state.linkSourceId);
+            if (srcNode) { toggleNoteLink(a, srcNode.id); return; }
+            state.linkSourceId = null; renderCanvasOnly(); return;
+        }
+        delete a._ctlPin;   // moving the card ends any pinned size-control run
+        isDraggingNode = true; draggedNode = a;
+        const pt = getWorkspacePoint(event.clientX, event.clientY);
+        dragOffset.x = pt.x - a.x; dragOffset.y = pt.y - a.y;
+        select(a.id, 'annotation');
+    });
+    // Right-click arms link mode from this note, mirroring nodes: the next
+    // node clicked gets (or loses) the red leader.
+    g.addEventListener('contextmenu', (event) => {
+        event.preventDefault(); event.stopPropagation();
+        state.linkSourceId = a.id;
+        renderCanvasOnly();
+    });
+}
+
+// In-place editing: no floating window — a contenteditable overlay dressed as
+// the note itself sits exactly on the card. Enter breaks the line (that is how
+// width is defined — there is no auto-wrap), clicking elsewhere commits,
+// Escape cancels. A note left empty deletes itself.
+function openAnnotationEditor(a) {
+    const cc = document.getElementById('canvasContainer');
+    const old = document.getElementById('annEditor'); if (old) old.remove();
+    const gEl = document.getElementById(`ui-ann-${a.id}`);
+    if (gEl) gEl.style.visibility = 'hidden';   // the overlay replaces the card while typing
+
+    const z = state.camera.zoom;
+    const ed = document.createElement('div');
+    ed.id = 'annEditor';
+    ed.dataset.annId = a.id;   // renderAnnotation keeps the card hidden while this is open
+    ed.contentEditable = 'plaintext-only';
+    ed.spellcheck = false;
+    ed.className = 'absolute z-40 outline-none';
+    ed.style.left = `${a.x * z + state.camera.x}px`;
+    ed.style.top = `${a.y * z + state.camera.y}px`;
+    ed.style.font = `${(a.size || 12) * z}px 'IBM Plex Sans', sans-serif`;
+    ed.style.lineHeight = '1.35';
+    ed.style.whiteSpace = 'pre';
+    ed.style.color = '#1e293b';
+    ed.style.padding = `${6 * z}px ${10 * z}px`;
+    ed.style.minWidth = `${44 * z}px`;
+    ed.style.minHeight = `${26 * z}px`;
+    ed.style.borderRadius = `${4 * z}px`;
+    if (a.style === 'note') { ed.style.background = '#fef9c3'; ed.style.border = `${Math.max(1, z)}px solid #ca8a04`; }
+    else { ed.style.background = 'rgba(255,255,255,0.92)'; ed.style.border = `${Math.max(1, z)}px dashed #eab308`; }
+    ed.innerText = a.text;
+
+    let closed = false;
+    const finish = (commitText) => {
+        if (closed) return; closed = true;
+        window.removeEventListener('mousedown', outside, true);
+        window.removeEventListener('wheel', outside, true);
+        if (commitText) a.text = ed.innerText.replace(/\n+$/, '');
+        ed.remove();
+        // the card may have been re-rendered since we opened — unhide whatever
+        // element currently represents this note (renderCanvasOnly follows anyway)
+        const cur = document.getElementById(`ui-ann-${a.id}`);
+        if (cur) cur.style.visibility = '';
+        if (!a.text.trim()) { state.annotations = state.annotations.filter((x) => x.id !== a.id); if (state.selectedId === a.id) { state.selectedId = null; state.selectedType = null; } }
+        save(); renderCanvasOnly();
+    };
+    const outside = (e) => { if (!ed.contains(e.target)) finish(true); };
+    ed.addEventListener('keydown', (e) => {
+        e.stopPropagation();   // typing must never trigger canvas shortcuts
+        if (e.key === 'Escape') finish(false);
+    });
+
+    cc.appendChild(ed);
+    ed.focus();
+    // caret at the end, ready to keep typing
+    const r = document.createRange(); r.selectNodeContents(ed); r.collapse(false);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    // Deferred so the click/drop that opened the editor can't instantly close it.
+    setTimeout(() => { window.addEventListener('mousedown', outside, true); window.addEventListener('wheel', outside, true); }, 0);
+}
+
 function renderCanvasOnly() {
-    lZones.innerHTML = ''; lLinks.innerHTML = ''; lNodes.innerHTML = '';
+    lZones.innerHTML = ''; lLinks.innerHTML = ''; lNodes.innerHTML = ''; lAnn.innerHTML = '';
+    state.annotations.forEach(renderAnnotation);
     document.getElementById('networkCanvas').className = `w-full h-full absolute inset-0 select-none ${state.linkSourceId ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`;
 
     // 1. Render Zone Bubbles (Controllable per interface)
@@ -260,7 +530,7 @@ function renderCanvasOnly() {
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('x', '-24'); rect.setAttribute('y', '-24'); rect.setAttribute('width', '48'); rect.setAttribute('height', '48'); rect.setAttribute('rx', '6');
 
-        if (isLinkSource) { rect.setAttribute('fill', '#fff7ed'); rect.setAttribute('stroke', '#ea580c'); rect.setAttribute('stroke-width', '2'); } 
+        if (isLinkSource) { rect.setAttribute('fill', '#fefce8'); rect.setAttribute('stroke', '#ca8a04'); rect.setAttribute('stroke-width', '2'); } 
         else if (isSelected) { rect.setAttribute('fill', '#fefce8'); rect.setAttribute('stroke', '#eab308'); rect.setAttribute('stroke-width', '2'); } 
         else if (isReachable) { rect.setAttribute('fill', '#fffbeb'); rect.setAttribute('stroke', '#fcd34d'); rect.setAttribute('stroke-width', '2.5'); }
         else if (severity === 'bad') { rect.setAttribute('fill', '#fef2f2'); rect.setAttribute('stroke', '#dc2626'); rect.setAttribute('stroke-width', '2'); }
@@ -346,7 +616,7 @@ function renderCanvasOnly() {
             const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             hint.setAttribute('text-anchor', 'middle'); hint.setAttribute('y', '-34'); hint.setAttribute('font-size', '9');
             hint.setAttribute('font-family', 'sans-serif');
-            hint.setAttribute('font-weight', '700'); hint.setAttribute('fill', '#ea580c'); hint.textContent = 'LINK TARGET...'; hint.style.pointerEvents = 'none';
+            hint.setAttribute('font-weight', '700'); hint.setAttribute('fill', '#ca8a04'); hint.textContent = 'LINK TARGET...'; hint.style.pointerEvents = 'none';
             g.appendChild(hint);
         }
 
@@ -375,6 +645,10 @@ function renderCanvasOnly() {
         g.addEventListener('click', (event) => {
             event.stopPropagation();
             if (state.linkSourceId) {
+                // Armed from a text note → complete the red leader here instead
+                // of a network link; the note owns the pairing (see toggleNoteLink).
+                const srcAnn = getAnnotation(state.linkSourceId);
+                if (srcAnn) { toggleNoteLink(srcAnn, node.id); return; }
                 // The armed node can be gone by now — loading a shared URL swaps
                 // state.nodes out from under link mode without disarming it — and
                 // a null here would throw and leave the canvas stuck in crosshair.
@@ -426,7 +700,7 @@ function renderFaceplate(node, container) {
 
     const head = document.createElement('div');
     head.className = 'flex items-center justify-between mb-1';
-    head.innerHTML = '<span class="text-[9px] font-bold text-slate-500 uppercase">Physical Ports</span>';
+    head.innerHTML = '<span class="text-[10px] font-bold text-slate-500 uppercase">Physical Ports</span>';
 
     const count = document.createElement('input');
     count.id = 'portCountInput';
@@ -453,14 +727,14 @@ function renderFaceplate(node, container) {
     const ports = getInterfaces(node).filter((i) => /^p\d+$/.test(i.id));
 
     if (!ports.length) {
-        grid.innerHTML = '<span class="text-[9px] text-slate-400 italic">No ports. Raise the count above.</span>';
+        grid.innerHTML = '<span class="text-[10px] text-slate-400 italic">No ports. Raise the count above.</span>';
     }
 
     ports.forEach((port) => {
         const link = linkOnIface(node.id, port.id);
         const neighbour = link ? getNode(link.source === node.id ? link.target : link.source) : null;
         const chip = document.createElement('button');
-        chip.className = 'w-6 h-6 rounded border text-[9px] font-mono font-bold transition ' + (
+        chip.className = 'w-6 h-6 rounded border text-[10px] font-mono font-bold transition ' + (
             neighbour ? 'bg-emerald-50 border-emerald-400 text-emerald-700 hover:border-emerald-600'
                 : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400');
         chip.textContent = port.name || port.id;
@@ -511,7 +785,7 @@ function renderSidebarData(node) {
             ipInp.title = iface.ip || '';
             if (iface.ip.trim() !== '' && !parseValidCIDR(iface.ip)) ipInp.classList.add('border-red-400', 'bg-red-50');
             const zoneLabel = document.createElement('label');
-            zoneLabel.className = 'flex items-center gap-0.5 shrink-0 text-[9px] text-slate-500 font-bold cursor-pointer mx-1';
+            zoneLabel.className = 'flex items-center gap-0.5 shrink-0 text-[10px] text-slate-500 font-bold cursor-pointer mx-1';
             zoneLabel.title = 'Draw Subnet Zone Bubble';
 
             const zoneCb = document.createElement('input');
@@ -537,7 +811,7 @@ function renderSidebarData(node) {
             // one button cycling inferred -> radio -> wired, rather than a
             // checkbox and a label. Dimmed means inferred; solid means you said so.
             const kindBtn = document.createElement('button');
-            kindBtn.className = 'text-[9px] shrink-0 leading-none';
+            kindBtn.className = 'text-[10px] shrink-0 leading-none';
             const explicit = iface.wireless !== undefined;
             kindBtn.textContent = ifaceIsWireless(iface) ? '📡' : '🔌';
             kindBtn.style.opacity = explicit ? '1' : '0.35';
@@ -587,7 +861,7 @@ function renderSidebarData(node) {
             const peer = link ? getNode(link.source === node.id ? link.target : link.source) : null;
             const wire = document.createElement('button');
             const radio = ifaceIsWireless(iface);
-            wire.className = 'text-[9px] shrink-0 px-0.5 ' + (peer ? 'text-slate-400 hover:text-blue-600' : 'text-slate-300 cursor-default');
+            wire.className = 'text-[10px] shrink-0 px-0.5 ' + (peer ? 'text-slate-400 hover:text-blue-600' : 'text-slate-300 cursor-default');
             wire.textContent = peer ? (radio ? '📶' : '🔌') : (radio ? '📡' : '○');
             wire.title = peer ? `${radio ? 'Associated' : 'Linked'} to ${peer.name}` : `${radio ? 'Radio' : 'Interface'} not linked`;
             if (link) wire.onclick = () => select(link.id, 'link');
@@ -626,7 +900,7 @@ function renderBondMode(node, bond) {
     tick.className = 'text-[10px] text-indigo-400 shrink-0'; tick.textContent = '↳';
 
     const label = document.createElement('span');
-    label.className = 'text-[9px] text-slate-400 shrink-0'; label.textContent = 'mode';
+    label.className = 'text-[10px] text-slate-400 shrink-0'; label.textContent = 'mode';
 
     const mode = document.createElement('select');
     mode.className = 'flex-1 min-w-0 border border-indigo-300 bg-indigo-50 rounded px-1 py-1 text-[10px] focus:outline-indigo-500';
@@ -665,13 +939,13 @@ function renderBondMember(node, member, bond, container) {
     });
 
     const note = document.createElement('span');
-    note.className = 'flex-1 min-w-0 text-[9px] text-slate-400 italic truncate px-1';
+    note.className = 'flex-1 min-w-0 text-[10px] text-slate-400 italic truncate px-1';
     note.textContent = `member of ${bond.name}`;
 
     const link = linkOnIface(node.id, member.id);
     const peer = link ? getNode(link.source === node.id ? link.target : link.source) : null;
     const wire = document.createElement('button');
-    wire.className = 'text-[9px] shrink-0 px-0.5 ' + (peer ? 'text-slate-400 hover:text-blue-600' : 'text-slate-300 cursor-default');
+    wire.className = 'text-[10px] shrink-0 px-0.5 ' + (peer ? 'text-slate-400 hover:text-blue-600' : 'text-slate-300 cursor-default');
     wire.textContent = peer ? '🔌' : '○';
     wire.title = peer ? `Linked to ${peer.name}` : 'Not linked';
     if (link) wire.onclick = () => select(link.id, 'link');
@@ -715,7 +989,7 @@ function renderLinkPorts(link) {
         head.innerHTML = `<span class="text-[10px] font-bold text-slate-600 truncate">${escapeHtml(node.name)}</span>`;
 
         const addBtn = document.createElement('button');
-        addBtn.className = 'text-[9px] text-blue-600 hover:underline font-bold shrink-0 ml-1';
+        addBtn.className = 'text-[10px] text-blue-600 hover:underline font-bold shrink-0 ml-1';
         addBtn.textContent = hasPortGrid(node) ? '+ Port' : '+ NIC';
         addBtn.onclick = () => {
             link[key] = createIfaceFor(node, { grow: true }).id;
@@ -729,14 +1003,14 @@ function renderLinkPorts(link) {
 
         const interfaces = getInterfaces(node);
         if (!interfaces.length) {
-            chips.innerHTML = '<span class="text-[9px] text-slate-400 italic">No interfaces — add one.</span>';
+            chips.innerHTML = '<span class="text-[10px] text-slate-400 italic">No interfaces — add one.</span>';
         }
 
         interfaces.forEach((iface) => {
             const selected = link[key] === iface.id;
             const takenBy = linksAtNode(node.id).find((l) => l.id !== link.id && ifaceIdOn(l, node.id) === iface.id && isExclusiveLink(l));
             const chip = document.createElement('button');
-            chip.className = 'px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold transition ' + (
+            chip.className = 'px-1.5 py-0.5 rounded border text-[10px] font-mono font-bold transition ' + (
                 selected ? 'bg-amber-100 border-amber-500 text-amber-800'
                     : takenBy ? 'bg-slate-100 border-slate-300 text-slate-400 hover:border-slate-400'
                         : 'bg-white border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600');
@@ -875,6 +1149,12 @@ function select(id, type) {
         } else { jumpGwBtn.classList.add('hidden'); }
         renderSidebarData(node);
         renderNodeDiagnostics(node);
+    } else if (type === 'annotation') {
+        nameInput.value = 'Text note'; nameInput.disabled = true;
+        netProps.classList.add('hidden'); generalProps.classList.add('hidden'); linkProps.classList.add('hidden');
+        if (document.getElementById('linkMediumProps')) document.getElementById('linkMediumProps').classList.add('hidden');
+        document.getElementById('linkPortProps').classList.add('hidden');
+        jumpGwBtn.classList.add('hidden');
     } else if (type === 'link') {
         const link = getLink(id); if (!link) return;
         const a = getNode(link.source), b = getNode(link.target);
