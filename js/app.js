@@ -520,7 +520,8 @@ function deleteSelected() {
     if (!state.selectedId) return;
     if (state.selectedType === 'node') { state.nodes = state.nodes.filter((n) => n.id !== state.selectedId); state.links = state.links.filter((l) => l.source !== state.selectedId && l.target !== state.selectedId); state.annotations.forEach((a) => { if (a.targets && a.targets.length) a.targets = a.targets.filter((t) => t !== state.selectedId); }); }
     else if (state.selectedType === 'link') { state.links = state.links.filter((l) => l.id !== state.selectedId); }
-    else if (state.selectedType === 'annotation') { state.annotations = state.annotations.filter((a) => a.id !== state.selectedId); }
+    else if (state.selectedType === 'annotation') { state.annotations = state.annotations.filter((a) => a.id !== state.selectedId); state.annotations.forEach((a) => { if (a.targets && a.targets.length) a.targets = a.targets.filter((t) => t !== state.selectedId); }); }
+    else if (state.selectedType === 'notelink') { removeNoteLink(state.selectedId); }
     select(null, null); save();
     renderCanvasOnly();
 }
@@ -558,9 +559,13 @@ window.addEventListener('mousemove', (event) => {
         state.annotations.forEach((a) => {
             (a.targets || []).forEach((tid) => {
                 if (a.id !== draggedNode.id && tid !== draggedNode.id) return;
+                const t = noteLinkTarget(tid);
+                if (!t) return;
+                const geo = noteLinkGeometry(a, t);
                 const el = document.getElementById(`ui-annlink-${a.id}-${tid}`);
-                const n = getNode(tid);
-                if (el && n) applyNoteLinkGeometry(el, noteLinkGeometry(a, n));
+                const hitEl = document.getElementById(`ui-annlinkhit-${a.id}-${tid}`);
+                if (el) applyNoteLinkGeometry(el, geo);
+                if (hitEl) applyNoteLinkGeometry(hitEl, geo);
             });
         });
     }

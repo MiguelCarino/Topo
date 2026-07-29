@@ -77,15 +77,23 @@ const getAnnotation = (id) => state.annotations.find((a) => a.id === id);
 // Leader geometry: border to border. The line leaves the card where the ray
 // to the node exits the rectangle and stops at the node's halo. Card size
 // comes from the transient _w/_h stamped at render time. Null = shapes overlap.
-function noteLinkGeometry(a, n) {
+// A leader target may be a node (rect exit → node halo) or another note
+// (rect exit → rect exit). Annotations are told apart by their `text` field.
+function noteLinkGeometry(a, t) {
     const w = a._w || 44, h = a._h || 26;
     const cx = a.x + w / 2, cy = a.y + h / 2;
-    const dx = n.x - cx, dy = n.y - cy;
+    const tIsNote = typeof t.text === 'string' && t.interfaces === undefined;
+    const tw = t._w || 44, th = t._h || 26;
+    const tcx = tIsNote ? t.x + tw / 2 : t.x, tcy = tIsNote ? t.y + th / 2 : t.y;
+    const dx = tcx - cx, dy = tcy - cy;
     const dist = Math.hypot(dx, dy) || 1;
-    const tEdge = Math.min(dx !== 0 ? (w / 2) / Math.abs(dx) : Infinity,
-                           dy !== 0 ? (h / 2) / Math.abs(dy) : Infinity);
-    const sx = cx + dx * tEdge, sy = cy + dy * tEdge;
-    const ex = n.x - (dx / dist) * 30, ey = n.y - (dy / dist) * 30;
+    const rectExit = (hw, hh) => Math.min(dx !== 0 ? hw / Math.abs(dx) : Infinity,
+                                          dy !== 0 ? hh / Math.abs(dy) : Infinity);
+    const tA = rectExit(w / 2, h / 2);
+    const sx = cx + dx * tA, sy = cy + dy * tA;
+    let ex, ey;
+    if (tIsNote) { const tB = rectExit(tw / 2, th / 2); ex = tcx - dx * tB; ey = tcy - dy * tB; }
+    else { ex = tcx - (dx / dist) * 30; ey = tcy - (dy / dist) * 30; }
     if ((ex - sx) * dx + (ey - sy) * dy <= 0) return null;
     return { sx, sy, ex, ey };
 }
@@ -97,13 +105,26 @@ function applyNoteLinkGeometry(el, geo) {
     el.setAttribute('x2', geo.ex); el.setAttribute('y2', geo.ey);
 }
 
-// Toggle a note↔node leader: linking an already-linked pair unlinks it.
-function toggleNoteLink(a, nodeId) {
+const noteLinkTarget = (tid) => getNode(tid) || getAnnotation(tid);
+
+// Toggle a leader between a note and a node or another note. The pairing is
+// stored on whichever note initiated it, so unlinking checks both directions.
+function toggleNoteLink(a, targetId) {
     a.targets = a.targets || [];
-    const i = a.targets.indexOf(nodeId);
-    if (i >= 0) a.targets.splice(i, 1); else a.targets.push(nodeId);
+    const other = getAnnotation(targetId);
+    const i = a.targets.indexOf(targetId);
+    if (i >= 0) a.targets.splice(i, 1);
+    else if (other && other.targets && other.targets.includes(a.id)) other.targets = other.targets.filter((t) => t !== a.id);
+    else a.targets.push(targetId);
     state.linkSourceId = null;
     save(); renderCanvasOnly();
+}
+
+// Remove one leader by its composite selection id nl:<noteId>:<targetId>.
+function removeNoteLink(selId) {
+    const [, aid, tid] = selId.split(':');
+    const a = getAnnotation(aid);
+    if (a && a.targets) a.targets = a.targets.filter((t) => t !== tid);
 }
 
 function renderAnnotation(a) {
@@ -137,18 +158,6 @@ function renderAnnotation(a) {
     rect.setAttribute('width', cardW);
     rect.setAttribute('height', cardH);
 
-    // Leader lines to linked nodes: pure ink — red, no medium, no ports, no
-    // diagnostics. Stable ids so the drag loop can move them fluidly, exactly
-    // like ui-link-* lines. Inserted under the card in the same layer.
-    (a.targets || []).forEach((tid) => {
-        const n = getNode(tid); if (!n) return;   // dangling target: skip, self-heals
-        const line = document.createElementNS(NS, 'line');
-        line.setAttribute('id', `ui-annlink-${a.id}-${tid}`);
-        line.setAttribute('stroke', '#ef4444'); line.setAttribute('stroke-width', '1.5');
-        line.setAttribute('opacity', '0.85'); line.style.pointerEvents = 'none';
-        applyNoteLinkGeometry(line, noteLinkGeometry(a, n));
-        lAnn.insertBefore(line, g);
-    });
     rect.setAttribute('stroke-width', selected ? 2 : 1);
     if (a.style === 'plain') {
         rect.setAttribute('fill', 'transparent');
@@ -240,10 +249,12 @@ function renderAnnotation(a) {
         // and it must not arm a drag either.
         if (event.detail > 1) { openAnnotationEditor(a); return; }
         if (state.linkSourceId) {
-            // Armed from a node → complete a red note-leader onto this card.
-            // Armed from this or another annotation → cancel (note↔note is noise).
+            // Armed from a node or another note → complete a red leader onto
+            // this card. Armed from this same note → cancel.
             const srcNode = getNode(state.linkSourceId);
             if (srcNode) { toggleNoteLink(a, srcNode.id); return; }
+            const srcAnn = getAnnotation(state.linkSourceId);
+            if (srcAnn && srcAnn.id !== a.id) { toggleNoteLink(srcAnn, a.id); return; }
             state.linkSourceId = null; renderCanvasOnly(); return;
         }
         delete a._ctlPin;   // moving the card ends any pinned size-control run
@@ -321,9 +332,65 @@ function openAnnotationEditor(a) {
     setTimeout(() => { window.addEventListener('mousedown', outside, true); window.addEventListener('wheel', outside, true); }, 0);
 }
 
+// Second pass, after every card has stamped its _w/_h: leaders can then hit
+// both borders — including note↔note lines whose far end is another card.
+// The group sits first in the layer, so lines render under every card.
+function renderNoteLeaders() {
+    const NS = 'http://www.w3.org/2000/svg';
+    const grp = document.createElementNS(NS, 'g');
+    lAnn.insertBefore(grp, lAnn.firstChild);
+    state.annotations.forEach((a) => {
+        (a.targets || []).forEach((tid) => {
+            const t = noteLinkTarget(tid); if (!t) return;   // dangling: skip, self-heals
+            const selId = `nl:${a.id}:${tid}`;
+            const isSel = state.selectedType === 'notelink' && state.selectedId === selId;
+            const geo = noteLinkGeometry(a, t);
+            const line = document.createElementNS(NS, 'line');
+            line.setAttribute('id', `ui-annlink-${a.id}-${tid}`);
+            line.setAttribute('stroke', '#ef4444');
+            line.setAttribute('stroke-width', isSel ? '2.5' : '1.5');
+            line.setAttribute('opacity', isSel ? '1' : '0.85');
+            line.style.pointerEvents = 'none';
+            applyNoteLinkGeometry(line, geo);
+            grp.appendChild(line);
+            // fat invisible twin: the click target (a 1.5px line is unhittable)
+            const hit = document.createElementNS(NS, 'line');
+            hit.setAttribute('id', `ui-annlinkhit-${a.id}-${tid}`);
+            hit.setAttribute('stroke', 'transparent'); hit.setAttribute('stroke-width', '12');
+            hit.style.cursor = 'pointer';
+            applyNoteLinkGeometry(hit, geo);
+            hit.addEventListener('mousedown', (e) => { e.stopPropagation(); select(selId, 'notelink'); });
+            grp.appendChild(hit);
+            // selected → a midpoint ✕, same affordance as everywhere else
+            if (isSel && geo) {
+                const del = document.createElementNS(NS, 'g');
+                del.setAttribute('transform', `translate(${(geo.sx + geo.ex) / 2}, ${(geo.sy + geo.ey) / 2})`);
+                del.setAttribute('class', 'node-delete');
+                const disc = document.createElementNS(NS, 'circle');
+                disc.setAttribute('r', '7.5');
+                disc.setAttribute('fill', '#dc2626'); disc.setAttribute('stroke', '#ffffff'); disc.setAttribute('stroke-width', '1.5');
+                del.appendChild(disc);
+                const mark = document.createElementNS(NS, 'text');
+                mark.setAttribute('text-anchor', 'middle'); mark.setAttribute('y', '3');
+                mark.setAttribute('font-size', '9'); mark.setAttribute('font-weight', '900'); mark.setAttribute('fill', '#ffffff');
+                mark.setAttribute('font-family', 'sans-serif');
+                mark.textContent = '✕'; mark.style.pointerEvents = 'none';
+                del.appendChild(mark);
+                const tip = document.createElementNS(NS, 'title');
+                tip.textContent = 'Delete note link';
+                del.appendChild(tip);
+                del.addEventListener('mousedown', (e) => e.stopPropagation());
+                del.addEventListener('click', (e) => { e.stopPropagation(); deleteSelected(); });
+                grp.appendChild(del);
+            }
+        });
+    });
+}
+
 function renderCanvasOnly() {
     lZones.innerHTML = ''; lLinks.innerHTML = ''; lNodes.innerHTML = ''; lAnn.innerHTML = '';
     state.annotations.forEach(renderAnnotation);
+    renderNoteLeaders();
     document.getElementById('networkCanvas').className = `w-full h-full absolute inset-0 select-none ${state.linkSourceId ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`;
 
     // 1. Render Zone Bubbles (Controllable per interface)
@@ -489,13 +556,17 @@ function renderCanvasOnly() {
             // drifting to the midpoint on a long one.
             const span = Math.hypot(tgt.x - src.x, tgt.y - src.y) || 1;
             const off = Math.min(0.42, Math.max(0.15, 66 / span));
+            // Perpendicular offset lifts labels off the stroke; opposite sides so
+            // the two names never collide with each other or the midpoint ✕ on a
+            // short link, where both ride near the centre.
+            const pnx = -(tgt.y - src.y) / span, pny = (tgt.x - src.x) / span;
 
-            [[src, link.sourceIface, off], [tgt, link.targetIface, 1 - off]].forEach(([node, ifaceId, t]) => {
+            [[src, link.sourceIface, off, 1], [tgt, link.targetIface, 1 - off, -1]].forEach(([node, ifaceId, t, side]) => {
                 const name = ifaceId ? ifaceLabel(node, ifaceId) : 'unbound';
                 const at = geo.pointAt(t);
                 const portLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                portLabel.setAttribute('x', String(at.x));
-                portLabel.setAttribute('y', String(at.y));
+                portLabel.setAttribute('x', String(at.x + pnx * 10 * side));
+                portLabel.setAttribute('y', String(at.y + pny * 10 * side + 2.5));
                 portLabel.setAttribute('text-anchor', 'middle');
                 portLabel.setAttribute('font-size', '8');
                 portLabel.setAttribute('font-family', 'monospace');
@@ -508,6 +579,28 @@ function renderCanvasOnly() {
                 portLabel.style.pointerEvents = 'none';
                 lLinks.appendChild(portLabel);
             });
+
+            // Midpoint ✕ — same affordance as nodes and note leaders
+            const mid = geo.pointAt(0.5);
+            const del = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            del.setAttribute('transform', `translate(${mid.x}, ${mid.y})`);
+            del.setAttribute('class', 'node-delete');
+            const disc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            disc.setAttribute('r', '7.5');
+            disc.setAttribute('fill', '#dc2626'); disc.setAttribute('stroke', '#ffffff'); disc.setAttribute('stroke-width', '1.5');
+            del.appendChild(disc);
+            const mark = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            mark.setAttribute('text-anchor', 'middle'); mark.setAttribute('y', '3');
+            mark.setAttribute('font-size', '9'); mark.setAttribute('font-weight', '900'); mark.setAttribute('fill', '#ffffff');
+            mark.setAttribute('font-family', 'sans-serif');
+            mark.textContent = '✕'; mark.style.pointerEvents = 'none';
+            del.appendChild(mark);
+            const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            tip.textContent = 'Delete link';
+            del.appendChild(tip);
+            del.addEventListener('mousedown', (e) => e.stopPropagation());
+            del.addEventListener('click', (e) => { e.stopPropagation(); deleteSelected(); });
+            lLinks.appendChild(del);
         }
     });
 
@@ -1149,6 +1242,12 @@ function select(id, type) {
         } else { jumpGwBtn.classList.add('hidden'); }
         renderSidebarData(node);
         renderNodeDiagnostics(node);
+    } else if (type === 'notelink') {
+        nameInput.value = 'Note link'; nameInput.disabled = true;
+        netProps.classList.add('hidden'); generalProps.classList.add('hidden'); linkProps.classList.add('hidden');
+        if (document.getElementById('linkMediumProps')) document.getElementById('linkMediumProps').classList.add('hidden');
+        document.getElementById('linkPortProps').classList.add('hidden');
+        jumpGwBtn.classList.add('hidden');
     } else if (type === 'annotation') {
         nameInput.value = 'Text note'; nameInput.disabled = true;
         netProps.classList.add('hidden'); generalProps.classList.add('hidden'); linkProps.classList.add('hidden');
