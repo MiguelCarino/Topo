@@ -852,23 +852,6 @@ function openModePicker(step = 'main') {
             openSetupWizard();
         });
     }
-    // Language row — the reporter path speaks en / es / pt-BR / ja / ru (phase 1).
-    const langRow = document.createElement('div');
-    langRow.className = 'flex gap-1.5 justify-center mt-3 pt-3';
-    langRow.style.borderTop = '1px solid var(--cs-border)';
-    [['en', 'EN'], ['es', 'ES'], ['pt-BR', 'PT'], ['ja', '日本語'], ['ru', 'RU']].forEach(([code, label]) => {
-        const b = document.createElement('button');
-        b.type = 'button'; b.className = 'cs-btn'; b.textContent = label;
-        if (code === LOCALE) { b.style.color = 'var(--cs-accent)'; b.style.borderColor = 'var(--cs-accent-dim)'; b.style.background = 'var(--cs-accent-faint)'; }
-        b.onclick = (e) => {
-            e.stopPropagation();
-            state.settings.lang = code; saveSettings(); setLocale(code);
-            applyLocale();
-            openModePicker(step); // re-render the open picker in the new language
-        };
-        langRow.appendChild(b);
-    });
-    list.appendChild(langRow);
     document.getElementById('modePicker').classList.remove('hidden');
 }
 function closeModePicker() { document.getElementById('modePicker').classList.add('hidden'); }
@@ -1345,3 +1328,19 @@ showLibraryTab(state.settings.libraryTab || 'nodes');
     initHistory(); // the loaded document is the floor of the undo timeline, not a step
     updateTracePortUi();
 })();
+
+// ---- Fleet language switcher (carino-lang.js) ----
+// Topo's own scripts run before the deferred carino-lang.js, so the boot block
+// above resolves a locale without knowing the fleet-wide cookie choice. Deferred
+// scripts execute before DOMContentLoaded, so by then window.CarinoLang has
+// resolved it — sync once there, and thereafter via the carino:langchange event
+// the navbar control fires.
+window.addEventListener('carino:langchange', (e) => {
+    state.settings.lang = e.detail.lang; saveSettings();
+    setLocale(e.detail.lang); applyLocale();
+});
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.CarinoLang && resolveLocale(CarinoLang.current) === CarinoLang.current && CarinoLang.current !== LOCALE) {
+        setLocale(CarinoLang.current); applyLocale();
+    }
+});
