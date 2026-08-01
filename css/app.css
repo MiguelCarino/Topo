@@ -90,9 +90,9 @@
 .cs-vdiv { width: 1px; height: 22px; background: var(--cs-border); flex-shrink: 0; }
 
 .cs-control-group {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; gap: 6px;
     border: 1px solid var(--cs-border); border-radius: 4px;
-    padding: 0 10px; height: 32px; background: transparent;
+    padding: 0 8px; height: 32px; background: transparent;
 }
 .cs-trace-lbl {
     display: flex; align-items: center; gap: 6px; cursor: pointer;
@@ -102,7 +102,7 @@
 .cs-trace-lbl input[type="checkbox"] { width: 13px; height: 13px; accent-color: var(--cs-accent); cursor: pointer; }
 .cs-hdiv { width: 1px; height: 14px; background: var(--cs-border); }
 .cs-trace-port {
-    width: 90px; background: transparent; border: none; outline: none;
+    width: 44px; background: transparent; border: none; outline: none;
     color: var(--cs-text); font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
 }
 .cs-trace-port::placeholder { color: var(--cs-text-muted); }
@@ -110,7 +110,7 @@
 
 .cs-trace-status {
     font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem;
-    color: var(--cs-text-muted); white-space: nowrap; min-width: 90px;
+    color: var(--cs-text-muted); white-space: nowrap; min-width: 64px;
 }
 .cs-trace-status.active { color: var(--cs-accent); font-weight: 700; }
 
@@ -396,3 +396,65 @@ aside input[type="checkbox"] { accent-color: var(--cs-accent); }
 /* branding pass: gateway-jump button in fleet gold, not slate */
 #jumpGwBtn { background: var(--cs-accent-dim); color: var(--cs-accent); border: 1px solid var(--cs-accent); }
 #jumpGwBtn:hover { background: var(--cs-accent); color: #050505; }
+
+/* ---- Simple mode (body.simple-mode) --------------------------------------
+   For non-technical users: hides every panel that assumes networking
+   knowledge (trace, diagnostics, IP configuration, blocks, validation).
+   Display-only — the underlying data is untouched, so toggling back to
+   Advanced (or sharing with someone who uses it) loses nothing.
+   Entry points: the header toggle, #simple, or ?simple in the URL. */
+body.simple-mode .cs-control-group,
+body.simple-mode #traceStatus,
+body.simple-mode #traceDivider,
+body.simple-mode #diagTabBtn,
+body.simple-mode #cfgPanel-diagnostics,
+body.simple-mode .lib-tab[data-tab="blocks"],
+body.simple-mode .lib-key,
+body.simple-mode #canvasFilterBox,
+body.simple-mode #linkProps,
+body.simple-mode #linkPortProps,
+body.simple-mode #nodeNetworkProps,
+body.simple-mode #osPortsRow,
+body.simple-mode #conflictAlert,
+body.simple-mode #conflictPill,
+body.simple-mode .palette-adv,
+body.simple-mode #cnDiagBtn,
+body.simple-mode #cnDiagBox,
+/* canvas: subnet zone bubbles, per-node IP addresses, per-link port names */
+body.simple-mode #layer-zones,
+body.simple-mode .node-ip,
+body.simple-mode .port-label { display: none !important; }
+
+/* The navbar Sys. Status control is just its yellow pulse dot everywhere —
+   the label only ever repeated the tooltip. !important because carino-diag.js
+   injects its own equal-specificity styles after this sheet loads. */
+#cnDiagBtn .lbl { display: none !important; }
+#cnDiagBtn { padding: 0 10px !important; }
+
+/* Mode picker options ("Something missing? Try another mode" / #setup) —
+   the one place modes are switched; there is deliberately no header toggle. */
+.mode-option { background: transparent; border: 1px solid var(--cs-border); cursor: pointer; }
+.mode-option:hover { border-color: var(--cs-accent); background: var(--cs-accent-faint); }
+
+/* Setup wizard device tiles: icon + label + count, steppers below. */
+.setup-tile { border: 1px solid var(--cs-border); transition: opacity 0.15s, border-color 0.15s; }
+.setup-tile:hover { border-color: var(--cs-accent-dim); }
+.setup-tile.off { opacity: 0.45; }
+
+/* Reduced view trims the export menu to the two things a reporter needs:
+   Copy link (the share URL IS the report) and a PNG. The rest returns with
+   Advanced. */
+body.simple-mode #exportWebpBtn,
+body.simple-mode #exportJsonBtn,
+body.simple-mode #importFileBtn,
+body.simple-mode #saveTemplateBtn,
+body.simple-mode #exportMenu .cs-menu-div { display: none !important; }
+
+/* ---- Purpose profile: imagenology ----------------------------------------
+   Inherits every simple-mode reduction above; these rules only reshape the
+   curated palette for a clinical audience. Must stay AFTER the simple-mode
+   block — the show/hide overrides win by source order. */
+body.profile-imagenology .palette-item[data-type="dicom"],
+body.profile-imagenology .palette-item[data-type="server"] { display: flex !important; }
+body.profile-imagenology .palette-item[data-type="iot"],
+body.profile-imagenology .palette-item[data-type="camera"] { display: none !important; }

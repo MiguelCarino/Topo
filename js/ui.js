@@ -25,13 +25,16 @@ const iconPaths = {
 
 // Palette order: each base type is followed by its L3 derivatives, so
 // Router → Load Balancer / L3 Switch / Edge, and Firewall → VPN Gateway.
+// simple: shown in Simple mode — the devices a non-technical person recognizes
+// from their own home. Everything else is Advanced-only (hidden by CSS, so the
+// palette never re-renders and existing nodes of any type keep working).
 const paletteDefs = [
-    { type: 'cloud', name: 'Cloud' }, { type: 'router', name: 'Router' }, { type: 'loadbalancer', name: 'Load Balancer' },
+    { type: 'cloud', name: 'Cloud', simple: true }, { type: 'router', name: 'Router', simple: true }, { type: 'loadbalancer', name: 'Load Balancer' },
     { type: 'l3switch', name: 'L3 Switch' }, { type: 'edge', name: 'Edge Gateway' }, { type: 'firewall', name: 'Firewall' },
-    { type: 'vpn', name: 'VPN Gateway' }, { type: 'switch', name: 'Switch' }, { type: 'ap', name: 'Wireless AP' },
+    { type: 'vpn', name: 'VPN Gateway' }, { type: 'switch', name: 'Switch', simple: true }, { type: 'ap', name: 'Wireless AP', simple: true },
     { type: 'server', name: 'Server' }, { type: 'vm', name: 'VM' }, { type: 'container', name: 'Container' },
-    { type: 'pc', name: 'Workstation' }, { type: 'voip', name: 'VoIP Phone' }, { type: 'iot', name: 'IoT Device' },
-    { type: 'printer', name: 'Printer' }, { type: 'camera', name: 'IP Camera' }, { type: 'dicom', name: 'DICOM' },
+    { type: 'pc', name: 'Workstation', simple: true }, { type: 'voip', name: 'VoIP Phone' }, { type: 'iot', name: 'IoT Device', simple: true },
+    { type: 'printer', name: 'Printer', simple: true }, { type: 'camera', name: 'IP Camera', simple: true }, { type: 'dicom', name: 'DICOM' },
     { type: 'custom', name: 'Custom Node' }
 ];
 
@@ -42,6 +45,8 @@ const paletteContainer = document.getElementById('nodePalette');
 paletteDefs.forEach((d) => {
     const btn = document.createElement('button');
     btn.className = 'palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer';
+    if (!d.simple) btn.classList.add('palette-adv'); // hidden in reduced profiles (css/app.css)
+    btn.dataset.type = d.type; // profile CSS overrides + purpose renames key off this
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="#1e293b" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[d.type]}</svg><span class="text-[10px] font-medium mt-1 uppercase text-center leading-tight">${d.name}</span>`;
     btn.title = 'Click to add (connects to the selected node) — or drag onto the canvas';
     // Click: add connected to the current selection (fast tree building)
@@ -565,6 +570,7 @@ function renderCanvasOnly() {
                 const name = ifaceId ? ifaceLabel(node, ifaceId) : 'unbound';
                 const at = geo.pointAt(t);
                 const portLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                portLabel.setAttribute('class', 'port-label'); // hidden in Simple mode (css/app.css)
                 portLabel.setAttribute('x', String(at.x + pnx * 10 * side));
                 portLabel.setAttribute('y', String(at.y + pny * 10 * side + 2.5));
                 portLabel.setAttribute('text-anchor', 'middle');
@@ -717,6 +723,7 @@ function renderCanvasOnly() {
             const validDisplayIps = node.interfaces.map(i=>i.ip).filter((i) => i && i.trim() !== '');
             validDisplayIps.slice(0, 2).forEach((ip, idx) => {
                 const ipLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                ipLabel.setAttribute('class', 'node-ip'); // hidden in Simple mode (css/app.css)
                 ipLabel.setAttribute('text-anchor', 'middle'); ipLabel.setAttribute('y', String(48 + idx * 10));
                 ipLabel.setAttribute('font-size', '8'); ipLabel.setAttribute('font-family', 'monospace'); ipLabel.setAttribute('fill', '#64748b');
                 let text = ip; if (idx === 1 && validDisplayIps.length > 2) { text += ` (+${validDisplayIps.length - 2})`; }
@@ -1138,7 +1145,6 @@ function clearPropertyInputs() {
     document.getElementById('propDns').value = '';
     document.getElementById('propOs').value = '';
     document.getElementById('propPorts').value = '';
-    document.getElementById('propNotes').value = '';
     document.getElementById('ifaceListContainer').innerHTML = '';
     document.getElementById('jumpGwBtn').classList.add('hidden');
     document.getElementById('propNetcfg').checked = false;
@@ -1210,7 +1216,7 @@ function select(id, type) {
         nameInput.value = node.name || ''; nameInput.disabled = false; generalProps.classList.remove('hidden'); linkProps.classList.add('hidden');
         if (document.getElementById('linkMediumProps')) document.getElementById('linkMediumProps').classList.add('hidden');
         document.getElementById('linkPortProps').classList.add('hidden');
-        document.getElementById('propOs').value = node.os || ''; document.getElementById('propPorts').value = node.ports || ''; document.getElementById('propNotes').value = node.notes || '';
+        document.getElementById('propOs').value = node.os || ''; document.getElementById('propPorts').value = node.ports || '';
 
         netProps.classList.remove('hidden');
         document.getElementById('propGw').value = node.gw || ''; document.getElementById('propDns').value = node.dns || '';

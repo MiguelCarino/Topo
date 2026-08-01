@@ -18,19 +18,19 @@
             <div class="cs-control-group">
                 <label class="cs-trace-lbl" title="Trace reachable network paths from the selected node">
                     <input type="checkbox" id="toggleTrace" />
-                    🔍 Trace
+                    Trace
                 </label>
                 <div class="cs-hdiv"></div>
                 <label class="cs-trace-lbl" title="Filter the trace by a port. Off = IP reachability only — the port stays typed in, just ignored.">
                     <input type="checkbox" id="tracePortToggle" />
                     Port
                 </label>
-                <input type="text" id="tracePort" placeholder="e.g. 443" class="cs-trace-port" title="Port to test when the Port filter is on">
+                <input type="text" id="tracePort" placeholder="443" class="cs-trace-port" title="Port to test when the Port filter is on">
             </div>
 
             <span id="traceStatus" class="cs-trace-status">Trace off</span>
 
-            <div class="cs-vdiv"></div>
+            <div class="cs-vdiv" id="traceDivider"></div>
 
             <button id="undoBtn" class="cs-btn" title="Nothing to undo" disabled>↶ Undo</button>
             <button id="redoBtn" class="cs-btn" title="Nothing to redo" disabled>↷ Redo</button>
@@ -56,7 +56,7 @@
                 <input type="file" id="importFileInput" accept=".json,.nettopo,application/json" hidden>
             </div>
 
-            <button id="clearCanvasBtn" class="cs-btn">Clear</button>
+            <button id="clearCanvasBtn" data-i18n class="cs-btn">Clear</button>
 
             <div class="cs-vdiv"></div>
             <button id="helpBtn" class="cs-btn" title="How to use — mouse & keyboard (press ?)" aria-label="Help">?</button>
@@ -78,10 +78,11 @@
             <div class="p-4 border-b border-slate-100 flex-1 overflow-y-auto min-h-[200px]">
                 <div id="tabPanel-nodes" class="lib-panel">
                     <div class="grid grid-cols-3 gap-2" id="nodePalette"></div>
+                    <button id="modeSwitchBtn" data-i18n class="w-full mt-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600 border border-dashed border-slate-300 hover:border-slate-400 rounded transition">Something missing? Try another mode</button>
                 </div>
 
                 <div id="tabPanel-templates" class="lib-panel hidden">
-                    <p class="text-[10px] text-slate-400 mb-2 leading-tight">A whole network. Replaces the canvas.</p>
+                    <p data-i18n class="text-[10px] text-slate-400 mb-2 leading-tight">A whole network. Replaces the canvas.</p>
                     <div id="templateList" class="flex flex-col gap-1"></div>
                     <div id="userTemplateSection" class="hidden mt-3 pt-3 border-t border-slate-100">
                         <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">My Networks</h3>
@@ -97,7 +98,7 @@
 
             <div class="p-4 border-t border-slate-100 bg-white flex flex-col shrink-0 max-h-[50%] overflow-y-auto relative">
                 <!-- Global canvas filter — independent of what's selected, so it sits above the tabs. -->
-                <div class="mb-3 pb-3 border-b border-slate-100">
+                <div class="mb-3 pb-3 border-b border-slate-100" id="canvasFilterBox">
                     <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filter Canvas</h2>
                     <input type="text" id="canvasFilter" placeholder="Search by name or IP..." class="w-full border border-slate-300 rounded px-2 py-1.5 text-xs focus:outline-blue-500" />
                 </div>
@@ -109,11 +110,11 @@
                 </div>
 
                 <div id="cfgPanel-config" class="cfg-panel flex flex-col flex-1">
-                <div id="noSelectionPane" class="text-center py-8 text-slate-400 text-xs italic">Select a node or link to configure.</div>
+                <div id="noSelectionPane" data-i18n class="text-center py-8 text-slate-400 text-xs italic">Select a node or link to configure.</div>
 
                 <div id="propertiesPane" class="hidden flex-col gap-3 pb-6">
                     <div>
-                        <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Name</label>
+                        <label data-i18n class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Name</label>
                         <input type="text" id="propName" class="w-full border border-slate-300 rounded px-2 py-1 text-sm font-bold focus:outline-blue-500" />
                     </div>
 
@@ -133,13 +134,13 @@
                     </div>
 
                     <div id="linkMediumProps" class="hidden pt-2 border-t border-slate-100">
-                        <label class="block text-[10px] font-bold text-emerald-600 mb-1 uppercase">Link Material</label>
+                        <label class="block text-[10px] font-bold text-emerald-600 mb-1 uppercase" id="linkMediumLabel">Link Material</label>
                         <select id="propMedium" class="w-full border border-emerald-300 bg-emerald-50 rounded px-2 py-1 text-xs focus:outline-emerald-500">
-                            <option value="utp">UTP (Solid Gray)</option>
-                            <option value="fiber">Fiber Optic (Solid Cyan)</option>
-                            <option value="wireless">Wireless (Dashed Purple)</option>
-                            <option value="powerline">Powerline (Dash-Dot Yellow)</option>
-                            <option value="vpn">VPN Tunnel (Overlay · Teal)</option>
+                            <option value="utp" data-simple="Network cable">UTP (Solid Gray)</option>
+                            <option value="fiber" data-simple="Fiber cable">Fiber Optic (Solid Cyan)</option>
+                            <option value="wireless" data-simple="Wi-Fi">Wireless (Dashed Purple)</option>
+                            <option value="powerline" data-simple="Through power outlets">Powerline (Dash-Dot Yellow)</option>
+                            <option value="vpn" data-simple="VPN (internet tunnel)">VPN Tunnel (Overlay · Teal)</option>
                         </select>
                     </div>
 
@@ -187,7 +188,7 @@
                     </div>
 
                     <div id="nodeGeneralProps" class="pt-3 border-t border-slate-100">
-                        <div class="grid grid-cols-2 gap-2 mb-2">
+                        <div class="grid grid-cols-2 gap-2 mb-2" id="osPortsRow">
                             <div class="col-span-1">
                                 <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">OS / Firmware</label>
                                 <input type="text" id="propOs" list="osDatalist" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500" />
@@ -198,14 +199,10 @@
                                 <input type="text" id="propPorts" placeholder="80, 443" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500" />
                             </div>
                         </div>
-                                <div class="mb-3">
-                                    <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Notes</label>
-                                    <textarea id="propNotes" rows="2" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500"></textarea>
-                                </div>
                             </div>
                         
                             <div class="pt-2 mt-auto">
-                                <button id="deleteElementBtn" class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-1.5 rounded text-xs font-bold transition flex justify-center items-center gap-1">
+                                <button id="deleteElementBtn" data-i18n class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-1.5 rounded text-xs font-bold transition flex justify-center items-center gap-1">
                                     Delete Selected
                                 </button>
                             </div>
@@ -262,6 +259,31 @@
                 ⚠️ <span id="conflictPillCount">0</span>
             </button>
 
+            <!-- Mode picker: the simple modes or the full editor. Opened by the
+                 "Something missing?" button (switch flow) and by #setup (setup
+                 flow, where a purpose choice continues into the counts step). -->
+            <div id="modePicker" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
+                <div class="rounded-lg shadow-2xl p-5 w-full max-w-sm" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
+                    <h4 id="modePickerTitle" class="text-[11px] font-bold uppercase tracking-wider mb-1" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">What are you documenting?</h4>
+                    <p data-i18n class="text-[11px] mb-3" style="color: var(--cs-text-muted)">Pick the view that fits — you can switch anytime, nothing is lost.</p>
+                    <div id="modePickerList" class="flex flex-col gap-2"></div>
+                </div>
+            </div>
+
+            <!-- Setup wizard (#setup / #setup-<profile>): count what you have,
+                 the network draws itself, then you land in the simple view to rename. -->
+            <div id="setupWizard" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
+                <div class="rounded-lg shadow-2xl p-5 w-full max-w-md" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
+                    <h4 data-i18n class="text-[11px] font-bold uppercase tracking-wider mb-1" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">What do you have?</h4>
+                    <p data-i18n class="text-[11px] mb-3" style="color: var(--cs-text-muted)">Count what's in the building — the network draws itself. You can rename and adjust everything afterwards.</p>
+                    <div id="setupRows" class="grid grid-cols-3 gap-2 mb-4 max-h-[60vh] overflow-y-auto"></div>
+                    <div class="flex gap-2 justify-end">
+                        <button id="setupCancelBtn" data-i18n class="cs-btn">Start empty</button>
+                        <button id="setupBuildBtn" data-i18n class="cs-btn">✨ Build my network</button>
+                    </div>
+                </div>
+            </div>
+
             <div id="shortcutHelp" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
                 <div class="rounded-lg shadow-2xl p-5 w-full max-w-sm" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
                     <div class="flex justify-between items-center mb-3">
@@ -275,6 +297,7 @@
     </div>
 
     <script src="js/state.js"></script>
+    <script src="js/i18n.js"></script>
     <script src="js/model.js"></script>
     <script src="js/data.js"></script>
     <script src="js/diagnostics.js"></script>

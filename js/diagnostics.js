@@ -693,7 +693,7 @@ function updateTraceStatus(reach) {
         if (reach) {
             reach.reachableNodes.forEach(id => { if(!isDumbDevice(getNode(id)) && id !== state.selectedId) count++; });
         }
-        el.textContent = `Path to ${count} devices`; el.className = 'cs-trace-status active';
+        el.textContent = `→ ${count} devices`; el.className = 'cs-trace-status active';
     }
 
     function validateTopology() {

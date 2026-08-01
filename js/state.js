@@ -3,6 +3,6 @@
 
 const state = {
     nodes: [], links: [], annotations: [], selectedId: null, selectedType: null, linkSourceId: null,
-    settings: { traceMode: false },
+    settings: { traceMode: false, profile: 'simple', advanced: true },
     camera: { x: 0, y: 0, zoom: 1 }
 };

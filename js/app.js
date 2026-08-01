@@ -94,7 +94,7 @@ function nextFreeHost(networkStr, prefix) {
 
 // ---- Auto-layout: tiered top-down tree (barycenter-ordered), toggleable ----
 let _tidyBackup = null;
-function setTidyLabel() { const b = document.getElementById('tidyBtn'); if (b) b.innerHTML = _tidyBackup ? '↺ Untidy' : '⤢ Tidy'; }
+function setTidyLabel() { const b = document.getElementById('tidyBtn'); if (b) b.innerHTML = _tidyBackup ? `↺ ${t('Untidy')}` : `⤢ ${t('Tidy')}`; }
 function invalidateTidy() { if (_tidyBackup) { _tidyBackup = null; setTidyLabel(); } }
 function tidyLayout() {
     if (!state.nodes.length) return;
@@ -163,12 +163,18 @@ function loadSettings() {
     try {
         const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {};
         state.settings.alertsHidden = !!saved.alertsHidden;
+        if (PROFILES[saved.profile]) {
+            state.settings.profile = saved.profile;
+            state.settings.advanced = 'advanced' in saved ? !!saved.advanced : false;
+        } else if (saved.simpleMode) { state.settings.profile = 'simple'; state.settings.advanced = false; } // pre-profile settings migrate
+        // saved.profile === 'advanced' (interim schema): the defaults already say advanced view, simple home
+        if (resolveLocale(saved.lang)) state.settings.lang = resolveLocale(saved.lang);
         if (['nodes', 'templates', 'blocks'].includes(saved.libraryTab)) state.settings.libraryTab = saved.libraryTab;
     } catch (e) { /* first run or blocked storage */ }
 }
 
 function saveSettings() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ alertsHidden: !!state.settings.alertsHidden, libraryTab: state.settings.libraryTab })); } catch (e) { /* private mode */ }
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ alertsHidden: !!state.settings.alertsHidden, profile: state.settings.profile, advanced: !!state.settings.advanced, lang: state.settings.lang, libraryTab: state.settings.libraryTab })); } catch (e) { /* private mode */ }
 }
 
 const USER_TPL_KEY = 'nettopo_user_templates';
@@ -502,7 +508,38 @@ async function load() {
     // is armed and the next canvas click looked up a node that no longer exists.
     state.selectedId = null; state.selectedType = null; state.linkSourceId = null;
     const hash = window.location.hash.substring(1);
-    if (!hash) { loadTemplateState(templatesData.house); autoBindLinks(); updateOsDatalist(); return; }
+    // The default document follows the profile only on an explicit profile
+    // entry ('#imagenology' opens onto an imaging network); a plain visit
+    // always gets the Smart Home demo.
+    const loadDefaultDoc = (profileTemplate) => {
+        const prof = PROFILES[state.settings.profile];
+        const key = (profileTemplate && prof && prof.template) || 'house';
+        loadTemplateState(templatesData[key] || templatesData.house);
+        autoBindLinks(); updateOsDatalist();
+    };
+    // Entry triggers in the hash — the hash otherwise carries the shared
+    // diagram, so these are consumed (the profile itself persists in
+    // settings): '#simple' / '#imagenology' open that profile's reduced view,
+    // '#advanced' the full view, '#setup' the wizard's device grid directly
+    // ('#setup-<profile>' also sets that home profile first). On a fresh boot
+    // fall through to the profile's default template; mid-session (typed over
+    // an open diagram) keep the canvas and let save() restore the doc hash.
+    let wizard = false, trigger = hash;
+    if (hash === 'setup') { wizard = true; trigger = state.settings.profile; }
+    else if (hash.startsWith('setup-') && PROFILES[hash.slice(6)]) { wizard = true; trigger = hash.slice(6); }
+    if (PROFILES[trigger] || trigger === 'advanced') {
+        if (PROFILES[trigger]) { state.settings.profile = trigger; state.settings.advanced = false; }
+        else state.settings.advanced = true;
+        saveSettings(); applyProfile();
+        if (state.nodes.length) { save(); }
+        else {
+            window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            loadDefaultDoc(true);
+        }
+        if (wizard) openSetupWizard();
+        return;
+    }
+    if (!hash) { loadDefaultDoc(false); return; }
     try {
         const json = hash[0] === FRAG_SCHEME ? await decodeFragment(hash) : decodeURIComponent(atob(hash));
         const parsed = JSON.parse(json);
@@ -602,18 +639,20 @@ function toggleShortcutHelp(force) {
 }
 
 const SHORTCUTS = [
-    { keys: ['T'], label: 'Toggle trace mode', test: (e) => e.key.toLowerCase() === 't',
+    // simpleHidden entries drive UI that Simple mode hides — the key handler
+    // skips them and the cheatsheet omits them while the mode is on.
+    { keys: ['T'], label: 'Toggle trace mode', simpleHidden: true, test: (e) => e.key.toLowerCase() === 't',
       run: () => setTraceMode(!state.settings.traceMode) },
     { keys: ['F'], label: 'Fit the diagram to the view', test: (e) => e.key.toLowerCase() === 'f',
       run: () => fitToView() },
-    { keys: ['A'], label: 'Show / hide validation alerts', test: (e) => e.key.toLowerCase() === 'a',
+    { keys: ['A'], label: 'Show / hide validation alerts', simpleHidden: true, test: (e) => e.key.toLowerCase() === 'a',
       run: () => { state.settings.alertsHidden = !state.settings.alertsHidden; saveSettings(); validateTopology(); } },
     { keys: ['L'], label: 'Link from the selected node', test: (e) => e.key.toLowerCase() === 'l',
       run: () => { if (state.selectedType === 'node' && state.selectedId) { state.linkSourceId = state.selectedId; renderCanvasOnly(); } } },
     { keys: ['1'], label: 'Nodes tab', test: (e) => e.key === '1', run: () => showLibraryTab('nodes') },
     { keys: ['2'], label: 'Networks tab', test: (e) => e.key === '2', run: () => showLibraryTab('templates') },
-    { keys: ['3'], label: 'Blocks tab', test: (e) => e.key === '3', run: () => showLibraryTab('blocks') },
-    { keys: ['/'], label: 'Search the canvas', test: (e) => e.key === '/',
+    { keys: ['3'], label: 'Blocks tab', simpleHidden: true, test: (e) => e.key === '3', run: () => showLibraryTab('blocks') },
+    { keys: ['/'], label: 'Search the canvas', simpleHidden: true, test: (e) => e.key === '/',
       run: () => { const f = document.getElementById('canvasFilter'); f.focus(); f.select(); } },
     { keys: ['0'], label: 'Reset zoom to 1:1', test: (e) => e.key === '0',
       run: () => document.getElementById('zoomResetBtn').click() },
@@ -622,7 +661,7 @@ const SHORTCUTS = [
     { keys: ['Del'], label: 'Delete the selection', test: (e) => e.key === 'Delete' || e.key === 'Backspace',
       run: () => deleteSelected() },
     { keys: ['Esc'], label: 'Cancel link mode / deselect', test: (e) => e.key === 'Escape',
-      run: () => { toggleShortcutHelp(false); state.linkSourceId = null; select(null, null); renderCanvasOnly(); } },
+      run: () => { toggleShortcutHelp(false); closeSetupWizard(); closeModePicker(); state.linkSourceId = null; select(null, null); renderCanvasOnly(); } },
     { keys: ['?'], label: 'Show this list', test: (e) => e.key === '?', run: () => toggleShortcutHelp() }
 ];
 
@@ -650,6 +689,7 @@ window.addEventListener('keydown', (event) => {
 
     const hit = SHORTCUTS.find((sc) => sc.test(event));
     if (!hit) return;
+    if (isReduced() && hit.simpleHidden) return;
     event.preventDefault();
     hit.run(event);
 });
@@ -670,7 +710,7 @@ function renderShortcutHelp() {
             <span class="shrink-0">${h.icon}</span>
             <span style="color: var(--cs-text-sec)"><span class="font-bold" style="color: var(--cs-text)">${escapeHtml(h.verb)}:</span> ${escapeHtml(h.text)}</span>
         </div>`).join('');
-    const keys = SHORTCUTS.map((sc) => `
+    const keys = SHORTCUTS.filter((sc) => !(isReduced() && sc.simpleHidden)).map((sc) => `
         <div class="shortcut-row flex items-center justify-between gap-3 py-1">
             <span style="color: var(--cs-text-sec)">${escapeHtml(sc.label)}</span>
             <span class="flex gap-1 shrink-0">${sc.keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join('')}</span>
@@ -682,6 +722,7 @@ function renderShortcutHelp() {
 
 // ---- Library tabs ----
 function showLibraryTab(name) {
+    if (isReduced() && name === 'blocks') name = 'nodes'; // Blocks is hidden in reduced profiles
     state.settings.libraryTab = name;
     saveSettings();
     document.querySelectorAll('.lib-tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
@@ -697,6 +738,235 @@ function showConfigTab(name) {
     document.querySelectorAll('.cfg-panel').forEach((p) => p.classList.toggle('hidden', p.id !== `cfgPanel-${name}`));
 }
 document.querySelectorAll('.cfg-tab').forEach((t) => { t.onclick = () => showConfigTab(t.dataset.cfgtab); });
+
+// ---- Profiles ----
+// Simple profiles are a starting point for people who are not technical at
+// all. The HOME PROFILE (simple, imagenology, …) is set by how the person
+// arrived — '#<profile>' / '#setup-<profile>' / '?profile=' — and is sticky;
+// modes are switched only through the mode picker (the "Something missing?"
+// button below the palette), so returning from Advanced always offers their
+// specific simple mode. Reduced hides trace, diagnostics, IP configuration, blocks and
+// validation chrome (body.simple-mode rules in css/app.css) and swaps jargon
+// for plain words; a purpose profile additionally curates the palette,
+// renames devices for its audience and picks the default document
+// (body.<cssClass> rules handle the palette exceptions). Display-only — the
+// document keeps every field, so Advanced completes the technical picture
+// with nothing lost. The setup wizard (openSetupWizard below) is the intake:
+// one universal device grid — count what you have, the network draws itself.
+const PROFILES = {
+    simple: {
+        icon: '🙂', label: 'General', blurb: 'A home or small office — just devices and connections', template: 'house',
+    },
+    imagenology: {
+        icon: '🩻', label: 'Imagenology', blurb: 'Medical imaging — modalities, PACS and viewing stations', template: 'imaging', cssClass: 'profile-imagenology',
+        renames: { server: 'PACS / Archive', pc: 'Viewing Station', dicom: 'Modality (CT/MR/US)' },
+    },
+};
+const isReduced = () => !state.settings.advanced;
+
+function applyProfile() {
+    if (!PROFILES[state.settings.profile]) state.settings.profile = 'simple';
+    const prof = PROFILES[state.settings.profile];
+    const on = isReduced();
+    document.body.classList.toggle('simple-mode', on);
+    Object.keys(PROFILES).forEach((k) => {
+        if (PROFILES[k].cssClass) document.body.classList.toggle(PROFILES[k].cssClass, on && k === state.settings.profile);
+    });
+    // Plain words while reduced (localized); the English originals come back
+    // with Advanced — technical vocabulary stays untranslated on purpose.
+    const tabText = (tab, txt) => { const el = document.querySelector(`.lib-tab[data-tab="${tab}"]`); if (el) el.firstChild.textContent = `${txt} `; };
+    tabText('nodes', on ? t('Devices') : 'Nodes');
+    tabText('templates', on ? t('Examples') : 'Networks');
+    document.getElementById('linkMediumLabel').textContent = on ? t('Connection') : 'Link Material';
+    document.querySelectorAll('#propMedium option').forEach((o) => {
+        if (!o.dataset.advanced) o.dataset.advanced = o.textContent;
+        o.textContent = on ? t(o.dataset.simple) : o.dataset.advanced;
+    });
+    // Purpose renames on the palette (e.g. Server → PACS / Archive).
+    document.querySelectorAll('#nodePalette .palette-item[data-type]').forEach((b) => {
+        const span = b.querySelector('span:last-child');
+        if (!span.dataset.base) span.dataset.base = span.textContent;
+        span.textContent = on ? t((prof.renames && prof.renames[b.dataset.type]) || span.dataset.base) : span.dataset.base;
+    });
+    if (on) {
+        if (state.settings.traceMode) setTraceMode(false);
+        if (state.settings.libraryTab === 'blocks') showLibraryTab('nodes');
+        showConfigTab('config'); // the Diagnostics tab is gone; never strand the panel on it
+    }
+    renderShortcutHelp(); // the cheatsheet drops keys whose UI is hidden
+}
+
+// ---- Locale (js/i18n.js holds the dictionaries) ----
+// Re-renders every reporter-path surface in the current locale: static
+// data-i18n markup, the mixed-content chrome (buttons whose text sits next to
+// glyphs or nested spans), then applyProfile() for the vocabulary swaps.
+function applyLocale() {
+    applyStaticI18n();
+    document.getElementById('undoBtn').textContent = `↶ ${t('Undo')}`;
+    document.getElementById('redoBtn').textContent = `↷ ${t('Redo')}`;
+    setTidyLabel();
+    document.getElementById('exportMenuBtn').innerHTML = `⤓ ${t('Export')} <span class="cs-caret">▾</span>`;
+    document.getElementById('copyUrlBtn').innerHTML = `🔗 ${t('Copy link')} <span class="cs-menu-note">${t('short URL')}</span>`;
+    document.getElementById('exportPngBtn').textContent = `🖼️ ${t('PNG image')}`;
+    applyProfile();
+}
+// ---- Mode picker ----
+// The one place modes are switched — there is deliberately no header toggle.
+// Opened by the "Something missing? Try another mode" button below the
+// palette. Two steps: 'main' offers Simple / Full editor / Setup wizard, and
+// picking Simple re-renders the same modal as 'purpose' — the simple
+// purposes (General, Imagenology, …), one per PROFILES entry.
+function openModePicker(step = 'main') {
+    document.getElementById('modePickerTitle').textContent =
+        step === 'purpose' ? t('What are you documenting?') : t('Choose a mode');
+    const list = document.getElementById('modePickerList');
+    list.innerHTML = '';
+    const addOption = (icon, label, blurb, pick) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'mode-option flex items-start gap-2.5 text-left rounded p-2.5 transition';
+        b.innerHTML = `<span class="text-lg leading-none">${icon}</span>
+            <span class="min-w-0"><b class="block text-[12px]" style="color: var(--cs-text)">${escapeHtml(label)}</b>
+            <span class="block text-[10px] leading-tight" style="color: var(--cs-text-muted)">${escapeHtml(blurb)}</span></span>`;
+        b.onclick = pick;
+        list.appendChild(b);
+    };
+    if (step === 'purpose') {
+        Object.keys(PROFILES).forEach((k) => {
+            const p = PROFILES[k];
+            addOption(p.icon, t(p.label), t(p.blurb), () => {
+                closeModePicker();
+                state.settings.profile = k; state.settings.advanced = false; saveSettings(); applyProfile();
+            });
+        });
+    } else {
+        addOption('🙂', t('Simple'), t('A simpler view for non-technical people — pick your purpose next'), () => {
+            openModePicker('purpose');
+        });
+        addOption('🛠️', t('Full editor'), t('Every device and technical detail — IPs, zones, diagnostics'), () => {
+            closeModePicker();
+            state.settings.advanced = true; saveSettings(); applyProfile();
+        });
+        addOption('✨', t('Setup wizard'), t('Start over: count what you have and the network draws itself'), () => {
+            closeModePicker();
+            openSetupWizard();
+        });
+    }
+    // Language row — the reporter path speaks en / es / pt-BR / ja / ru (phase 1).
+    const langRow = document.createElement('div');
+    langRow.className = 'flex gap-1.5 justify-center mt-3 pt-3';
+    langRow.style.borderTop = '1px solid var(--cs-border)';
+    [['en', 'EN'], ['es', 'ES'], ['pt-BR', 'PT'], ['ja', '日本語'], ['ru', 'RU']].forEach(([code, label]) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'cs-btn'; b.textContent = label;
+        if (code === LOCALE) { b.style.color = 'var(--cs-accent)'; b.style.borderColor = 'var(--cs-accent-dim)'; b.style.background = 'var(--cs-accent-faint)'; }
+        b.onclick = (e) => {
+            e.stopPropagation();
+            state.settings.lang = code; saveSettings(); setLocale(code);
+            applyLocale();
+            openModePicker(step); // re-render the open picker in the new language
+        };
+        langRow.appendChild(b);
+    });
+    list.appendChild(langRow);
+    document.getElementById('modePicker').classList.remove('hidden');
+}
+function closeModePicker() { document.getElementById('modePicker').classList.add('hidden'); }
+document.getElementById('modeSwitchBtn').onclick = () => openModePicker();
+document.getElementById('modePicker').onclick = (e) => {
+    if (e.target.id === 'modePicker') closeModePicker(); // click the backdrop to dismiss
+};
+
+// ---- Setup wizard ----
+// The gentlest on-ramp: tick off what's in the building and the network
+// builds itself — hub in the middle, everything spawned through spawnNode so
+// devices inherit real addresses invisibly. Deliberately NOT auto-tidied:
+// spawn placement fans devices around the hub, and forcing a tier hierarchy
+// mis-ranks star-topology gear; Tidy stays one click away in the header.
+// One universal grid, most likely devices first, technical gear further down
+// — no purpose question; everything is shown no matter the mode. '#setup'
+// opens it directly; '#setup-<profile>' also sets that home profile so the
+// person lands in the right simple view to rename and adjust.
+const SETUP_HUB = { type: 'router', name: 'Router' };
+const SETUP_ITEMS = [
+    { type: 'pc', name: 'Computer', label: 'Computers / laptops', count: 2 },
+    { type: 'iot', name: 'Smart Device', label: 'Smart TVs & devices', count: 2 },
+    { type: 'printer', name: 'Printer', label: 'Printers', count: 1 },
+    { type: 'camera', name: 'Camera', label: 'Cameras', count: 0 },
+    { type: 'ap', name: 'Wireless AP', label: 'Wi-Fi points', count: 0 },
+    { type: 'switch', name: 'Switch', label: 'Switches', count: 0 },
+    { type: 'server', name: 'Server', label: 'Servers / NAS', count: 0 },
+    { type: 'voip', name: 'VoIP Phone', label: 'Desk phones', count: 0 },
+    { type: 'dicom', name: 'Modality', label: 'Modalities (CT, MR, US…)', count: 0 },
+    { type: 'firewall', name: 'Firewall', label: 'Firewalls', count: 0 },
+    { type: 'vpn', name: 'VPN Gateway', label: 'VPN gateways', count: 0 },
+    { type: 'l3switch', name: 'L3 Switch', label: 'L3 switches', count: 0 },
+    { type: 'loadbalancer', name: 'Load Balancer', label: 'Load balancers', count: 0 },
+    { type: 'edge', name: 'Edge Gateway', label: 'Edge gateways', count: 0 },
+    { type: 'vm', name: 'VM', label: 'Virtual machines', count: 0 },
+    { type: 'container', name: 'Container', label: 'Containers', count: 0 },
+    { type: 'cloud', name: 'Cloud', label: 'Internet / cloud links', count: 0 },
+    { type: 'custom', name: 'Device', label: 'Other devices', count: 0 },
+];
+function openSetupWizard() {
+    const rows = document.getElementById('setupRows');
+    rows.innerHTML = '';
+    // Grid of device tiles (same icons as the palette), count in the middle,
+    // the −/+ steppers below. A zero-count tile dims so the selection reads
+    // at a glance.
+    SETUP_ITEMS.forEach((item, i) => {
+        const tile = document.createElement('div');
+        tile.className = `setup-tile flex flex-col items-center gap-1 rounded p-2.5 text-center${item.count === 0 ? ' off' : ''}`;
+        tile.dataset.i = String(i);
+        tile.innerHTML = `<svg viewBox="0 0 24 24" width="26" height="26" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="color: var(--cs-text-sec)">${iconPaths[item.type] || ''}</svg>
+            <span class="text-[10px] font-medium leading-tight" style="color: var(--cs-text-sec)">${escapeHtml(t(item.label))}</span>
+            <b class="setup-count text-[14px]" data-i="${i}" style="color: var(--cs-text)">${item.count}</b>
+            <span class="flex gap-1.5">
+              <button type="button" class="cs-btn setup-dec" data-i="${i}" aria-label="fewer">−</button>
+              <button type="button" class="cs-btn setup-inc" data-i="${i}" aria-label="more">+</button></span>`;
+        rows.appendChild(tile);
+    });
+    rows.querySelectorAll('.setup-dec, .setup-inc').forEach((b) => {
+        b.onclick = () => {
+            const el = rows.querySelector(`.setup-count[data-i="${b.dataset.i}"]`);
+            const next = Math.max(0, Math.min(9, Number(el.textContent) + (b.classList.contains('setup-inc') ? 1 : -1)));
+            el.textContent = String(next);
+            rows.querySelector(`.setup-tile[data-i="${b.dataset.i}"]`).classList.toggle('off', next === 0);
+        };
+    });
+    document.getElementById('setupWizard').classList.remove('hidden');
+}
+function closeSetupWizard() { document.getElementById('setupWizard').classList.add('hidden'); }
+
+function buildSetupNetwork() {
+    // The wizard's audience is non-technical: whatever view was active, the
+    // built network always opens in the home profile's simple view — no IPs,
+    // zones or config. Advanced (via the mode picker) completes them later.
+    state.settings.advanced = false; saveSettings(); applyProfile();
+    state.nodes = []; state.links = []; state.annotations = [];
+    spawnNode(SETUP_HUB.type, {});
+    const hub = state.nodes[state.nodes.length - 1];
+    hub.name = t(SETUP_HUB.name);
+    const counts = [...document.querySelectorAll('#setupRows .setup-count')].map((el) => Number(el.textContent) || 0);
+    // Localized names on purpose: they are editable labels the reporter will
+    // read and export, not identifiers.
+    SETUP_ITEMS.forEach((item, i) => {
+        for (let n = 1; n <= counts[i]; n++) {
+            spawnNode(item.type, { connectTo: hub.id });
+            state.nodes[state.nodes.length - 1].name = counts[i] > 1 ? `${t(item.name)} ${n}` : t(item.name);
+        }
+    });
+    select(null, null);
+    fitToView(); save();
+    initHistory(); // the built network is the floor of the undo timeline
+    renderCanvasOnly();
+    closeSetupWizard();
+}
+document.getElementById('setupBuildBtn').onclick = buildSetupNetwork;
+document.getElementById('setupCancelBtn').onclick = closeSetupWizard;
+document.getElementById('setupWizard').onclick = (e) => {
+    if (e.target.id === 'setupWizard') closeSetupWizard(); // click the backdrop to dismiss
+};
 
 function libraryItem({ icon, name, blurb }, onPick, onDelete) {
     const row = document.createElement('div');
@@ -792,8 +1062,7 @@ const propertyBindings = [
     { key: 'gw', id: 'propGw' },
     { key: 'dns', id: 'propDns' },
     { key: 'os', id: 'propOs' },
-    { key: 'ports', id: 'propPorts' },
-    { key: 'notes', id: 'propNotes' }
+    { key: 'ports', id: 'propPorts' }
 ];
 
 propertyBindings.forEach((binding) => {
@@ -1049,6 +1318,26 @@ document.getElementById('shortcutHelp').onclick = (e) => {
 renderLibrary();
 renderShortcutHelp();
 loadSettings();
+// '?profile=<name>' (or the legacy '?simple') also selects a home profile —
+// unlike the '#<profile>' hash it composes with a shared diagram hash, so one
+// link can carry both the network and the profile.
+{
+    const params = new URLSearchParams(window.location.search);
+    const p = PROFILES[params.get('profile')] ? params.get('profile') : (params.has('simple') ? 'simple' : null);
+    if (p) { state.settings.profile = p; state.settings.advanced = false; saveSettings(); }
+    // A plain visit — no hash, no profile param — always opens the full
+    // editor, whatever view was persisted. Reduced views are entered
+    // explicitly: '#simple' / '#imagenology' / '?profile=' / the mode picker.
+    // A doc-carrying hash (a shared link or a mid-edit reload) keeps the
+    // persisted view so a refresh never flips a simple-mode user to full.
+    else if (!window.location.hash) state.settings.advanced = true;
+    // Locale: '?lang=' (persisted — intake links hand a Spanish clinic a
+    // Spanish wizard) > saved choice > browser language > English.
+    const urlLang = resolveLocale(params.get('lang'));
+    if (urlLang) { state.settings.lang = urlLang; saveSettings(); }
+    setLocale(state.settings.lang || resolveLocale(navigator.language) || 'en');
+}
+applyLocale();
 showLibraryTab(state.settings.libraryTab || 'nodes');
 // Boot may need to decompress a shared "~" link, so await it before drawing.
 (async () => {
