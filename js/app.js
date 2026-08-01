@@ -800,7 +800,10 @@ function applyProfile() {
 // Re-renders every reporter-path surface in the current locale: static
 // data-i18n markup, the mixed-content chrome (buttons whose text sits next to
 // glyphs or nested spans), then applyProfile() for the vocabulary swaps.
-function applyLocale() {
+// Called with a lang only by the fleet switcher bridge in js/i18n.js, which is
+// the one case where the new choice has to be remembered.
+function applyLocale(lang) {
+    if (lang) { state.settings.lang = lang; saveSettings(); }
     applyStaticI18n();
     document.getElementById('undoBtn').textContent = `↶ ${t('Undo')}`;
     document.getElementById('redoBtn').textContent = `↷ ${t('Redo')}`;
@@ -1330,17 +1333,6 @@ showLibraryTab(state.settings.libraryTab || 'nodes');
 })();
 
 // ---- Fleet language switcher (carino-lang.js) ----
-// Topo's own scripts run before the deferred carino-lang.js, so the boot block
-// above resolves a locale without knowing the fleet-wide cookie choice. Deferred
-// scripts execute before DOMContentLoaded, so by then window.CarinoLang has
-// resolved it — sync once there, and thereafter via the carino:langchange event
-// the navbar control fires.
-window.addEventListener('carino:langchange', (e) => {
-    state.settings.lang = e.detail.lang; saveSettings();
-    setLocale(e.detail.lang); applyLocale();
-});
-document.addEventListener('DOMContentLoaded', () => {
-    if (window.CarinoLang && resolveLocale(CarinoLang.current) === CarinoLang.current && CarinoLang.current !== LOCALE) {
-        setLocale(CarinoLang.current); applyLocale();
-    }
-});
+// The bridge lives in js/i18n.js, which owns the dictionary and the locale: it
+// listens for 'carino:langchange', switches the dictionary, then calls
+// applyLocale(lang) below to re-render and persist the choice.

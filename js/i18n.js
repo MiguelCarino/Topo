@@ -5,6 +5,21 @@
 // demand ever appears. Locale: ?lang= override > saved choice > browser
 // language > en. Japanese deliberately says "PC", not コンピューター.
 // Load order: state -> i18n -> model -> data -> diagnostics -> ui -> app
+//
+// Self-contained IIFE: the dictionary and the locale stay private and only the
+// four helpers below are published on window. This file also owns the bridge to
+// the fleet switcher — carino-lang.js owns the *preference*, i18n.js owns the
+// *dictionary* and re-applies on 'carino:langchange'.
+//
+// It is loaded WITHOUT defer, unlike the rest of the fleet, because Topo's own
+// scripts (js/app.js in particular) are classic non-deferred scripts that call
+// t() at load time; deferring only this file would run it after them. That also
+// means carino-lang.js (deferred) has not run yet when this file executes, so
+// the fleet preference is picked up on DOMContentLoaded instead — see the
+// bridge at the bottom.
+
+(function () {
+'use strict';
 
 const I18N = {
     es: {
@@ -382,3 +397,28 @@ function applyStaticI18n() {
         el.textContent = t(el.dataset.i18nKey);
     });
 }
+
+// ---- Published surface (js/app.js consumes these as bare globals) ----
+window.t = t;
+window.setLocale = setLocale;
+window.resolveLocale = resolveLocale;
+window.applyStaticI18n = applyStaticI18n;
+
+// ---- Fleet language switcher bridge (carino-lang.js) ----
+// Switch the dictionary, then hand off to the app's own re-render. The lang is
+// passed through so app.js can persist it in its settings — the preference is
+// app state, the dictionary is ours.
+function switchTo(lang) {
+    setLocale(lang);
+    if (typeof window.applyLocale === 'function') window.applyLocale(lang);
+}
+window.addEventListener('carino:langchange', (e) => switchTo(e.detail.lang));
+// carino-lang.js is deferred, so it resolves the fleet-wide choice after this
+// file has already picked a locale from the URL / saved settings / navigator.
+// Deferred scripts run before DOMContentLoaded, so by then it is available.
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.CarinoLang && resolveLocale(CarinoLang.current) === CarinoLang.current
+        && CarinoLang.current !== LOCALE) switchTo(CarinoLang.current);
+});
+
+})();
