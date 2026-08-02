@@ -23,6 +23,10 @@
 
 const I18N = {
     es: {
+        'Late shift.': 'Turno nocturno.',
+        'Good morning.': 'Buenos días.',
+        'Good afternoon.': 'Buenas tardes.',
+        'Good evening.': 'Buenas noches.',
         // Mode picker
         'Choose a mode': 'Elige un modo',
         'What are you documenting?': '¿Qué vas a documentar?',
@@ -112,6 +116,10 @@ const I18N = {
         'PNG image': 'Imagen PNG',
     },
     'pt-BR': {
+        'Late shift.': 'Turno da noite.',
+        'Good morning.': 'Bom dia.',
+        'Good afternoon.': 'Boa tarde.',
+        'Good evening.': 'Boa noite.',
         'Choose a mode': 'Escolha um modo',
         'What are you documenting?': 'O que você vai documentar?',
         'Pick the view that fits — you can switch anytime, nothing is lost.': 'Escolha a visão que combina com você: pode trocar quando quiser, nada se perde.',
@@ -196,6 +204,10 @@ const I18N = {
         'PNG image': 'Imagem PNG',
     },
     ru: {
+        'Late shift.': 'Ночная смена.',
+        'Good morning.': 'Доброе утро.',
+        'Good afternoon.': 'Добрый день.',
+        'Good evening.': 'Добрый вечер.',
         'Choose a mode': 'Выберите режим',
         'What are you documenting?': 'Что вы документируете?',
         'Pick the view that fits — you can switch anytime, nothing is lost.': 'Выберите подходящий вид: переключаться можно в любой момент, ничего не потеряется.',
@@ -280,6 +292,10 @@ const I18N = {
         'PNG image': 'PNG-изображение',
     },
     ja: {
+        'Late shift.': '夜勤お疲れさま。',
+        'Good morning.': 'おはようございます。',
+        'Good afternoon.': 'こんにちは。',
+        'Good evening.': 'こんばんは。',
         'Choose a mode': 'モードを選択',
         'What are you documenting?': '何を記録しますか？',
         'Pick the view that fits — you can switch anytime, nothing is lost.': '合うビューを選んでください。いつでも切り替えられ、何も失われません。',
