@@ -78,9 +78,43 @@ function createIfaceFor(node, opts = {}) {
         node.portCount = portCountOf(node) + 1;
         return { id: `p${node.portCount}`, name: String(node.portCount), ip: '', implicit: true };
     }
-    const iface = { id: nextId('i'), name: nextName('eth'), ip: '' };
+    const iface = { id: nextId('i'), name: nextName('eth'), ip: '', mac: '' };
     node.interfaces.push(iface);
     return iface;
+}
+
+// ---- MAC addresses ----
+// Topo has always TALKED about MACs — the flapping diagnostic, the bond's "one
+// MAC, one address" — while inferring all of it from IP co-location. An
+// interface can now hold the real address, which makes two things checkable
+// that inference never could: who the vendor is, and whether the same address
+// appears twice on the drawing.
+const normMac = (v) => String(v || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+const hasMac = (iface) => normMac(iface && iface.mac).length === 12;
+
+// Every (node, iface) holding a given address. A duplicate is a fact about the
+// whole map, not about either interface, so this is keyed across all nodes.
+function macIndex(nodes) {
+    const seen = new Map();
+    (nodes || []).forEach((n) => (n.interfaces || []).forEach((i) => {
+        if (!hasMac(i)) return;
+        const k = normMac(i.mac);
+        if (!seen.has(k)) seen.set(k, []);
+        seen.get(k).push({ node: n, iface: i });
+    }));
+    return seen;
+}
+// Broadcast and multicast addresses are SUPPOSED to repeat — an interface
+// configured with one is its own error, reported separately, and counting it as
+// a duplicate would bury the real ones.
+function duplicateMacs(nodes) {
+    const out = [];
+    macIndex(nodes).forEach((holders, hex) => {
+        if (holders.length < 2) return;
+        if (parseInt(hex.slice(0, 2), 16) & 0x01) return;
+        out.push({ hex, holders });
+    });
+    return out;
 }
 
 // ---- Bonds ----

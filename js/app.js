@@ -1066,6 +1066,15 @@ propertyBindings.forEach((binding) => {
     });
 });
 
+// Opens the hardware-address line under every interface on this node. A
+// node-level toggle rather than a per-row button because the interface row has
+// no width left to give — see renderMacLine.
+document.getElementById('addMacBtn').onclick = () => {
+    if (!state.selectedId || state.selectedType !== 'node') return;
+    const node = getNode(state.selectedId); if (!node) return;
+    node.macOpen = !node.macOpen;
+    renderSidebarData(node); save();
+};
 document.getElementById('addIfaceBtn').onclick = () => { if (!state.selectedId || state.selectedType !== 'node') return; const node = getNode(state.selectedId); if (!node) return; createIfaceFor(node); renderSidebarData(node); save();
 renderCanvasOnly();
 renderNodeDiagnostics(node); };

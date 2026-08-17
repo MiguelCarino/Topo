@@ -978,6 +978,14 @@ function renderSidebarData(node) {
             }
             div.appendChild(del); ifCont.appendChild(div);
 
+            // The MAC line is opened for the whole node from the header button,
+            // not per row: every control in that row is already fighting for a
+            // 281px sidebar, and the address field is documented above as being
+            // 44px short as it is. An interface already holding an address shows
+            // it regardless — hiding a value that exists is how a drawing starts
+            // lying about itself.
+            if (node.macOpen || hasMac(iface)) ifCont.appendChild(renderMacLine(node, iface));
+
             if (isBond(iface)) {
                 // The mode gets its own line. It will not fit beside the address
                 // in a 281px sidebar, and squeezing the CIDR down to "10" to make
@@ -992,6 +1000,120 @@ function renderSidebarData(node) {
 // The bond's mode, on its own line beneath it. Active-backup and LACP differ in
 // one way that matters on a diagram: whether the members may land on two
 // different switches, which is what evaluateBond checks.
+// A MAC never fits beside a CIDR in this sidebar, so it gets the line under
+// its interface — same shape as the bond mode below.
+//
+// The read-out is deliberately about what the ADDRESS says, not what the vendor
+// table says: the universal/local bit is the one that matters on a network map,
+// because a locally-administered address is randomised and any inventory keyed
+// on it is fiction. The vendor is a nice-to-have on top of that.
+function fmtColonSafe(v) {
+    const hex = (window.CarinoOUI ? window.CarinoOUI.normalizeMac(v) : String(v || ''));
+    return hex.length === 12 ? hex.match(/.{2}/g).join(':') : String(v || '');
+}
+
+function renderMacLine(node, iface) {
+    const row = document.createElement('div');
+    row.className = 'flex flex-col gap-0.5 min-w-0 pl-3 mb-1';
+
+    const top = document.createElement('div');
+    top.className = 'flex items-center gap-1 min-w-0';
+
+    const tick = document.createElement('span');
+    tick.className = 'text-[10px] text-slate-400 shrink-0'; tick.textContent = '↳';
+
+    const label = document.createElement('span');
+    label.className = 'text-[10px] text-slate-400 shrink-0'; label.textContent = 'mac';
+
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.value = iface.mac || '';
+    inp.placeholder = 'AA:BB:CC:DD:EE:FF';
+    inp.className = 'flex-1 min-w-0 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500';
+
+    const out = document.createElement('div');
+    out.className = 'text-[10px] leading-tight pl-4';
+
+    // Pasting is the normal way an address gets here — off a label, a DHCP
+    // lease, `ip link`. Normalising on paste means every one of those formats
+    // (colons, hyphens, Cisco dotted quads, bare hex) lands the same way.
+    function paint() {
+        const raw = inp.value.trim();
+        inp.classList.remove('border-red-400', 'bg-red-50', 'border-amber-400', 'bg-amber-50');
+        if (!raw) { out.innerHTML = ''; return; }
+        const api = window.CarinoOUI;
+        if (!api) { out.innerHTML = ''; return; }
+        const d = api.decodeMac(raw);
+        if (d.error) {
+            inp.classList.add('border-red-400', 'bg-red-50');
+            out.innerHTML = `<span class="text-red-600">${d.error}</span>`;
+            return;
+        }
+        const bits = [];
+        if (d.isBroadcast) bits.push('<b class="text-red-600">broadcast</b>');
+        else if (d.isMulticast) bits.push('<b class="text-red-600">multicast</b>');
+        else bits.push('unicast');
+
+        if (d.isLocal) {
+            inp.classList.add('border-amber-400', 'bg-amber-50');
+            bits.push('<b class="text-amber-600">locally administered</b>');
+        } else {
+            bits.push('universal');
+        }
+
+        const v = d.vendor;
+        const vendor = v.vendor
+            ? `<b>${v.vendor}</b>`
+            : '<span class="text-slate-400">OUI not in the built-in table</span>';
+
+        // A duplicate is the reason this field exists at all: the flapping
+        // diagnostic could only ever guess at it from IP co-location.
+        const dupes = (typeof duplicateMacs === 'function' ? duplicateMacs(state.nodes) : [])
+            .find((x) => x.hex === api.normalizeMac(raw));
+        const others = dupes ? dupes.holders.filter((h) => h.iface.id !== iface.id) : [];
+        if (others.length) inp.classList.add('border-red-400', 'bg-red-50');
+
+        out.innerHTML =
+            `<div class="text-slate-500">${vendor} · ${bits.join(' · ')}</div>` +
+            (d.isLocal && !d.isMulticast && !d.isBroadcast
+                ? '<div class="text-amber-600">Randomised or hand-set — the vendor prefix means nothing here.</div>' : '') +
+            (others.length
+                ? `<div class="text-red-600">Also on ${others.map((h) => `${h.node.name} / ${h.iface.name}`).join(', ')} — two interfaces cannot share an address on one L2 domain.</div>`
+                : '') +
+            `<div class="text-slate-400">link-local ${d.ll}</div>`;
+    }
+
+    inp.addEventListener('input', () => {
+        iface.mac = inp.value;
+        paint();
+        save();
+        renderNodeDiagnostics(node);
+    });
+    // Leaving the field is when a half-typed address becomes a stored one, so
+    // that is where it gets tidied into one canonical form.
+    inp.addEventListener('blur', () => {
+        const api = window.CarinoOUI;
+        if (api && api.normalizeMac(inp.value).length === 12) {
+            iface.mac = fmtColonSafe(inp.value);
+            inp.value = iface.mac;
+            save();
+        }
+    });
+
+    const clear = document.createElement('button');
+    clear.innerHTML = '✖';
+    clear.className = 'text-slate-400 hover:text-red-500 px-1 shrink-0 text-[10px]';
+    clear.title = 'Clear this address';
+    clear.onclick = () => {
+        iface.mac = '';
+        save(); renderSidebarData(node); renderNodeDiagnostics(node);
+    };
+
+    top.appendChild(tick); top.appendChild(label); top.appendChild(inp); top.appendChild(clear);
+    row.appendChild(top); row.appendChild(out);
+    paint();
+    return row;
+}
+
 function renderBondMode(node, bond) {
     const row = document.createElement('div');
     row.className = 'flex items-center gap-1 min-w-0 pl-3';

@@ -294,6 +294,50 @@ function nodeSeverity(node) {
     return issues.some((i) => i.level === 'bad') ? 'bad' : 'warn';
 }
 
+// MAC addresses are optional on a drawing, so silence is the right answer when
+// none are set — this check only speaks when there is something to say.
+//
+// It is the counterpart to evaluateMultiHoming: that one infers ARP flux from
+// two interfaces sharing a subnet, which is a guess. A duplicate hardware
+// address is not a guess, and it breaks the segment the same way whether or not
+// the addresses happen to share a subnet.
+function evaluateMac(node) {
+    const own = getInterfaces(node).filter(hasMac);
+    if (!own.length) return { level: 'info', text: 'No hardware addresses recorded on this node.' };
+
+    const api = window.CarinoOUI;
+
+    // An interface configured with a group address cannot source a frame from
+    // it; that is a fault on this node, before any question of duplicates.
+    const group = own.filter((i) => parseInt(normMac(i.mac).slice(0, 2), 16) & 0x01);
+    if (group.length) {
+        return { level: 'bad', text: `${group.map((i) => i.name).join(', ')} carries a broadcast or multicast address. An interface cannot source frames from a group address — that value belongs in a destination, not on a NIC.` };
+    }
+
+    const dupes = duplicateMacs(state.nodes)
+        .filter((d) => d.holders.some((h) => h.node.id === node.id));
+    if (dupes.length) {
+        const first = dupes[0];
+        const where = first.holders.map((h) => `${h.node.name} / ${h.iface.name}`).join(' and ');
+        return { level: 'bad', text: `${api ? api.fmtColon(first.hex) : first.hex} is on ${where}. Two interfaces in one broadcast domain cannot hold the same address — the switch rewrites its CAM table on every frame, which is the flapping this tool reports from the other direction. Clone, restored backup or a hand-typed address are the usual causes.` };
+    }
+
+    const local = own.filter((i) => parseInt(normMac(i.mac).slice(0, 2), 16) & 0x02);
+    if (local.length === own.length) {
+        return { level: 'warn', text: `Every address here is locally administered (${own.map((i) => i.name).join(', ')}). That is correct for a VM, a bond or a randomising client, and wrong for an inventory — the vendor prefix on these is made up.` };
+    }
+    if (local.length) {
+        return { level: 'warn', text: `${local.map((i) => i.name).join(', ')} ${local.length === 1 ? 'is' : 'are'} locally administered — randomised or hand-set, so the vendor prefix says nothing.` };
+    }
+
+    const vendors = own.map((i) => {
+        const d = api ? api.decodeMac(i.mac) : null;
+        return d && d.vendor && d.vendor.vendor ? d.vendor.vendor : null;
+    }).filter(Boolean);
+    const uniq = Array.from(new Set(vendors));
+    return { level: 'good', text: `${own.length} burned-in address${own.length === 1 ? '' : 'es'}, no duplicates on the map${uniq.length ? ` (${uniq.join(', ')})` : ''}.` };
+}
+
 function evaluateGateway(node) {
     if (isDumbDevice(node)) {
         return {
@@ -483,6 +527,7 @@ function renderNodeDiagnostics(node) {
         ['Bond', evaluateBond(node)],
         ['Ports', evaluatePorts(node)],
         ['Radio', evaluateRadio(node)],
+        ['MAC', evaluateMac(node)],
         ['Gateway', evaluateGateway(node)],
         ['DNS', evaluateDns(node)],
         ['Trace Port', evaluateTracePort(node)]

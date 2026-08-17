@@ -150,6 +150,7 @@
                                 <label class="block text-[10px] font-bold text-slate-500 uppercase">Interfaces (Port & IP)</label>
                                 <div class="flex gap-2">
                                     <button id="bondIfaceBtn" class="text-[10px] text-indigo-600 hover:underline font-bold hidden" title="Fold every wired NIC into one bond: one MAC, one address">⇄ Bond NICs</button>
+                                    <button id="addMacBtn" class="text-[10px] text-slate-500 hover:underline font-bold" title="Show the hardware address under each interface — paste one and it is decoded">+ MAC</button>
                                     <button id="addIfaceBtn" class="text-[10px] text-blue-600 hover:underline font-bold">+ Add Interface</button>
                                 </div>
                             </div>
@@ -296,6 +297,7 @@
 
     </div>
 
+    <script src="js/oui.js"></script>
     <script src="js/state.js"></script>
     <script src="js/i18n.js"></script>
     <script src="js/model.js"></script>

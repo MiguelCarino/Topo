@@ -83,6 +83,143 @@ const commonErrorsTemplate = (originX, originY) => ({
     }))
 });
 
+// ── The offline plan, drawn ──────────────────────────────────────────────
+// One template per tier of offline.carino.systems' hardware plan, so the bill
+// of materials and the diagram cannot disagree about what is being bought. The
+// node names are the line items; the tiers are Lean / Balanced / Extended.
+//
+// The shape they all share is the point of that plan: the WAN is a leaf, not
+// the root. Cut the cloud at the top of any of these and every service a user
+// actually opens is still on the near side of the router — which is why DNS on
+// each of them points at the local resolver and never at 8.8.8.8. A template
+// that pointed clients at a public resolver would be drawing the failure the
+// whole site exists to avoid.
+const OFFLINE_LEAN = {
+    nodes: [
+        { id: 'ol-wan', type: 'cloud', name: 'ISP (optional)', x: 420, y: 40, ips: [] },
+        { id: 'ol-rtr', type: 'router', name: 'RB5009 — gateway', x: 420, y: 150, nat: true,
+          gw: '203.0.113.1', dns: '10.10.0.10',
+          interfaces: [{ id: 'i1', name: 'ether1', ip: '203.0.113.2/30' },
+                       { id: 'i2', name: 'bridge', ip: '10.10.0.1/24' }] },
+        { id: 'ol-sw', type: 'switch', name: 'CRS310 2.5G access', x: 420, y: 260, portCount: 8, interfaces: [] },
+        { id: 'ol-node', type: 'server', name: 'Node A — Proxmox', x: 250, y: 380, gw: '10.10.0.1',
+          dns: '10.10.0.10', ports: '53, 80, 443, 123',
+          interfaces: [{ id: 'i1', name: 'eno1', ip: '10.10.0.10/24' }] },
+        { id: 'ol-mirror', type: 'vm', name: 'Mirror + Kiwix (VM)', x: 400, y: 490, gw: '10.10.0.1',
+          dns: '10.10.0.10', ports: '80, 8080',
+          interfaces: [{ id: 'i1', name: 'ens18', ip: '10.10.0.20/24' }] },
+        { id: 'ol-ap', type: 'ap', name: 'cAP ax', x: 590, y: 380, ips: [] },
+        { id: 'ol-pc', type: 'pc', name: 'Workstation', x: 250, y: 490, gw: '10.10.0.1', dns: '10.10.0.10',
+          interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.50/24' }] },
+        { id: 'ol-lap', type: 'pc', name: 'Laptop (Wi-Fi)', x: 640, y: 490, gw: '10.10.0.1', dns: '10.10.0.10',
+          interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.0.51/24' }] }
+    ],
+    links: [
+        { id: 'oll1', source: 'ol-wan', target: 'ol-rtr' },
+        { id: 'oll2', source: 'ol-rtr', target: 'ol-sw' },
+        { id: 'oll3', source: 'ol-sw', target: 'ol-node' },
+        { id: 'oll4', source: 'ol-sw', target: 'ol-ap' },
+        { id: 'oll5', source: 'ol-sw', target: 'ol-pc' },
+        { id: 'oll6', source: 'ol-node', target: 'ol-mirror' },
+        { id: 'oll7', source: 'ol-ap', target: 'ol-lap', medium: 'wireless' }
+    ]
+};
+
+// Balanced is the recommended tier, and the thing it buys is the second site:
+// a replica at the other end of a VPN, plus an LTE path so the tunnel survives
+// the fixed line. The 10G core appears here too, which is why bulk restores
+// stop being an overnight job.
+const OFFLINE_BALANCED = {
+    nodes: [
+        { id: 'ob-wan', type: 'cloud', name: 'ISP (optional)', x: 300, y: 40, ips: [] },
+        { id: 'ob-lte', type: 'cloud', name: 'LTE/5G failover', x: 560, y: 40, ips: [] },
+        { id: 'ob-rtr', type: 'router', name: 'RB5009 — gateway', x: 420, y: 150, nat: true,
+          gw: '203.0.113.1', dns: '10.10.0.10',
+          interfaces: [{ id: 'i1', name: 'ether1', ip: '203.0.113.2/30' },
+                       { id: 'i2', name: 'ether2', ip: '198.51.100.2/30' },
+                       { id: 'i3', name: 'bridge', ip: '10.10.0.1/24' }] },
+        { id: 'ob-core', type: 'switch', name: 'CRS310 10G core', x: 420, y: 260, portCount: 8, interfaces: [] },
+        { id: 'ob-acc', type: 'switch', name: 'CRS310 2.5G access', x: 650, y: 350, portCount: 8, interfaces: [] },
+        { id: 'ob-node', type: 'server', name: 'Node A — Proxmox', x: 200, y: 350, gw: '10.10.0.1',
+          dns: '10.10.0.10', ports: '53, 80, 443, 123',
+          interfaces: [{ id: 'i1', name: 'eno1', ip: '10.10.0.10/24' }] },
+        { id: 'ob-mirror', type: 'vm', name: 'Mirror + Kiwix (VM)', x: 200, y: 470, gw: '10.10.0.1',
+          dns: '10.10.0.10', ports: '80, 8080',
+          interfaces: [{ id: 'i1', name: 'ens18', ip: '10.10.0.20/24' }] },
+        { id: 'ob-ap', type: 'ap', name: 'cAP ax', x: 780, y: 440, ips: [] },
+        { id: 'ob-pc', type: 'pc', name: 'Workstation', x: 620, y: 470, gw: '10.10.0.1', dns: '10.10.0.10',
+          interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.50/24' }] },
+        { id: 'ob-vpn', type: 'vpn', name: 'WireGuard to site B', x: 420, y: 380, ips: [] },
+        { id: 'ob-nodeb', type: 'server', name: 'Node B — replica (site B)', x: 420, y: 500,
+          gw: '10.10.20.1', dns: '10.10.0.10', ports: '22, 8006',
+          interfaces: [{ id: 'i1', name: 'eno1', ip: '10.10.20.10/24' }] }
+    ],
+    links: [
+        { id: 'obl1', source: 'ob-wan', target: 'ob-rtr' },
+        { id: 'obl2', source: 'ob-lte', target: 'ob-rtr' },
+        { id: 'obl3', source: 'ob-rtr', target: 'ob-core' },
+        { id: 'obl4', source: 'ob-core', target: 'ob-node' },
+        { id: 'obl5', source: 'ob-core', target: 'ob-acc' },
+        { id: 'obl6', source: 'ob-acc', target: 'ob-pc' },
+        { id: 'obl7', source: 'ob-acc', target: 'ob-ap' },
+        { id: 'obl8', source: 'ob-node', target: 'ob-mirror' },
+        { id: 'obl9', source: 'ob-core', target: 'ob-vpn' },
+        { id: 'obl10', source: 'ob-vpn', target: 'ob-nodeb', medium: 'vpn' }
+    ]
+};
+
+// Extended adds the things that stop being optional once other people depend on
+// the site: a third location for the tape and cold copies, a satellite path
+// that does not share a right-of-way with the fixed line, and a GPU node so the
+// models run on the near side of the router as well.
+const OFFLINE_EXTENDED = {
+    nodes: [
+        { id: 'oe-wan', type: 'cloud', name: 'ISP (optional)', x: 240, y: 40, ips: [] },
+        { id: 'oe-lte', type: 'cloud', name: 'LTE/5G failover', x: 440, y: 40, ips: [] },
+        { id: 'oe-sat', type: 'cloud', name: 'Starlink', x: 640, y: 40, ips: [] },
+        { id: 'oe-rtr', type: 'router', name: 'RB5009 — gateway', x: 440, y: 150, nat: true,
+          gw: '203.0.113.1', dns: '10.10.0.10',
+          interfaces: [{ id: 'i1', name: 'ether1', ip: '203.0.113.2/30' },
+                       { id: 'i2', name: 'ether2', ip: '198.51.100.2/30' },
+                       { id: 'i3', name: 'ether3', ip: '192.0.2.2/30' },
+                       { id: 'i4', name: 'bridge', ip: '10.10.0.1/24' }] },
+        { id: 'oe-core', type: 'switch', name: 'CRS310 10G core', x: 440, y: 260, portCount: 8, interfaces: [] },
+        { id: 'oe-acc', type: 'switch', name: 'CRS310 2.5G access', x: 720, y: 350, portCount: 8, interfaces: [] },
+        { id: 'oe-node', type: 'server', name: 'Node A — Proxmox', x: 180, y: 350, gw: '10.10.0.1',
+          dns: '10.10.0.10', ports: '53, 80, 443, 123',
+          interfaces: [{ id: 'i1', name: 'eno1', ip: '10.10.0.10/24' }] },
+        { id: 'oe-gpu', type: 'server', name: 'GPU node — local LLM', x: 180, y: 470, gw: '10.10.0.1',
+          dns: '10.10.0.10', ports: '11434',
+          interfaces: [{ id: 'i1', name: 'eno1', ip: '10.10.0.30/24' }] },
+        { id: 'oe-lto', type: 'custom', name: 'LTO-7 drive', x: 320, y: 470, ips: [] },
+        { id: 'oe-ap', type: 'ap', name: 'cAP ax', x: 850, y: 440, ips: [] },
+        { id: 'oe-pc', type: 'pc', name: 'Workstation', x: 690, y: 470, gw: '10.10.0.1', dns: '10.10.0.10',
+          interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.50/24' }] },
+        { id: 'oe-vpn', type: 'vpn', name: 'WireGuard mesh', x: 440, y: 380, ips: [] },
+        { id: 'oe-nodeb', type: 'server', name: 'Node B — replica (site B)', x: 380, y: 520,
+          gw: '10.10.20.1', dns: '10.10.0.10', ports: '22, 8006',
+          interfaces: [{ id: 'i1', name: 'eno1', ip: '10.10.20.10/24' }] },
+        { id: 'oe-nodec', type: 'server', name: 'Site C — cold copies', x: 560, y: 520,
+          gw: '10.10.30.1', dns: '10.10.0.10', ports: '22',
+          interfaces: [{ id: 'i1', name: 'eno1', ip: '10.10.30.10/24' }] }
+    ],
+    links: [
+        { id: 'oel1', source: 'oe-wan', target: 'oe-rtr' },
+        { id: 'oel2', source: 'oe-lte', target: 'oe-rtr' },
+        { id: 'oel3', source: 'oe-sat', target: 'oe-rtr' },
+        { id: 'oel4', source: 'oe-rtr', target: 'oe-core' },
+        { id: 'oel5', source: 'oe-core', target: 'oe-node' },
+        { id: 'oel6', source: 'oe-core', target: 'oe-gpu' },
+        { id: 'oel7', source: 'oe-core', target: 'oe-acc' },
+        { id: 'oel8', source: 'oe-acc', target: 'oe-pc' },
+        { id: 'oel9', source: 'oe-acc', target: 'oe-ap' },
+        { id: 'oel10', source: 'oe-node', target: 'oe-lto' },
+        { id: 'oel11', source: 'oe-core', target: 'oe-vpn' },
+        { id: 'oel12', source: 'oe-vpn', target: 'oe-nodeb', medium: 'vpn' },
+        { id: 'oel13', source: 'oe-vpn', target: 'oe-nodec', medium: 'vpn' }
+    ]
+};
+
 const templatesData = {
     house: {
         nodes: [
@@ -529,7 +666,10 @@ const templatesData = {
             { id: 'ml20', source: 'm_scif', target: 'm_ssrv', sourceIface: 'p4' }
         ]
     },
-    errors: commonErrorsTemplate(620, 380)
+    errors: commonErrorsTemplate(620, 380),
+    offlineLean: OFFLINE_LEAN,
+    offlineBalanced: OFFLINE_BALANCED,
+    offlineExtended: OFFLINE_EXTENDED
 };
 
 // Menu copy for the library tabs. Order here is the order shown; the key must
@@ -550,7 +690,10 @@ const TEMPLATE_META = [
     { key: 'studio',     icon: '🎬', name: 'Media Studio',    blurb: '10G edit bays and a passthrough render node' },
     { key: 'callcenter', icon: '📞', name: 'Call Center',     blurb: 'PBX, agent phones and workstations' },
     { key: 'showcase',   icon: '🧩', name: 'Full Showcase',   blurb: 'Every node type, medium and feature at once' },
-    { key: 'errors',     icon: '🚑', name: 'Common Errors',   blurb: 'Broken on purpose — six faults to find' }
+    { key: 'errors',     icon: '🚑', name: 'Common Errors',   blurb: 'Broken on purpose — six faults to find' },
+    { key: 'offlineLean',     icon: '🔌', name: 'Offline · Lean',     blurb: 'One node, one site — the ~$5.2k tier' },
+    { key: 'offlineBalanced', icon: '🔋', name: 'Offline · Balanced', blurb: 'Second site over VPN, LTE failover — the recommended tier' },
+    { key: 'offlineExtended', icon: '🛰️', name: 'Offline · Extended', blurb: 'Third site, satellite path and a GPU node' }
 ];
 
 const SNIPPET_META = [
