@@ -44,6 +44,8 @@
             <div class="cs-menu">
                 <button id="exportMenuBtn" class="cs-btn" aria-haspopup="true" aria-expanded="false" title="Share, export & import builds">⤓ Export <span class="cs-caret">▾</span></button>
                 <div id="exportMenu" class="cs-menu-panel hidden" role="menu" aria-labelledby="exportMenuBtn">
+                    <button id="reportBtn" class="cs-menu-item" role="menuitem">📋 Site report <span class="cs-menu-note">printable</span></button>
+                    <div class="cs-menu-div"></div>
                     <button id="copyUrlBtn" class="cs-menu-item" role="menuitem">🔗 Copy link <span class="cs-menu-note">short URL</span></button>
                     <div class="cs-menu-div"></div>
                     <button id="exportPngBtn" class="cs-menu-item" role="menuitem">🖼️ PNG image</button>
@@ -285,6 +287,21 @@
                 </div>
             </div>
 
+            <!-- Site report: who the survey was for, before the document is
+                 written. The fields are rendered from REPORT_FIELDS in
+                 js/report.js so the form and the document cannot disagree. -->
+            <div id="reportDialog" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
+                <div class="rounded-lg shadow-2xl p-5 w-full max-w-md max-h-full overflow-y-auto" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
+                    <h4 id="reportDialogTitle" data-i18n class="text-[11px] font-bold uppercase tracking-wider mb-1" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">Site report</h4>
+                    <p data-i18n class="text-[11px] mb-3" style="color: var(--cs-text-muted)">The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.</p>
+                    <div id="reportFields" class="flex flex-col gap-2.5 mb-4"></div>
+                    <div class="flex gap-2 justify-end">
+                        <button id="reportCancelBtn" data-i18n class="cs-btn">Cancel</button>
+                        <button id="reportBuildBtn" data-i18n class="cs-btn">📋 Open report</button>
+                    </div>
+                </div>
+            </div>
+
             <div id="shortcutHelp" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
                 <div class="rounded-lg shadow-2xl p-5 w-full max-w-sm" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
                     <div class="flex justify-between items-center mb-3">
@@ -304,6 +321,7 @@
     <script src="js/data.js"></script>
     <script src="js/diagnostics.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/report.js"></script>
     <script src="js/app.js"></script>
 <script src="carino-navbar.js" data-app="Topo" data-repo="Topo" defer></script>
 <script src="carino-lang.js" defer></script>

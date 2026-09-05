@@ -554,7 +554,7 @@ function getPortStatus(node, portQuery) {
         return {
             ok: true,
             level: 'info',
-            text: 'No trace port requested.'
+            text: t('No trace port requested.')
         };
     }
 
@@ -564,7 +564,7 @@ function getPortStatus(node, portQuery) {
         return {
             ok: false,
             level: 'bad',
-            text: `Invalid trace port: ${query}`
+            text: t('Invalid trace port: {port}', { port: query })
         };
     }
 
@@ -572,7 +572,7 @@ function getPortStatus(node, portQuery) {
         return {
             ok: true,
             level: 'info',
-            text: 'Transit device; service port is not evaluated as an endpoint.'
+            text: t('Transit device; service port is not evaluated as an endpoint.')
         };
     }
 
@@ -580,7 +580,7 @@ function getPortStatus(node, portQuery) {
         return {
             ok: true,
             level: 'warn',
-            text: 'No allowed ports defined; treating as open.'
+            text: t('No allowed ports defined; treating as open.')
         };
     }
 
@@ -590,7 +590,7 @@ function getPortStatus(node, portQuery) {
         return {
             ok: false,
             level: 'bad',
-            text: `Allowed Ports field is invalid: ${node.ports}`
+            text: t('Allowed Ports field is invalid: {ports}', { ports: node.ports })
         };
     }
 
@@ -601,8 +601,8 @@ function getPortStatus(node, portQuery) {
     return {
         ok: match,
         level: match ? 'good' : 'bad',
-        text: match
-            ? `Port ${query} is allowed by this node.`
-            : `Port ${query} is not listed in this node's Allowed Ports.`
+        text: t(match
+            ? 'Port {port} is allowed by this node.'
+            : "Port {port} is not listed in this node's Allowed Ports.", { port: query })
     };
 }

@@ -10,6 +10,11 @@
 # css/ and js/ by relative path, so running it from /tmp would silently load a
 # page with no app on it and every assertion would fail for the wrong reason.
 #
+# ?lang=en pins the locale for every suite. The diagnostics are translated now,
+# so a machine whose browser reports es would otherwise fail every assertion that
+# matches on an English finding — and the URL parameter beats saved settings, so
+# a suite that switches locale cannot leak into the next one either.
+#
 # Served over HTTP, not opened as file://, because file:// treats every external
 # script and stylesheet as a foreign origin. That costs us the two things a test
 # run most needs: real messages (errors collapse to "Script error." with no file
@@ -68,7 +73,7 @@ open(runfile, 'w').write(html.replace('</body>', f'<script src="{suite}"></scrip
 PY
 
     dom=$("$CHROME" --headless --disable-gpu --no-sandbox \
-          --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:$PORT/$RUNFILE" 2>/dev/null)
+          --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:$PORT/$RUNFILE?lang=en" 2>/dev/null)
 
     results=$(printf '%s' "$dom" | python3 -c '
 import sys, re, html

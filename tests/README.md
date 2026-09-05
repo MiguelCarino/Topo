@@ -58,6 +58,8 @@ length a pixel under Chromium, and the strict assertion caught it.
 | `history` | Undo/redo on the shared serializer: the timeline rides `save()`, identical saves add no step, a fresh edit forks the future, Ctrl+Z acts on the canvas |
 | `trace` | The trace port-filter toggle: `activeTracePort()` gates reachability pruning, a suspended port is kept not cleared, the three diagnostic messages |
 | `compat` | Cross-engine safeguards: image export named for the MIME the canvas produced (old-WebKit WebP→PNG), storage writes that survive a throwing `setItem`, every SVG label carries an explicit font-family |
+| `i18n` | Translation coverage: every locale carries every diagnostic and report message, placeholders survive translation, every evaluator and the rendered report come out in the chosen language, and English comes back afterwards |
+| `report` | The site report: the findings split says exactly what the alert panel says, severity ordering, the model against the canvas, customer-supplied text escaped, and a header that rides the document without touching untouched diagrams |
 | `sharing` | Transmitting a build: the compressed `~` share fragment round-trips and is far shorter, legacy links still decode, unicode survives, `load()` restores both formats, and the portable `.nettopo` file exports/imports intact |
 
 ## Writing one

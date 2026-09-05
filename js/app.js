@@ -280,9 +280,14 @@ function serializeAnnotation(a) {
     return { id: a.id, x: a.x, y: a.y, text: a.text, style: a.style === 'note' ? 'note' : undefined, size: a.size && a.size !== 12 ? a.size : undefined, targets: a.targets && a.targets.length ? a.targets : undefined };
 }
 function serializeDoc() {
-    // annotations rides the same `|| undefined` trick as netcfg: documents that
-    // never place a text note stay byte-identical to their pre-feature form.
-    return { nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined };
+    // annotations and report ride the same `|| undefined` trick as netcfg:
+    // documents that never place a text note, and diagrams whose report header
+    // was never filled in, stay byte-identical to their pre-feature form.
+    //
+    // The report header travels with the document rather than living in
+    // settings, so a shared link is the whole engagement — the survey and who it
+    // was for — and not just the picture.
+    return { nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report) };
 }
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
@@ -496,6 +501,10 @@ function loadTemplateState(tpl) {
     state.nodes = cloneData(tpl.nodes).map(normalizeLoadedNode);
     state.links = cloneData(tpl.links).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
     state.annotations = cloneData(tpl.annotations || []).map(normalizeLoadedAnnotation);
+    // Left exactly as stored. normalizeReportMeta() defaults the date to today,
+    // so normalising here would give every untouched diagram a report header to
+    // serialize and break the byte-identical promise above.
+    state.report = tpl.report && typeof tpl.report === 'object' ? cloneData(tpl.report) : null;
 }
 
 // Async so it can decompress a shared "~" link, but the legacy path evaluates no
@@ -661,7 +670,7 @@ const SHORTCUTS = [
     { keys: ['Del'], label: 'Delete the selection', test: (e) => e.key === 'Delete' || e.key === 'Backspace',
       run: () => deleteSelected() },
     { keys: ['Esc'], label: 'Cancel link mode / deselect', test: (e) => e.key === 'Escape',
-      run: () => { toggleShortcutHelp(false); closeSetupWizard(); closeModePicker(); state.linkSourceId = null; select(null, null); renderCanvasOnly(); } },
+      run: () => { toggleShortcutHelp(false); closeSetupWizard(); closeModePicker(); closeReportDialog(); state.linkSourceId = null; select(null, null); renderCanvasOnly(); } },
     { keys: ['?'], label: 'Show this list', test: (e) => e.key === '?', run: () => toggleShortcutHelp() }
 ];
 
@@ -811,7 +820,15 @@ function applyLocale(lang) {
     document.getElementById('exportMenuBtn').innerHTML = `⤓ ${t('Export')} <span class="cs-caret">▾</span>`;
     document.getElementById('copyUrlBtn').innerHTML = `🔗 ${t('Copy link')} <span class="cs-menu-note">${t('short URL')}</span>`;
     document.getElementById('exportPngBtn').textContent = `🖼️ ${t('PNG image')}`;
+    document.getElementById('reportBtn').innerHTML = `📋 ${t('Site report')} <span class="cs-menu-note">${t('printable')}</span>`;
+    // Only matters while the dialog is open — its fields are built at open time.
+    if (!document.getElementById('reportDialog').classList.contains('hidden')) renderReportFields();
     applyProfile();
+    // The findings speak the locale now, and nothing above regenerates them:
+    // renderCanvasOnly() ends in validateTopology(), which redraws the alert
+    // list, and the selection panel needs its own nudge. Skipped on an empty
+    // canvas, which is the state applyLocale() sees during boot.
+    if (state.nodes.length) { renderCanvasOnly(); refreshSelectedNodeDiagnostics(); }
 }
 // ---- Mode picker ----
 // The one place modes are switched — there is deliberately no header toggle.
@@ -1197,8 +1214,12 @@ function importJsonFile(file) {
     reader.readAsText(file);
 }
 
-function handleExport(format) {
-    if (!state.nodes.length) { alert('Nothing to export. Add at least one node first.'); return; }
+// Rasterise the canvas to a data URL, cropped to the drawing plus padding.
+// Split from handleExport so the site report can embed the same picture the
+// export menu saves — one code path, so the diagram in the report cannot drift
+// from the diagram in the PNG. Resolves to null when there is nothing to draw.
+function captureCanvasImage(format) {
+    if (!state.nodes.length) return Promise.resolve(null);
     const PADDING = 90, NODE_HALF_SIZE = 24, LABEL_EXTRA_BOTTOM = 42, SCALE = 4;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
@@ -1230,23 +1251,33 @@ function handleExport(format) {
     if (!serialized.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)) serialized = serialized.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
 
     const url = URL.createObjectURL(new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' })), img = new Image();
-    img.onload = () => {
-        const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
-        canvas.width = exportWidth * SCALE; canvas.height = exportHeight * SCALE;
-        ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#f8fafc'; ctx.scale(SCALE, SCALE);
-        for (let x = ((-minX) % GRID_SNAP + GRID_SNAP) % GRID_SNAP; x < exportWidth; x += GRID_SNAP) {
-            for (let y = ((-minY) % GRID_SNAP + GRID_SNAP) % GRID_SNAP; y < exportHeight; y += GRID_SNAP) {
-                ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2); ctx.fill();
+
+    return new Promise((resolve, reject) => {
+        img.onload = () => {
+            const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
+            canvas.width = exportWidth * SCALE; canvas.height = exportHeight * SCALE;
+            ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#f8fafc'; ctx.scale(SCALE, SCALE);
+            for (let x = ((-minX) % GRID_SNAP + GRID_SNAP) % GRID_SNAP; x < exportWidth; x += GRID_SNAP) {
+                for (let y = ((-minY) % GRID_SNAP + GRID_SNAP) % GRID_SNAP; y < exportHeight; y += GRID_SNAP) {
+                    ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2); ctx.fill();
+                }
             }
-        }
-        ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0, exportWidth * SCALE, exportHeight * SCALE);
-        const out = encodeCanvas(canvas, format);
+            ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0, exportWidth * SCALE, exportHeight * SCALE);
+            const out = encodeCanvas(canvas, format);
+            URL.revokeObjectURL(url);
+            resolve({ url: out.url, ext: out.ext, width: canvas.width, height: canvas.height });
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not rasterise the canvas.')); };
+        img.src = url;
+    });
+}
+
+function handleExport(format) {
+    if (!state.nodes.length) { alert('Nothing to export. Add at least one node first.'); return; }
+    captureCanvasImage(format).then((out) => {
         const a = document.createElement('a'); a.href = out.url; a.download = `network-diagram.${out.ext}`; a.click();
-        URL.revokeObjectURL(url);
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); alert('Could not export image.'); };
-    img.src = url;
+    }).catch(() => alert('Could not export image.'));
 }
 
 document.getElementById('canvasFilter').addEventListener('input', (event) => {
@@ -1271,6 +1302,28 @@ document.getElementById('exportPngBtn').onclick = () => handleExport('png');
 document.getElementById('exportWebpBtn').onclick = () => handleExport('webp');
 document.getElementById('exportJsonBtn').onclick = exportJsonFile;
 document.getElementById('importFileBtn').onclick = () => document.getElementById('importFileInput').click();
+
+// ---- Site report ----
+// The one export that is a document rather than a copy of the drawing, so it
+// asks who it is for first. js/report.js owns the fields, the model and the
+// layout; this is only the wiring.
+document.getElementById('reportBtn').onclick = () => {
+    if (!state.nodes.length) { alert('Nothing to report on yet. Add at least one device first.'); return; }
+    openReportDialog();
+};
+document.getElementById('reportCancelBtn').onclick = () => closeReportDialog();
+document.getElementById('reportDialog').onclick = (e) => {
+    if (e.target.id === 'reportDialog') closeReportDialog(); // click the backdrop to dismiss
+};
+document.getElementById('reportBuildBtn').onclick = async () => {
+    const btn = document.getElementById('reportBuildBtn');
+    commitReportMeta();
+    closeReportDialog();
+    btn.disabled = true;
+    try { await generateSiteReport(); }
+    catch (err) { console.warn('Could not build the report:', err); alert('Could not build the report.'); }
+    finally { btn.disabled = false; }
+};
 
 // Export/share/import dropdown: open on the trigger, close on choosing an item,
 // clicking away, or Escape. Items keep their own handlers (wired just above); the

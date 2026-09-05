@@ -64,14 +64,14 @@ function evaluateInterfaces(node) {
     if (isDumbDevice(node)) {
         return {
             level: 'info',
-            text: 'No interfaces assigned. This node is acting as an L2 backplane.'
+            text: t('No interfaces assigned. This node is acting as an L2 backplane.')
         };
     }
 
     if (!node.interfaces || !node.interfaces.length) {
         return {
             level: 'warn',
-            text: 'No interfaces configured.'
+            text: t('No interfaces configured.')
         };
     }
 
@@ -80,7 +80,7 @@ function evaluateInterfaces(node) {
     if (invalid.length) {
         return {
             level: 'bad',
-            text: `Invalid CIDR on: ${invalid.map((i) => i.name || 'interface').join(', ')}`
+            text: t('Invalid CIDR on: {names}', { names: invalid.map((i) => i.name || 'interface').join(', ') })
         };
     }
 
@@ -89,13 +89,13 @@ function evaluateInterfaces(node) {
     if (!valid.length) {
         return {
             level: 'warn',
-            text: 'Interfaces exist, but none has a valid CIDR IP.'
+            text: t('Interfaces exist, but none has a valid CIDR IP.')
         };
     }
 
     return {
         level: 'good',
-        text: `${valid.length} valid interface${valid.length === 1 ? '' : 's'} configured.`
+        text: t(valid.length === 1 ? '{n} valid interface configured.' : '{n} valid interfaces configured.', { n: valid.length })
     };
 }
 
@@ -105,7 +105,7 @@ function evaluateInterfaces(node) {
 // breaks outbound ARP while established TCP sessions keep working.
 function evaluateMultiHoming(node) {
     if (isDumbDevice(node)) {
-        return { level: 'info', text: 'L2 backplane nodes do not hold IPs to duplicate.' };
+        return { level: 'info', text: t('L2 backplane nodes do not hold IPs to duplicate.') };
     }
 
     const addressed = getInterfaces(node)
@@ -120,7 +120,7 @@ function evaluateMultiHoming(node) {
 
     const duplicated = [...byNet.entries()].filter(([, list]) => list.length > 1);
     if (!duplicated.length) {
-        return { level: 'good', text: 'Each interface sits on its own subnet.' };
+        return { level: 'good', text: t('Each interface sits on its own subnet.') };
     }
 
     for (const [networkStr, list] of duplicated) {
@@ -136,7 +136,7 @@ function evaluateMultiHoming(node) {
         if (sameSegment) {
             return {
                 level: 'bad',
-                text: `MAC flapping: ${names} both sit on ${networkStr} in the same broadcast domain. The switch sees this MAC on two ports and rewrites its CAM table, so new outbound ARP gets dropped while existing TCP sessions survive. Fix: unplug one, set arp_ignore=1 / arp_announce=2, or bond the NICs.`
+                text: t('MAC flapping: {names} both sit on {net} in the same broadcast domain. The switch sees this MAC on two ports and rewrites its CAM table, so new outbound ARP gets dropped while existing TCP sessions survive. Fix: unplug one, set arp_ignore=1 / arp_announce=2, or bond the NICs.', { names, net: networkStr })
             };
         }
     }
@@ -144,7 +144,7 @@ function evaluateMultiHoming(node) {
     const [networkStr, list] = duplicated[0];
     return {
         level: 'warn',
-        text: `ARP flux: ${list.map((i) => i.name).join(' + ')} share subnet ${networkStr}. The kernel answers ARP for these IPs on both NICs (weak host model). They reach different broadcast domains, so switches will not flap — but set arp_ignore=1 / arp_announce=2 to bind ARP to its own interface.`
+        text: t('ARP flux: {names} share subnet {net}. The kernel answers ARP for these IPs on both NICs (weak host model). They reach different broadcast domains, so switches will not flap — but set arp_ignore=1 / arp_announce=2 to bind ARP to its own interface.', { names: list.map((i) => i.name).join(' + '), net: networkStr })
     };
 }
 
@@ -152,12 +152,12 @@ function evaluateMultiHoming(node) {
 function evaluatePorts(node) {
     const adjacent = linksAtNode(node.id);
     if (!adjacent.length) {
-        return { level: 'info', text: 'No links attached.' };
+        return { level: 'info', text: t('No links attached.') };
     }
 
     const unbound = adjacent.filter((l) => !ifaceIdOn(l, node.id));
     if (unbound.length) {
-        return { level: 'warn', text: `${unbound.length} link(s) are not bound to an interface. Select the link and pick a port.` };
+        return { level: 'warn', text: t('{n} link(s) are not bound to an interface. Select the link and pick a port.', { n: unbound.length }) };
     }
 
     // A switch port or a host NIC is a physical socket that takes one cable. A
@@ -175,13 +175,13 @@ function evaluatePorts(node) {
     const doubled = [...usage.entries()].filter(([, count]) => count > 1);
     if (doubled.length) {
         const names = doubled.map(([id]) => ifaceLabel(node, id)).join(', ');
-        return { level: 'bad', text: `Two cables on one port: ${names}. A physical port carries one link.` };
+        return { level: 'bad', text: t('Two cables on one port: {names}. A physical port carries one link.', { names }) };
     }
 
     const known = new Set(getInterfaces(node).map((i) => i.id));
     const orphaned = adjacent.filter((l) => !known.has(ifaceIdOn(l, node.id)));
     if (orphaned.length) {
-        return { level: 'bad', text: `${orphaned.length} link(s) land on interfaces this node no longer has. Rebind them or raise the port count.` };
+        return { level: 'bad', text: t('{n} link(s) land on interfaces this node no longer has. Rebind them or raise the port count.', { n: orphaned.length }) };
     }
 
     if (hasPortGrid(node)) {
@@ -190,14 +190,16 @@ function evaluatePorts(node) {
         const total = portCountOf(node);
         const used = new Set(adjacent.map((l) => ifaceIdOn(l, node.id)).filter((id) => /^p\d+$/.test(id))).size;
         if (used > total) {
-            return { level: 'bad', text: `${used} cables on a ${total}-port ${node.type}. Raise the port count or add a switch.` };
+            return { level: 'bad', text: t('{used} cables on a {total}-port {type}. Raise the port count or add a switch.', { used, total, type: node.type }) };
         }
         const clients = adjacent.filter((l) => ifaceIsWireless(ifaceOn(node, ifaceIdOn(l, node.id)))).length;
-        const radioNote = clients ? `, ${clients} wireless client${clients === 1 ? '' : 's'}` : '';
-        return { level: 'good', text: `${used} of ${total} ports in use${radioNote}.` };
+        const key = !clients ? '{used} of {total} ports in use.'
+            : clients === 1 ? '{used} of {total} ports in use, {n} wireless client.'
+                : '{used} of {total} ports in use, {n} wireless clients.';
+        return { level: 'good', text: t(key, { used, total, n: clients }) };
     }
 
-    return { level: 'good', text: `${adjacent.length} link(s) on distinct interfaces.` };
+    return { level: 'good', text: t('{n} link(s) on distinct interfaces.', { n: adjacent.length }) };
 }
 
 // Radio and copper are not interchangeable: a Wi-Fi association cannot originate
@@ -213,16 +215,19 @@ function evaluateRadio(node) {
         const name = peer?.name || 'peer';
         const wireless = ifaceIsWireless(iface);
 
-        if (medium === 'wireless' && !wireless) problems.push(`${iface.name} is wired but carries the Wi-Fi link to ${name}`);
-        else if (medium !== 'wireless' && wireless) problems.push(`${iface.name} is a radio but carries the ${medium} cable to ${name}`);
+        if (medium === 'wireless' && !wireless) problems.push(t('{iface} is wired but carries the Wi-Fi link to {peer}', { iface: iface.name, peer: name }));
+        else if (medium !== 'wireless' && wireless) problems.push(t('{iface} is a radio but carries the {medium} cable to {peer}', { iface: iface.name, medium, peer: name }));
     });
 
     if (problems.length) {
-        return { level: 'bad', text: `${problems.join('; ')}. Wi-Fi needs a wireless NIC (wlan0, wlp1s0); cables need an Ethernet port.` };
+        return { level: 'bad', text: t('{problems}. Wi-Fi needs a wireless NIC (wlan0, wlp1s0); cables need an Ethernet port.', { problems: problems.join('; ') }) };
     }
     const radios = getInterfaces(node).filter(ifaceIsWireless).length;
-    if (!linksAtNode(node.id).length) return { level: 'info', text: 'No links attached.' };
-    return { level: 'good', text: radios ? `Links match their interface type (${radios} radio${radios === 1 ? '' : 's'}).` : 'Links match their interface type.' };
+    if (!linksAtNode(node.id).length) return { level: 'info', text: t('No links attached.') };
+    const key = !radios ? 'Links match their interface type.'
+        : radios === 1 ? 'Links match their interface type ({n} radio).'
+            : 'Links match their interface type ({n} radios).';
+    return { level: 'good', text: t(key, { n: radios }) };
 }
 
 // Bonds are the remedy evaluateMultiHoming prescribes, so a half-built one has
@@ -231,28 +236,31 @@ function evaluateRadio(node) {
 // to cure.
 function evaluateBond(node) {
     const bonds = getInterfaces(node).filter(isBond);
-    if (!bonds.length) return { level: 'info', text: 'No bonded interfaces.' };
+    if (!bonds.length) return { level: 'info', text: t('No bonded interfaces.') };
 
     for (const bond of bonds) {
         const ids = bond.bond.members || [];
         const dangling = ids.filter((id) => !ifaceOn(node, id));
         if (dangling.length) {
-            return { level: 'bad', text: `${bond.name} lists ${dangling.length} member interface${dangling.length === 1 ? '' : 's'} that no longer exist. Remove them from the bond, or recreate the NICs.` };
+            return { level: 'bad', text: t(dangling.length === 1
+                ? '{bond} lists {n} member interface that no longer exists. Remove it from the bond, or recreate the NIC.'
+                : '{bond} lists {n} member interfaces that no longer exist. Remove them from the bond, or recreate the NICs.',
+                { bond: bond.name, n: dangling.length }) };
         }
 
         const members = bondMembers(node, bond);
         if (members.length < 2) {
-            return { level: 'warn', text: `${bond.name} has ${members.length} member. A bond of one is a NIC with extra steps — it buys no redundancy and no bandwidth. Add a second member or unbond it.` };
+            return { level: 'warn', text: t('{bond} has {n} member. A bond of one is a NIC with extra steps — it buys no redundancy and no bandwidth. Add a second member or unbond it.', { bond: bond.name, n: members.length }) };
         }
 
         const addressed = members.filter((m) => parseValidCIDR(m.ip));
         if (addressed.length) {
-            return { level: 'bad', text: `${addressed.map((m) => m.name).join(', ')} still hold an address inside ${bond.name}. Members are L2 only — the address belongs on the bond. Leave it on the members and the kernel answers ARP on each of them, which is the flux the bond was supposed to fix.` };
+            return { level: 'bad', text: t('{names} still hold an address inside {bond}. Members are L2 only — the address belongs on the bond. Leave it on the members and the kernel answers ARP on each of them, which is the flux the bond was supposed to fix.', { names: addressed.map((m) => m.name).join(', '), bond: bond.name }) };
         }
 
         const radios = members.filter(ifaceIsWireless);
         if (radios.length) {
-            return { level: 'bad', text: `${radios.map((m) => m.name).join(', ')} is a radio. A Wi-Fi association cannot be a bond member — the two ends negotiate a single association, not a trunk.` };
+            return { level: 'bad', text: t('{names} is a radio. A Wi-Fi association cannot be a bond member — the two ends negotiate a single association, not a trunk.', { names: radios.map((m) => m.name).join(', ') }) };
         }
 
         if (bond.bond.mode === '802.3ad') {
@@ -260,14 +268,14 @@ function evaluateBond(node) {
                 .map((m) => { const link = linkOnIface(node.id, m.id); return link ? segmentKeyOf(link, node.id) : null; })
                 .filter(Boolean);
             if (segments.length > 1 && new Set(segments).size > 1) {
-                return { level: 'bad', text: `LACP: ${bond.name} members land in different broadcast domains. 802.3ad negotiates a LAG with one switch — split across two independent switches, the peers never bring the aggregate up. Use active-backup, or stack/MLAG the switches so they present as one.` };
+                return { level: 'bad', text: t('LACP: {bond} members land in different broadcast domains. 802.3ad negotiates a LAG with one switch — split across two independent switches, the peers never bring the aggregate up. Use active-backup, or stack/MLAG the switches so they present as one.', { bond: bond.name }) };
             }
         }
     }
 
     const bond = bonds[0];
     const count = (bond.bond.members || []).length;
-    return { level: 'good', text: `${bond.name} bonds ${count} NICs (${BOND_MODES[bond.bond.mode] || bond.bond.mode}). One MAC, one address — no ARP flux to answer for.` };
+    return { level: 'good', text: t('{bond} bonds {n} NICs ({mode}). One MAC, one address — no ARP flux to answer for.', { bond: bond.name, n: count, mode: BOND_MODES[bond.bond.mode] || bond.bond.mode }) };
 }
 
 // Interface-level problems only — this is what the canvas badge reflects, so it
@@ -278,10 +286,10 @@ function interfaceIssues(node) {
 
     const invalid = (node.interfaces || []).filter((iface) => iface.ip && !parseValidCIDR(iface.ip));
     if (invalid.length) {
-        issues.push({ label: 'Interfaces', level: 'bad', text: `Invalid CIDR on: ${invalid.map((i) => i.name || 'interface').join(', ')}` });
+        issues.push({ label: t('Interfaces'), level: 'bad', text: t('Invalid CIDR on: {names}', { names: invalid.map((i) => i.name || 'interface').join(', ') }) });
     }
 
-    [['Multi-Homing', evaluateMultiHoming(node)], ['Bond', evaluateBond(node)], ['Ports', evaluatePorts(node)], ['Radio', evaluateRadio(node)]].forEach(([label, result]) => {
+    [[t('Multi-Homing'), evaluateMultiHoming(node)], [t('Bond'), evaluateBond(node)], [t('Ports'), evaluatePorts(node)], [t('Radio'), evaluateRadio(node)]].forEach(([label, result]) => {
         if (result.level === 'bad' || result.level === 'warn') issues.push({ label, ...result });
     });
 
@@ -303,7 +311,7 @@ function nodeSeverity(node) {
 // the addresses happen to share a subnet.
 function evaluateMac(node) {
     const own = getInterfaces(node).filter(hasMac);
-    if (!own.length) return { level: 'info', text: 'No hardware addresses recorded on this node.' };
+    if (!own.length) return { level: 'info', text: t('No hardware addresses recorded on this node.') };
 
     const api = window.CarinoOUI;
 
@@ -311,7 +319,7 @@ function evaluateMac(node) {
     // it; that is a fault on this node, before any question of duplicates.
     const group = own.filter((i) => parseInt(normMac(i.mac).slice(0, 2), 16) & 0x01);
     if (group.length) {
-        return { level: 'bad', text: `${group.map((i) => i.name).join(', ')} carries a broadcast or multicast address. An interface cannot source frames from a group address — that value belongs in a destination, not on a NIC.` };
+        return { level: 'bad', text: t('{names} carries a broadcast or multicast address. An interface cannot source frames from a group address — that value belongs in a destination, not on a NIC.', { names: group.map((i) => i.name).join(', ') }) };
     }
 
     const dupes = duplicateMacs(state.nodes)
@@ -319,15 +327,18 @@ function evaluateMac(node) {
     if (dupes.length) {
         const first = dupes[0];
         const where = first.holders.map((h) => `${h.node.name} / ${h.iface.name}`).join(' and ');
-        return { level: 'bad', text: `${api ? api.fmtColon(first.hex) : first.hex} is on ${where}. Two interfaces in one broadcast domain cannot hold the same address — the switch rewrites its CAM table on every frame, which is the flapping this tool reports from the other direction. Clone, restored backup or a hand-typed address are the usual causes.` };
+        return { level: 'bad', text: t('{mac} is on {where}. Two interfaces in one broadcast domain cannot hold the same address — the switch rewrites its CAM table on every frame, which is the flapping this tool reports from the other direction. Clone, restored backup or a hand-typed address are the usual causes.', { mac: api ? api.fmtColon(first.hex) : first.hex, where }) };
     }
 
     const local = own.filter((i) => parseInt(normMac(i.mac).slice(0, 2), 16) & 0x02);
     if (local.length === own.length) {
-        return { level: 'warn', text: `Every address here is locally administered (${own.map((i) => i.name).join(', ')}). That is correct for a VM, a bond or a randomising client, and wrong for an inventory — the vendor prefix on these is made up.` };
+        return { level: 'warn', text: t('Every address here is locally administered ({names}). That is correct for a VM, a bond or a randomising client, and wrong for an inventory — the vendor prefix on these is made up.', { names: own.map((i) => i.name).join(', ') }) };
     }
     if (local.length) {
-        return { level: 'warn', text: `${local.map((i) => i.name).join(', ')} ${local.length === 1 ? 'is' : 'are'} locally administered — randomised or hand-set, so the vendor prefix says nothing.` };
+        return { level: 'warn', text: t(local.length === 1
+            ? '{names} is locally administered — randomised or hand-set, so the vendor prefix says nothing.'
+            : '{names} are locally administered — randomised or hand-set, so the vendor prefix says nothing.',
+            { names: local.map((i) => i.name).join(', ') }) };
     }
 
     const vendors = own.map((i) => {
@@ -335,21 +346,24 @@ function evaluateMac(node) {
         return d && d.vendor && d.vendor.vendor ? d.vendor.vendor : null;
     }).filter(Boolean);
     const uniq = Array.from(new Set(vendors));
-    return { level: 'good', text: `${own.length} burned-in address${own.length === 1 ? '' : 'es'}, no duplicates on the map${uniq.length ? ` (${uniq.join(', ')})` : ''}.` };
+    const key = uniq.length
+        ? (own.length === 1 ? '{n} burned-in address, no duplicates on the map ({vendors}).' : '{n} burned-in addresses, no duplicates on the map ({vendors}).')
+        : (own.length === 1 ? '{n} burned-in address, no duplicates on the map.' : '{n} burned-in addresses, no duplicates on the map.');
+    return { level: 'good', text: t(key, { n: own.length, vendors: uniq.join(', ') }) };
 }
 
 function evaluateGateway(node) {
     if (isDumbDevice(node)) {
         return {
             level: 'info',
-            text: 'L2 backplane nodes do not require a gateway.'
+            text: t('L2 backplane nodes do not require a gateway.')
         };
     }
 
     if (!node.gw || !node.gw.trim()) {
         return {
             level: 'warn',
-            text: 'No gateway configured.'
+            text: t('No gateway configured.')
         };
     }
 
@@ -360,9 +374,9 @@ function evaluateGateway(node) {
 
         return {
             level: cloudOk ? 'good' : 'info',
-            text: cloudOk
+            text: t(cloudOk
                 ? 'Default route placeholder configured; cloud/internet node is reachable.'
-                : 'Default route placeholder configured.'
+                : 'Default route placeholder configured.')
         };
     }
 
@@ -371,7 +385,7 @@ function evaluateGateway(node) {
     } catch (e) {
         return {
             level: 'bad',
-            text: `Invalid gateway IP: ${gw}`
+            text: t('Invalid gateway IP: {gw}', { gw })
         };
     }
 
@@ -380,7 +394,7 @@ function evaluateGateway(node) {
     if (!gatewayNode) {
         return {
             level: 'bad',
-            text: `Gateway ${gw} was not found on any node/interface.`
+            text: t('Gateway {gw} was not found on any node/interface.', { gw })
         };
     }
 
@@ -388,9 +402,9 @@ function evaluateGateway(node) {
 
     return {
         level: reachable ? 'good' : 'bad',
-        text: reachable
-            ? `Gateway ${gw} found on ${gatewayNode.name} and is reachable.`
-            : `Gateway ${gw} exists on ${gatewayNode.name}, but is not reachable from this node.`
+        text: t(reachable
+            ? 'Gateway {gw} found on {node} and is reachable.'
+            : 'Gateway {gw} exists on {node}, but is not reachable from this node.', { gw, node: gatewayNode.name })
     };
 }
 
@@ -398,7 +412,7 @@ function evaluateDns(node) {
     if (isDumbDevice(node)) {
         return {
             level: 'info',
-            text: 'L2 backplane nodes do not require DNS.'
+            text: t('L2 backplane nodes do not require DNS.')
         };
     }
 
@@ -407,7 +421,7 @@ function evaluateDns(node) {
     if (!dnsList.length) {
         return {
             level: 'warn',
-            text: 'No DNS server configured.'
+            text: t('No DNS server configured.')
         };
     }
 
@@ -419,7 +433,7 @@ function evaluateDns(node) {
         } catch (e) {
             return {
                 level: 'bad',
-                text: `${dnsIp}: invalid DNS IP.`
+                text: t('{ip}: invalid DNS IP.', { ip: dnsIp })
             };
         }
 
@@ -432,27 +446,27 @@ function evaluateDns(node) {
             if (reachable && dnsPort.ok) {
                 return {
                     level: 'good',
-                    text: `${dnsIp}: found on ${dnsNode.name}, reachable, DNS port OK.`
+                    text: t('{ip}: found on {node}, reachable, DNS port OK.', { ip: dnsIp, node: dnsNode.name })
                 };
             }
 
             if (!reachable) {
                 return {
                     level: 'bad',
-                    text: `${dnsIp}: found on ${dnsNode.name}, but not reachable.`
+                    text: t('{ip}: found on {node}, but not reachable.', { ip: dnsIp, node: dnsNode.name })
                 };
             }
 
             return {
                 level: 'bad',
-                text: `${dnsIp}: reachable, but DNS port 53 appears closed.`
+                text: t('{ip}: reachable, but DNS port 53 appears closed.', { ip: dnsIp })
             };
         }
 
         if (isPrivateIP(parsed)) {
             return {
                 level: 'bad',
-                text: `${dnsIp}: private DNS server not found in topology.`
+                text: t('{ip}: private DNS server not found in topology.', { ip: dnsIp })
             };
         }
 
@@ -460,9 +474,9 @@ function evaluateDns(node) {
 
         return {
             level: cloudOk ? 'good' : 'warn',
-            text: cloudOk
-                ? `${dnsIp}: public DNS; cloud/internet path appears reachable.`
-                : `${dnsIp}: public DNS, but no cloud/internet path was found.`
+            text: t(cloudOk
+                ? '{ip}: public DNS; cloud/internet path appears reachable.'
+                : '{ip}: public DNS, but no cloud/internet path was found.', { ip: dnsIp })
         };
     });
 
@@ -488,13 +502,13 @@ function evaluateTracePort(node) {
     if (!filterOn && typed) {
         return {
             level: 'info',
-            text: `Port filter off — trace is evaluating IP reachability only (port ${typed} ignored).`
+            text: t('Port filter off — trace is evaluating IP reachability only (port {port} ignored).', { port: typed })
         };
     }
     if (!typed) {
         return {
             level: 'info',
-            text: 'No trace port entered. Trace is evaluating IP reachability only.'
+            text: t('No trace port entered. Trace is evaluating IP reachability only.')
         };
     }
 
@@ -522,15 +536,15 @@ function renderNodeDiagnostics(node) {
     if (placeholder) placeholder.classList.add('hidden');
 
     const checks = [
-        ['Interfaces', evaluateInterfaces(node)],
-        ['Multi-Homing', evaluateMultiHoming(node)],
-        ['Bond', evaluateBond(node)],
-        ['Ports', evaluatePorts(node)],
-        ['Radio', evaluateRadio(node)],
-        ['MAC', evaluateMac(node)],
-        ['Gateway', evaluateGateway(node)],
-        ['DNS', evaluateDns(node)],
-        ['Trace Port', evaluateTracePort(node)]
+        [t('Interfaces'), evaluateInterfaces(node)],
+        [t('Multi-Homing'), evaluateMultiHoming(node)],
+        [t('Bond'), evaluateBond(node)],
+        [t('Ports'), evaluatePorts(node)],
+        [t('Radio'), evaluateRadio(node)],
+        [t('MAC'), evaluateMac(node)],
+        [t('Gateway'), evaluateGateway(node)],
+        [t('DNS'), evaluateDns(node)],
+        [t('Trace Port'), evaluateTracePort(node)]
     ];
 
     const hasBad = checks.some(([, result]) => result.level === 'bad');
@@ -741,10 +755,25 @@ function updateTraceStatus(reach) {
         el.textContent = `→ ${count} devices`; el.className = 'cs-trace-status active';
     }
 
-    function validateTopology() {
-    const alertBox = document.getElementById('conflictAlert');
-    const msgList = document.getElementById('conflictMsgList');
-    const errors = [];
+// ---- Topology-wide findings ----
+// Split out of validateTopology() so one list can feed two surfaces: the canvas
+// alert panel, which wants a sentence per problem, and the site report, which
+// wants the device, the check and the severity in their own columns.
+//
+// Each finding carries an explicit `line` because three of these read naturally
+// as "IP Conflict: …" or "L2 loop: …" rather than "<device>: …" — the panel's
+// wording predates the report and changing it was not the point of the split.
+// `subject` is who to go and look at; `line` is what the panel says.
+//
+// Node-local NIC faults come from interfaceIssues(); everything here is
+// relational — a duplicate address, a mismatched cable, a cycle — which is why
+// none of it can be blamed on a single node's badge.
+function topologyFindings() {
+    const findings = [];
+    const add = (level, subject, check, detail, line) => findings.push({
+        level, subject, check, detail,
+        line: line || (subject ? `${subject}: ${detail}` : detail)
+    });
     const ipMap = {};
 
     state.nodes.forEach((node) => {
@@ -760,20 +789,23 @@ function updateTraceStatus(reach) {
                 try {
                     const gwIp = ipaddr.parse(node.gw.trim());
                     const gatewayOnLocalSubnet = validIPs.some((local) => gwIp.match(local.cidrObj));
-                    if (!gatewayOnLocalSubnet) errors.push(`${node.name}: Gateway ${node.gw} is unreachable.`);
-                } catch (e) { errors.push(`${node.name}: Invalid gateway format.`); }
+                    if (!gatewayOnLocalSubnet) add('bad', node.name, t('Gateway'), t('Gateway {gw} is unreachable.', { gw: node.gw }));
+                } catch (e) { add('bad', node.name, t('Gateway'), t('Invalid gateway format.')); }
             }
         }
     });
 
     Object.entries(ipMap).forEach(([ip, names]) => {
-        if (names.length > 1) errors.push(`IP Conflict: ${ip} shared by ${names.join(', ')}.`);
+        if (names.length > 1) {
+            const detail = t('{ip} shared by {names}.', { ip, names: names.join(', ') });
+            add('bad', names.join(', '), t('IP Conflict'), detail, `${t('IP Conflict')}: ${detail}`);
+        }
     });
 
     // Interface-level problems, surfaced globally so you do not have to click
     // each node to find the one that is flapping.
     state.nodes.forEach((node) => {
-        interfaceIssues(node).forEach((issue) => errors.push(`${node.name}: ${issue.text}`));
+        interfaceIssues(node).forEach((issue) => add(issue.level, node.name, issue.label, issue.text));
     });
 
     // Both ends of a cable are one wire: if each end holds an IP, they must agree.
@@ -783,7 +815,9 @@ function updateTraceStatus(reach) {
         const a = parseValidCIDR(ifaceOn(src, link.sourceIface)?.ip);
         const b = parseValidCIDR(ifaceOn(tgt, link.targetIface)?.ip);
         if (!a || !b || a.networkStr === b.networkStr) return;
-        errors.push(`${src.name} (${ifaceLabel(src, link.sourceIface)}) and ${tgt.name} (${ifaceLabel(tgt, link.targetIface)}) are cabled together but sit on different subnets (${a.networkStr} vs ${b.networkStr}).`);
+        const detail = t('{a} ({ifaceA}) and {b} ({ifaceB}) are cabled together but sit on different subnets ({netA} vs {netB}).',
+            { a: src.name, ifaceA: ifaceLabel(src, link.sourceIface), b: tgt.name, ifaceB: ifaceLabel(tgt, link.targetIface), netA: a.networkStr, netB: b.networkStr });
+        add('bad', `${src.name} ↔ ${tgt.name}`, t('Cabling'), detail, detail);
     });
 
     // An L2 loop is the sibling failure to MAC flapping: a cycle through dumb
@@ -796,9 +830,19 @@ function updateTraceStatus(reach) {
         if (!src || !tgt || effectiveMedium(link) === 'vpn') return;
         if (!isDumbDevice(src) || !isDumbDevice(tgt)) return; // only forwarding devices close a loop
         const rootA = find(src.id), rootB = find(tgt.id);
-        if (rootA === rootB) errors.push(`L2 loop: the link between ${src.name} and ${tgt.name} closes a switching loop. Broadcast storm risk unless STP is enabled.`);
-        else parent[rootA] = rootB;
+        if (rootA === rootB) {
+            const detail = t('the link between {a} and {b} closes a switching loop. Broadcast storm risk unless STP is enabled.', { a: src.name, b: tgt.name });
+            add('bad', `${src.name} ↔ ${tgt.name}`, t('L2 loop'), detail, `${t('L2 loop')}: ${detail}`);
+        } else parent[rootA] = rootB;
     });
+
+    return findings;
+}
+
+function validateTopology() {
+    const alertBox = document.getElementById('conflictAlert');
+    const msgList = document.getElementById('conflictMsgList');
+    const errors = topologyFindings().map((f) => f.line);
 
     const pill = document.getElementById('conflictPill');
     const hidden = !!state.settings.alertsHidden;
