@@ -3,7 +3,7 @@
 // would catch: that splitting topologyFindings() out of validateTopology() did
 // not change one word the alert panel shows, and that a device named with angle
 // brackets cannot inject markup into a document handed to a customer.
-window.addEventListener('load', () => { setTimeout(() => {
+window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
 
@@ -130,6 +130,69 @@ window.addEventListener('load', () => { setTimeout(() => {
   state.report = { site: '', client: '', engineer: '', ref: '', date: '', scope: '' };
   ok('and neither does an emptied one', serializeDoc().report === undefined,
      JSON.stringify(serializeDoc().report));
+
+  // ---- The split did not change the single-site document ----
+  // reportHtml() was cut into reportDocument() + reportSheet() so the estate
+  // report can put many sheets in one file. Every other assertion in this suite
+  // is now regression cover for a refactor it was not written for; these are
+  // the ones that watch the seam itself. A single-site report must still be
+  // exactly one sheet, with nothing in it that only makes sense once there are
+  // several.
+  loadTemplateState(templatesData.errors); autoBindLinks();
+  const oneSite = reportHtml(reportModel(), null);
+  const count = (hay, needle) => hay.split(needle).length - 1;
+  ok('a single-site report is still one sheet', count(oneSite, 'class="sheet"') === 1,
+     String(count(oneSite, 'class="sheet"')));
+  ok('with one title and one print button',
+     count(oneSite, '<h1>') === 1 && count(oneSite, 'class="toolbar"') === 1);
+  ok('and no sheet anchor, which only an index needs', !oneSite.includes('<div class="sheet" id='));
+  ok('the page-break rule ships but cannot match a lone sheet',
+     oneSite.includes('.sheet + .sheet') && count(oneSite, 'class="sheet"') === 1);
+
+  // ---- The header has to travel with the document, not with the tab ----
+  // It rides inside serializeDoc(), so every restore path has to put it back —
+  // and two of them did not. load()'s document branch never assigned it at all,
+  // which is worse than dropping it: opening a shared link in a tab where a
+  // report had been filled in left the PREVIOUS client's name on someone else's
+  // network, and the next keystroke saved it there.
+  loadTemplateState(templatesData.hospital); autoBindLinks();
+  state.report = { site: 'Torre A', client: 'Hospital San José', engineer: '', ref: '', date: '', scope: '' };
+  save();
+  const withHeader = window.location.hash;
+  await load();
+  ok('a shared link brings its own survey header back',
+     state.report && state.report.client === 'Hospital San José', JSON.stringify(state.report));
+
+  // A document with no header must CLEAR the one on screen, not inherit it.
+  state.report = { site: 'Somebody else', client: 'Another client', engineer: '', ref: '', date: '', scope: '' };
+  window.history.replaceState(null, '', '#' + encodeDoc({ nodes: templatesData.house.nodes, links: templatesData.house.links }));
+  await load();
+  ok('and a document without one does not inherit the last one', state.report === null,
+     JSON.stringify(state.report));
+
+  // Undo restores a document, so it has to restore the whole document. Undoing
+  // to a step whose header merely MATCHES the current one proves nothing — the
+  // two snapshots have to disagree about it, or applyDoc() can ignore the field
+  // entirely and still look correct.
+  window.history.replaceState(null, '', withHeader);
+  await load(); initHistory();
+  state.report = { site: 'Torre A', client: 'Clínica Norte', engineer: '', ref: '', date: '', scope: '' };
+  save();
+  ok('the header is part of what a step records', state.report.client === 'Clínica Norte');
+  undo();
+  ok('undo restores the header the step had, not the one on screen',
+     state.report && state.report.client === 'Hospital San José', JSON.stringify(state.report));
+  redo();
+  ok('and redo puts the newer one back',
+     state.report && state.report.client === 'Clínica Norte', JSON.stringify(state.report));
+
+  // Reading a stored document must not leave its header behind on the canvas.
+  state.report = { site: 'On screen', client: '', engineer: '', ref: '', date: '', scope: '' };
+  const seen = withDoc({ nodes: [], links: [], report: { site: 'In the drawer' } }, () => state.report && state.report.site);
+  ok('withDoc lends the stored header to whatever is reading it', seen === 'In the drawer', String(seen));
+  ok('and hands the canvas its own back afterwards',
+     state.report && state.report.site === 'On screen', JSON.stringify(state.report));
+  state.report = null;
 
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);

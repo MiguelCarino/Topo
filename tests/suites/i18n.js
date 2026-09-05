@@ -127,6 +127,32 @@ window.addEventListener('load', () => { setTimeout(() => {
   });
   state.report = null;
 
+  // ---- The landing, which is the first page a reporter ever sees ----
+  // Its static text goes through applyStaticI18n(), the cards through t() at
+  // render time, and the two are easy to translate separately and half-ship.
+  // These assert the page as one surface.
+  localStorage.removeItem(LIBRARY_KEY);
+  loadTemplateState(templatesData.errors); autoBindLinks();
+  librarySave('Hospital San José — Torre B');
+  const englishLanding = (setLocale('en'), applyLocale(), openLanding(false),
+                          document.getElementById('landing').textContent);
+
+  locales.forEach((loc) => {
+    setLocale(loc);
+    applyLocale();                       // re-runs applyStaticI18n and re-renders the cards
+    const text = document.getElementById('landing').textContent;
+    ok(`${loc}: the landing is in the locale`, text !== englishLanding);
+    ok(`${loc}: its headline is translated`, !text.includes('Nobody ever wrote this network down'));
+    ok(`${loc}: so is the drop zone`, !text.includes('Start a new network'));
+    ok(`${loc}: the storage warning is translated`, !/this is not an account/i.test(text));
+    ok(`${loc}: a card's device count is translated`, !/\d+ devices/.test(text), (text.match(/\d+ devices/) || [])[0]);
+    ok(`${loc}: no unfilled placeholder reaches a card`, !/\{\w+\}/.test(text), (text.match(/\{\w+\}/) || [])[0]);
+    ok(`${loc}: the customer's own site name is untouched`, text.includes('Hospital San José — Torre B'));
+  });
+  setLocale('en'); applyLocale();
+  closeLanding();
+  localStorage.removeItem(LIBRARY_KEY);
+
   // Switching back has to actually switch back, or one language test poisons
   // every assertion after it.
   setLocale('en');

@@ -589,6 +589,132 @@ const MESSAGES = {
         'Powerline': 'Línea eléctrica',
         'VPN tunnel': 'Túnel VPN',
         'Unspecified': 'Sin especificar',
+        // ---- Binder report (js/report.js, the estate document) ----
+        '📋 Binder report': '📋 Informe del binder',
+        'Binder report': 'Informe del binder',
+        'Every saved network as one document: the estate totals, the findings across all sites, the addressing they share, then each network in full.':
+            'Todas las redes guardadas en un solo documento: los totales del conjunto, los hallazgos de todos los sitios, el direccionamiento que comparten y después cada red completa.',
+        'Open binder report': 'Abrir informe del binder',
+        'Open report': 'Abrir informe',
+        'Include a diagram for each site': 'Incluir un diagrama de cada sitio',
+        'Renders each network in turn — slower, and the file gets much larger.':
+            'Dibuja cada red por turno: más lento, y el archivo queda mucho más grande.',
+        'Estate documentation report': 'Informe de documentación del conjunto',
+        'Estate not named': 'Conjunto sin nombre',
+        'Sites': 'Sitios',
+        'Site': 'Sitio',
+        'Findings across the estate': 'Hallazgos de todo el conjunto',
+        'Estate addressing': 'Direccionamiento del conjunto',
+        'Estate topology': 'Topología del conjunto',
+        'Used in': 'Usada en',
+        'Via': 'Vía',
+        'Reaches': 'Alcanza',
+        '(not in this binder)': '(no está en este binder)',
+        'No site names another site.': 'Ningún sitio nombra a otro sitio.',
+        'This network could not be read.': 'No se pudo leer esta red.',
+        'A highlighted network is documented in more than one site. Whether that is a conflict depends on whether those sites are routed together, which this survey does not record — it is stated here as a fact, not as a finding.':
+            'Una red resaltada está documentada en más de un sitio. Que eso sea un conflicto depende de si esos sitios están enrutados entre sí, algo que este levantamiento no registra: se indica como un hecho, no como un hallazgo.',
+        '+{n} more': '+{n} más',
+        'Nothing to report on yet — save a network first.':
+            'Todavía no hay nada que informar: guarda una red primero.',
+        // ---- Binder links & the guest shelf ----
+        'Nothing was kept — you already have a newer copy of {n} of these.': 'No se conservó nada: ya tienes una copia más reciente de {n} de estas.',
+        'Shared with you': 'Compartido contigo',
+        '🔗 Copy binder link': '🔗 Copiar enlace del binder',
+        'Copy binder link': 'Copiar enlace del binder',
+        '⤓ Keep all in this browser': '⤓ Conservar todo en este navegador',
+        'Keep': 'Conservar',
+        'Keep in this browser': 'Conservar en este navegador',
+        'Dismiss': 'Descartar',
+        '{n} network was shared with you — it stays in this tab only until you keep it.':
+            '{n} red fue compartida contigo: permanece solo en esta pestaña hasta que la conserves.',
+        '{n} networks were shared with you — they stay in this tab only until you keep them.':
+            '{n} redes fueron compartidas contigo: permanecen solo en esta pestaña hasta que las conserves.',
+        'That binder link could not be read.': 'No se pudo leer ese enlace de binder.',
+        'That binder link carried no networks.': 'Ese enlace de binder no traía ninguna red.',
+        'Nothing to share yet.': 'Todavía no hay nada que compartir.',
+        'This browser cannot make a binder link. Export the binder file instead?':
+            'Este navegador no puede crear un enlace de binder. ¿Exportar el archivo del binder?',
+        'These {n} networks are too much for one link. Export the binder file instead?':
+            'Estas {n} redes son demasiado para un solo enlace. ¿Exportar el archivo del binder?',
+        'Binder link copied — {n} networks in one URL. Anyone with the link can open them.':
+            'Enlace del binder copiado: {n} redes en una sola URL. Cualquiera con el enlace puede abrirlas.',
+        'Copy this binder link:': 'Copia este enlace del binder:',
+        // ---- Save to binder (File System Access) ----
+        'Saves to {name}': 'Se guarda en {name}',
+        'change': 'cambiar',
+        'That file already holds {n} networks you do not have. Add them to this browser?': 'Ese archivo ya contiene {n} redes que no tienes. ¿Agregarlas a este navegador?',
+        // Landing & library — the front door on a bare URL, and the cards
+        // for the networks this browser holds. See js/library.js.
+        'build file, or a whole binder, here.': 'archivo de compilación, o un binder completo, aquí.',
+        '⤓ Export binder': '⤓ Exportar binder',
+        'Nothing to export yet.': 'Todavía no hay nada que exportar.',
+        'Not exported yet — a build file is the only copy that survives a cleared cache.':
+            'Aún sin exportar: un archivo es la única copia que sobrevive a un borrado de caché.',
+        'Binder exported {when}.': 'Binder exportado {when}.',
+        'Binder exported {when} — {n} network has changed since.':
+            'Binder exportado {when} — {n} red ha cambiado desde entonces.',
+        'Binder exported {when} — {n} networks have changed since.':
+            'Binder exportado {when} — {n} redes han cambiado desde entonces.',
+        'Binder loaded: {added} added, {updated} updated, {kept} already up to date.':
+            'Binder cargado: {added} agregadas, {updated} actualizadas, {kept} ya al día.',
+        '{n} entry in the file could not be read and was skipped.':
+            '{n} entrada del archivo no se pudo leer y se omitió.',
+        'That file does not look like a Topo build or binder.':
+            'Ese archivo no parece una compilación ni un binder de Topo.',
+        'That file is not valid JSON.': 'Ese archivo no es JSON válido.',
+        'Could not read that file.': 'No se pudo leer ese archivo.',
+        'Saved networks live in this browser only — this is not an account, and clearing site data removes them. Export the binder for a copy that survives.':
+            'Las redes guardadas viven solo en este navegador: esto no es una cuenta, y borrar los datos del sitio las elimina. Exporta el binder para conservar una copia.',
+        'Nobody ever wrote this network down.': 'Nadie dejó esta red por escrito.',
+        'Draw it once, and it checks itself.': 'Dibújala una vez y se revisa sola.',
+        'Every device, every subnet, every cable — with the address conflicts, loops and dead gateways found for you, and a report you can hand over.':
+            'Cada equipo, cada subred, cada cable — con los conflictos de direcciones, los bucles y las puertas de enlace muertas encontrados por ti, y un informe que puedes entregar.',
+        'It runs in this tab — no server, no upload, no account — which is why it still works in a comms room with no signal.':
+            'Funciona en esta pestaña — sin servidor, sin subidas, sin cuenta — y por eso sigue funcionando en un site sin señal.',
+        'A blank canvas that has its own link from the first device.':
+            'Un lienzo en blanco que tiene su propio enlace desde el primer dispositivo.',
+        'Or drop a': 'O suelta aquí un archivo',
+        '✚ New network': '✚ Red nueva',
+        '📂 Open a file': '📂 Abrir un archivo',
+        'First time here? Start from something that already exists.':
+            '¿Primera vez? Empieza desde algo que ya existe.',
+        'Networks you save are kept in this browser, and show up here.':
+            'Las redes que guardes se conservan en este navegador y aparecen aquí.',
+        'Start a new network': 'Empezar una red nueva',
+        'Open a file': 'Abrir un archivo',
+        'Set up from a count': 'Configurar por conteo',
+        'Open the example': 'Abrir el ejemplo',
+        'Your networks': 'Tus redes',
+        'Open this network': 'Abrir esta red',
+        'No findings': 'Sin hallazgos',
+        'Could not read': 'No se pudo leer',
+        'Rename': 'Renombrar',
+        'Delete': 'Eliminar',
+        'Rename network — new name:': 'Renombrar red — nuevo nombre:',
+        'Delete saved network "{name}"? This cannot be undone.':
+            '¿Eliminar la red guardada «{name}»? Esto no se puede deshacer.',
+        'Replace the network on screen with "{name}"?': '¿Reemplazar la red en pantalla por «{name}»?',
+        'Name this network:': 'Nombra esta red:',
+        'Saved "{name}" to your networks.': 'Se guardó «{name}» en tus redes.',
+        'Nothing to save — add some devices first.':
+            'No hay nada que guardar: agrega algunos dispositivos primero.',
+        'Could not save — browser storage is unavailable (private mode or full).':
+            'No se pudo guardar: el almacenamiento del navegador no está disponible (modo privado o lleno).',
+        'Untitled network': 'Red sin título',
+        'My networks': 'Mis redes',
+        'saved here': 'guardadas aquí',
+        'Save this network': 'Guardar esta red',
+        'Save as template': 'Guardar como plantilla',
+        'reusable': 'reutilizable',
+        'just now': 'ahora mismo',
+        '{n}m ago': 'hace {n} min',
+        '{n}h ago': 'hace {n} h',
+        '{n}d ago': 'hace {n} d',
+        '{n} device': '{n} dispositivo',
+        '{n} devices': '{n} dispositivos',
+        '{n} subnet': '{n} subred',
+        '{n} subnets': '{n} subredes',
     },
     'pt-BR': {
         // Interfaces
@@ -763,7 +889,133 @@ const MESSAGES = {
         'Wireless': 'Sem fio',
         'Powerline': 'Rede elétrica',
         'VPN tunnel': 'Túnel VPN',
-        'Unspecified': 'Não especificado'
+        'Unspecified': 'Não especificado',
+        // ---- Binder report (js/report.js, the estate document) ----
+        '📋 Binder report': '📋 Relatório do binder',
+        'Binder report': 'Relatório do binder',
+        'Every saved network as one document: the estate totals, the findings across all sites, the addressing they share, then each network in full.':
+            'Todas as redes salvas em um único documento: os totais do conjunto, os achados de todos os sites, o endereçamento que compartilham e depois cada rede por inteiro.',
+        'Open binder report': 'Abrir relatório do binder',
+        'Open report': 'Abrir relatório',
+        'Include a diagram for each site': 'Incluir um diagrama de cada site',
+        'Renders each network in turn — slower, and the file gets much larger.':
+            'Desenha cada rede por vez: mais lento, e o arquivo fica bem maior.',
+        'Estate documentation report': 'Relatório de documentação do conjunto',
+        'Estate not named': 'Conjunto sem nome',
+        'Sites': 'Sites',
+        'Site': 'Site',
+        'Findings across the estate': 'Achados em todo o conjunto',
+        'Estate addressing': 'Endereçamento do conjunto',
+        'Estate topology': 'Topologia do conjunto',
+        'Used in': 'Usada em',
+        'Via': 'Via',
+        'Reaches': 'Alcança',
+        '(not in this binder)': '(não está neste binder)',
+        'No site names another site.': 'Nenhum site nomeia outro site.',
+        'This network could not be read.': 'Não foi possível ler esta rede.',
+        'A highlighted network is documented in more than one site. Whether that is a conflict depends on whether those sites are routed together, which this survey does not record — it is stated here as a fact, not as a finding.':
+            'Uma rede destacada está documentada em mais de um site. Se isso é um conflito depende de os sites estarem roteados entre si, o que este levantamento não registra: está aqui como fato, não como achado.',
+        '+{n} more': '+{n} mais',
+        'Nothing to report on yet — save a network first.':
+            'Ainda não há nada a relatar: salve uma rede primeiro.',
+        // ---- Binder links & the guest shelf ----
+        'Nothing was kept — you already have a newer copy of {n} of these.': 'Nada foi guardado: você já tem uma cópia mais recente de {n} destas.',
+        'Shared with you': 'Compartilhado com você',
+        '🔗 Copy binder link': '🔗 Copiar link do binder',
+        'Copy binder link': 'Copiar link do binder',
+        '⤓ Keep all in this browser': '⤓ Guardar tudo neste navegador',
+        'Keep': 'Guardar',
+        'Keep in this browser': 'Guardar neste navegador',
+        'Dismiss': 'Dispensar',
+        '{n} network was shared with you — it stays in this tab only until you keep it.':
+            '{n} rede foi compartilhada com você: fica só nesta aba até você guardá-la.',
+        '{n} networks were shared with you — they stay in this tab only until you keep them.':
+            '{n} redes foram compartilhadas com você: ficam só nesta aba até você guardá-las.',
+        'That binder link could not be read.': 'Não foi possível ler esse link de binder.',
+        'That binder link carried no networks.': 'Esse link de binder não trazia nenhuma rede.',
+        'Nothing to share yet.': 'Ainda não há nada para compartilhar.',
+        'This browser cannot make a binder link. Export the binder file instead?':
+            'Este navegador não consegue criar um link de binder. Exportar o arquivo do binder?',
+        'These {n} networks are too much for one link. Export the binder file instead?':
+            'Estas {n} redes são demais para um único link. Exportar o arquivo do binder?',
+        'Binder link copied — {n} networks in one URL. Anyone with the link can open them.':
+            'Link do binder copiado: {n} redes em uma URL. Qualquer pessoa com o link pode abri-las.',
+        'Copy this binder link:': 'Copie este link do binder:',
+        // ---- Save to binder (File System Access) ----
+        'Saves to {name}': 'Salva em {name}',
+        'change': 'alterar',
+        'That file already holds {n} networks you do not have. Add them to this browser?': 'Esse arquivo já contém {n} redes que você não tem. Adicionar a este navegador?',
+        // Landing & library — the front door on a bare URL, and the cards
+        // for the networks this browser holds. See js/library.js.
+        'build file, or a whole binder, here.': 'arquivo de build, ou um binder inteiro, aqui.',
+        '⤓ Export binder': '⤓ Exportar binder',
+        'Nothing to export yet.': 'Ainda não há nada para exportar.',
+        'Not exported yet — a build file is the only copy that survives a cleared cache.':
+            'Ainda não exportado — um arquivo é a única cópia que sobrevive a uma limpeza de cache.',
+        'Binder exported {when}.': 'Binder exportado {when}.',
+        'Binder exported {when} — {n} network has changed since.':
+            'Binder exportado {when} — {n} rede mudou desde então.',
+        'Binder exported {when} — {n} networks have changed since.':
+            'Binder exportado {when} — {n} redes mudaram desde então.',
+        'Binder loaded: {added} added, {updated} updated, {kept} already up to date.':
+            'Binder carregado: {added} adicionadas, {updated} atualizadas, {kept} já em dia.',
+        '{n} entry in the file could not be read and was skipped.':
+            '{n} entrada do arquivo não pôde ser lida e foi ignorada.',
+        'That file does not look like a Topo build or binder.':
+            'Esse arquivo não parece um build nem um binder do Topo.',
+        'That file is not valid JSON.': 'Esse arquivo não é JSON válido.',
+        'Could not read that file.': 'Não foi possível ler esse arquivo.',
+        'Saved networks live in this browser only — this is not an account, and clearing site data removes them. Export the binder for a copy that survives.':
+            'As redes salvas ficam somente neste navegador — isto não é uma conta, e limpar os dados do site as remove. Exporte o binder para ter uma cópia que sobrevive.',
+        'Nobody ever wrote this network down.': 'Ninguém deixou esta rede documentada.',
+        'Draw it once, and it checks itself.': 'Desenhe uma vez e ela se verifica sozinha.',
+        'Every device, every subnet, every cable — with the address conflicts, loops and dead gateways found for you, and a report you can hand over.':
+            'Cada equipamento, cada sub-rede, cada cabo — com os conflitos de endereço, os loops e os gateways mortos encontrados para você, e um relatório que dá para entregar.',
+        'It runs in this tab — no server, no upload, no account — which is why it still works in a comms room with no signal.':
+            'Roda nesta aba — sem servidor, sem upload, sem conta — e é por isso que continua funcionando numa sala de equipamentos sem sinal.',
+        'A blank canvas that has its own link from the first device.':
+            'Uma tela em branco que já tem seu próprio link desde o primeiro dispositivo.',
+        'Or drop a': 'Ou solte aqui um arquivo',
+        '✚ New network': '✚ Rede nova',
+        '📂 Open a file': '📂 Abrir um arquivo',
+        'First time here? Start from something that already exists.':
+            'Primeira vez? Comece a partir de algo que já existe.',
+        'Networks you save are kept in this browser, and show up here.':
+            'As redes que você salvar ficam neste navegador e aparecem aqui.',
+        'Start a new network': 'Começar uma rede nova',
+        'Open a file': 'Abrir um arquivo',
+        'Set up from a count': 'Configurar por contagem',
+        'Open the example': 'Abrir o exemplo',
+        'Your networks': 'Suas redes',
+        'Open this network': 'Abrir esta rede',
+        'No findings': 'Sem achados',
+        'Could not read': 'Não foi possível ler',
+        'Rename': 'Renomear',
+        'Delete': 'Excluir',
+        'Rename network — new name:': 'Renomear rede — novo nome:',
+        'Delete saved network "{name}"? This cannot be undone.':
+            'Excluir a rede salva "{name}"? Isso não pode ser desfeito.',
+        'Replace the network on screen with "{name}"?': 'Substituir a rede na tela por "{name}"?',
+        'Name this network:': 'Dê um nome a esta rede:',
+        'Saved "{name}" to your networks.': 'Rede "{name}" salva nas suas redes.',
+        'Nothing to save — add some devices first.':
+            'Nada a salvar — adicione alguns dispositivos primeiro.',
+        'Could not save — browser storage is unavailable (private mode or full).':
+            'Não foi possível salvar — o armazenamento do navegador está indisponível (modo privado ou cheio).',
+        'Untitled network': 'Rede sem título',
+        'My networks': 'Minhas redes',
+        'saved here': 'salvas aqui',
+        'Save this network': 'Salvar esta rede',
+        'Save as template': 'Salvar como modelo',
+        'reusable': 'reutilizável',
+        'just now': 'agora mesmo',
+        '{n}m ago': 'há {n} min',
+        '{n}h ago': 'há {n} h',
+        '{n}d ago': 'há {n} d',
+        '{n} device': '{n} dispositivo',
+        '{n} devices': '{n} dispositivos',
+        '{n} subnet': '{n} sub-rede',
+        '{n} subnets': '{n} sub-redes',
     },
     ru: {
         // Interfaces. Counts are written to read correctly with any numeral in
@@ -940,7 +1192,132 @@ const MESSAGES = {
         'Wireless': 'Беспроводная',
         'Powerline': 'По электросети',
         'VPN tunnel': 'Туннель VPN',
-        'Unspecified': 'Не указано'
+        'Unspecified': 'Не указано',
+        // ---- Binder report (js/report.js, the estate document) ----
+        '📋 Binder report': '📋 Отчёт по биндеру',
+        'Binder report': 'Отчёт по биндеру',
+        'Every saved network as one document: the estate totals, the findings across all sites, the addressing they share, then each network in full.':
+            'Все сохранённые сети одним документом: сводка по объекту, замечания по всем площадкам, общая адресация, а затем каждая сеть целиком.',
+        'Open binder report': 'Открыть отчёт по биндеру',
+        'Open report': 'Открыть отчёт',
+        'Include a diagram for each site': 'Включить схему каждой площадки',
+        'Renders each network in turn — slower, and the file gets much larger.':
+            'Отрисовывает каждую сеть по очереди: медленнее, и файл получается заметно больше.',
+        'Estate documentation report': 'Отчёт о документировании объекта',
+        'Estate not named': 'Объект без названия',
+        'Sites': 'Площадки',
+        'Site': 'Площадка',
+        'Findings across the estate': 'Замечания по всему объекту',
+        'Estate addressing': 'Адресация по объекту',
+        'Estate topology': 'Топология объекта',
+        'Used in': 'Используется в',
+        'Via': 'Через',
+        'Reaches': 'Достигает',
+        '(not in this binder)': '(нет в этом биндере)',
+        'No site names another site.': 'Ни одна площадка не ссылается на другую.',
+        'This network could not be read.': 'Не удалось прочитать эту сеть.',
+        'A highlighted network is documented in more than one site. Whether that is a conflict depends on whether those sites are routed together, which this survey does not record — it is stated here as a fact, not as a finding.':
+            'Выделенная сеть задокументирована более чем на одной площадке. Конфликт это или нет, зависит от того, маршрутизируются ли эти площадки между собой, а обследование этого не фиксирует: здесь это указано как факт, а не как замечание.',
+        '+{n} more': 'ещё {n}',
+        'Nothing to report on yet — save a network first.':
+            'Пока не о чем отчитываться — сначала сохраните сеть.',
+        // ---- Binder links & the guest shelf ----
+        'Nothing was kept — you already have a newer copy of {n} of these.': 'Ничего не сохранено: у вас уже есть более новая копия ({n}).',
+        'Shared with you': 'Поделились с вами',
+        '🔗 Copy binder link': '🔗 Скопировать ссылку на биндер',
+        'Copy binder link': 'Скопировать ссылку на биндер',
+        '⤓ Keep all in this browser': '⤓ Сохранить всё в этом браузере',
+        'Keep': 'Сохранить',
+        'Keep in this browser': 'Сохранить в этом браузере',
+        'Dismiss': 'Отклонить',
+        '{n} network was shared with you — it stays in this tab only until you keep it.':
+            'С вами поделились сетями: {n}. Она останется только в этой вкладке, пока вы её не сохраните.',
+        '{n} networks were shared with you — they stay in this tab only until you keep them.':
+            'С вами поделились сетями: {n}. Они останутся только в этой вкладке, пока вы их не сохраните.',
+        'That binder link could not be read.': 'Не удалось прочитать эту ссылку на биндер.',
+        'That binder link carried no networks.': 'По этой ссылке на биндер не оказалось ни одной сети.',
+        'Nothing to share yet.': 'Пока нечем поделиться.',
+        'This browser cannot make a binder link. Export the binder file instead?':
+            'Этот браузер не может создать ссылку на биндер. Экспортировать файл биндера?',
+        'These {n} networks are too much for one link. Export the binder file instead?':
+            'Столько сетей ({n}) не помещается в одну ссылку. Экспортировать файл биндера?',
+        'Binder link copied — {n} networks in one URL. Anyone with the link can open them.':
+            'Ссылка на биндер скопирована: сетей в одном URL — {n}. Открыть их сможет любой, у кого есть ссылка.',
+        'Copy this binder link:': 'Скопируйте эту ссылку на биндер:',
+        // ---- Save to binder (File System Access) ----
+        'Saves to {name}': 'Сохраняется в {name}',
+        'change': 'изменить',
+        'That file already holds {n} networks you do not have. Add them to this browser?': 'В этом файле уже есть сети, которых у вас нет: {n}. Добавить их в этот браузер?',
+        // Landing & library — the front door on a bare URL, and the cards
+        // for the networks this browser holds. See js/library.js.
+        'build file, or a whole binder, here.': 'файл сборки или целый биндер сюда.',
+        '⤓ Export binder': '⤓ Экспорт биндера',
+        'Nothing to export yet.': 'Пока нечего экспортировать.',
+        'Not exported yet — a build file is the only copy that survives a cleared cache.':
+            'Ещё не экспортировано — файл остаётся единственной копией, пережившей очистку кэша.',
+        'Binder exported {when}.': 'Биндер экспортирован {when}.',
+        'Binder exported {when} — {n} network has changed since.':
+            'Биндер экспортирован {when} — с тех пор изменилась {n} сеть.',
+        'Binder exported {when} — {n} networks have changed since.':
+            'Биндер экспортирован {when} — с тех пор изменились сетей: {n}.',
+        'Binder loaded: {added} added, {updated} updated, {kept} already up to date.':
+            'Биндер загружен: добавлено {added}, обновлено {updated}, без изменений {kept}.',
+        '{n} entry in the file could not be read and was skipped.':
+            'Записей в файле не удалось прочитать и они пропущены: {n}.',
+        'That file does not look like a Topo build or binder.':
+            'Этот файл не похож ни на сборку, ни на биндер Topo.',
+        'That file is not valid JSON.': 'Этот файл не является корректным JSON.',
+        'Could not read that file.': 'Не удалось прочитать этот файл.',
+        'Saved networks live in this browser only — this is not an account, and clearing site data removes them. Export the binder for a copy that survives.':
+            'Сохранённые сети хранятся только в этом браузере — это не учётная запись, и очистка данных сайта их удалит. Экспортируйте биндер, чтобы копия сохранилась.',
+        'Nobody ever wrote this network down.': 'Эту сеть никто так и не задокументировал.',
+        'Draw it once, and it checks itself.': 'Нарисуйте её один раз — дальше она проверяет себя сама.',
+        'Every device, every subnet, every cable — with the address conflicts, loops and dead gateways found for you, and a report you can hand over.':
+            'Каждое устройство, каждая подсеть, каждый кабель — с найденными за вас конфликтами адресов, петлями и мёртвыми шлюзами, и отчётом, который можно отдать.',
+        'It runs in this tab — no server, no upload, no account — which is why it still works in a comms room with no signal.':
+            'Работает в этой вкладке — без сервера, без загрузки, без учётной записи — и поэтому продолжает работать в серверной без связи.',
+        'A blank canvas that has its own link from the first device.':
+            'Пустой холст, у которого есть своя ссылка с первого же устройства.',
+        'Or drop a': 'Или перетащите сюда файл сборки',
+        '✚ New network': '✚ Новая сеть',
+        '📂 Open a file': '📂 Открыть файл',
+        'First time here? Start from something that already exists.':
+            'Впервые здесь? Начните с того, что уже есть.',
+        'Networks you save are kept in this browser, and show up here.':
+            'Сохранённые сети остаются в этом браузере и появляются здесь.',
+        'Start a new network': 'Создать новую сеть',
+        'Open a file': 'Открыть файл',
+        'Set up from a count': 'Настроить по количеству',
+        'Open the example': 'Открыть пример',
+        'Your networks': 'Ваши сети',
+        'Open this network': 'Открыть эту сеть',
+        'No findings': 'Замечаний нет',
+        'Could not read': 'Не удалось прочитать',
+        'Rename': 'Переименовать',
+        'Delete': 'Удалить',
+        'Rename network — new name:': 'Переименовать сеть — новое имя:',
+        'Delete saved network "{name}"? This cannot be undone.':
+            'Удалить сохранённую сеть «{name}»? Это действие необратимо.',
+        'Replace the network on screen with "{name}"?': 'Заменить сеть на экране на «{name}»?',
+        'Name this network:': 'Назовите эту сеть:',
+        'Saved "{name}" to your networks.': 'Сеть «{name}» сохранена в ваших сетях.',
+        'Nothing to save — add some devices first.': 'Нечего сохранять — сначала добавьте устройства.',
+        'Could not save — browser storage is unavailable (private mode or full).':
+            'Не удалось сохранить — хранилище браузера недоступно (приватный режим или переполнено).',
+        'Untitled network': 'Сеть без названия',
+        'My networks': 'Мои сети',
+        'saved here': 'сохранено здесь',
+        'Save this network': 'Сохранить эту сеть',
+        'Save as template': 'Сохранить как шаблон',
+        'reusable': 'многоразовый',
+        'just now': 'только что',
+        '{n}m ago': '{n} мин назад',
+        '{n}h ago': '{n} ч назад',
+        '{n}d ago': '{n} дн назад',
+        '{n} device': '{n} устройство',
+        '{n} devices': '{n} устройств',
+        '{n} subnet': '{n} подсеть',
+        '{n} subnets': '{n} подсетей',
     },
     ja: {
         // Japanese marks no plural, so each singular/plural pair maps to one
@@ -1118,7 +1495,125 @@ const MESSAGES = {
         'Wireless': '無線',
         'Powerline': '電力線',
         'VPN tunnel': 'VPN トンネル',
-        'Unspecified': '未指定'
+        'Unspecified': '未指定',
+        // ---- Binder report (js/report.js, the estate document) ----
+        '📋 Binder report': '📋 バインダーレポート',
+        'Binder report': 'バインダーレポート',
+        'Every saved network as one document: the estate totals, the findings across all sites, the addressing they share, then each network in full.':
+            '保存したすべてのネットワークを 1 つの文書に。全体の集計、全拠点の指摘、共有しているアドレス、そして各ネットワークの詳細が続きます。',
+        'Open binder report': 'バインダーレポートを開く',
+        'Open report': 'レポートを開く',
+        'Include a diagram for each site': '各拠点の構成図を含める',
+        'Renders each network in turn — slower, and the file gets much larger.':
+            '各ネットワークを順に描画します。時間がかかり、ファイルもかなり大きくなります。',
+        'Estate documentation report': '全体構成ドキュメント',
+        'Estate not named': '全体名称なし',
+        'Sites': '拠点',
+        'Site': '拠点',
+        'Findings across the estate': '全拠点の指摘',
+        'Estate addressing': '全体のアドレス設計',
+        'Estate topology': '全体のトポロジー',
+        'Used in': '使用拠点',
+        'Via': '経由',
+        'Reaches': '接続先',
+        '(not in this binder)': '（このバインダーにありません）',
+        'No site names another site.': '他の拠点を参照している拠点はありません。',
+        'This network could not be read.': 'このネットワークは読み込めませんでした。',
+        'A highlighted network is documented in more than one site. Whether that is a conflict depends on whether those sites are routed together, which this survey does not record — it is stated here as a fact, not as a finding.':
+            'ハイライトされたネットワークは複数の拠点で記録されています。それが競合かどうかは、その拠点同士がルーティングされているかによりますが、本調査はそれを記録していません。ここでは事実として示しており、指摘ではありません。',
+        '+{n} more': '他 {n} 件',
+        'Nothing to report on yet — save a network first.': '報告できるものがまだありません。まずネットワークを保存してください。',
+        // ---- Binder links & the guest shelf ----
+        'Nothing was kept — you already have a newer copy of {n} of these.': '保存しませんでした。{n} 件についてはすでに新しいコピーがあります。',
+        'Shared with you': '共有されたもの',
+        '🔗 Copy binder link': '🔗 バインダーのリンクをコピー',
+        'Copy binder link': 'バインダーのリンクをコピー',
+        '⤓ Keep all in this browser': '⤓ すべてこのブラウザに保存',
+        'Keep': '保存',
+        'Keep in this browser': 'このブラウザに保存',
+        'Dismiss': '閉じる',
+        '{n} network was shared with you — it stays in this tab only until you keep it.':
+            '{n} 件のネットワークが共有されています。保存するまではこのタブにのみ残ります。',
+        '{n} networks were shared with you — they stay in this tab only until you keep them.':
+            '{n} 件のネットワークが共有されています。保存するまではこのタブにのみ残ります。',
+        'That binder link could not be read.': 'このバインダーのリンクは読み込めませんでした。',
+        'That binder link carried no networks.': 'このバインダーのリンクにはネットワークがありませんでした。',
+        'Nothing to share yet.': 'まだ共有できるものがありません。',
+        'This browser cannot make a binder link. Export the binder file instead?':
+            'このブラウザではバインダーのリンクを作成できません。バインダーのファイルを書き出しますか？',
+        'These {n} networks are too much for one link. Export the binder file instead?':
+            'この {n} 件のネットワークは 1 つのリンクには多すぎます。バインダーのファイルを書き出しますか？',
+        'Binder link copied — {n} networks in one URL. Anyone with the link can open them.':
+            'バインダーのリンクをコピーしました。{n} 件のネットワークが 1 つの URL に入っています。リンクを知っている人は誰でも開けます。',
+        'Copy this binder link:': 'このバインダーのリンクをコピー:',
+        // ---- Save to binder (File System Access) ----
+        'Saves to {name}': '保存先: {name}',
+        'change': '変更',
+        'That file already holds {n} networks you do not have. Add them to this browser?': 'このファイルには手元にない {n} 件のネットワークがあります。このブラウザに追加しますか？',
+        // Landing & library — the front door on a bare URL, and the cards
+        // for the networks this browser holds. See js/library.js.
+        'build file, or a whole binder, here.': 'ビルドファイル、またはバインダーごとここにドロップ。',
+        '⤓ Export binder': '⤓ バインダーを書き出す',
+        'Nothing to export yet.': '書き出せるものがまだありません。',
+        'Not exported yet — a build file is the only copy that survives a cleared cache.':
+            'まだ書き出していません。キャッシュを消しても残るのはファイルだけです。',
+        'Binder exported {when}.': 'バインダーの書き出し: {when}。',
+        'Binder exported {when} — {n} network has changed since.':
+            'バインダーの書き出し: {when}。以降 {n} 件のネットワークが変更されています。',
+        'Binder exported {when} — {n} networks have changed since.':
+            'バインダーの書き出し: {when}。以降 {n} 件のネットワークが変更されています。',
+        'Binder loaded: {added} added, {updated} updated, {kept} already up to date.':
+            'バインダーを読み込みました: 追加 {added} 件、更新 {updated} 件、変更なし {kept} 件。',
+        '{n} entry in the file could not be read and was skipped.': 'ファイル内の {n} 件は読み込めなかったためスキップしました。',
+        'That file does not look like a Topo build or binder.': 'このファイルは Topo のビルドにもバインダーにも見えません。',
+        'That file is not valid JSON.': 'このファイルは正しい JSON ではありません。',
+        'Could not read that file.': 'このファイルを読み込めませんでした。',
+        'Saved networks live in this browser only — this is not an account, and clearing site data removes them. Export the binder for a copy that survives.':
+            '保存したネットワークはこのブラウザ内にのみ存在します。アカウントではないため、サイトデータを消去すると失われます。残したい場合はバインダーを書き出してください。',
+        'Nobody ever wrote this network down.': 'このネットワークは誰も記録してこなかった。',
+        'Draw it once, and it checks itself.': '一度描けば、あとは自動で点検します。',
+        'Every device, every subnet, every cable — with the address conflicts, loops and dead gateways found for you, and a report you can hand over.':
+            'すべての機器、すべてのサブネット、すべてのケーブルを。アドレスの重複、ループ、応答しないゲートウェイは自動で検出し、そのまま渡せるレポートになります。',
+        'It runs in this tab — no server, no upload, no account — which is why it still works in a comms room with no signal.':
+            'このタブ内で動作します。サーバーもアップロードもアカウントも不要なので、電波の届かない機械室でも使えます。',
+        'A blank canvas that has its own link from the first device.': '空のキャンバス。最初の機器から専用リンクを持ちます。',
+        'Or drop a': 'または',
+        '✚ New network': '✚ 新規ネットワーク',
+        '📂 Open a file': '📂 ファイルを開く',
+        'First time here? Start from something that already exists.': '初めてですか？ すでにあるものから始められます。',
+        'Networks you save are kept in this browser, and show up here.': '保存したネットワークはこのブラウザに残り、ここに表示されます。',
+        'Start a new network': '新しいネットワークを作成',
+        'Open a file': 'ファイルを開く',
+        'Set up from a count': '台数から作成',
+        'Open the example': 'サンプルを開く',
+        'Your networks': '保存したネットワーク',
+        'Open this network': 'このネットワークを開く',
+        'No findings': '指摘なし',
+        'Could not read': '読み込めません',
+        'Rename': '名前を変更',
+        'Delete': '削除',
+        'Rename network — new name:': 'ネットワークの名前を変更 — 新しい名前:',
+        'Delete saved network "{name}"? This cannot be undone.': '保存したネットワーク「{name}」を削除しますか？元に戻せません。',
+        'Replace the network on screen with "{name}"?': '画面のネットワークを「{name}」に置き換えますか？',
+        'Name this network:': 'このネットワークの名前:',
+        'Saved "{name}" to your networks.': '「{name}」を保存しました。',
+        'Nothing to save — add some devices first.': '保存するものがありません — まず機器を追加してください。',
+        'Could not save — browser storage is unavailable (private mode or full).':
+            '保存できません — ブラウザのストレージが利用できません（プライベートモードまたは容量不足）。',
+        'Untitled network': '名称未設定のネットワーク',
+        'My networks': 'マイネットワーク',
+        'saved here': 'ここに保存',
+        'Save this network': 'このネットワークを保存',
+        'Save as template': 'テンプレートとして保存',
+        'reusable': '再利用可',
+        'just now': 'たった今',
+        '{n}m ago': '{n}分前',
+        '{n}h ago': '{n}時間前',
+        '{n}d ago': '{n}日前',
+        '{n} device': '{n} 台',
+        '{n} devices': '{n} 台',
+        '{n} subnet': '{n} サブネット',
+        '{n} subnets': '{n} サブネット',
     }
 };
 

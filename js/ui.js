@@ -652,6 +652,20 @@ function renderCanvasOnly() {
         label.setAttribute('font-weight', '600'); label.setAttribute('fill', '#334155'); label.textContent = node.name; label.style.pointerEvents = 'none';
         g.appendChild(label);
 
+        // "↗ Torre A" under a cloud that stands for another site. Drawn exactly
+        // the same whether or not the reference resolves in this browser: the
+        // drawing is the deliverable and it is read by people with no library
+        // at all, so it must not say two different things to two readers.
+        if (node.siteRef && (node.siteRef.name || node.siteRef.id)) {
+            const ref = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            ref.setAttribute('text-anchor', 'middle'); ref.setAttribute('y', '48'); ref.setAttribute('font-size', '9');
+            ref.setAttribute('font-family', 'sans-serif');   // exported PNGs carry no stylesheet
+            ref.setAttribute('fill', '#64748b');
+            ref.textContent = `↗ ${node.siteRef.name || node.siteRef.id}`;
+            ref.style.pointerEvents = 'none';
+            g.appendChild(ref);
+        }
+
         // Badge rides on top of selection/trace styling, so a flapping node stays
         // visible even while it is selected or lit up by a trace.
         if (severity) {
@@ -1272,7 +1286,68 @@ function clearPropertyInputs() {
     document.getElementById('propNetcfg').checked = false;
     document.getElementById('netcfgHint').classList.add('hidden');
     refreshNetcfgLink(null);
+    renderSiteRef(null);
     renderNodeDiagnostics(null);
+}
+
+// ---- Inter-site links ----
+// A picker rather than a text field, because it is the only control that can
+// capture the binder id AND the name together and guarantee the id came from a
+// real card. A typed name would produce name-only references by construction —
+// the degraded case — and could never be opened.
+const SITE_REF_UNRESOLVED = '__unresolved__';
+
+function renderSiteRef(node) {
+    const block = document.getElementById('siteRefBlock');
+    const sel = document.getElementById('propSiteRef');
+    const hint = document.getElementById('siteRefHint');
+    const open = document.getElementById('openSiteRefBtn');
+    if (!node || node.type !== 'cloud') { block.classList.add('hidden'); return; }
+    block.classList.remove('hidden');
+
+    const ref = node.siteRef || null;
+    const entry = ref && ref.id ? libraryEntry(ref.id) : null;
+    sel.innerHTML = '';
+    // The sentinel is load-bearing, not cosmetic: a <select> whose value is not
+    // among its options silently resets to index 0. Without it, clicking a
+    // cloud on a link someone sent you and then touching any other field would
+    // destroy the reference the sender wrote.
+    if (ref && !entry) sel.appendChild(new Option(ref.name || '(unnamed site)', SITE_REF_UNRESOLVED));
+    sel.appendChild(new Option('— not a site —', ''));
+    libraryEntries()
+        .filter((e) => e.id !== state.libraryId)   // a site cannot stand for itself
+        .forEach((e) => sel.appendChild(new Option(e.name, e.id)));
+    sel.value = entry ? entry.id : (ref ? SITE_REF_UNRESOLVED : '');
+
+    hint.classList.toggle('hidden', !(ref && !entry));
+    if (ref && !entry) hint.textContent = 'Not in this browser — import the binder that holds it to link them.';
+    open.classList.toggle('hidden', !entry);
+    if (entry) {
+        open.textContent = `↗ Open ${entry.name}`;
+        open.className = 'w-full mt-2 py-1 rounded text-[10px] font-bold transition text-center bg-amber-100 text-amber-800 hover:bg-amber-200';
+        open.onclick = () => openFromLibrary(entry.id);
+    }
+
+    sel.onchange = () => {
+        const v = sel.value;
+        if (v === SITE_REF_UNRESOLVED) return;            // already the current value
+        if (!v) delete node.siteRef;
+        else {
+            const picked = libraryEntry(v);
+            if (!picked) return;
+            node.siteRef = { id: picked.id, name: picked.name };
+            // Only rename a cloud still carrying its spawn default: a cloud
+            // someone deliberately called "ISP" must not be renamed out from
+            // under them because they also said which site it reaches. The
+            // default is derived from paletteDefs the same way spawnNode()
+            // builds it, so renaming the palette entry cannot quietly turn this
+            // into a check against a string nothing produces any more.
+            const def = paletteDefs.find((pd) => pd.type === node.type);
+            if (node.name === `New ${def ? def.name : 'Node'}`) node.name = picked.name;
+        }
+        save(); renderCanvasOnly(); renderSiteRef(node);
+        document.getElementById('propName').value = node.name;
+    };
 }
 
 // ---- Netplan bridge link (docs/netplan-bridge-design.md) ----
@@ -1357,6 +1432,7 @@ function select(id, type) {
         document.getElementById('netcfgHint').classList.toggle('hidden', !NETCFG_ADVISORY.includes(node.type));
         netcfgCb.onchange = (e) => { node.netcfg = e.target.checked; save(); refreshNetcfgLink(node); };
         refreshNetcfgLink(node);
+        renderSiteRef(node);
         if (node.gw && node.gw.trim() !== '') {
             jumpGwBtn.classList.remove('hidden');
             jumpGwBtn.onclick = () => {

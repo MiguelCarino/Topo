@@ -49,6 +49,7 @@ function spawnNode(type, opts = {}) {
     select(node.id, 'node'); save();
     renderCanvasOnly();
     renderNodeDiagnostics(node);
+    return node;   // as spawnAnnotation does, so a caller can go on to configure it
 }
 
 // ---- Subnet / auto-IP helpers (IPv4) ----
@@ -268,10 +269,13 @@ function updateOsDatalist() {
 // undo/redo — goes through here, so there is a single allowlist to keep honest.
 // Any node/link/interface field not named here is dropped on the next save.
 function serializeNode(n) {
-    // netcfg rides the same `|| undefined` trick as sourceIface: JSON.stringify
-    // drops it, so documents that never touch the netplan toggle stay
-    // byte-identical to what they were before the field existed.
-    return { id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', nat: !!n.nat, netcfg: n.netcfg || undefined, portCount: Number.isFinite(n.portCount) ? n.portCount : undefined, interfaces: (n.interfaces || []).map((i) => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone, wireless: i.wireless, bond: i.bond })) };
+    // netcfg and siteRef ride the same `|| undefined` trick as sourceIface:
+    // JSON.stringify drops them, so documents that never touch the netplan
+    // toggle and never name another site stay byte-identical to what they were
+    // before those fields existed. siteRef is rebuilt field by field rather
+    // than passed through, for the same reason the interface list two entries
+    // along is: an allowlist keeps a hand-edited key out of the URL.
+    return { id: n.id, type: n.type, name: n.name, x: n.x, y: n.y, gw: n.gw || '', dns: n.dns || '', os: n.os || '', ports: n.ports || '', notes: n.notes || '', nat: !!n.nat, netcfg: n.netcfg || undefined, siteRef: n.siteRef ? { id: n.siteRef.id, name: n.siteRef.name } : undefined, portCount: Number.isFinite(n.portCount) ? n.portCount : undefined, interfaces: (n.interfaces || []).map((i) => ({ id: i.id, name: i.name, ip: i.ip, drawZone: i.drawZone, wireless: i.wireless, bond: i.bond })) };
 }
 function serializeLink(l) {
     return { id: l.id, source: l.source, target: l.target, attachment: l.attachment, medium: l.medium, sourceIface: l.sourceIface || undefined, targetIface: l.targetIface || undefined };
@@ -303,6 +307,19 @@ function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); 
 // only the compressed path awaits; the legacy path stays synchronous, which is
 // why load() can still be called synchronously with a legacy hash.
 const FRAG_SCHEME = '~';
+// A third format, one level up: 'b~' carries a whole binder — many networks in
+// one link. Detection is a prefix test and decoding slices one character, after
+// which the payload is exactly a '~' fragment, so there is one codec and not
+// two. Always compressed: encodeShareFragment falls back to the legacy form
+// when deflate does not help, and a legacy fallback here would emit an
+// ambiguous 'b<base64>' that the discriminator below could not tell from a
+// document whose base64 happens to start with b.
+const BINDER_FRAG_SCHEME = 'b~';
+// Roughly fifteen sites. Measured: eight realistic sites bundle to ~4.7k chars
+// and nineteen to ~10.8k, so this is a ceiling on the pathological case rather
+// than a limit anyone meets. Past it the file is the honest answer.
+const BINDER_URL_MAX = 12000;
+const isBinderFragment = (frag) => typeof frag === 'string' && frag.startsWith(BINDER_FRAG_SCHEME);
 const _canCompress = typeof CompressionStream !== 'undefined';
 const _canDecompress = typeof DecompressionStream !== 'undefined';
 
@@ -333,6 +350,15 @@ async function encodeShareFragment(json) {
     const compressed = FRAG_SCHEME + _b64urlFromBytes(packed);
     return compressed.length < legacy.length + 1 ? compressed : legacy;
 }
+const canMakeBinderLink = () => _canCompress;
+
+async function encodeBinderFragment(json) {
+    if (!_canCompress) throw new Error('This browser cannot compress a binder link.');
+    const packed = await _pipeStream(new CompressionStream('deflate-raw'), new TextEncoder().encode(json));
+    return BINDER_FRAG_SCHEME + _b64urlFromBytes(packed);
+}
+const decodeBinderFragment = (frag) => decodeFragment(frag.slice(1));   // 'b~xxx' -> '~xxx'
+
 // fragment (no '#') -> json string. Async only for the compressed form.
 async function decodeFragment(frag) {
     if (frag[0] === FRAG_SCHEME) {
@@ -389,7 +415,17 @@ function bridgeIntent(node) {
     return { v: 1, ifaces, fam: [true, anyV6] };
 }
 
+// While a stored document is temporarily on the canvas — the binder report
+// rasterises every site in turn — the canvas is not the user's document. The
+// sweep's finally can put state back, but it cannot un-write the URL or un-push
+// an undo step, so the one chokepoint that writes both refuses instead. See
+// withDocRendered() in js/report.js.
+let _borrowedCanvas = 0;
+const canvasIsBorrowed = () => _borrowedCanvas > 0;
+function borrowCanvas(on) { _borrowedCanvas = Math.max(0, _borrowedCanvas + (on ? 1 : -1)); }
+
 function save() {
+    if (_borrowedCanvas) return;
     try {
         const doc = serializeDoc();
         recordHistory(JSON.stringify(doc));            // ride the one chokepoint every mutation already calls
@@ -438,6 +474,10 @@ function applyDoc(json) {
     state.nodes = (parsed.nodes || []).map(normalizeLoadedNode);
     state.links = (Array.isArray(parsed.links) ? parsed.links : []).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
     state.annotations = (Array.isArray(parsed.annotations) ? parsed.annotations : []).map(normalizeLoadedAnnotation);
+    // The header rides inside the document (serializeDoc), so a restore that
+    // skipped it made undo silently drop who the survey was for — and the next
+    // save wrote a document without it.
+    state.report = parsed.report && typeof parsed.report === 'object' ? parsed.report : null;
     autoBindLinks();
     window.history.replaceState(null, '', `#${encodeDoc(serializeDoc())}`);
     updateOsDatalist();
@@ -465,6 +505,19 @@ function updateUndoButtons() {
     if (r) { r.disabled = !_redoStack.length; r.title = _redoStack.length ? `Redo (${_redoStack.length}) — Ctrl+Shift+Z` : 'Nothing to redo'; }
 }
 
+// A site reference is a caption with a pointer attached, in that order of
+// importance: `id` only resolves in the browser that holds that binder card,
+// while `name` is what the recipient of a shared link has to read. So a ref
+// with neither is not a claim about anything and is dropped, and a ref with
+// only a name is still perfectly good — it says what the cloud stands for,
+// which is more than the bare "cloud named Torre A" it replaces.
+function normalizeSiteRef(v) {
+    if (!v || typeof v !== 'object') return null;
+    const id = typeof v.id === 'string' ? v.id.trim() : '';
+    const name = typeof v.name === 'string' ? v.name.trim() : '';
+    return (id || name) ? { id, name } : null;
+}
+
 function normalizeLoadedNode(node) {
     const def = initialDataDefaults[node.type] || { interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] };
     let normalizedInterfaces = Array.isArray(node.interfaces) ? node.interfaces : cloneData(def.interfaces);
@@ -483,6 +536,13 @@ function normalizeLoadedNode(node) {
     const normalized = { id: node.id || `n_${Date.now()}_${Math.random().toString(16).slice(2)}`, type: node.type || 'custom', name: node.name || 'Unnamed Node', x: Number.isFinite(node.x) ? node.x : 200, y: Number.isFinite(node.y) ? node.y : 200, gw: node.gw || '', dns: node.dns || '', os: node.os || '', ports: node.ports || '', notes: node.notes || '', nat: !!(node.nat || (initialDataDefaults[node.type] && initialDataDefaults[node.type].nat && node.nat === undefined)), interfaces: normalizedInterfaces };
     if (Number.isFinite(node.portCount)) normalized.portCount = node.portCount;
     if (node.netcfg) normalized.netcfg = true;
+    // The single enforcement point for "only a cloud stands for another site",
+    // so every reader downstream — the canvas, the panel, the estate report —
+    // may assume it without re-checking. A workstation that "is" another site
+    // would be a lie: it still counts in this drawing's device total, its
+    // subnet table and its findings.
+    const ref = node.type === 'cloud' ? normalizeSiteRef(node.siteRef) : null;
+    if (ref) normalized.siteRef = ref;
     return normalized;
 }
 
@@ -548,13 +608,47 @@ async function load() {
         if (wizard) openSetupWizard();
         return;
     }
-    if (!hash) { loadDefaultDoc(false); return; }
+    // A binder link: many networks, and not a document at all. It opens the
+    // landing with them on a guest shelf and touches neither the canvas nor
+    // this browser's library — see openBinderLink(). Placed ahead of the
+    // document branch because that branch would atob() this, throw, and load
+    // the demo network, which looks exactly like a working app.
+    if (isBinderFragment(hash)) { await openBinderLink(hash); return; }
+
+    // A bare URL is the front door, not a document: the landing offers the
+    // networks this browser already holds before anything is drawn. Everything
+    // else — a shared hash, a profile trigger, an intake link — arrives with the
+    // job already chosen and goes straight to the editor. The demo network is
+    // still one click away, as "Open the example".
+    if (!hash) {
+        if (shouldShowLanding()) { openLanding(true); return; }
+        loadDefaultDoc(false); return;
+    }
+    // A hash is a document in its own right — a shared link, a pasted URL, a step
+    // back through history — and so is the demo the catch below falls back to.
+    // Whatever saved network was open, this is not necessarily it, so the
+    // association is dropped here (ahead of the try, to cover both) and Save
+    // asks for a name rather than quietly overwriting an entry with a different
+    // network. The profile-trigger branch above keeps the canvas it had, so it
+    // keeps its card too.
+    state.libraryId = null;
+    // A document arriving by Back/Forward off a binder link would otherwise load
+    // underneath a landing page still painted on top of it, with the editor's
+    // own controls still suppressed.
+    if (landingIsOpen()) landingHandledDocument();
     try {
         const json = hash[0] === FRAG_SCHEME ? await decodeFragment(hash) : decodeURIComponent(atob(hash));
         const parsed = JSON.parse(json);
         state.nodes = (parsed.nodes || []).map(normalizeLoadedNode);
         state.links = (Array.isArray(parsed.links) ? parsed.links : []).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
         state.annotations = (Array.isArray(parsed.annotations) ? parsed.annotations : []).map(normalizeLoadedAnnotation);
+        // Assigned unconditionally, including to null. Not assigning it at all
+        // left the *previous* document's survey header in place, so opening a
+        // shared link in a tab where a report had been filled in put someone
+        // else's client name on this network — and saved it there on the next
+        // keystroke. loadTemplateState() has always done this; this branch
+        // never did.
+        state.report = parsed.report && typeof parsed.report === 'object' ? parsed.report : null;
     } catch (e) {
         loadTemplateState(templatesData.house);
     }
@@ -670,7 +764,12 @@ const SHORTCUTS = [
     { keys: ['Del'], label: 'Delete the selection', test: (e) => e.key === 'Delete' || e.key === 'Backspace',
       run: () => deleteSelected() },
     { keys: ['Esc'], label: 'Cancel link mode / deselect', test: (e) => e.key === 'Escape',
-      run: () => { toggleShortcutHelp(false); closeSetupWizard(); closeModePicker(); closeReportDialog(); state.linkSourceId = null; select(null, null); renderCanvasOnly(); } },
+      run: () => {
+          // The landing covers everything below it, so dismissing it is the
+          // whole action — nothing underneath is selectable to deselect.
+          if (landingIsOpen()) { closeLanding(); return; }
+          toggleShortcutHelp(false); closeSetupWizard(); closeModePicker(); closeReportDialog(); state.linkSourceId = null; select(null, null); renderCanvasOnly();
+      } },
     { keys: ['?'], label: 'Show this list', test: (e) => e.key === '?', run: () => toggleShortcutHelp() }
 ];
 
@@ -821,8 +920,16 @@ function applyLocale(lang) {
     document.getElementById('copyUrlBtn').innerHTML = `🔗 ${t('Copy link')} <span class="cs-menu-note">${t('short URL')}</span>`;
     document.getElementById('exportPngBtn').textContent = `🖼️ ${t('PNG image')}`;
     document.getElementById('reportBtn').innerHTML = `📋 ${t('Site report')} <span class="cs-menu-note">${t('printable')}</span>`;
+    document.getElementById('myNetworksBtn').innerHTML = `🗂️ ${t('My networks')} <span class="cs-menu-note">${t('saved here')}</span>`;
+    document.getElementById('saveNetworkBtn').textContent = `💾 ${t('Save this network')}`;
+    document.getElementById('saveTemplateBtn').innerHTML = `📐 ${t('Save as template')} <span class="cs-menu-note">${t('reusable')}</span>`;
+    // The cards are built at open time and carry counts, ages and pluralised
+    // labels that applyStaticI18n() cannot reach.
+    if (landingIsOpen()) renderLanding();
     // Only matters while the dialog is open — its fields are built at open time.
-    if (!document.getElementById('reportDialog').classList.contains('hidden')) renderReportFields();
+    if (!document.getElementById('reportDialog').classList.contains('hidden')) renderReportDialog();
+    document.getElementById('binderReportBtn').innerHTML = `📋 ${t('Binder report')}`;
+    document.getElementById('binderLinkBtn').innerHTML = `🔗 ${t('Copy binder link')}`;
     applyProfile();
     // The findings speak the locale now, and nothing above regenerates them:
     // renderCanvasOnly() ends in validateTopology(), which redraws the alert
@@ -947,6 +1054,7 @@ function buildSetupNetwork() {
     // zones or config. Advanced (via the mode picker) completes them later.
     state.settings.advanced = false; saveSettings(); applyProfile();
     state.nodes = []; state.links = []; state.annotations = [];
+    state.libraryId = null; state.report = null;   // a built network is not the card that was open
     spawnNode(SETUP_HUB.type, {});
     const hub = state.nodes[state.nodes.length - 1];
     hub.name = t(SETUP_HUB.name);
@@ -992,6 +1100,11 @@ function applyTemplate(template) {
     if (!template) return;
     if (!confirm('Replace current workspace with this network?')) return;
     loadTemplateState(template); autoBindLinks();
+    // A template is a different document, so the card the canvas came from is
+    // not this one — without dropping it, Save would overwrite that card with
+    // the template, silently and with no prompt. Every other replacement path
+    // does this; these two were missed.
+    state.libraryId = null;
     state.selectedId = null; state.selectedType = null; state.linkSourceId = null;
     select(null, null); save(); invalidateTidy();
     renderCanvasOnly();
@@ -1025,7 +1138,7 @@ function renderUserTemplates() {
     section.classList.toggle('hidden', !names.length);
     names.forEach((name) => {
         list.appendChild(libraryItem(
-            { icon: '💾', name, blurb: `${(saved[name].nodes || []).length} nodes · saved locally` },
+            { icon: '📐', name, blurb: `${(saved[name].nodes || []).length} nodes · reusable template` },
             () => applyTemplate(saved[name]),
             () => {
                 if (!confirm(`Delete saved network "${name}"?`)) return;
@@ -1173,13 +1286,16 @@ function encodeCanvas(canvas, requested) {
 // length ceiling, travels as an email/chat attachment, and diffs in git. Same
 // serializer as everything else, wrapped in a tiny self-identifying envelope so
 // the file can be recognised and can carry a schema version later.
-function exportJsonFile() {
-    if (!state.nodes.length) { alert('Nothing to export. Add at least one node first.'); return; }
-    const payload = { kind: 'nettopology', version: 1, doc: serializeDoc() };
+function downloadJson(payload, filename) {
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'network-build.nettopo.json'; a.click();
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
     URL.revokeObjectURL(url);
+}
+
+function exportJsonFile() {
+    if (!state.nodes.length) { alert('Nothing to export. Add at least one node first.'); return; }
+    downloadJson({ kind: 'nettopology', version: 1, doc: serializeDoc() }, 'network-build.nettopo.json');
 }
 
 // Accept both the enveloped file we write and a bare { nodes, links } — the same
@@ -1193,13 +1309,26 @@ function docFromImported(parsed) {
 // Load a parsed build object onto the canvas. Split from the file reading so the
 // swap logic is testable without a FileReader in the way. Returns whether it took.
 function applyImportedDoc(parsed) {
+    // A binder is a library, not a document — it merges into the saved networks
+    // and leaves the canvas alone. Checked first because a binder also has a
+    // `sites` array full of things that look like documents, and because this
+    // is the one door: the drop zone, "Open a file" and the Export menu's
+    // "Import build" all arrive here, and the file itself says which it is.
+    if (applyImportedBinder(parsed)) return true;
     const doc = docFromImported(parsed);
-    if (!doc) { alert('That file does not look like a Topo build.'); return false; }
+    if (!doc) { alert(t('That file does not look like a Topo build or binder.')); return false; }
     if (state.nodes.length && !confirm('Replace the current canvas with this build?')) return false;
+    // A file is its own document: whatever saved network was open, this is not
+    // it, so Save will ask for a name rather than overwrite that card.
+    state.libraryId = null;
     loadTemplateState(doc); autoBindLinks();
     state.selectedId = null; state.selectedType = null; state.linkSourceId = null;
     select(null, null); save(); invalidateTidy();
     renderCanvasOnly(); fitToView();
+    // "Open a file" is one of the landing's four doors, and the file reader
+    // resolves long after the click — so the landing steps aside here, where
+    // the document is known to have loaded, rather than optimistically there.
+    if (landingIsOpen()) landingHandledDocument();
     return true;
 }
 
@@ -1207,10 +1336,10 @@ function importJsonFile(file) {
     const reader = new FileReader();
     reader.onload = () => {
         let parsed;
-        try { parsed = JSON.parse(reader.result); } catch (e) { alert('That file is not valid JSON.'); return; }
+        try { parsed = JSON.parse(reader.result); } catch (e) { alert(t('That file is not valid JSON.')); return; }
         applyImportedDoc(parsed);
     };
-    reader.onerror = () => alert('Could not read that file.');
+    reader.onerror = () => alert(t('Could not read that file.'));
     reader.readAsText(file);
 }
 
@@ -1218,9 +1347,14 @@ function importJsonFile(file) {
 // Split from handleExport so the site report can embed the same picture the
 // export menu saves — one code path, so the diagram in the report cannot drift
 // from the diagram in the PNG. Resolves to null when there is nothing to draw.
-function captureCanvasImage(format) {
+// `scale` exists for the binder report, which rasterises every site in the
+// binder in one go: at the export's 4x a twelve-site estate is a lot of canvas
+// for pictures that are printed two to a page. Omitted everywhere else, so the
+// PNG export and the single-site report are byte-for-byte what they were.
+function captureCanvasImage(format, scale) {
     if (!state.nodes.length) return Promise.resolve(null);
-    const PADDING = 90, NODE_HALF_SIZE = 24, LABEL_EXTRA_BOTTOM = 42, SCALE = 4;
+    const PADDING = 90, NODE_HALF_SIZE = 24, LABEL_EXTRA_BOTTOM = 42;
+    const SCALE = Number.isFinite(scale) && scale > 0 ? scale : 4;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
     state.nodes.forEach((node) => {
@@ -1303,6 +1437,59 @@ document.getElementById('exportWebpBtn').onclick = () => handleExport('webp');
 document.getElementById('exportJsonBtn').onclick = exportJsonFile;
 document.getElementById('importFileBtn').onclick = () => document.getElementById('importFileInput').click();
 
+// ---- Landing ----
+// js/library.js owns the store, the cards and the overlay; this is the wiring,
+// kept beside the export menu because the same two doors (a file, a saved
+// network) are reachable from both.
+document.getElementById('myNetworksBtn').onclick = () => openLanding(false);
+document.getElementById('binderExportBtn').onclick = exportBinder;
+// js/report.js owns the dialog and the document; this is only the wiring.
+document.getElementById('binderReportBtn').onclick = openBinderReportDialog;
+document.getElementById('binderLinkBtn').onclick = copyBinderLink;
+document.getElementById('guestKeepAllBtn').onclick = () => keepGuestSites(guestSites());
+document.getElementById('guestDismissBtn').onclick = dismissGuestBinder;
+document.getElementById('binderRebindBtn').onclick = rebindBinderFile;
+document.getElementById('saveNetworkBtn').onclick = saveCurrentToLibrary;
+document.getElementById('landingNewBtn').onclick = (e) => { e.stopPropagation(); startNewNetwork(); };
+document.getElementById('landingOpenFileBtn').onclick = (e) => { e.stopPropagation(); document.getElementById('importFileInput').click(); };
+document.getElementById('landingWizardBtn').onclick = () => {
+    // The wizard sits a layer below the landing, so the landing has to leave
+    // first — and it leaves as a dismissal, since the wizard has not produced a
+    // document yet and "Start empty" is one of its answers.
+    closeLanding();
+    openSetupWizard();
+};
+document.getElementById('landingExampleBtn').onclick = () => {
+    const prof = PROFILES[state.settings.profile];
+    state.libraryId = null;
+    loadDocIntoCanvas(templatesData[(prof && prof.template) || 'house'] || templatesData.house);
+    landingHandledDocument();
+};
+
+// The drop zone. A build file arriving from a colleague is the same act as
+// opening one, so it lands in the same box, and clicking the box's background
+// opens the picker — a convenience for the mouse, never the only way in (the
+// buttons inside stop propagation so they do not also trigger it).
+//
+// dragover must preventDefault or the browser navigates away to the dropped
+// file, which loses the page. The counter is because dragenter/dragleave fire
+// for every child element the pointer crosses: without it the border flickers
+// off the moment the cursor passes over the heading.
+(function () {
+    const zone = document.getElementById('landingDrop');
+    let depth = 0;
+    const paint = (on) => zone.classList.toggle('drag', on);
+    zone.onclick = () => document.getElementById('importFileInput').click();
+    zone.addEventListener('dragenter', (e) => { e.preventDefault(); depth++; paint(true); });
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+    zone.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) paint(false); });
+    zone.addEventListener('drop', (e) => {
+        e.preventDefault(); depth = 0; paint(false);
+        const file = e.dataTransfer.files && e.dataTransfer.files[0];
+        if (file) importJsonFile(file);   // owns the parse, the alerts and the swap
+    });
+})();
+
 // ---- Site report ----
 // The one export that is a document rather than a copy of the drawing, so it
 // asks who it is for first. js/report.js owns the fields, the model and the
@@ -1317,10 +1504,15 @@ document.getElementById('reportDialog').onclick = (e) => {
 };
 document.getElementById('reportBuildBtn').onclick = async () => {
     const btn = document.getElementById('reportBuildBtn');
-    commitReportMeta();
+    // The binder path reads the form and stops there: the estate header belongs
+    // to this one document, and writing it into state.report would stamp it on
+    // whatever network happens to be open behind the landing.
+    const binder = reportMode() === 'binder';
+    const meta = binder ? readReportFields() : commitReportMeta();
+    const images = binder ? document.getElementById('reportImages').checked : false;
     closeReportDialog();
     btn.disabled = true;
-    try { await generateSiteReport(); }
+    try { await (binder ? generateBinderReport(meta, { images }) : generateSiteReport()); }
     catch (err) { console.warn('Could not build the report:', err); alert('Could not build the report.'); }
     finally { btn.disabled = false; }
 };
@@ -1348,7 +1540,16 @@ document.getElementById('importFileInput').onchange = (event) => {
 
 // Browser back/forward swaps the document wholesale (a shared URL, say), so the
 // edit timeline for the old document no longer applies — start a fresh one.
-window.addEventListener('popstate', async () => { await load(); renderCanvasOnly(); fitToView(); initHistory(); });
+// initHistory() only when the document actually changed. The binder branch
+// deliberately leaves the canvas alone, and resetting the timeline for a
+// document still being edited threw away every undo step with nothing to show
+// for it.
+window.addEventListener('popstate', async () => {
+    const before = JSON.stringify(serializeDoc());
+    await load(); renderCanvasOnly();
+    if (JSON.stringify(serializeDoc()) === before) return;
+    fitToView(); initHistory();
+});
 
 document.getElementById('conflictHideBtn').onclick = () => {
     state.settings.alertsHidden = true; saveSettings(); validateTopology();
@@ -1389,9 +1590,21 @@ applyLocale();
 showLibraryTab(state.settings.libraryTab || 'nodes');
 // Boot may need to decompress a shared "~" link, so await it before drawing.
 (async () => {
-    await load(); renderCanvasOnly(); fitToView();
-    initHistory(); // the loaded document is the floor of the undo timeline, not a step
-    updateTracePortUi();
+    try {
+        // Before load(), because a refresh of a binder link has to find its
+        // shelf already in hand — openBinderLink() only runs for the hash that
+        // carried it, and a plain reload of a doc hash must still show it.
+        restoreGuestBinder();
+        await load(); renderCanvasOnly(); fitToView();
+        initHistory(); // the loaded document is the floor of the undo timeline, not a step
+        updateTracePortUi();
+    } finally {
+        // Boot has decided: either the landing is up and keeps the chrome hidden
+        // on its own, or this is the editor and its controls belong on screen.
+        // In a finally because a half-booted editor is still usable, while an
+        // invisible one is not.
+        document.body.classList.remove('chrome-pending');
+    }
 })();
 
 // ---- Fleet language switcher (carino-lang.js) ----

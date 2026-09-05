@@ -15,6 +15,14 @@
 # matches on an English finding — and the URL parameter beats saved settings, so
 # a suite that switches locale cannot leak into the next one either.
 #
+# #advanced enters the editor. A bare URL is the landing page now (js/library.js),
+# and a suite driving the editor from behind a full-screen overlay would be
+# testing a state no user is ever in — Escape would reach the landing rather than
+# the panel under test. '#advanced' is a real entry, not a test backdoor: it is
+# what the mode picker's "Full editor" writes, and on a fresh boot it loads the
+# same default document the bare URL used to. The landing itself is asserted in
+# tests/suites/library.js.
+#
 # Served over HTTP, not opened as file://, because file:// treats every external
 # script and stylesheet as a foreign origin. That costs us the two things a test
 # run most needs: real messages (errors collapse to "Script error." with no file
@@ -61,11 +69,18 @@ suite, runfile = sys.argv[1], sys.argv[2]
 html = open('index.html').read()
 # Record the first boot error, so a suite that never reports can say why it died
 # instead of leaving us to guess. Goes in <head>, ahead of every app script.
-probe = ('<script>window.addEventListener("error", (e) => {'
+# 'error' alone misses the case that matters most now that suites are async: a
+# throw inside an async suite body is an unhandled REJECTION, not an error, so
+# the run reported "nothing at all" with no reason. Both feed the same box.
+probe = ('<script>const _be = (msg) => {'
          'if (document.getElementById("BOOTERR")) return;'
-         'const p = document.createElement("pre"); p.id = "BOOTERR";'
-         'p.textContent = e.message + " @ " + (e.filename || "").split("/").pop() + ":" + e.lineno;'
-         'document.documentElement.appendChild(p); });</script>')
+         'const p = document.createElement("pre"); p.id = "BOOTERR"; p.textContent = msg;'
+         'document.documentElement.appendChild(p); };'
+         'window.addEventListener("error", (e) => _be('
+         'e.message + " @ " + (e.filename || "").split("/").pop() + ":" + e.lineno));'
+         'window.addEventListener("unhandledrejection", (e) => _be('
+         '"unhandled rejection: " + ((e.reason && (e.reason.stack || e.reason.message)) || e.reason)));'
+         '</script>')
 if '</head>' not in html or '</body>' not in html:
     sys.exit('index.html is missing </head> or </body> to inject into')
 html = html.replace('</head>', probe + '</head>', 1)
@@ -73,7 +88,7 @@ open(runfile, 'w').write(html.replace('</body>', f'<script src="{suite}"></scrip
 PY
 
     dom=$("$CHROME" --headless --disable-gpu --no-sandbox \
-          --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:$PORT/$RUNFILE?lang=en" 2>/dev/null)
+          --virtual-time-budget=8000 --dump-dom "http://127.0.0.1:$PORT/$RUNFILE?lang=en#advanced" 2>/dev/null)
 
     results=$(printf '%s' "$dom" | python3 -c '
 import sys, re, html

@@ -11,7 +11,16 @@
     <link rel="stylesheet" href="fonts/carino-fonts.css">
     <link rel="stylesheet" href="css/app.css">
 </head>
-<body class="bg-gray-100 font-sans h-screen flex flex-col overflow-hidden text-slate-800">
+<!-- chrome-pending: the editor's own controls and its work area start hidden and
+     are revealed by the boot in js/app.js, once load() has decided whether this
+     URL is a document or the landing page. Without it the whole editor paints
+     first and the landing drops over it a beat later — over a second of Undo,
+     Export and an empty canvas, all acting on a document nobody has chosen, on
+     any machine slow enough to notice. It is an attribute in the markup rather
+     than a line of script because it has to be true before the first paint, and
+     it is cleared unconditionally (in a finally) so a boot that throws leaves a
+     usable editor rather than an invisible one. -->
+<body class="bg-gray-100 font-sans h-screen flex flex-col overflow-hidden text-slate-800 chrome-pending">
 
     <header class="cs-header">
         <div class="cs-right">
@@ -44,6 +53,9 @@
             <div class="cs-menu">
                 <button id="exportMenuBtn" class="cs-btn" aria-haspopup="true" aria-expanded="false" title="Share, export & import builds">⤓ Export <span class="cs-caret">▾</span></button>
                 <div id="exportMenu" class="cs-menu-panel hidden" role="menu" aria-labelledby="exportMenuBtn">
+                    <button id="myNetworksBtn" class="cs-menu-item" role="menuitem">🗂️ My networks <span class="cs-menu-note">saved here</span></button>
+                    <button id="saveNetworkBtn" class="cs-menu-item" role="menuitem">💾 Save this network</button>
+                    <div class="cs-menu-div"></div>
                     <button id="reportBtn" class="cs-menu-item" role="menuitem">📋 Site report <span class="cs-menu-note">printable</span></button>
                     <div class="cs-menu-div"></div>
                     <button id="copyUrlBtn" class="cs-menu-item" role="menuitem">🔗 Copy link <span class="cs-menu-note">short URL</span></button>
@@ -53,7 +65,7 @@
                     <button id="exportJsonBtn" class="cs-menu-item" role="menuitem">📄 Build file <span class="cs-menu-note">.nettopo</span></button>
                     <div class="cs-menu-div"></div>
                     <button id="importFileBtn" class="cs-menu-item" role="menuitem">📂 Import build…</button>
-                    <button id="saveTemplateBtn" class="cs-menu-item" role="menuitem">💾 Save as template</button>
+                    <button id="saveTemplateBtn" class="cs-menu-item" role="menuitem">📐 Save as template <span class="cs-menu-note">reusable</span></button>
                 </div>
                 <input type="file" id="importFileInput" accept=".json,.nettopo,application/json" hidden>
             </div>
@@ -188,6 +200,20 @@
                             <p id="netcfgHint" class="hidden text-[10px] text-slate-400 mt-1 leading-tight">These usually run vendor firmware, not netplan.</p>
                             <a id="openNetcfgBtn" target="_blank" rel="noopener" class="hidden w-full mt-2 py-1 rounded text-[10px] font-bold transition text-center">⚙️ Open config → netplan.carino.systems</a>
                         </div>
+
+                        <!-- Inter-site link. A cloud is already this codebase's
+                             "something outside this drawing", and naming one after
+                             another building was the existing workaround; this makes
+                             the claim structured so the estate report can draw it.
+                             English labels with no data-i18n, matching the netcfg
+                             block and natRow — advanced sidebar vocabulary stays
+                             untranslated on purpose (js/i18n.js). -->
+                        <div id="siteRefBlock" class="hidden pt-2 mt-2 border-t border-slate-100">
+                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase" title="Say that this cloud stands for another network in your binder, so the estate report can draw the link between them.">Stands for another site</label>
+                            <select id="propSiteRef" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500"></select>
+                            <p id="siteRefHint" class="hidden text-[10px] text-slate-400 mt-1 leading-tight"></p>
+                            <button id="openSiteRefBtn" type="button" class="hidden w-full mt-2 py-1 rounded text-[10px] font-bold transition text-center"></button>
+                        </div>
                     </div>
 
                     <div id="nodeGeneralProps" class="pt-3 border-t border-slate-100">
@@ -273,6 +299,137 @@
                 </div>
             </div>
 
+            <!-- Landing (bare URL only — see shouldShowLanding()). The front
+                 door: say what the tool is, offer the one way in, then the
+                 networks this browser already holds. It sits inside the work
+                 area so the fleet navbar stays above it, and .landing-open
+                 hides the editor's own controls — Undo and Export act on a
+                 document nobody has chosen yet.
+
+                 Laid out like dcm.carino.systems' front door, which is the
+                 fleet's pattern for "a tool that happens to have a landing
+                 page": a mark with one piece of motion, a two-line claim whose
+                 second half is the payoff, a short lede, then a single large
+                 target rather than a row of equal buttons. Everything is
+                 centred and everything disappears the moment a document is
+                 open — a headline still sitting above someone's survey while
+                 they work would be the wrong way round. -->
+            <div id="landing" class="hidden absolute inset-0 z-40 overflow-y-auto">
+                <div class="landing-inner">
+
+                    <section class="landing-hero">
+                        <!-- No logo above the trace. logo.webp is a black silhouette
+                             that cannot be recoloured and simply does not exist on
+                             this background, and the fleet navbar is already carrying
+                             "Carino / TOPO" two centimetres higher. The trace is the
+                             mark. -->
+                        <div class="landing-mark" aria-hidden="true">
+                            <!-- The app's own trace-flow animation, at mark size: an
+                                 orthogonally routed link with a packet running down it.
+                                 One polyline so the packet travels the whole path, and
+                                 pathLength="100" so the dash maths below is in percent. -->
+                            <svg class="netline" viewBox="0 0 200 40" preserveAspectRatio="xMidYMid meet">
+                                <polyline class="trace" pathLength="100" points="6,20 36,20 36,7 66,7 96,7 96,33 126,33 156,33 156,20 194,20" />
+                                <polyline class="pulse" pathLength="100" points="6,20 36,20 36,7 66,7 96,7 96,33 126,33 156,33 156,20 194,20" />
+                                <g class="dots">
+                                    <rect x="2" y="16" width="8" height="8" rx="1.5" />
+                                    <rect x="62" y="3" width="8" height="8" rx="1.5" />
+                                    <rect x="122" y="29" width="8" height="8" rx="1.5" />
+                                    <rect x="190" y="16" width="8" height="8" rx="1.5" />
+                                </g>
+                            </svg>
+                        </div>
+                        <h1><span data-i18n>Nobody ever wrote this network down.</span><br><span class="gold" data-i18n>Draw it once, and it checks itself.</span></h1>
+                        <p class="landing-lede">
+                            <span data-i18n>Every device, every subnet, every cable — with the address conflicts, loops and dead gateways found for you, and a report you can hand over.</span>
+                            <span data-i18n>It runs in this tab — no server, no upload, no account — which is why it still works in a comms room with no signal.</span>
+                        </p>
+                    </section>
+
+                    <!-- One target, not four buttons. It is also the drop zone: a
+                         build file arriving from a colleague is the same act as
+                         opening one, and a drop TARGET wants to be large. The box
+                         holds buttons, so it is not itself a button — clicking the
+                         background opens the file picker as a convenience for the
+                         mouse, never as the only way in. -->
+                    <div class="landing-drop" id="landingDrop">
+                        <svg class="landing-drop-icon" viewBox="0 0 48 40" aria-hidden="true">
+                            <path d="M24 15 V21 M24 21 H10 V26 M24 21 H38 V26" />
+                            <rect x="16" y="4" width="16" height="11" rx="2" />
+                            <rect x="2" y="26" width="16" height="11" rx="2" />
+                            <rect x="30" y="26" width="16" height="11" rx="2" />
+                        </svg>
+                        <h2 data-i18n>Start a new network</h2>
+                        <p><span data-i18n>A blank canvas that has its own link from the first device.</span><br><span data-i18n>Or drop a</span> <code>.nettopo</code> <span data-i18n>build file, or a whole binder, here.</span></p>
+                        <div class="landing-drop-actions">
+                            <button class="landing-drop-btn primary" id="landingNewBtn" data-i18n>✚ New network</button>
+                            <button class="landing-drop-btn" id="landingOpenFileBtn" data-i18n>📂 Open a file</button>
+                        </div>
+                    </div>
+
+                    <!-- A sibling of the drop box, never a child: a button nested
+                         inside it would pop the file dialog on every chip click. -->
+                    <div class="landing-chips">
+                        <div class="landing-chips-lbl" data-i18n>First time here? Start from something that already exists.</div>
+                        <div class="landing-chips-row">
+                            <button class="landing-chip" id="landingExampleBtn" data-i18n>Open the example</button>
+                            <button class="landing-chip accent" id="landingWizardBtn" data-i18n>Set up from a count</button>
+                        </div>
+                        <div class="landing-chips-note" id="landingEmpty" data-i18n>Networks you save are kept in this browser, and show up here.</div>
+                    </div>
+
+                    <!-- A binder someone sent, decoded from a 'b~' link. Its own
+                         section, never merged into "Your networks" until the visitor
+                         presses Keep: a link arrives by someone else's click, and
+                         nothing a stranger sent belongs in this browser's library
+                         without being asked for. -->
+                    <div id="landingShared" class="hidden landing-section">
+                        <div class="landing-section-head">
+                            <h2 data-i18n class="landing-section-title">Shared with you</h2>
+                            <div class="landing-section-actions">
+                                <button id="guestKeepAllBtn" class="landing-chip accent hidden" data-i18n>⤓ Keep all in this browser</button>
+                                <button id="guestDismissBtn" class="landing-chip" data-i18n>Dismiss</button>
+                            </div>
+                        </div>
+                        <div id="guestCards" class="landing-cards"></div>
+                        <p id="guestBinderStatus" class="landing-binder-status"></p>
+                    </div>
+
+                    <!-- There is no "import binder" button on purpose: the file says
+                         what it is, so one door (the drop zone / Open a file) takes
+                         both a single build and a whole binder. That also keeps the
+                         import reachable on a machine where the library is still
+                         empty and this whole section is hidden. -->
+                    <div id="landingSaved" class="hidden landing-section">
+                        <div class="landing-section-head">
+                            <h2 data-i18n class="landing-section-title">Your networks</h2>
+                            <!-- Report before Export: read it, then file it. -->
+                            <div class="landing-section-actions">
+                                <button id="binderLinkBtn" class="landing-chip" data-i18n>🔗 Copy binder link</button>
+                                <button id="binderReportBtn" class="landing-chip" data-i18n>📋 Binder report</button>
+                                <button id="binderExportBtn" class="landing-chip" data-i18n>⤓ Export binder</button>
+                            </div>
+                        </div>
+                        <div id="landingCards" class="landing-cards"></div>
+                        <!-- Filled by binderStatus(). Says how long since the library
+                             was last written to a file and how many networks have
+                             changed since — the only form of "back this up" anyone
+                             reads twice. -->
+                        <p id="binderStatus" class="landing-binder-status"></p>
+                        <!-- Where the binder goes, once it is bound to a real file.
+                             Ships hidden and stays hidden on every browser without
+                             the File System Access API, so Firefox and Safari never
+                             see a control that cannot do anything. -->
+                        <p id="binderTarget" class="landing-binder-target" hidden>
+                            <span id="binderTargetName"></span>
+                            <button id="binderRebindBtn" type="button" class="landing-linkish" data-i18n>change</button>
+                        </p>
+                        <p id="landingFootnote" data-i18n class="landing-footnote">Saved networks live in this browser only — this is not an account, and clearing site data removes them. Export the binder for a copy that survives.</p>
+                    </div>
+
+                </div>
+            </div>
+
             <!-- Setup wizard (#setup / #setup-<profile>): count what you have,
                  the network draws itself, then you land in the simple view to rename. -->
             <div id="setupWizard" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
@@ -290,14 +447,23 @@
             <!-- Site report: who the survey was for, before the document is
                  written. The fields are rendered from REPORT_FIELDS in
                  js/report.js so the form and the document cannot disagree. -->
-            <div id="reportDialog" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
+            <!-- z-50, above the landing's z-40: the binder report is launched FROM
+                 the landing and the landing stays up behind it. -->
+            <div id="reportDialog" class="hidden absolute inset-0 z-50 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
                 <div class="rounded-lg shadow-2xl p-5 w-full max-w-md max-h-full overflow-y-auto" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
                     <h4 id="reportDialogTitle" data-i18n class="text-[11px] font-bold uppercase tracking-wider mb-1" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">Site report</h4>
-                    <p data-i18n class="text-[11px] mb-3" style="color: var(--cs-text-muted)">The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.</p>
+                    <p id="reportDialogBlurb" data-i18n class="text-[11px] mb-3" style="color: var(--cs-text-muted)">The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.</p>
                     <div id="reportFields" class="flex flex-col gap-2.5 mb-4"></div>
+                    <!-- Binder mode only. Two sibling spans rather than markup nested
+                         inside one data-i18n element: applyStaticI18n sets textContent
+                         and would eat any children. -->
+                    <label id="reportImagesRow" class="hidden text-[11px] mb-3" style="color: var(--cs-text-muted)">
+                        <input type="checkbox" id="reportImages" class="mt-0.5" checked>
+                        <span><span data-i18n>Include a diagram for each site</span><br><span class="opacity-70" data-i18n>Renders each network in turn — slower, and the file gets much larger.</span></span>
+                    </label>
                     <div class="flex gap-2 justify-end">
                         <button id="reportCancelBtn" data-i18n class="cs-btn">Cancel</button>
-                        <button id="reportBuildBtn" data-i18n class="cs-btn">📋 Open report</button>
+                        <button id="reportBuildBtn" class="cs-btn">📋 Open report</button>
                     </div>
                 </div>
             </div>
@@ -322,6 +488,7 @@
     <script src="js/diagnostics.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/report.js"></script>
+    <script src="js/library.js"></script>
     <script src="js/app.js"></script>
 <script src="carino-navbar.js" data-app="Topo" data-repo="Topo" defer></script>
 <script src="carino-lang.js" defer></script>

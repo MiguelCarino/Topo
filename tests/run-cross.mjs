@@ -55,8 +55,8 @@ async function buildRunfile(suite) {
 async function runSuite(browser, suite) {
   const page = await browser.newPage();
   try {
-    // ?lang=en for the same reason run.sh pins it — see the note there.
-    await page.goto(`http://127.0.0.1:${PORT}/${RUNFILE}?lang=en`, { waitUntil: 'load' });
+    // ?lang=en and #advanced for the same reasons run.sh uses them — see the note there.
+    await page.goto(`http://127.0.0.1:${PORT}/${RUNFILE}?lang=en#advanced`, { waitUntil: 'load' });
     let text = '';
     try {
       await page.waitForSelector('#TESTOUT', { timeout: 15000 });

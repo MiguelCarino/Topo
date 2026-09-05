@@ -458,3 +458,243 @@ body.profile-imagenology .palette-item[data-type="dicom"],
 body.profile-imagenology .palette-item[data-type="server"] { display: flex !important; }
 body.profile-imagenology .palette-item[data-type="iot"],
 body.profile-imagenology .palette-item[data-type="camera"] { display: none !important; }
+
+/* ============================================================
+   Landing — the front door on a bare URL. Laid out like
+   dcm.carino.systems: centred, a mark with one piece of motion,
+   a two-line claim, then one large target instead of a row of
+   equal buttons. Gold on black like the rest of the chrome and
+   deliberately not a light "document" surface — the canvas is
+   the document, this is the way in.
+   ============================================================ */
+/* :not(.hidden) is load-bearing, not tidiness. `display: flex` on an ID beats
+   Tailwind's `.hidden { display: none }` on specificity alone, so the plain
+   rule left this overlay painted over the editor forever — the same trap
+   .cs-menu-panel.hidden documents above, and the reason the assertions below it
+   check computed visibility rather than the class. */
+#landing {
+    background: radial-gradient(1100px 560px at 50% -8%, rgba(234, 179, 8, 0.08), transparent 70%), var(--cs-bg);
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+}
+#landing:not(.hidden) { display: flex; }
+/* margin:auto rather than align-items:center — it centres a short page and
+   still lets a long one (a screen full of saved networks) scroll from the top
+   instead of clipping its head off. */
+.landing-inner {
+    margin: auto; width: min(760px, 92%); padding: 40px 0 44px;
+    display: flex; flex-direction: column; align-items: center; gap: 26px;
+}
+/* Source order is written for a first visit: what this is, then the way in.
+   Someone with saved networks has already had that conversation and came back
+   for their own work, so the list moves above the drop zone and the pitch
+   shrinks to the claim — same markup, no second layout to keep in step. The
+   class is set by renderLanding(), which is the one place that knows. */
+.landing-hero { order: 1; }
+.landing-drop { order: 2; }
+.landing-chips { order: 3; }
+.landing-section { order: 4; }
+#landing.has-saved .landing-section { order: 2; }
+#landing.has-saved .landing-drop { order: 3; }
+#landing.has-saved .landing-chips { order: 4; }
+#landing.has-saved .landing-lede { display: none; }
+#landing.has-saved .landing-hero h1 { font-size: clamp(16px, 2.1vw, 19px); margin-bottom: 0; }
+#landing.has-saved .netline { width: 150px; height: 30px; }
+#landing.has-saved .landing-mark { margin-bottom: 8px; }
+#landing.has-saved .landing-drop { padding: 24px 28px; }
+#landing.has-saved .landing-drop-icon { width: 40px; height: 34px; margin-bottom: 8px; }
+#landing.has-saved .landing-inner { gap: 20px; }
+/* "First time here?" under a screen of your own saved networks is addressed to
+   nobody. The two chips say what they do without it. */
+#landing.has-saved .landing-chips-lbl { display: none; }
+
+/* ---- Hero ---- */
+.landing-hero { text-align: center; }
+.landing-mark { display: flex; justify-content: center; margin-bottom: 14px; }
+/* The app's own trace-flow, reused as the mark's underline: a faint routed link
+   with a bright packet running down it. pathLength="100" puts the dash maths in
+   percent, so the path can be redrawn without recomputing the animation. */
+.netline { width: 230px; height: 46px; overflow: visible; }
+.netline polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.netline .trace { stroke: var(--cs-accent); stroke-width: 2; opacity: 0.14; }
+.netline .pulse {
+    stroke: var(--cs-accent); stroke-width: 2.4; stroke-dasharray: 16 120;
+    filter: drop-shadow(0 0 6px rgba(234, 179, 8, 0.9));
+    animation: netline-flow 2.6s linear infinite;
+}
+.netline .dots rect { fill: var(--cs-bg); stroke: var(--cs-accent); stroke-width: 1.6; opacity: 0.55; }
+@keyframes netline-flow { from { stroke-dashoffset: 136; } to { stroke-dashoffset: 0; } }
+/* Same courtesy the link-flow keyframes above extend: keep the shape, drop the loop. */
+@media (prefers-reduced-motion: reduce) { .netline .pulse { animation: none; stroke-dasharray: none; opacity: 0.5; } }
+
+.landing-hero h1 {
+    margin: 0 0 12px; font-size: clamp(19px, 3.2vw, 28px); line-height: 1.28;
+    font-weight: 700; letter-spacing: -0.01em; color: var(--cs-text);
+}
+.landing-hero h1 .gold { color: var(--cs-accent); }
+.landing-lede { margin: 0 auto; max-width: 62ch; font-size: 13.5px; line-height: 1.65; color: var(--cs-text-sec); }
+
+/* ---- The one way in, which is also the drop zone ---- */
+.landing-drop {
+    width: min(560px, 100%); padding: 34px 30px; text-align: center; cursor: pointer;
+    border: 2px dashed var(--cs-border); border-radius: 16px;
+    background: linear-gradient(180deg, #0d0d0d, #080808); transition: 0.2s;
+}
+.landing-drop:hover, .landing-drop.drag {
+    border-color: var(--cs-accent); box-shadow: 0 0 32px var(--cs-accent-glow); transform: translateY(-2px);
+}
+/* Drawn rather than typed: a device glyph in the app's own line language, and
+   no font on the reader's machine to be missing it. */
+.landing-drop-icon { width: 52px; height: 44px; margin: 0 auto 10px; display: block; }
+.landing-drop-icon rect, .landing-drop-icon path {
+    fill: none; stroke: var(--cs-accent); stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round; opacity: 0.85;
+}
+.landing-drop:hover .landing-drop-icon rect, .landing-drop:hover .landing-drop-icon path,
+.landing-drop.drag .landing-drop-icon rect, .landing-drop.drag .landing-drop-icon path { opacity: 1; }
+.landing-drop h2 { font-size: 19px; font-weight: 800; margin: 0 0 7px; color: var(--cs-text); }
+.landing-drop p { margin: 0; color: var(--cs-text-muted); font-size: 12.5px; line-height: 1.6; }
+.landing-drop code { font-family: 'IBM Plex Mono', monospace; color: var(--cs-accent); }
+.landing-drop-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+.landing-drop-btn {
+    padding: 8px 16px; border: 1px solid var(--cs-border); background: #101010;
+    color: var(--cs-text-sec); border-radius: 6px; cursor: pointer;
+    font: 600 12px 'IBM Plex Sans', system-ui, sans-serif; transition: 0.15s;
+}
+.landing-drop-btn:hover, .landing-drop-btn:focus-visible {
+    border-color: var(--cs-accent); background: var(--cs-accent-faint); color: var(--cs-accent); outline: none;
+}
+.landing-drop-btn.primary { border-color: var(--cs-accent); background: var(--cs-accent-faint); color: var(--cs-accent); }
+.landing-drop-btn.primary:hover, .landing-drop-btn.primary:focus-visible { background: var(--cs-accent); color: #050505; }
+
+/* ---- The starting points, as chips ---- */
+.landing-chips { text-align: center; }
+.landing-chips-lbl { color: var(--cs-text-muted); font-size: 12px; margin-bottom: 9px; }
+.landing-chips-row { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.landing-chip {
+    padding: 6px 12px; background: #101010; border: 1px solid var(--cs-border);
+    color: var(--cs-text-sec); border-radius: 5px; cursor: pointer;
+    font: 600 12px 'IBM Plex Sans', system-ui, sans-serif; transition: 0.15s;
+}
+.landing-chip:hover, .landing-chip:focus-visible {
+    border-color: var(--cs-accent); background: var(--cs-accent-faint); color: var(--cs-accent); outline: none;
+}
+.landing-chip.accent { border-color: var(--cs-accent-dim); color: var(--cs-accent); background: var(--cs-accent-faint); }
+.landing-chips-note { margin-top: 10px; color: var(--cs-text-muted); font-size: 11px; }
+
+/* The shelf sits above the saved networks: it is the reason this visitor is
+   here, and it is the only section with a deadline on it. */
+#landing.has-saved #landingShared { order: 1; }
+#landingShared { order: 1; }
+.landing-card.guest .landing-card-open { border-left: 2px solid var(--cs-accent-dim); }
+/* Keep is a named action rather than a glyph, and it does not hide until hover:
+   a card that can evaporate with the tab has to say what to do about it. */
+.landing-card-tools.guest { opacity: 1; }
+.landing-tool.wide { width: auto; padding: 0 7px; font-size: 0.58rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+
+/* ---- Saved networks ---- */
+.landing-section { width: 100%; margin-top: 8px; }
+/* The label and the one action share a baseline, and the rule that used to sit
+   under the label now sits under the pair. */
+.landing-section-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    border-bottom: 1px solid var(--cs-border); padding-bottom: 6px; margin-bottom: 10px;
+}
+.landing-section-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The binder-only images row. Explicit rather than a Tailwind `flex` utility
+   beside `hidden`: those two have equal specificity, so which one wins depends
+   on stylesheet order — the same trap .cs-menu-panel.hidden documents above. */
+#reportImagesRow:not(.hidden) { display: flex; align-items: flex-start; gap: 8px; }
+.landing-section-head .landing-chip { padding: 4px 9px; font-size: 11px; }
+.landing-section-title {
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em; color: var(--cs-text-muted);
+    margin: 0;
+}
+.landing-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(224px, 1fr)); gap: 10px; }
+
+/* The card is a div because rename/delete are buttons and a button cannot nest
+   inside one; the open button fills it, and the tools float over the corner. */
+.landing-card { position: relative; }
+.landing-card-open {
+    display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left;
+    background: var(--cs-bg-card); border: 1px solid var(--cs-border); border-radius: 8px;
+    padding: 12px 13px 11px; cursor: pointer; transition: 0.15s;
+}
+.landing-card-open:hover, .landing-card-open:focus-visible {
+    border-color: var(--cs-accent); background: var(--cs-accent-faint); outline: none;
+}
+/* A long site name truncates rather than reflowing the card to a different
+   height than its neighbours — the grid reads as a grid. */
+.landing-card-name {
+    font-size: 0.79rem; font-weight: 600; color: var(--cs-text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    padding-right: 44px;   /* clear of the tools */
+}
+.landing-card-stats { font-family: 'IBM Plex Mono', monospace; font-size: 0.63rem; color: var(--cs-text-muted); }
+.landing-card-badges { display: flex; gap: 5px; margin-top: 4px; flex-wrap: wrap; }
+.landing-card-when {
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem;
+    color: var(--cs-text-muted); opacity: 0.75; margin-top: 3px;
+}
+.landing-badge {
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 700;
+    border-radius: 3px; padding: 1px 5px; border: 1px solid transparent; white-space: nowrap;
+}
+.landing-badge.bad { color: #fca5a5; border-color: rgba(248, 113, 113, 0.35); background: rgba(248, 113, 113, 0.1); }
+.landing-badge.warn { color: #fcd34d; border-color: rgba(251, 191, 36, 0.3); background: rgba(251, 191, 36, 0.09); }
+.landing-badge.good { color: #86efac; border-color: rgba(74, 222, 128, 0.28); background: rgba(74, 222, 128, 0.08); }
+
+/* Dim until the card is hovered or something inside it has focus — visible to a
+   keyboard, out of the way of a glance down the list. */
+.landing-card-tools { position: absolute; top: 8px; right: 8px; display: flex; gap: 2px; opacity: 0; transition: 0.15s; }
+.landing-card:hover .landing-card-tools, .landing-card:focus-within .landing-card-tools { opacity: 1; }
+.landing-tool {
+    width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+    background: var(--cs-bg-elev); border: 1px solid var(--cs-border); border-radius: 4px;
+    color: var(--cs-text-muted); font-size: 0.62rem; line-height: 1; cursor: pointer; transition: 0.15s;
+}
+.landing-tool:hover, .landing-tool:focus-visible { color: var(--cs-accent); border-color: var(--cs-accent); outline: none; }
+
+/* Not styled as a warning. It is a fact with a date on it, and something that
+   turns red every visit is something people stop seeing. */
+.landing-binder-status {
+    margin: 12px 0 0; text-align: center;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; color: var(--cs-text-muted);
+}
+.landing-binder-status.stale { color: var(--cs-accent); opacity: 0.85; }
+
+.landing-binder-target {
+    margin: 4px 0 0; text-align: center;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; color: var(--cs-text-muted);
+}
+.landing-linkish {
+    background: none; border: none; padding: 0 0 0 6px; cursor: pointer;
+    font: inherit; color: var(--cs-accent); text-decoration: underline; opacity: 0.8;
+}
+.landing-linkish:hover, .landing-linkish:focus-visible { opacity: 1; outline: none; }
+
+/* The one thing a card list must say out loud: it is a browser, not an account. */
+.landing-footnote {
+    font-size: 0.66rem; line-height: 1.5; color: var(--cs-text-muted);
+    margin: 8px 0 0; text-align: center;
+}
+
+/* Undo, Export and Trace act on a document nobody has picked yet. Two things
+   this rule has to survive, both caused by carino-navbar.js lifting .cs-right
+   out of .cs-header and into its own bar (relocateActions): a descendant
+   selector under .cs-header stops matching once the navbar has booted, and the
+   navbar's own '#carinoNav .cn-actions{display:flex}' outranks any class-only
+   selector we could write — hence !important rather than a specificity race we
+   would lose again the next time that file changes. The navbar itself stays
+   put: the landing is a page of this app, not of the site. */
+body.landing-open .cs-right { display: none !important; }
+/* And the same controls before boot has decided anything at all — see the note
+   on <body class="chrome-pending"> in index.html. The work area uses visibility
+   rather than display so that revealing it costs no reflow, and so the page
+   keeps its own background instead of collapsing to a white strip. */
+body.chrome-pending .cs-right { display: none !important; }
+body.chrome-pending aside, body.chrome-pending #canvasContainer { visibility: hidden; }
+body.chrome-pending .handy-bar { display: none !important; }
+/* Same argument for the phone: js/mobile.js floats a bar of Undo/Redo/Delete
+   over the canvas, and on the landing there is no canvas for it to act on. */
+body.landing-open .handy-bar { display: none !important; }

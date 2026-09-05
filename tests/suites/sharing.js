@@ -5,6 +5,10 @@
 // that the compressed form is actually smaller. Async because compression is.
 window.addEventListener('load', async () => {
   const out = [];
+  // keepGuestSites() can alert (nothing was kept), and a real dialog hangs a
+  // headless run outright rather than failing it.
+  const realAlert = window.alert, realConfirm = window.confirm, realPrompt = window.prompt;
+  window.alert = () => {}; window.confirm = () => true; window.prompt = () => null;
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
 
   // A real-ish diagram — big enough that compression clearly wins.
@@ -69,6 +73,95 @@ window.addEventListener('load', async () => {
   const took = applyImportedDoc(payload);
   ok('importing a build loads it onto an empty canvas', took === true && state.nodes.length === N, String(state.nodes.length));
   ok('the imported build keeps its NAT and port count', !!getNode('r') && getNode('r').nat === true && portCountOf(getNode('sw')) === 24);
+
+  // ---- The binder link ----
+  // A third fragment format carrying many networks. The sharp edge is the
+  // ordering in load(): a 'b~' hash reaching the document branch would be
+  // atob()'d, throw, and quietly load the demo network — a failure that looks
+  // exactly like a working app.
+  localStorage.removeItem(LIBRARY_KEY);
+  loadTemplateState(templatesData.hospital); autoBindLinks(); librarySave('Torre A');
+  loadTemplateState(templatesData.campus); autoBindLinks(); librarySave('Campus Norte');
+  const binderJson = JSON.stringify(binderFile());
+  const bFrag = await encodeBinderFragment(binderJson);
+
+  ok('a binder fragment is marked apart from both document formats',
+     bFrag.startsWith('b~') && isBinderFragment(bFrag)
+     && !isBinderFragment('~abc') && !isBinderFragment('eyJub2Rlcy'), bFrag.slice(0, 6));
+  ok('and it round-trips back to the same binder',
+     await decodeBinderFragment(bFrag) === binderJson);
+  const back = binderFromImported(JSON.parse(await decodeBinderFragment(bFrag)));
+  ok('with every network intact', back && back.sites.length === 2, String(back && back.sites.length));
+
+  // The measurement that made this feature worth building: bundling beats
+  // compressing each site on its own, because the sites share structure.
+  const each = await Promise.all(back.sites.map((st) => encodeShareFragment(JSON.stringify(st.doc))));
+  const summed = each.reduce((n, f) => n + f.length, 0);
+  ok('one bundled link is smaller than the sites compressed separately',
+     bFrag.length < summed, `${bFrag.length} vs ${summed}`);
+
+  // Opening one: the shelf fills, the canvas is not touched, nothing is saved.
+  loadTemplateState(templatesData.errors); autoBindLinks();
+  const canvasBefore = JSON.stringify(serializeDoc());
+  const libBefore = localStorage.getItem(LIBRARY_KEY);
+  window.history.replaceState(null, '', `#${bFrag}`);
+  await load();
+  ok('a binder link opens the landing, not a document',
+     !document.getElementById('landing').classList.contains('hidden'));
+  ok('it fills the shelf with what was shared', guestSites().length === 2, String(guestSites().length));
+  ok('and leaves the canvas exactly as it was', JSON.stringify(serializeDoc()) === canvasBefore);
+  ok('nothing a stranger sent reached this browser\u2019s library',
+     localStorage.getItem(LIBRARY_KEY) === libBefore);
+
+  // The risk the ordering guards against, asserted directly.
+  dismissGuestBinder();
+  window.history.replaceState(null, '', '#b~notavalidfragment');
+  await load();
+  ok('a corrupt binder link does not silently become the demo network',
+     JSON.stringify(serializeDoc()) === canvasBefore, `${state.nodes.length} nodes`);
+  ok('the shelf stays empty', guestSites().length === 0);
+  // On the error text, not on "there is text": the shelf's ordinary caption is
+  // never empty, so a length check passed whether or not anything went wrong.
+  ok('and the landing says why', /could not be read/i.test(document.getElementById('guestBinderStatus').textContent),
+     document.getElementById('guestBinderStatus').textContent);
+  ok('and the shelf is visible to say it',
+     getComputedStyle(document.getElementById('landingShared')).display !== 'none');
+
+  // Keeping is the only way in, and it is the same merge the file drop uses.
+  dismissGuestBinder();
+  localStorage.removeItem(LIBRARY_KEY);
+  window.history.replaceState(null, '', `#${bFrag}`);
+  await load();
+  // Guarded: keeping from an empty shelf would throw rather than fail, and a
+  // suite that dies says far less than a named assertion does.
+  ok('the shelf has something to keep', guestSites().length === 2, String(guestSites().length));
+  // A card that loses the newer-wins comparison is NOT kept, and must not be
+  // swept off the shelf as though it had been — once the landing is dismissed
+  // the shelf is the only remaining copy.
+  const firstId = guestSites()[0].id;
+  const lib0 = loadLibrary();
+  lib0[firstId] = { id: firstId, name: 'Mine, newer', doc: { nodes: [], links: [] }, created: 1, updated: Date.now() + 60000 };
+  persistLibrary(lib0);
+  keepGuestSites([guestSites()[0]]);
+  ok('a shelf card that loses to a newer local copy stays on the shelf',
+     guestSites().some((x) => x.id === firstId) && loadLibrary()[firstId].name === 'Mine, newer',
+     guestSites().map((x) => x.id).join(','));
+  delete lib0[firstId]; persistLibrary(lib0);
+
+  keepGuestSites(guestSites().slice(0, 1));
+  ok('Keep moves exactly one network into the library',
+     Object.keys(loadLibrary()).length === 1 && guestSites().length === 1,
+     `${Object.keys(loadLibrary()).length} kept, ${guestSites().length} left`);
+  keepGuestSites(guestSites());
+  ok('and keeping the rest empties the shelf',
+     Object.keys(loadLibrary()).length === 2 && guestSites().length === 0);
+
+  dismissGuestBinder();
+  localStorage.removeItem(LIBRARY_KEY);
+  try { sessionStorage.removeItem(GUEST_BINDER_KEY); } catch (e) { /* private mode */ }
+  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+  window.alert = realAlert; window.confirm = realConfirm; window.prompt = realPrompt;
 
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);
