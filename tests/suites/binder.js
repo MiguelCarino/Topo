@@ -133,6 +133,10 @@ window.addEventListener('load', () => { setTimeout(async () => {
      withNames.includes('Hospital San José — Torre B'), 'recorded name missing');
   ok('while the card label still heads the sheet and the index',
      withNames.includes('torre b lower case'));
+  // And where the two agree, the row is dropped: the heading already said it.
+  const agreeing = html.slice(html.indexOf('class="sheet" id='));
+  ok('a sheet whose recorded name matches its card prints no Site row',
+     !agreeing.includes('<dt>Site</dt>'), 'a redundant Site row survived');
   libraryDelete(renamedId);
   // Stated as "nowhere past the cover" rather than as a count: a count would
   // pass for the wrong reason the moment the cover's own wording changed.

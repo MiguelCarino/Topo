@@ -509,7 +509,9 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 
 /* ---- Hero ---- */
 .landing-hero { text-align: center; }
-.landing-mark { display: flex; justify-content: center; margin-bottom: 14px; }
+.landing-mark { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 14px; }
+.landing-mark img { width: 58px; height: 58px; }
+#landing.has-saved .landing-mark img { width: 40px; height: 40px; }
 /* The app's own trace-flow, reused as the mark's underline: a faint routed link
    with a bright packet running down it. pathLength="100" puts the dash maths in
    percent, so the path can be redrawn without recomputing the animation. */

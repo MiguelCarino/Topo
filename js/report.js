@@ -771,7 +771,15 @@ function binderHtml(binder, images = {}) {
         // single-site report of the same document prints that name, and the two
         // must not contradict each other. The card name is the sheet's heading
         // and its index entry, which is how the reader finds it.
-        sheetMeta.site = (s.rawMeta.site || '').trim() || s.name;
+        // Printed only when it says something the heading does not. The card is
+        // usually named after the site, and a "Site: Bodega Sur" row under a
+        // heading reading "Bodega Sur" is a line the reader has to check to
+        // discover it was not worth reading. Where the two DIFFER — saving
+        // before filling the header is the ordinary way that happens — the
+        // document's own name is the one that prints, because the single-site
+        // report of the same document prints it too.
+        const recordedSite = (s.rawMeta.site || '').trim();
+        sheetMeta.site = recordedSite && recordedSite !== s.name ? recordedSite : '';
         sheetMeta.scope = s.rawMeta.scope || '';   // each building's own scope note always stands
         REPORT_FIELDS.forEach(({ key }) => {
             if (key === 'site' || key === 'scope') return;
