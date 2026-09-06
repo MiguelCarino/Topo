@@ -480,9 +480,16 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 /* margin:auto rather than align-items:center — it centres a short page and
    still lets a long one (a screen full of saved networks) scroll from the top
    instead of clipping its head off. */
+/* The scale is dcm.carino.systems', measured rather than guessed: 30px
+   headline, 14.5px lede on a 680px column, a drop zone with 56px of padding.
+   Everything here had been set a notch smaller — 28/13.5/34 — and a 62ch cap on
+   the lede narrowed it to 496px, so the same three sentences wrapped to four
+   cramped lines and the whole page read as a small block floating in black.
+   The children are shrink-to-fit inside this centred flex column, so the hero
+   needs its own width or it collapses to the longest line it happens to have. */
 .landing-inner {
     margin: auto; width: min(760px, 92%); padding: 40px 0 44px;
-    display: flex; flex-direction: column; align-items: center; gap: 26px;
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
 }
 /* Source order is written for a first visit: what this is, then the way in.
    Someone with saved networks has already had that conversation and came back
@@ -497,25 +504,25 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 #landing.has-saved .landing-drop { order: 3; }
 #landing.has-saved .landing-chips { order: 4; }
 #landing.has-saved .landing-lede { display: none; }
-#landing.has-saved .landing-hero h1 { font-size: clamp(16px, 2.1vw, 19px); margin-bottom: 0; }
-#landing.has-saved .netline { width: 150px; height: 30px; }
+#landing.has-saved .landing-hero h1 { font-size: clamp(17px, 2.3vw, 21px); margin-bottom: 0; }
+#landing.has-saved .netline { width: 165px; height: 32px; }
 #landing.has-saved .landing-mark { margin-bottom: 8px; }
-#landing.has-saved .landing-drop { padding: 24px 28px; }
-#landing.has-saved .landing-drop-icon { width: 40px; height: 34px; margin-bottom: 8px; }
+#landing.has-saved .landing-drop { padding: 30px 28px; }
+#landing.has-saved .landing-drop-icon { width: 46px; height: 38px; margin-bottom: 8px; }
 #landing.has-saved .landing-inner { gap: 20px; }
 /* "First time here?" under a screen of your own saved networks is addressed to
    nobody. The two chips say what they do without it. */
 #landing.has-saved .landing-chips-lbl { display: none; }
 
 /* ---- Hero ---- */
-.landing-hero { text-align: center; }
-.landing-mark { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 14px; }
-.landing-mark img { width: 58px; height: 58px; }
-#landing.has-saved .landing-mark img { width: 40px; height: 40px; }
+.landing-hero { width: min(680px, 100%); text-align: center; }
+.landing-mark { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 12px; }
+.landing-mark img { width: 64px; height: 64px; }
+#landing.has-saved .landing-mark img { width: 44px; height: 44px; }
 /* The app's own trace-flow, reused as the mark's underline: a faint routed link
    with a bright packet running down it. pathLength="100" puts the dash maths in
    percent, so the path can be redrawn without recomputing the animation. */
-.netline { width: 230px; height: 46px; overflow: visible; }
+.netline { width: 250px; height: 48px; overflow: visible; }
 .netline polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .netline .trace { stroke: var(--cs-accent); stroke-width: 2; opacity: 0.14; }
 .netline .pulse {
@@ -529,15 +536,15 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 @media (prefers-reduced-motion: reduce) { .netline .pulse { animation: none; stroke-dasharray: none; opacity: 0.5; } }
 
 .landing-hero h1 {
-    margin: 0 0 12px; font-size: clamp(19px, 3.2vw, 28px); line-height: 1.28;
+    margin: 0 0 12px; font-size: clamp(20px, 3.4vw, 30px); line-height: 1.25;
     font-weight: 700; letter-spacing: -0.01em; color: var(--cs-text);
 }
 .landing-hero h1 .gold { color: var(--cs-accent); }
-.landing-lede { margin: 0 auto; max-width: 62ch; font-size: 13.5px; line-height: 1.65; color: var(--cs-text-sec); }
+.landing-lede { margin: 0; font-size: 14.5px; line-height: 1.65; color: var(--cs-text-sec); }
 
 /* ---- The one way in, which is also the drop zone ---- */
 .landing-drop {
-    width: min(560px, 100%); padding: 34px 30px; text-align: center; cursor: pointer;
+    width: min(560px, 100%); padding: 56px 32px; text-align: center; cursor: pointer;
     border: 2px dashed var(--cs-border); border-radius: 16px;
     background: linear-gradient(180deg, #0d0d0d, #080808); transition: 0.2s;
 }
@@ -546,15 +553,15 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 }
 /* Drawn rather than typed: a device glyph in the app's own line language, and
    no font on the reader's machine to be missing it. */
-.landing-drop-icon { width: 52px; height: 44px; margin: 0 auto 10px; display: block; }
+.landing-drop-icon { width: 62px; height: 52px; margin: 0 auto 12px; display: block; }
 .landing-drop-icon rect, .landing-drop-icon path {
     fill: none; stroke: var(--cs-accent); stroke-width: 2;
     stroke-linecap: round; stroke-linejoin: round; opacity: 0.85;
 }
 .landing-drop:hover .landing-drop-icon rect, .landing-drop:hover .landing-drop-icon path,
 .landing-drop.drag .landing-drop-icon rect, .landing-drop.drag .landing-drop-icon path { opacity: 1; }
-.landing-drop h2 { font-size: 19px; font-weight: 800; margin: 0 0 7px; color: var(--cs-text); }
-.landing-drop p { margin: 0; color: var(--cs-text-muted); font-size: 12.5px; line-height: 1.6; }
+.landing-drop h2 { font-size: 22px; font-weight: 800; margin: 0 0 8px; color: var(--cs-text); }
+.landing-drop p { margin: 0; color: var(--cs-text-muted); font-size: 14px; line-height: 1.5; }
 .landing-drop code { font-family: 'IBM Plex Mono', monospace; color: var(--cs-accent); }
 .landing-drop-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
 .landing-drop-btn {
