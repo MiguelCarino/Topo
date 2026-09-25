@@ -805,6 +805,14 @@ function deliverReport(html, meta) {
     const name = `${slug}-report-${meta.date || todayISO()}.html`;
 
     const tab = window.open(url, '_blank');
+    // A blob: page inherits this page's CSP, which forbids inline handlers, so
+    // the toolbar's onclick is dead in the tab. It stays in the markup for the
+    // downloaded file, which has no CSP; the tab is same-origin, so it is wired
+    // from here instead.
+    if (tab) tab.addEventListener('load', () => {
+        const btn = tab.document.querySelector('.toolbar button');
+        if (btn) btn.onclick = () => tab.print();
+    });
     if (!tab) {
         const a = document.createElement('a');
         a.href = url; a.download = name; a.click();

@@ -116,17 +116,19 @@ window.addEventListener('load', () => {
   ok('legacy unbound link gets auto-bound', !!ol.sourceIface && !!ol.targetIface, `${ol.sourceIface}>${ol.targetIface}`);
   ok('legacy diagram reports no false warnings', nodeSeverity(getNode('x')) === null, String(evaluateMultiHoming(getNode('x')).text).slice(0, 50));
 
-  // ---- Scenario 9: hash size sanity (implicit ports) ----
+  // ---- Scenario 9: document size sanity (implicit ports) ----
+  // Measured on the live document (history.state now, not the hash); the
+  // shared link is a compressed form of the same JSON.
   reset([{ id: 'big', type: 'switch', name: 'Big', x: 0, y: 0, portCount: 48, interfaces: [] }], []);
   save();
-  const implicitLen = window.location.hash.length;
+  const implicitLen = liveDocJson().length;
   // Same switch, but with every port materialized — what the naive model would cost.
   const materialized = [];
   for (let p = 1; p <= 48; p++) materialized.push({ id: `p${p}`, name: String(p), ip: '' });
   reset([{ id: 'big', type: 'switch', name: 'Big', x: 0, y: 0, portCount: 48, interfaces: materialized }], []);
   save();
-  const explicitLen = window.location.hash.length;
-  ok('implicit ports keep a 48-port switch small in the hash', implicitLen * 3 < explicitLen,
+  const explicitLen = liveDocJson().length;
+  ok('implicit ports keep a 48-port switch small in the document', implicitLen * 3 < explicitLen,
      `implicit=${implicitLen} vs materialized=${explicitLen} chars`);
 
   const pre = document.createElement('pre');

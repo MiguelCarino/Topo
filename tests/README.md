@@ -18,6 +18,18 @@ The instrumented copy is written to the repo root as `.testrun.html`, not to
 elsewhere and you get a blank page with no app on it, and every assertion fails
 for the wrong reason.
 
+## Real-clock suites
+
+A suite whose first lines say `@realtime` awaits Web Crypto (PBKDF2 key
+stretching, AES-GCM). Headless Chromium's `--virtual-time-budget` never lets
+that finish: the crypto runs off the main thread, the page looks idle, and the
+DOM is dumped with the derivation still pending, even with a fetch holding the
+clock. `run.sh` hands those suites to `run-cross.mjs` on Chromium instead, and
+without Playwright installed it **fails** them rather than skipping, because a
+suite that did not run is not a passing one. One-time setup:
+
+    cd tests && npm install && npx playwright install chromium
+
 ## Cross-engine (Chromium + Gecko + WebKit)
 
 `run.sh` proves the suites on Chromium only — it depends on `--dump-dom`, which
@@ -63,6 +75,7 @@ length a pixel under Chromium, and the strict assertion caught it.
 | `binder` | The estate document: the cover's totals are the sites' own totals, a site inside the estate reports exactly what it reports alone, subnets are counted once across the estate, a network documented in two buildings is named as a fact and never graded as a finding, a site header that differs from the cover prints and one that agrees stays quiet, the image sweep hands the canvas back byte-identical and adds no undo step, a reference cycle between sites terminates, the estate graph puts a hub above the branches that reach it and draws every one inside the viewBox, no sheet prints a date its document never recorded, and a save() during the sweep cannot write the borrowed document into the URL or the undo timeline |
 | `binderfile` | Save to binder: without the File System Access API everything still downloads, a handle round-trips through the store, an already-granted permission is not re-requested and a refused one falls back to a download, a failed write aborts its stream, and binding to a file that already holds someone's networks merges rather than obliterates. The real picker, a handle surviving a browser restart, and the browser's permission prompt are hand-verified only — as is the IndexedDB store itself, whose callbacks never fire under run.sh's virtual clock |
 | `report` | The site report: the findings split says exactly what the alert panel says, severity ordering, the model against the canvas, customer-supplied text escaped, and a header that rides the document without touching untouched diagrams |
+| `privacy` | *(real clock)* The network stays out of places it should not be: editing leaves the address bar bare and the document in `history.state`, a reload restores it (and its saved card), an arriving plain, legacy or binder link is opened and then comes off the URL; a sealed `e~` link round-trips only with its passphrase, is fresh ciphertext every time, holds nothing readable, and a wrong passphrase, a flipped byte, an unknown version, a truncation or garbage are each refused by name; the unlock dialog asks, retries on a wrong passphrase, opens a network or a binder shelf, and declining keeps the canvas; the share dialog seals by default with a generated passphrase, refuses a short one, withdraws a stale link, warns on a plain one; and the page runs under its CSP (script-src `'self'` only, an allowlisted connect-src, no Referer) with zero violations |
 | `sharing` | Transmitting a build: the compressed `~` share fragment round-trips and is far shorter, legacy links still decode, unicode survives, `load()` restores both formats, the portable `.nettopo` file exports/imports intact, and a `b~` binder link carries many networks in one URL — bundled smaller than the sites compressed separately, opening onto a guest shelf that touches neither the canvas nor this browser's library until Keep, and never silently decoding as a document |
 
 ## Writing one

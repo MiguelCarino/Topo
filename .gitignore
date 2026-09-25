@@ -3,3 +3,5 @@
 tests/node_modules/
 tests/package-lock.json
 .crossrun.html
+.testprobe.js
+.crossprobe.js

@@ -755,6 +755,10 @@ body.landing-open .cs-right { display: none !important; }
 body.chrome-pending .cs-right { display: none !important; }
 body.chrome-pending aside, body.chrome-pending #canvasContainer { visibility: hidden; }
 body.chrome-pending .handy-bar { display: none !important; }
+/* The one exception: a sealed link asks for its passphrase during boot, before
+   the work area it lives in is revealed. visibility is inherited but not
+   enforced, so a descendant can opt back in. */
+body.chrome-pending #unlockDialog { visibility: visible; }
 /* Same argument for the phone: js/mobile.js floats a bar of Undo/Redo/Delete
    over the canvas, and on the landing there is no canvas for it to act on. */
 body.landing-open .handy-bar { display: none !important; }

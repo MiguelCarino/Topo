@@ -20,11 +20,16 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..'); // repo root
 const RUNFILE = '.crossrun.html';
 const PORT = Number(process.env.PORT || 8791);
 
-// Same boot-error probe run.sh injects: a suite that never reports can say why.
-const PROBE = '<script>window.addEventListener("error",(e)=>{if(document.getElementById("BOOTERR"))return;'
+// Same boot-error probe run.sh injects, and for the same reason a file rather
+// than inline: index.html's CSP forbids inline script. It also collects CSP
+// violations for tests/suites/privacy.js.
+const PROBEFILE = '.crossprobe.js';
+const PROBE = 'window.addEventListener("error",(e)=>{if(document.getElementById("BOOTERR"))return;'
   + 'const p=document.createElement("pre");p.id="BOOTERR";'
   + 'p.textContent=e.message+" @ "+(e.filename||"").split("/").pop()+":"+e.lineno;'
-  + 'document.documentElement.appendChild(p);});</script>';
+  + 'document.documentElement.appendChild(p);});'
+  + 'window.__cspViolations=[];document.addEventListener("securitypolicyviolation",(e)=>'
+  + 'window.__cspViolations.push(e.violatedDirective+" "+(e.blockedURI||"inline")));';
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.webp': 'image/webp', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json' };
@@ -45,8 +50,9 @@ function serve() {
 
 async function buildRunfile(suite) {
   let html = await readFile(join(ROOT, 'index.html'), 'utf8');
-  if (!html.includes('</head>') || !html.includes('</body>')) throw new Error('index.html missing </head> or </body>');
-  html = html.replace('</head>', PROBE + '</head>');
+  if (!html.includes('<head>') || !html.includes('</body>')) throw new Error('index.html missing <head> or </body>');
+  await writeFile(join(ROOT, PROBEFILE), PROBE);
+  html = html.replace('<head>', `<head><script src="${PROBEFILE}"></script>`);
   html = html.replace('</body>', `<script src="tests/suites/${suite}.js"></script>\n</body>`);
   await writeFile(join(ROOT, RUNFILE), html);
 }
@@ -90,7 +96,9 @@ let anyFail = false;
 const summary = [];
 
 try {
-  for (const engine of ENGINES) {
+  // TOPO_ENGINES=chromium narrows the run; run.sh uses it for the real-clock suites.
+  const only = (process.env.TOPO_ENGINES || '').split(',').filter(Boolean);
+  for (const engine of ENGINES.filter((e) => !only.length || only.includes(e.name))) {
     let browser;
     try {
       browser = await engine.type.launch();
@@ -120,6 +128,7 @@ try {
   }
 } finally {
   await unlink(join(ROOT, RUNFILE)).catch(() => {});
+  await unlink(join(ROOT, PROBEFILE)).catch(() => {});
   await server.close();
 }
 

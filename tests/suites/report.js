@@ -158,7 +158,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
   loadTemplateState(templatesData.hospital); autoBindLinks();
   state.report = { site: 'Torre A', client: 'Hospital San José', engineer: '', ref: '', date: '', scope: '' };
   save();
-  const withHeader = window.location.hash;
+  const withHeader = '#' + encodeDoc(serializeDoc());
+  await load();                  // the reload path: the document from history.state
+  ok('a reload brings the survey header back',
+     state.report && state.report.client === 'Hospital San José', JSON.stringify(state.report));
+  window.history.replaceState(null, '', withHeader);
   await load();
   ok('a shared link brings its own survey header back',
      state.report && state.report.client === 'Hospital San José', JSON.stringify(state.report));

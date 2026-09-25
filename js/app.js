@@ -296,12 +296,14 @@ function serializeDoc() {
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
 // ---- URL fragment codec ----
-// The diagram rides in the URL fragment: never sent to a server (so no proxy
-// length cap, and private by construction — it stays out of logs and Referer).
+// A shared diagram rides in the URL fragment: never sent to a server (so no
+// proxy length cap, and it stays out of server logs and Referer). Not private,
+// though: see sealed links below, and the live document, which is kept out of
+// the URL altogether.
 // Its one weakness is size, so the *shareable* form (Copy URL) is compressed.
 // Two fragment formats, told apart by a leading marker so old links keep opening:
 //   ~<base64url>   deflate-raw compressed  — 7–10x smaller, the form Copy URL emits
-//   <base64>       legacy btoa(encodeURIComponent(json)) — what save() writes live
+//   <base64>       legacy btoa(encodeURIComponent(json)) — what save() once wrote live
 // "~" is unreserved in URLs and absent from both base64 alphabets, so it is an
 // unambiguous discriminator. Compression is async (native CompressionStream), so
 // only the compressed path awaits; the legacy path stays synchronous, which is
@@ -358,6 +360,119 @@ async function encodeBinderFragment(json) {
     return BINDER_FRAG_SCHEME + _b64urlFromBytes(packed);
 }
 const decodeBinderFragment = (frag) => decodeFragment(frag.slice(1));   // 'b~xxx' -> '~xxx'
+
+// ---- Sealed links: 'e~' ----
+// A fragment never reaches a server, but it is not a secret either: it sits in
+// browser history (and whatever syncs it), in the chat or mail thread it was
+// pasted into, and in front of every extension that can read the tab's URL.
+// base64 and deflate are encodings, so anyone holding a '~' link holds the
+// network. A sealed link is AES-GCM ciphertext under a key stretched from a
+// passphrase; sent separately from the link, the passphrase is what makes a
+// leaked link noise.
+//
+//   e~<base64url( version | salt[16] | iv[12] | ciphertext+tag )>
+//   plaintext = kind (0 document, 1 binder) | deflated (1/0) | body
+//
+// One envelope for both payloads, so a binder is sealed the same way a single
+// network is, and the kind travels inside the ciphertext — the link does not
+// even say which of the two it carries. The version byte is the additional
+// authenticated data, and it fixes the KDF parameters: raising the iteration
+// count later means a new version, never reinterpreting an old link.
+const SEAL_SCHEME = 'e~';
+const SEAL_VERSION = 1;
+const SEAL_ITERATIONS = 600000;      // PBKDF2-HMAC-SHA256, OWASP's 2023 figure
+const SEAL_KIND = { doc: 0, binder: 1 };
+const SEAL_MIN_PASSPHRASE = 8;
+const isSealedFragment = (frag) => typeof frag === 'string' && frag.startsWith(SEAL_SCHEME);
+// Web Crypto is secure-context only: https, or localhost while developing.
+const canSeal = () => !!(window.crypto && crypto.subtle);
+
+async function _sealKey(passphrase, salt, usage) {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: SEAL_ITERATIONS },
+        base, { name: 'AES-GCM', length: 256 }, false, [usage]);
+}
+
+// json string -> 'e~...' (no leading '#').
+async function sealFragment(json, kind, passphrase) {
+    if (!canSeal()) throw new Error('This browser cannot encrypt a link.');
+    const raw = new TextEncoder().encode(json);
+    const body = _canCompress ? await _pipeStream(new CompressionStream('deflate-raw'), raw) : raw;
+    const plain = new Uint8Array(2 + body.length);
+    plain[0] = kind; plain[1] = _canCompress ? 1 : 0; plain.set(body, 2);
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const header = new Uint8Array([SEAL_VERSION]);
+    const key = await _sealKey(passphrase, salt, 'encrypt');
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: header }, key, plain));
+    const out = new Uint8Array(1 + 16 + 12 + ct.length);
+    out.set(header, 0); out.set(salt, 1); out.set(iv, 17); out.set(ct, 29);
+    return SEAL_SCHEME + _b64urlFromBytes(out);
+}
+
+// 'e~...' -> { kind, json }. Throws an Error whose .code is 'damaged' (not a
+// link this build can read), 'passphrase' (wrong passphrase — GCM cannot tell
+// that apart from tampering, and neither should the message) or 'unsupported'.
+async function unsealFragment(frag, passphrase) {
+    const fail = (code) => Object.assign(new Error(code), { code });
+    if (!canSeal()) throw fail('unsupported');
+    let bytes;
+    try { bytes = _bytesFromB64url(frag.slice(SEAL_SCHEME.length)); } catch (e) { throw fail('damaged'); }
+    if (bytes.length < 1 + 16 + 12 + 16 + 2 || bytes[0] !== SEAL_VERSION) throw fail('damaged');
+    const key = await _sealKey(passphrase, bytes.slice(1, 17), 'decrypt');
+    let plain;
+    try {
+        plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.slice(17, 29), additionalData: bytes.slice(0, 1) }, key, bytes.slice(29)));
+    } catch (e) { throw fail('passphrase'); }
+    const kind = plain[0], body = plain.slice(2);
+    if (kind !== SEAL_KIND.doc && kind !== SEAL_KIND.binder) throw fail('damaged');
+    if (plain[1] && !_canDecompress) throw fail('unsupported');
+    const raw = plain[1] ? await _pipeStream(new DecompressionStream('deflate-raw'), body) : body;
+    return { kind, json: new TextDecoder().decode(raw) };
+}
+
+// A passphrase worth sending: 16 characters from an alphabet with no i/l/o/0/1
+// to misread over the phone — 31 symbols, so ~79 bits, in groups of four.
+// Rejection-sampled (bytes of 248 and up are redrawn) so no symbol is favoured.
+function generatePassphrase() {
+    const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+    const limit = 256 - (256 % alphabet.length);
+    let s = '';
+    while (s.replace(/-/g, '').length < 16) {
+        for (const b of crypto.getRandomValues(new Uint8Array(32))) {
+            if (b >= limit) continue;
+            const n = s.replace(/-/g, '').length;
+            if (n === 16) break;
+            if (n && n % 4 === 0) s += '-';
+            s += alphabet[b % alphabet.length];
+        }
+    }
+    return s;
+}
+
+// ---- The live document: history.state, not the URL ----
+// The open document used to be rewritten into the fragment on every edit, so
+// every network anyone drew landed in browser history, and in any history sync,
+// whether or not it was ever shared. It now rides the history entry's state
+// object instead: kept per tab, restored by a reload and by Back/Forward exactly
+// as the fragment was, but stored with the session rather than as a URL — never
+// in the history list, never synced. The address bar stays bare. A fragment is
+// now only ever an envelope arriving: load() opens it, then puts the document
+// here and clears the URL.
+//
+// The card it came from rides along, so a reload no longer forgets which saved
+// network is open.
+const LIVE_STATE_KEY = 'topoDoc';
+const cleanUrl = () => window.location.pathname + window.location.search;
+function liveState(json) { return { [LIVE_STATE_KEY]: json, lib: state.libraryId || null }; }
+function liveEntry() {
+    const s = window.history.state;
+    return s && typeof s[LIVE_STATE_KEY] === 'string' ? s : null;
+}
+const liveDocJson = () => { const e = liveEntry(); return e ? e[LIVE_STATE_KEY] : null; };
+function writeLiveDoc(json, push) {
+    window.history[push ? 'pushState' : 'replaceState'](liveState(json), '', cleanUrl());
+}
 
 // fragment (no '#') -> json string. Async only for the compressed form.
 async function decodeFragment(frag) {
@@ -428,8 +543,9 @@ function save() {
     if (_borrowedCanvas) return;
     try {
         const doc = serializeDoc();
-        recordHistory(JSON.stringify(doc));            // ride the one chokepoint every mutation already calls
-        window.history.replaceState(null, '', `#${encodeDoc(doc)}`);
+        const json = JSON.stringify(doc);
+        recordHistory(json);                           // ride the one chokepoint every mutation already calls
+        writeLiveDoc(json);
         updateOsDatalist();
     } catch (err) { console.warn('Could not save diagram state:', err); }
 }
@@ -479,7 +595,7 @@ function applyDoc(json) {
     // save wrote a document without it.
     state.report = parsed.report && typeof parsed.report === 'object' ? parsed.report : null;
     autoBindLinks();
-    window.history.replaceState(null, '', `#${encodeDoc(serializeDoc())}`);
+    writeLiveDoc(JSON.stringify(serializeDoc()));
     updateOsDatalist();
     select(null, null); invalidateTidy();
     renderCanvasOnly();
@@ -592,7 +708,7 @@ async function load() {
     // '#advanced' the full view, '#setup' the wizard's device grid directly
     // ('#setup-<profile>' also sets that home profile first). On a fresh boot
     // fall through to the profile's default template; mid-session (typed over
-    // an open diagram) keep the canvas and let save() restore the doc hash.
+    // an open diagram) keep the canvas and let save() put it back in the entry.
     let wizard = false, trigger = hash;
     if (hash === 'setup') { wizard = true; trigger = state.settings.profile; }
     else if (hash.startsWith('setup-') && PROFILES[hash.slice(6)]) { wizard = true; trigger = hash.slice(6); }
@@ -602,7 +718,7 @@ async function load() {
         saveSettings(); applyProfile();
         if (state.nodes.length) { save(); }
         else {
-            window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            window.history.replaceState(null, '', cleanUrl());
             loadDefaultDoc(true);
         }
         if (wizard) openSetupWizard();
@@ -612,33 +728,68 @@ async function load() {
     // landing with them on a guest shelf and touches neither the canvas nor
     // this browser's library — see openBinderLink(). Placed ahead of the
     // document branch because that branch would atob() this, throw, and load
-    // the demo network, which looks exactly like a working app.
-    if (isBinderFragment(hash)) { await openBinderLink(hash); return; }
+    // the demo network, which looks exactly like a working app. The payload
+    // leaves the URL once it is on the shelf; the shelf is what a reload finds.
+    if (isBinderFragment(hash)) {
+        await openBinderLink(hash);
+        window.history.replaceState(null, '', cleanUrl());
+        return;
+    }
+    // A sealed link: ask for the passphrase in the page (never prompt(): boot
+    // awaits this, and a native modal would freeze a blank page), then route
+    // what comes out exactly as the plain link would have been routed.
+    if (isSealedFragment(hash)) { await openSealedLink(hash); return; }
+
+    // No fragment, but this history entry holds the open document: a reload,
+    // or Back/Forward onto a network. The card it belonged to comes back with it.
+    const live = !hash && liveEntry();
+    if (live) {
+        if (landingIsOpen()) landingHandledDocument();
+        applyLoadedJson(live[LIVE_STATE_KEY]);
+        state.libraryId = live.lib || null;
+        return;
+    }
 
     // A bare URL is the front door, not a document: the landing offers the
     // networks this browser already holds before anything is drawn. Everything
     // else — a shared hash, a profile trigger, an intake link — arrives with the
     // job already chosen and goes straight to the editor. The demo network is
-    // still one click away, as "Open the example".
+    // still one click away, as "Open the example". Back onto the landing with a
+    // network still on the canvas keeps it: dismissing then means "carry on",
+    // not "start empty".
     if (!hash) {
-        if (shouldShowLanding()) { openLanding(true); return; }
+        if (shouldShowLanding()) { openLanding(state.nodes.length === 0); return; }
         loadDefaultDoc(false); return;
     }
-    // A hash is a document in its own right — a shared link, a pasted URL, a step
-    // back through history — and so is the demo the catch below falls back to.
-    // Whatever saved network was open, this is not necessarily it, so the
-    // association is dropped here (ahead of the try, to cover both) and Save
-    // asks for a name rather than quietly overwriting an entry with a different
-    // network. The profile-trigger branch above keeps the canvas it had, so it
-    // keeps its card too.
+    // A hash is a document in its own right — a shared link, a pasted URL, an
+    // old link from before the document moved out of the URL — and so is the
+    // demo the catch below falls back to.
+    let json = null;
+    try { json = hash[0] === FRAG_SCHEME ? await decodeFragment(hash) : decodeURIComponent(atob(hash)); }
+    catch (e) { /* unreadable: applyLoadedJson(null) falls back to the demo */ }
+    openArrivedDocument(json);
+}
+
+// A document that arrived by link — plain or unsealed. Whatever saved network
+// was open, this is not necessarily it, so the association is dropped and Save
+// asks for a name rather than quietly overwriting an entry with a different
+// network. The profile-trigger branch keeps the canvas it had, so it keeps its
+// card too. Then the envelope comes off the URL: the document moves into the
+// history entry, and the address bar no longer carries the network.
+function openArrivedDocument(json) {
     state.libraryId = null;
     // A document arriving by Back/Forward off a binder link would otherwise load
     // underneath a landing page still painted on top of it, with the editor's
     // own controls still suppressed.
     if (landingIsOpen()) landingHandledDocument();
+    applyLoadedJson(json);
+    writeLiveDoc(JSON.stringify(serializeDoc()));
+}
+
+function applyLoadedJson(json) {
     try {
-        const json = hash[0] === FRAG_SCHEME ? await decodeFragment(hash) : decodeURIComponent(atob(hash));
         const parsed = JSON.parse(json);
+        if (!parsed || typeof parsed !== 'object') throw new Error('not a document');
         state.nodes = (parsed.nodes || []).map(normalizeLoadedNode);
         state.links = (Array.isArray(parsed.links) ? parsed.links : []).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
         state.annotations = (Array.isArray(parsed.annotations) ? parsed.annotations : []).map(normalizeLoadedAnnotation);
@@ -928,6 +1079,7 @@ function applyLocale(lang) {
     if (landingIsOpen()) renderLanding();
     // Only matters while the dialog is open — its fields are built at open time.
     if (!document.getElementById('reportDialog').classList.contains('hidden')) renderReportDialog();
+    if (shareDialogOpen()) renderShareDialog();
     document.getElementById('binderReportBtn').innerHTML = `📋 ${t('Binder report')}`;
     document.getElementById('binderLinkBtn').innerHTML = `🔗 ${t('Copy binder link')}`;
     applyProfile();
@@ -1219,19 +1371,11 @@ document.getElementById('zoomInBtn').onclick = () => { state.camera.zoom = Math.
 document.getElementById('zoomOutBtn').onclick = () => { state.camera.zoom = Math.max(0.2, state.camera.zoom / 1.2); applyCamera(); };
 document.getElementById('zoomResetBtn').onclick = () => { state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera(); };
 document.getElementById('clearCanvasBtn').onclick = () => { if (!confirm('Clear canvas?')) return; state.nodes = []; state.links = []; state.selectedId = null; state.selectedType = null; state.linkSourceId = null; save(); invalidateTidy(); select(null, null); renderCanvasOnly(); };
-// Copy URL is the share path, so it emits the compressed "~" fragment (7–10x
-// shorter) and writes it to the address bar too, so what you copy and what you
-// see match. Live editing keeps the fast uncompressed hash; this upgrades it.
-document.getElementById('copyUrlBtn').onclick = async () => {
-    save();
-    try {
-        const frag = await encodeShareFragment(JSON.stringify(serializeDoc()));
-        window.history.replaceState(null, '', `#${frag}`);
-    } catch (e) { /* fall back to whatever save() already wrote */ }
-    const url = window.location.href;
-    try { await navigator.clipboard.writeText(url); alert('Shareable URL copied.'); }
-    catch (e) { prompt('Copy this URL:', url); }
-};
+// Copy link is the share path. It no longer writes the link into the address
+// bar: the bar stays bare so the network is not in this browser's history, and
+// the link exists only on the clipboard. The dialog offers a passphrase first
+// (js/share.js) — sealed is the default, plain is a deliberate choice.
+document.getElementById('copyUrlBtn').onclick = () => { save(); openShareDialog('doc'); };
 
 document.getElementById('toggleTrace').addEventListener('change', (event) => {
     state.settings.traceMode = event.target.checked;
@@ -1577,9 +1721,10 @@ loadSettings();
     // A plain visit — no hash, no profile param — always opens the full
     // editor, whatever view was persisted. Reduced views are entered
     // explicitly: '#simple' / '#imagenology' / '?profile=' / the mode picker.
-    // A doc-carrying hash (a shared link or a mid-edit reload) keeps the
-    // persisted view so a refresh never flips a simple-mode user to full.
-    else if (!window.location.hash) state.settings.advanced = true;
+    // A shared link, or a mid-edit reload (the document is in history.state
+    // now, not the hash), keeps the persisted view so a refresh never flips a
+    // simple-mode user to full.
+    else if (!window.location.hash && !liveEntry()) state.settings.advanced = true;
     // Locale: '?lang=' (persisted — intake links hand a Spanish clinic a
     // Spanish wizard) > saved choice > browser language > English.
     const urlLang = resolveLocale(params.get('lang'));

@@ -35,12 +35,13 @@ cd "$(dirname "$0")/.."
 CHROME="${CHROME:-chromium-browser}"
 PORT="${PORT:-8731}"
 RUNFILE=".testrun.html"
+PROBEFILE=".testprobe.js"
 
 command -v "$CHROME" >/dev/null || { echo "no $CHROME on PATH; set CHROME=..." >&2; exit 127; }
 
 python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1 &
 SERVER=$!
-trap 'rm -f "$RUNFILE"; kill $SERVER 2>/dev/null' EXIT
+trap 'rm -f "$RUNFILE" "$PROBEFILE"; kill $SERVER 2>/dev/null' EXIT
 
 for _ in $(seq 50); do
     if (exec 3<>/dev/tcp/127.0.0.1/"$PORT") 2>/dev/null; then exec 3<&-; break; fi
@@ -63,16 +64,46 @@ for suite in "${suites[@]}"; do
         echo "?? ${suite}: no such suite" >&2; missing=$((missing + 1)); continue
     fi
 
-    python3 - "$src" "$RUNFILE" <<'PY'
+    # A suite marked '@realtime' awaits Web Crypto, and headless Chromium's
+    # virtual clock never lets that finish: the page is dumped as idle with the
+    # key derivation still pending, even with a fetch holding the clock. So it
+    # runs on Playwright's real clock instead, on Chromium only here (run-cross
+    # covers the other engines). Without Playwright it fails, loudly, rather
+    # than passing by not running.
+    if head -5 "$src" | grep -q '@realtime'; then
+        if [ ! -d tests/node_modules/playwright ] || ! command -v node >/dev/null; then
+            echo "FAIL ${suite}: needs the real-clock runner (cd tests && npm install && npx playwright install chromium)"
+            failed=$((failed + 1)); continue
+        fi
+        rt=$(cd tests && TOPO_ENGINES=chromium node run-cross.mjs "$suite" 2>&1)
+        line=$(printf '%s\n' "$rt" | grep -E "^(ok  |FAIL) ${suite}\b" | head -1)
+        [ -n "$line" ] || line="FAIL ${suite}: real-clock run reported nothing"
+        echo "${line} (real clock)"
+        printf '%s\n' "$rt" | grep '^       FAIL ::' || true
+        n=$(printf '%s\n' "$rt" | sed -n 's/.*chromium: \([0-9]*\) assertions.*/\1/p' | head -1)
+        nbad=$(printf '%s\n' "$rt" | sed -n 's/.*chromium: [0-9]* assertions, \([0-9]*\) failing.*/\1/p' | head -1)
+        total=$((total + ${n:-0}))
+        case "$line" in
+            ok*) ;;
+            *) bad=${nbad:-0}; [ "$bad" -gt 0 ] || bad=1; failed=$((failed + bad)) ;;
+        esac
+        continue
+    fi
+
+    python3 - "$src" "$RUNFILE" "$PROBEFILE" <<'PY'
 import sys
-suite, runfile = sys.argv[1], sys.argv[2]
+suite, runfile, probefile = sys.argv[1], sys.argv[2], sys.argv[3]
 html = open('index.html').read()
 # Record the first boot error, so a suite that never reports can say why it died
 # instead of leaving us to guess. Goes in <head>, ahead of every app script.
 # 'error' alone misses the case that matters most now that suites are async: a
 # throw inside an async suite body is an unhandled REJECTION, not an error, so
 # the run reported "nothing at all" with no reason. Both feed the same box.
-probe = ('<script>const _be = (msg) => {'
+# A file, not an inline <script>: index.html carries a CSP that forbids inline
+# script, and the probe has to be subject to it like everything else. It also
+# counts CSP violations into window.__cspViolations for tests/suites/privacy.js,
+# so it goes first in <head>, ahead of the policy and every script it governs.
+probe = ('const _be = (msg) => {'
          'if (document.getElementById("BOOTERR")) return;'
          'const p = document.createElement("pre"); p.id = "BOOTERR"; p.textContent = msg;'
          'document.documentElement.appendChild(p); };'
@@ -80,10 +111,13 @@ probe = ('<script>const _be = (msg) => {'
          'e.message + " @ " + (e.filename || "").split("/").pop() + ":" + e.lineno));'
          'window.addEventListener("unhandledrejection", (e) => _be('
          '"unhandled rejection: " + ((e.reason && (e.reason.stack || e.reason.message)) || e.reason)));'
-         '</script>')
-if '</head>' not in html or '</body>' not in html:
-    sys.exit('index.html is missing </head> or </body> to inject into')
-html = html.replace('</head>', probe + '</head>', 1)
+         'window.__cspViolations = [];'
+         'document.addEventListener("securitypolicyviolation", (e) =>'
+         ' window.__cspViolations.push(e.violatedDirective + " " + (e.blockedURI || "inline")));')
+open(probefile, 'w').write(probe)
+if '<head>' not in html or '</head>' not in html or '</body>' not in html:
+    sys.exit('index.html is missing <head>, </head> or </body> to inject into')
+html = html.replace('<head>', '<head><script src="' + probefile + '"></script>', 1)
 open(runfile, 'w').write(html.replace('</body>', f'<script src="{suite}"></script>\n</body>', 1))
 PY
 

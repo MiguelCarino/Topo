@@ -170,21 +170,20 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('a clean network says so instead',
      !!injected.querySelector('.landing-badge.good') && !injected.querySelector('.landing-badge.bad'));
 
-  // ---- Opening a card puts the document back in the URL ----
-  // A hash left over from an earlier save() would make "there is a hash" true
-  // for free, so park a foreign one first. The claim is not that a URL exists,
-  // it is that the URL carries *this* document — that is what makes a card a
-  // bookmark rather than a private copy.
+  // ---- Opening a card puts the document in this history entry ----
+  // Park a foreign entry first, so "the entry holds a document" is not true for
+  // free. The claim is that the entry holds *this* document (that is what makes
+  // a reload or Back come back to it) and that the URL holds none of it.
   answer = true;
-  window.history.replaceState(null, '', window.location.pathname + window.location.search + '#stale');
+  window.history.replaceState({ topoDoc: '{"stale":true}' }, '', window.location.pathname + window.location.search + '#stale');
   openFromLibrary(idBad);
   ok('opening a card closes the landing',
      document.getElementById('landing').classList.contains('hidden')
      && !document.body.classList.contains('landing-open'));
   ok('and loads that network', state.nodes.length === templatesData.errors.nodes.length,
      `${state.nodes.length} vs ${templatesData.errors.nodes.length}`);
-  ok('the network is a link again, and it is this network',
-     window.location.hash === '#' + encodeDoc(serializeDoc()), window.location.hash.slice(0, 20));
+  ok('the entry holds this network, and the URL none of it',
+     liveDocJson() === JSON.stringify(serializeDoc()) && window.location.hash === '', window.location.hash.slice(0, 20));
   ok('and the canvas remembers which card it came from', state.libraryId === idBad, String(state.libraryId));
   ok('so Save updates that card without asking for a name',
      (prompted = null, saveCurrentToLibrary(), prompted === null && Object.keys(loadLibrary()).length === 2),
@@ -200,13 +199,13 @@ window.addEventListener('load', () => { setTimeout(async () => {
   answer = true;
 
   // ---- A new network is a document from the first moment ----
-  window.history.replaceState(null, '', window.location.pathname + window.location.search + '#stale');
+  window.history.replaceState({ topoDoc: '{"stale":true}' }, '', window.location.pathname + window.location.search + '#stale');
   startNewNetwork();
   ok('starting new empties the canvas', state.nodes.length === 0 && state.links.length === 0);
-  // The point of "#seed": a blank canvas is already a document, shareable and
-  // reloadable before the first device lands on it.
-  ok('and a blank canvas still gets its own link',
-     window.location.hash === '#' + encodeDoc(serializeDoc()) && window.location.hash !== '#stale',
+  // A blank canvas is already a document, shareable and reloadable before the
+  // first device lands on it.
+  ok('and a blank canvas is still a document of its own',
+     liveDocJson() === JSON.stringify(serializeDoc()) && window.location.hash === '',
      window.location.hash.slice(0, 20));
   ok('a blank canvas is not somebody else’s card', state.libraryId === null, String(state.libraryId));
   ok('an empty canvas has nothing to save', (prompted = null, saveCurrentToLibrary(), prompted === null));

@@ -5,6 +5,17 @@
     <link rel="alternate icon" type="image/webp" href="logo.webp">
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Privacy, not decoration. The network being edited is someone's
+         addressing plan, so the page is locked down as if it were secret:
+         no Referer to anywhere, scripts from this origin only, and connect-src
+         names every host the fleet diag panel asks for its public IP — a script
+         that got in could not send the document anywhere else. Styles stay
+         'unsafe-inline' because Tailwind's browser build writes a <style> and
+         the markup uses style attributes; neither can execute. Meta-delivered,
+         because GitHub Pages sets no headers (so no frame-ancestors, which a
+         meta CSP ignores). tests/suites/privacy.js fails on any violation. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://api4.ipify.org https://api6.ipify.org https://ipv4.icanhazip.com https://ipv6.icanhazip.com https://4.ident.me https://6.ident.me https://1.1.1.1 https://ipwho.is https://ipinfo.io https://ipapi.co; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'">
+    <meta name="referrer" content="no-referrer">
     <title>Topo — Network Topology Editor</title>
     <!-- Vendored, not CDN — see vendor/README.md. Both MIT, keeping their own licences. -->
     <script src="vendor/tailwind-browser-4.3.3.js"></script>
@@ -469,6 +480,52 @@
                 </div>
             </div>
 
+            <!-- Share (Copy link / Copy binder link). Sealed by default: the
+                 link is ciphertext and the passphrase travels another way.
+                 z-50 like the report dialog — the binder link is launched from
+                 the landing. Rendered by js/share.js. -->
+            <div id="shareDialog" class="hidden absolute inset-0 z-50 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
+                <div class="rounded-lg shadow-2xl p-5 w-full max-w-md max-h-full overflow-y-auto" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
+                    <h4 id="shareTitle" class="text-[11px] font-bold uppercase tracking-wider mb-1" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">Share this network</h4>
+                    <p id="shareBlurb" class="text-[11px] mb-3" style="color: var(--cs-text-muted)"></p>
+                    <label class="flex gap-2 items-center text-[11px] mb-2 cursor-pointer" style="color: var(--cs-text)">
+                        <input type="checkbox" id="shareSeal" checked>
+                        <span data-i18n>Lock the link with a passphrase</span>
+                    </label>
+                    <div id="sharePassRow" class="flex gap-2 mb-1">
+                        <input id="sharePass" type="text" autocomplete="off" spellcheck="false" class="flex-1 min-w-0 rounded px-2 py-1.5 text-xs" style="background: var(--cs-bg-elev); border: 1px solid var(--cs-border); color: var(--cs-text); font-family: 'IBM Plex Mono', monospace">
+                        <button id="shareNewPass" data-i18n class="cs-btn" title="Make a new random passphrase">New</button>
+                    </div>
+                    <p id="shareHint" class="text-[11px] mb-3" style="color: var(--cs-text-muted)"></p>
+                    <div id="shareResult" class="hidden mb-3">
+                        <p id="shareDone" class="text-[11px] mb-2" style="color: var(--cs-text)"></p>
+                        <textarea id="shareLink" readonly rows="3" class="w-full rounded px-2 py-1.5 text-[10px] break-all" style="background: var(--cs-bg-elev); border: 1px solid var(--cs-border); color: var(--cs-text-muted); font-family: 'IBM Plex Mono', monospace"></textarea>
+                    </div>
+                    <div class="flex gap-2 justify-end flex-wrap">
+                        <button id="shareCloseBtn" data-i18n class="cs-btn">Close</button>
+                        <button id="sharePassCopyBtn" class="cs-btn hidden">🔑 Copy passphrase</button>
+                        <button id="shareCopyBtn" class="cs-btn">🔗 Copy link</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Unlock (an arriving 'e~' link). Asked for in the page because
+                 boot awaits the answer, and prompt() would freeze a blank one.
+                 z-50 and visibility:visible (css/app.css) so it shows while
+                 chrome-pending still hides the rest of the work area. -->
+            <div id="unlockDialog" class="hidden absolute inset-0 z-50 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
+                <form id="unlockForm" class="rounded-lg shadow-2xl p-5 w-full max-w-sm" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
+                    <h4 data-i18n class="text-[11px] font-bold uppercase tracking-wider mb-1" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">This link is locked</h4>
+                    <p data-i18n class="text-[11px] mb-3" style="color: var(--cs-text-muted)">Whoever sent it should have given you a passphrase separately. Nothing is sent anywhere — it is checked in this browser.</p>
+                    <input id="unlockPass" type="password" autocomplete="off" spellcheck="false" class="w-full rounded px-2 py-1.5 text-xs mb-1" style="background: var(--cs-bg-elev); border: 1px solid var(--cs-border); color: var(--cs-text); font-family: 'IBM Plex Mono', monospace">
+                    <p id="unlockError" class="text-[11px] mb-3 min-h-[1.25em]" style="color: #f87171"></p>
+                    <div class="flex gap-2 justify-end">
+                        <button type="button" id="unlockCancelBtn" data-i18n class="cs-btn">Don't open</button>
+                        <button type="submit" id="unlockOpenBtn" class="cs-btn">🔓 Open</button>
+                    </div>
+                </form>
+            </div>
+
             <div id="shortcutHelp" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
                 <div class="rounded-lg shadow-2xl p-5 w-full max-w-sm" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
                     <div class="flex justify-between items-center mb-3">
@@ -490,6 +547,7 @@
     <script src="js/ui.js"></script>
     <script src="js/report.js"></script>
     <script src="js/library.js"></script>
+    <script src="js/share.js"></script>
     <script src="js/app.js"></script>
 <script src="carino-navbar.js" data-app="Topo" data-repo="Topo" defer></script>
 <script src="carino-lang.js" defer></script>

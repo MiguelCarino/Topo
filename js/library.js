@@ -223,9 +223,17 @@ function dismissGuestBinder() {
 // editor is revealed, so a modal would freeze a blank page. Failures render
 // into the shelf's own status line instead.
 async function openBinderLink(frag) {
+    let json = null;
+    try { json = await decodeBinderFragment(frag); } catch (e) { /* reported below as unreadable */ }
+    openBinderPayload(json);
+}
+
+// The shelf half of a binder link, shared with a sealed one (js/share.js),
+// which arrives here already decrypted and decompressed.
+function openBinderPayload(json) {
     _guestError = '';
     try {
-        const parsed = binderFromImported(JSON.parse(await decodeBinderFragment(frag)));
+        const parsed = binderFromImported(JSON.parse(json));
         if (!parsed) _guestError = t('That binder link could not be read.');
         else if (!parsed.sites.length) _guestError = t('That binder link carried no networks.');
         else setGuestBinder({ sites: withGuestIds(parsed.sites), exported: parsed.exported });
@@ -265,27 +273,23 @@ function openGuestSite(id) {
     if (!_landingBoot && state.nodes.length
         && !confirm(t('Replace the network on screen with "{name}"?', { name: site.name }))) return;
     state.libraryId = null;
-    window.history.pushState(null, '', `#${encodeDoc(site.doc)}`);
+    writeLiveDoc(JSON.stringify(site.doc), true);
     loadDocIntoCanvas(site.doc);
     landingHandledDocument();
 }
 
 // ---- Making one ----
-async function copyBinderLink() {
+// The link itself is built by the share dialog (js/share.js), which offers to
+// seal it first. What stays here is the part only a binder has: whether this
+// browser can compress one at all.
+function copyBinderLink() {
     const file = binderFile();
     if (!file.sites.length) { alert(t('Nothing to share yet.')); return; }
     if (!canMakeBinderLink()) {
         if (confirm(t('This browser cannot make a binder link. Export the binder file instead?'))) exportBinder();
         return;
     }
-    const frag = await encodeBinderFragment(JSON.stringify(file));
-    if (frag.length > BINDER_URL_MAX) {
-        if (confirm(t('These {n} networks are too much for one link. Export the binder file instead?', { n: file.sites.length }))) exportBinder();
-        return;
-    }
-    const url = `${location.origin}${location.pathname}#${frag}`;
-    try { await navigator.clipboard.writeText(url); alert(t('Binder link copied — {n} networks in one URL. Anyone with the link can open them.', { n: file.sites.length })); }
-    catch (e) { prompt(t('Copy this binder link:'), url); }
+    openShareDialog('binder');
 }
 
 // ---- "You have not backed this up" ----
@@ -408,7 +412,7 @@ function libraryWhen(ts) {
 let _landingBoot = false;   // opened by boot (dismissing means "start empty"), vs. opened from the menu
 
 function shouldShowLanding() {
-    if (window.location.hash) return false;
+    if (window.location.hash || liveEntry()) return false;
     const params = new URLSearchParams(window.location.search);
     // '?lang=' is presentation and stays on the landing — a Spanish reporter
     // opening the bare site gets a Spanish landing. '?profile=' and the legacy
@@ -778,8 +782,8 @@ function openFromLibrary(id) {
 }
 
 // "Start a new network": a blank canvas that is a document from the first
-// moment. save() gives it its own hash, so it can be shared, reloaded and
-// bookmarked before a single device is placed.
+// moment. save() gives it its own history entry, so it can be shared and
+// reloaded before a single device is placed.
 function startNewNetwork() {
     state.libraryId = null;
     state.report = null;
