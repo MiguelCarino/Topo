@@ -17,6 +17,8 @@ Draw a network (devices, addresses, cables) and Topo checks it for address confl
 
 There is no server and no upload. Networks you save stay in this browser's local storage, and the one you are working on is kept in the page's history rather than in the URL. To share a network as a link, the share dialog locks it with a passphrase by default (AES-GCM encryption). The only outside requests come from the optional Sys. Status panel, which looks up your public IP address, and only when you open it.
 
+**Related tools:** [Hardware](https://hardware.carino.systems/) · [Netplan](https://netplan.carino.systems/) · [Ping](https://ping.carino.systems/)
+
 ## Licensing
 
 **Mine — GNU Affero General Public License v3.0 or later.** Everything in this
