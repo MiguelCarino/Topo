@@ -963,20 +963,20 @@ const MOUSE_HINTS = [
 ];
 
 function renderShortcutHelp() {
-    const subhead = (t) => `<div class="text-[10px] font-bold uppercase tracking-wider mb-1.5 mt-1" style="color: var(--cs-text-muted)">${t}</div>`;
+    const subhead = (t) => `<div class="sc-sub">${t}</div>`;
     const mouse = MOUSE_HINTS.map((h) => `
-        <div class="flex items-baseline gap-2 py-1">
-            <span class="shrink-0">${h.icon}</span>
-            <span style="color: var(--cs-text-sec)"><span class="font-bold" style="color: var(--cs-text)">${escapeHtml(h.verb)}:</span> ${escapeHtml(h.text)}</span>
+        <div class="sc-hint">
+            <span>${h.icon}</span>
+            <span><b>${escapeHtml(h.verb)}:</b> ${escapeHtml(h.text)}</span>
         </div>`).join('');
     const keys = SHORTCUTS.filter((sc) => !(isReduced() && sc.simpleHidden)).map((sc) => `
-        <div class="shortcut-row flex items-center justify-between gap-3 py-1">
-            <span style="color: var(--cs-text-sec)">${escapeHtml(sc.label)}</span>
-            <span class="flex gap-1 shrink-0">${sc.keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join('')}</span>
+        <div class="shortcut-row sc-row">
+            <span>${escapeHtml(sc.label)}</span>
+            <span class="sc-keys">${sc.keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join('')}</span>
         </div>`).join('');
     document.getElementById('shortcutBody').innerHTML =
         subhead('Mouse') + mouse +
-        `<div class="mt-2 pt-2" style="border-top: 1px solid var(--cs-border)">${subhead('Keyboard')}${keys}</div>`;
+        `<div class="sc-keyboard">${subhead('Keyboard')}${keys}</div>`;
 }
 
 // ---- Library tabs ----
@@ -1103,10 +1103,10 @@ function openModePicker(step = 'main') {
     const addOption = (icon, label, blurb, pick) => {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'mode-option flex items-start gap-2.5 text-left rounded p-2.5 transition';
-        b.innerHTML = `<span class="text-lg leading-none">${icon}</span>
-            <span class="min-w-0"><b class="block text-[12px]" style="color: var(--cs-text)">${escapeHtml(label)}</b>
-            <span class="block text-[10px] leading-tight" style="color: var(--cs-text-muted)">${escapeHtml(blurb)}</span></span>`;
+        b.className = 'mode-option';
+        b.innerHTML = `<span class="mo-icon">${icon}</span>
+            <span><b>${escapeHtml(label)}</b>
+            <span class="mo-blurb">${escapeHtml(blurb)}</span></span>`;
         b.onclick = pick;
         list.appendChild(b);
     };
@@ -1178,12 +1178,12 @@ function openSetupWizard() {
     // at a glance.
     SETUP_ITEMS.forEach((item, i) => {
         const tile = document.createElement('div');
-        tile.className = `setup-tile flex flex-col items-center gap-1 rounded p-2.5 text-center${item.count === 0 ? ' off' : ''}`;
+        tile.className = `setup-tile${item.count === 0 ? ' off' : ''}`;
         tile.dataset.i = String(i);
-        tile.innerHTML = `<svg viewBox="0 0 24 24" width="26" height="26" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="color: var(--cs-text-sec)">${iconPaths[item.type] || ''}</svg>
-            <span class="text-[10px] font-medium leading-tight" style="color: var(--cs-text-sec)">${escapeHtml(t(item.label))}</span>
-            <b class="setup-count text-[14px]" data-i="${i}" style="color: var(--cs-text)">${item.count}</b>
-            <span class="flex gap-1.5">
+        tile.innerHTML = `<svg viewBox="0 0 24 24" width="26" height="26" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-sec)">${iconPaths[item.type] || ''}</svg>
+            <span class="st-label">${escapeHtml(t(item.label))}</span>
+            <b class="setup-count" data-i="${i}">${item.count}</b>
+            <span class="st-steps">
               <button type="button" class="cs-btn setup-dec" data-i="${i}" aria-label="fewer">−</button>
               <button type="button" class="cs-btn setup-inc" data-i="${i}" aria-label="more">+</button></span>`;
         rows.appendChild(tile);
@@ -1235,8 +1235,8 @@ function libraryItem({ icon, name, blurb }, onPick, onDelete) {
     const row = document.createElement('div');
     row.className = 'lib-item';
     const btn = document.createElement('button');
-    btn.className = 'flex items-start gap-2 flex-1 min-w-0 bg-transparent border-0 p-0 text-left cursor-pointer';
-    btn.innerHTML = `<span class="lib-item-icon">${icon}</span><span class="min-w-0"><span class="lib-item-name block truncate">${escapeHtml(name)}</span><span class="lib-item-blurb block">${escapeHtml(blurb)}</span></span>`;
+    btn.className = 'lib-item-open';
+    btn.innerHTML = `<span class="lib-item-icon">${icon}</span><span style="min-width:0"><span class="lib-item-name">${escapeHtml(name)}</span><span class="lib-item-blurb">${escapeHtml(blurb)}</span></span>`;
     btn.onclick = onPick;
     row.appendChild(btn);
     if (onDelete) {
@@ -1661,21 +1661,8 @@ document.getElementById('reportBuildBtn').onclick = async () => {
     finally { btn.disabled = false; }
 };
 
-// Export/share/import dropdown: open on the trigger, close on choosing an item,
-// clicking away, or Escape. Items keep their own handlers (wired just above); the
-// menu only governs visibility.
-(function () {
-    const btn = document.getElementById('exportMenuBtn');
-    const menu = document.getElementById('exportMenu');
-    if (!btn || !menu) return;
-    const isOpen = () => !menu.classList.contains('hidden');
-    const close = () => { menu.classList.add('hidden'); btn.setAttribute('aria-expanded', 'false'); };
-    const open = () => { menu.classList.remove('hidden'); btn.setAttribute('aria-expanded', 'true'); };
-    btn.addEventListener('click', (e) => { e.stopPropagation(); isOpen() ? close() : open(); });
-    menu.addEventListener('click', (e) => { if (e.target.closest('.cs-menu-item')) close(); });
-    document.addEventListener('click', (e) => { if (isOpen() && !menu.contains(e.target) && e.target !== btn) close(); });
-    window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isOpen()) { close(); btn.focus(); } });
-})();
+// The Export menu's opening and closing is carino-ui.js's (shared .cs-menu);
+// its items keep the handlers wired above.
 document.getElementById('importFileInput').onchange = (event) => {
     const file = event.target.files[0];
     if (file) importJsonFile(file);

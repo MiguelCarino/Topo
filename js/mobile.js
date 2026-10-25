@@ -1,17 +1,15 @@
 /* ============================================================
    mobile.js — phone/tablet adaptation for topo.carino.systems
    ------------------------------------------------------------
-   The desktop layout is a fixed w-96 sidebar sitting beside the
-   canvas, with the app's controls (Trace / Undo / Export / …)
-   relocated into the shared Carino navbar as `.cn-actions`.
-   Neither survives a narrow screen: the sidebar eats the canvas
-   and the action cluster overflows the bar. So below the
-   breakpoint we do the same thing netplan.carino.systems does:
+   The rail is the shared workspace drawer below 900px
+   (carino-ui.css + carino-ui.js open and close it on any
+   [data-ws-toggle]). This file adds the two things that are
+   Topo's own:
 
-     1. turn the <aside> into an off-canvas drawer opened by a ☰
-        button injected into the navbar, and
-     2. fold the navbar's action cluster into a section at the
-        top of that drawer.
+     1. the navbar's action cluster (Trace / Undo / Export / …)
+        folds into a section at the top of that drawer, and
+     2. a floating "handy" bar of the five things a phone needs
+        mid-edit, whose ☰ is the drawer's toggle.
 
    Everything reverses above the breakpoint. The relocated nodes
    are the real DOM elements (never clones), so every id and
@@ -21,21 +19,14 @@
 (function () {
     'use strict';
 
-    // 1024px, not netplan's 860: this app's action cluster (a Trace group,
-    // Undo/Redo, Tidy, Export, Clear, Help) is far wider than netplan's four
-    // buttons, so it overflows a narrow desktop long before 860px. Folding it
-    // away at the tablet breakpoint keeps the bar clean the whole way down.
-    var MQ = window.matchMedia('(max-width: 1024px)');
-    var aside = document.querySelector('aside');
+    // carino-ui.css's drawer breakpoint.
+    var MQ = window.matchMedia('(max-width: 900px)');
+    var aside = document.querySelector('.topo-rail');
     if (!aside) return;
-
-    // Scrim that dims the canvas behind an open drawer and closes it on tap.
-    var scrim = document.createElement('div');
-    scrim.id = 'mobileScrim';
-    document.body.appendChild(scrim);
+    var ws = aside.closest('.ws');
 
     // A titled home for the navbar actions while the drawer holds them. It sits
-    // at the very top of the aside; on desktop CSS keeps it hidden.
+    // at the very top of the rail; on desktop CSS keeps it hidden.
     var actionsSection = document.createElement('div');
     actionsSection.id = 'mobileActions';
     actionsSection.innerHTML =
@@ -44,32 +35,12 @@
     aside.insertBefore(actionsSection, aside.firstChild);
     var slot = actionsSection.querySelector('#mobileActionsSlot');
 
-    function openDrawer() {
-        aside.classList.add('drawer-open');
-        scrim.classList.add('open');
-        document.body.classList.add('drawer-lock');
-    }
-    function closeDrawer() {
-        aside.classList.remove('drawer-open');
-        scrim.classList.remove('open');
-        document.body.classList.remove('drawer-lock');
-    }
-    function toggleDrawer() {
-        aside.classList.contains('drawer-open') ? closeDrawer() : openDrawer();
-    }
-
-    scrim.addEventListener('click', closeDrawer);
-    // Esc closes the drawer too; app.js's own Esc handlers still run alongside.
-    window.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') closeDrawer();
-    });
-
     // Move the navbar's action cluster into the drawer below the breakpoint and
-    // back into the bar above it. `.cn-actions` is the app's own `.cs-right`,
-    // relocated into `.cn-right` by carino-navbar.js at mount.
+    // back into the bar above it. `.topo-actions` is relocated into `.cn-right`
+    // by carino-navbar.js at mount (data-carino-actions).
     function syncActions() {
         var nav = document.getElementById('carinoNav');
-        var actions = document.querySelector('.cn-actions');
+        var actions = document.querySelector('.topo-actions.cn-actions');
         if (!actions) return; // navbar not mounted yet — boot()'s retry will catch it
         if (MQ.matches) {
             if (actions.parentNode !== slot) slot.appendChild(actions);
@@ -78,7 +49,6 @@
             if (right && actions.parentNode !== right) {
                 right.insertBefore(actions, right.querySelector('.social-row'));
             }
-            closeDrawer();
         }
     }
 
@@ -113,12 +83,10 @@
             bar.appendChild(d);
         }
 
-        var menuBtn = btn('handyMenu', '☰', 'Open controls', function (e) {
-            e.stopPropagation();
-            toggleDrawer();
-            menuBtn.setAttribute('aria-expanded', aside.classList.contains('drawer-open') ? 'true' : 'false');
-        });
-        menuBtn.setAttribute('aria-expanded', 'false'); // known state before the first tap
+        // carino-ui.js toggles the drawer (and aria-expanded) for it.
+        var menuBtn = btn('handyMenu', '☰', 'Open controls', function () {});
+        menuBtn.setAttribute('data-ws-toggle', '');
+        menuBtn.setAttribute('aria-expanded', ws && ws.classList.contains('drawer-open') ? 'true' : 'false');
 
         var traceBox = document.getElementById('toggleTrace');
         var traceBtn = btn('handyTrace', '🔍', 'Toggle trace', function () {

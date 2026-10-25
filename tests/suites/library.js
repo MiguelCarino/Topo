@@ -227,7 +227,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
   // ---- The editor's controls are actually off the screen ----
   // Asserted on the computed style, not on the class that is supposed to cause
-  // it. carino-navbar.js lifts .cs-right out of .cs-header into its own bar and
+  // it. carino-navbar.js lifts .topo-actions (data-carino-actions) into its own bar and
   // styles it '#carinoNav .cn-actions{display:flex}' — a rule with an id in it,
   // living in a file shared across the fleet and changed independently of this
   // one. Our rule only wins because it is !important, so this checks the
@@ -252,7 +252,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
         document.elementFromPoint(Math.round(innerWidth * 0.7), Math.round(innerHeight * 0.5))),
      String(document.elementFromPoint(Math.round(innerWidth * 0.7), Math.round(innerHeight * 0.5))?.id));
 
-  const csRight = document.querySelector('.cs-right');
+  const csRight = document.querySelector('.topo-actions');
   const exportBtn = document.getElementById('exportMenuBtn');
   // Deliberately not asserting *where* the controls live. They get relocated by
   // whichever shell claims them — carino-navbar.js lifts them into its own bar

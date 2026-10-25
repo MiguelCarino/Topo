@@ -51,7 +51,7 @@ function renderShareDialog() {
         : t('The link carries the whole network: devices, addresses, names and notes.');
     _shareEl('sharePassRow').classList.toggle('hidden', !sealed);
     const hint = _shareEl('shareHint');
-    hint.style.color = sealed ? 'var(--cs-text-muted)' : '#f87171';
+    hint.style.color = sealed ? 'var(--text-muted)' : '#f87171';
     if (!canSeal()) hint.textContent = t('This page cannot encrypt (it needs https), so the link can only be plain. Anyone who gets it can read the whole network.');
     else if (!sealed) hint.textContent = `⚠ ${t('Anyone who gets this link can read the whole network. Chats, mail and browser history keep links.')}`;
     else if (pass.length < SEAL_MIN_PASSPHRASE) hint.textContent = t('At least {n} characters. The suggested one is far stronger than anything memorable.', { n: SEAL_MIN_PASSPHRASE });

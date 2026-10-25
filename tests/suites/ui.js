@@ -90,10 +90,8 @@ window.addEventListener('load', () => { setTimeout(() => {
     ] })];
   state.links = [];
   select('b', 'node');
-  // Measure a tick later, never in select()'s own tick. Tailwind's browser JIT
-  // generates arbitrary values like w-[74px] only once it sees them in the DOM,
-  // and until it does the input falls back to its ~170px default — which reads
-  // as a squeezed layout that will not exist by the time anyone looks.
+  // Measure a tick later, never in select()'s own tick, so the rows have been
+  // laid out with their final widths (css/app.css .if-row).
   setTimeout(() => {
   const rows = [...document.querySelectorAll('#ifaceListContainer input[type=text]')];
   const named = rows.filter(r => r.value === 'bond0' || r.value === 'eno1');

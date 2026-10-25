@@ -44,10 +44,10 @@ let isDraggingCanvas = false, isDraggingNode = false, draggedNode = null, dragOf
 const paletteContainer = document.getElementById('nodePalette');
 paletteDefs.forEach((d) => {
     const btn = document.createElement('button');
-    btn.className = 'palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer';
+    btn.className = 'palette-item';
     if (!d.simple) btn.classList.add('palette-adv'); // hidden in reduced profiles (css/app.css)
     btn.dataset.type = d.type; // profile CSS overrides + purpose renames key off this
-    btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="#1e293b" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[d.type]}</svg><span class="text-[10px] font-medium mt-1 uppercase text-center leading-tight">${d.name}</span>`;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[d.type]}</svg><span>${d.name}</span>`;
     btn.title = 'Click to add (connects to the selected node) — or drag onto the canvas';
     // Click: add connected to the current selection (fast tree building)
     btn.onclick = () => spawnNode(d.type, { connectTo: (state.selectedType === 'node' && state.selectedId) ? state.selectedId : null });
@@ -67,8 +67,8 @@ paletteDefs.forEach((d) => {
       icon: '<path d="M4 4h16v12l-4 4H4z" fill="#fef9c3" stroke="#ca8a04"/><path d="M16 20v-4h4" fill="none" stroke="#ca8a04"/>' },
 ].forEach((d) => {
     const btn = document.createElement('button');
-    btn.className = 'palette-item flex flex-col items-center p-2 bg-slate-50 border border-slate-200 rounded hover:border-blue-400 hover:bg-blue-50 cursor-pointer';
-    btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="#1e293b" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${d.icon}</svg><span class="text-[10px] font-medium mt-1 uppercase text-center leading-tight">${d.name}</span>`;
+    btn.className = 'palette-item';
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${d.icon}</svg><span>${d.name}</span>`;
     btn.title = d.title;
     btn.onclick = () => spawnAnnotation({ style: d.style, edit: true });
     btn.setAttribute('draggable', 'true');
@@ -293,7 +293,7 @@ function openAnnotationEditor(a) {
     ed.dataset.annId = a.id;   // renderAnnotation keeps the card hidden while this is open
     ed.contentEditable = 'plaintext-only';
     ed.spellcheck = false;
-    ed.className = 'absolute z-40 outline-none';
+    ed.className = 'ann-editor';
     ed.style.left = `${a.x * z + state.camera.x}px`;
     ed.style.top = `${a.y * z + state.camera.y}px`;
     ed.style.font = `${(a.size || 12) * z}px 'IBM Plex Sans', sans-serif`;
@@ -396,7 +396,7 @@ function renderCanvasOnly() {
     lZones.innerHTML = ''; lLinks.innerHTML = ''; lNodes.innerHTML = ''; lAnn.innerHTML = '';
     state.annotations.forEach(renderAnnotation);
     renderNoteLeaders();
-    document.getElementById('networkCanvas').className = `w-full h-full absolute inset-0 select-none ${state.linkSourceId ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`;
+    document.getElementById('networkCanvas').className = `topo-svg${state.linkSourceId ? ' linking' : ''}`;
 
     // 1. Render Zone Bubbles (Controllable per interface)
     const subnets = {};
@@ -810,17 +810,17 @@ function renderCanvasOnly() {
 // costs one number in the URL hash rather than 48 objects.
 function renderFaceplate(node, container) {
     const wrap = document.createElement('div');
-    wrap.className = 'mb-2';
+    wrap.className = 'faceplate';
 
     const head = document.createElement('div');
-    head.className = 'flex items-center justify-between mb-1';
-    head.innerHTML = '<span class="text-[10px] font-bold text-slate-500 uppercase">Physical Ports</span>';
+    head.className = 'prop-headrow';
+    head.innerHTML = '<span class="prop-lbl">Physical Ports</span>';
 
     const count = document.createElement('input');
     count.id = 'portCountInput';
     count.type = 'number'; count.min = '0'; count.max = '96';
     count.value = String(portCountOf(node));
-    count.className = 'w-14 border border-slate-300 rounded px-1 py-0.5 text-[10px] font-mono text-right focus:outline-blue-500';
+    count.className = 'if-in faceplate-count';
     count.oninput = (e) => {
         const next = parseInt(e.target.value, 10);
         if (!Number.isFinite(next) || next < 0) return;
@@ -837,20 +837,18 @@ function renderFaceplate(node, container) {
     wrap.appendChild(head);
 
     const grid = document.createElement('div');
-    grid.className = 'flex flex-wrap gap-1';
+    grid.className = 'chip-row';
     const ports = getInterfaces(node).filter((i) => /^p\d+$/.test(i.id));
 
     if (!ports.length) {
-        grid.innerHTML = '<span class="text-[10px] text-slate-400 italic">No ports. Raise the count above.</span>';
+        grid.innerHTML = '<span class="rail-none">No ports. Raise the count above.</span>';
     }
 
     ports.forEach((port) => {
         const link = linkOnIface(node.id, port.id);
         const neighbour = link ? getNode(link.source === node.id ? link.target : link.source) : null;
         const chip = document.createElement('button');
-        chip.className = 'w-6 h-6 rounded border text-[10px] font-mono font-bold transition ' + (
-            neighbour ? 'bg-emerald-50 border-emerald-400 text-emerald-700 hover:border-emerald-600'
-                : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400');
+        chip.className = 'port-chip' + (neighbour ? ' on' : '');
         chip.textContent = port.name || port.id;
         chip.title = neighbour ? `Port ${port.name} → ${neighbour.name}` : `Port ${port.name} — free`;
         if (link) chip.onclick = () => select(link.id, 'link'); // jump to the cable in this port
@@ -876,36 +874,35 @@ function renderSidebarData(node) {
     }
 
     if (!node.interfaces.length) {
-        if (!hasPortGrid(node)) ifCont.innerHTML = '<span class="text-[10px] text-slate-400 italic">No interfaces defined.</span>';
+        if (!hasPortGrid(node)) ifCont.innerHTML = '<span class="rail-none">No interfaces defined.</span>';
     }
     else {
         node.interfaces.forEach((iface, i) => {
             // Members are drawn beneath the bond that owns them, not in place.
             if (isBondMember(node, iface.id)) return;
 
-            const div = document.createElement('div'); div.className = 'flex items-center gap-1 min-w-0';
+            const div = document.createElement('div'); div.className = 'if-row';
             const nameInp = document.createElement('input'); nameInp.type = 'text'; nameInp.value = iface.name; nameInp.placeholder = 'eth0';
-            nameInp.className = 'w-[74px] shrink-0 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500 bg-slate-50';
+            nameInp.className = 'if-in if-name';
             nameInp.addEventListener('input', (e) => { node.interfaces[i].name = e.target.value; save();
             renderCanvasOnly();
             renderNodeDiagnostics(node); });
 
             const ipInp = document.createElement('input'); ipInp.type = 'text'; ipInp.value = iface.ip; ipInp.placeholder = 'CIDR';
-            ipInp.className = 'flex-1 min-w-0 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500';
+            ipInp.className = 'if-in if-ip';
             // A full /24 CIDR needs ~146px and the row can spare ~102, so a long
             // address scrolls out of sight — and "192.168.1.70/24" clipped to
             // "192.168.1.7" reads as a different, entirely valid address. Until
             // the row earns more width, the hover says what it really holds.
             ipInp.title = iface.ip || '';
-            if (iface.ip.trim() !== '' && !parseValidCIDR(iface.ip)) ipInp.classList.add('border-red-400', 'bg-red-50');
+            if (iface.ip.trim() !== '' && !parseValidCIDR(iface.ip)) ipInp.classList.add('bad');
             const zoneLabel = document.createElement('label');
-            zoneLabel.className = 'flex items-center gap-0.5 shrink-0 text-[10px] text-slate-500 font-bold cursor-pointer mx-1';
+            zoneLabel.className = 'if-zone';
             zoneLabel.title = 'Draw Subnet Zone Bubble';
 
             const zoneCb = document.createElement('input');
             zoneCb.type = 'checkbox';
-            zoneCb.className = 'w-3 h-3 accent-blue-500 rounded cursor-pointer';
-
+            
             const initParsed = parseValidCIDR(iface.ip);
             zoneCb.checked = iface.drawZone !== undefined ? iface.drawZone : (initParsed ? initParsed.isPrivate : false);
 
@@ -925,7 +922,7 @@ function renderSidebarData(node) {
             // one button cycling inferred -> radio -> wired, rather than a
             // checkbox and a label. Dimmed means inferred; solid means you said so.
             const kindBtn = document.createElement('button');
-            kindBtn.className = 'text-[10px] shrink-0 leading-none';
+            kindBtn.className = 'if-ico';
             const explicit = iface.wireless !== undefined;
             kindBtn.textContent = ifaceIsWireless(iface) ? '📡' : '🔌';
             kindBtn.style.opacity = explicit ? '1' : '0.35';
@@ -943,8 +940,8 @@ function renderSidebarData(node) {
                 node.interfaces[i].ip = e.target.value;
                 ipInp.title = e.target.value; 
                 const parsedData = parseValidCIDR(e.target.value);
-                if (e.target.value.trim() !== '' && !parsedData) ipInp.classList.add('border-red-400', 'bg-red-50');
-                else ipInp.classList.remove('border-red-400', 'bg-red-50');
+                if (e.target.value.trim() !== '' && !parsedData) ipInp.classList.add('bad');
+                else ipInp.classList.remove('bad');
 
                 // Auto-update checkbox fallback visual state if it was never explicitly set
                 if (node.interfaces[i].drawZone === undefined && parsedData) {
@@ -956,7 +953,7 @@ function renderSidebarData(node) {
                 renderNodeDiagnostics(node); 
             });
 
-            const del = document.createElement('button'); del.innerHTML = '✖'; del.className = 'text-slate-400 hover:text-red-500 px-1 shrink-0';
+            const del = document.createElement('button'); del.innerHTML = '✖'; del.className = 'if-del';
             del.title = isBond(iface) ? `Unbond ${iface.name} (members keep their cables)` : `Delete ${iface.name || 'interface'} and any cable in it`;
             del.onclick = () => {
                 // Unbonding is not deletion: the members outlive it, so the
@@ -975,7 +972,7 @@ function renderSidebarData(node) {
             const peer = link ? getNode(link.source === node.id ? link.target : link.source) : null;
             const wire = document.createElement('button');
             const radio = ifaceIsWireless(iface);
-            wire.className = 'text-[10px] shrink-0 px-0.5 ' + (peer ? 'text-slate-400 hover:text-blue-600' : 'text-slate-300 cursor-default');
+            wire.className = 'if-ico ' + (peer ? 'linked' : 'free');
             wire.textContent = peer ? (radio ? '📶' : '🔌') : (radio ? '📡' : '○');
             wire.title = peer ? `${radio ? 'Associated' : 'Linked'} to ${peer.name}` : `${radio ? 'Radio' : 'Interface'} not linked`;
             if (link) wire.onclick = () => select(link.id, 'link');
@@ -985,7 +982,7 @@ function renderSidebarData(node) {
             // A bond has no socket and no antenna: neither the cable indicator
             // nor the radio override means anything on it.
             if (isBond(iface)) {
-                nameInp.classList.add('border-indigo-300', 'bg-indigo-50', 'font-bold');
+                nameInp.classList.add('bond');
                 div.appendChild(zoneLabel);
             } else {
                 div.appendChild(kindBtn); div.appendChild(zoneLabel); div.appendChild(wire);
@@ -1028,48 +1025,48 @@ function fmtColonSafe(v) {
 
 function renderMacLine(node, iface) {
     const row = document.createElement('div');
-    row.className = 'flex flex-col gap-0.5 min-w-0 pl-3 mb-1';
+    row.className = 'if-mac';
 
     const top = document.createElement('div');
-    top.className = 'flex items-center gap-1 min-w-0';
+    top.className = 'if-row';
 
     const tick = document.createElement('span');
-    tick.className = 'text-[10px] text-slate-400 shrink-0'; tick.textContent = '↳';
+    tick.className = 'if-tick'; tick.textContent = '↳';
 
     const label = document.createElement('span');
-    label.className = 'text-[10px] text-slate-400 shrink-0'; label.textContent = 'mac';
+    label.className = 'if-tick'; label.textContent = 'mac';
 
     const inp = document.createElement('input');
     inp.type = 'text'; inp.value = iface.mac || '';
     inp.placeholder = 'AA:BB:CC:DD:EE:FF';
-    inp.className = 'flex-1 min-w-0 border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500';
+    inp.className = 'if-in if-ip';
 
     const out = document.createElement('div');
-    out.className = 'text-[10px] leading-tight pl-4';
+    out.className = 'if-mac-out';
 
     // Pasting is the normal way an address gets here — off a label, a DHCP
     // lease, `ip link`. Normalising on paste means every one of those formats
     // (colons, hyphens, Cisco dotted quads, bare hex) lands the same way.
     function paint() {
         const raw = inp.value.trim();
-        inp.classList.remove('border-red-400', 'bg-red-50', 'border-amber-400', 'bg-amber-50');
+        inp.classList.remove('bad', 'warn');
         if (!raw) { out.innerHTML = ''; return; }
         const api = window.CarinoOUI;
         if (!api) { out.innerHTML = ''; return; }
         const d = api.decodeMac(raw);
         if (d.error) {
-            inp.classList.add('border-red-400', 'bg-red-50');
-            out.innerHTML = `<span class="text-red-600">${d.error}</span>`;
+            inp.classList.add('bad');
+            out.innerHTML = `<span class="bad">${d.error}</span>`;
             return;
         }
         const bits = [];
-        if (d.isBroadcast) bits.push('<b class="text-red-600">broadcast</b>');
-        else if (d.isMulticast) bits.push('<b class="text-red-600">multicast</b>');
+        if (d.isBroadcast) bits.push('<b class="bad">broadcast</b>');
+        else if (d.isMulticast) bits.push('<b class="bad">multicast</b>');
         else bits.push('unicast');
 
         if (d.isLocal) {
-            inp.classList.add('border-amber-400', 'bg-amber-50');
-            bits.push('<b class="text-amber-600">locally administered</b>');
+            inp.classList.add('warn');
+            bits.push('<b class="warn">locally administered</b>');
         } else {
             bits.push('universal');
         }
@@ -1077,23 +1074,23 @@ function renderMacLine(node, iface) {
         const v = d.vendor;
         const vendor = v.vendor
             ? `<b>${v.vendor}</b>`
-            : '<span class="text-slate-400">OUI not in the built-in table</span>';
+            : '<span class="muted">OUI not in the built-in table</span>';
 
         // A duplicate is the reason this field exists at all: the flapping
         // diagnostic could only ever guess at it from IP co-location.
         const dupes = (typeof duplicateMacs === 'function' ? duplicateMacs(state.nodes) : [])
             .find((x) => x.hex === api.normalizeMac(raw));
         const others = dupes ? dupes.holders.filter((h) => h.iface.id !== iface.id) : [];
-        if (others.length) inp.classList.add('border-red-400', 'bg-red-50');
+        if (others.length) inp.classList.add('bad');
 
         out.innerHTML =
-            `<div class="text-slate-500">${vendor} · ${bits.join(' · ')}</div>` +
+            `<div>${vendor} · ${bits.join(' · ')}</div>` +
             (d.isLocal && !d.isMulticast && !d.isBroadcast
-                ? '<div class="text-amber-600">Randomised or hand-set — the vendor prefix means nothing here.</div>' : '') +
+                ? '<div class="warn">Randomised or hand-set — the vendor prefix means nothing here.</div>' : '') +
             (others.length
-                ? `<div class="text-red-600">Also on ${others.map((h) => `${h.node.name} / ${h.iface.name}`).join(', ')} — two interfaces cannot share an address on one L2 domain.</div>`
+                ? `<div class="bad">Also on ${others.map((h) => `${h.node.name} / ${h.iface.name}`).join(', ')} — two interfaces cannot share an address on one L2 domain.</div>`
                 : '') +
-            `<div class="text-slate-400">link-local ${d.ll}</div>`;
+            `<div class="muted">link-local ${d.ll}</div>`;
     }
 
     inp.addEventListener('input', () => {
@@ -1115,7 +1112,7 @@ function renderMacLine(node, iface) {
 
     const clear = document.createElement('button');
     clear.innerHTML = '✖';
-    clear.className = 'text-slate-400 hover:text-red-500 px-1 shrink-0 text-[10px]';
+    clear.className = 'if-del';
     clear.title = 'Clear this address';
     clear.onclick = () => {
         iface.mac = '';
@@ -1130,16 +1127,16 @@ function renderMacLine(node, iface) {
 
 function renderBondMode(node, bond) {
     const row = document.createElement('div');
-    row.className = 'flex items-center gap-1 min-w-0 pl-3';
+    row.className = 'if-row if-sub';
 
     const tick = document.createElement('span');
-    tick.className = 'text-[10px] text-indigo-400 shrink-0'; tick.textContent = '↳';
+    tick.className = 'if-tick bond'; tick.textContent = '↳';
 
     const label = document.createElement('span');
-    label.className = 'text-[10px] text-slate-400 shrink-0'; label.textContent = 'mode';
+    label.className = 'if-tick'; label.textContent = 'mode';
 
     const mode = document.createElement('select');
-    mode.className = 'flex-1 min-w-0 border border-indigo-300 bg-indigo-50 rounded px-1 py-1 text-[10px] focus:outline-indigo-500';
+    mode.className = 'if-select';
     mode.title = 'Active-Backup survives a switch failure; LACP needs both cables on one switch (or MLAG)';
     Object.entries(BOND_MODES).forEach(([value, text]) => {
         const opt = document.createElement('option'); opt.value = value; opt.textContent = text;
@@ -1160,14 +1157,14 @@ function renderBondMode(node, bond) {
 // evaluateBond exists to catch.
 function renderBondMember(node, member, bond, container) {
     const row = document.createElement('div');
-    row.className = 'flex items-center gap-1 min-w-0 pl-3';
+    row.className = 'if-row if-sub';
 
     const tick = document.createElement('span');
-    tick.className = 'text-[10px] text-indigo-400 shrink-0'; tick.textContent = '↳';
+    tick.className = 'if-tick bond'; tick.textContent = '↳';
 
     const nameInp = document.createElement('input');
     nameInp.type = 'text'; nameInp.value = member.name; nameInp.placeholder = 'eno1';
-    nameInp.className = 'w-[74px] shrink-0 border border-slate-200 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500 bg-white';
+    nameInp.className = 'if-in if-name';
     nameInp.addEventListener('input', (e) => {
         const real = node.interfaces.find((x) => x.id === member.id);
         if (real) real.name = e.target.value;
@@ -1175,19 +1172,19 @@ function renderBondMember(node, member, bond, container) {
     });
 
     const note = document.createElement('span');
-    note.className = 'flex-1 min-w-0 text-[10px] text-slate-400 italic truncate px-1';
+    note.className = 'if-note';
     note.textContent = `member of ${bond.name}`;
 
     const link = linkOnIface(node.id, member.id);
     const peer = link ? getNode(link.source === node.id ? link.target : link.source) : null;
     const wire = document.createElement('button');
-    wire.className = 'text-[10px] shrink-0 px-0.5 ' + (peer ? 'text-slate-400 hover:text-blue-600' : 'text-slate-300 cursor-default');
+    wire.className = 'if-ico ' + (peer ? 'linked' : 'free');
     wire.textContent = peer ? '🔌' : '○';
     wire.title = peer ? `Linked to ${peer.name}` : 'Not linked';
     if (link) wire.onclick = () => select(link.id, 'link');
 
     const pull = document.createElement('button');
-    pull.innerHTML = '✖'; pull.className = 'text-slate-400 hover:text-red-500 px-1 shrink-0';
+    pull.innerHTML = '✖'; pull.className = 'if-del';
     pull.title = `Remove ${member.name} from ${bond.name}`;
     pull.onclick = () => {
         const remaining = (bond.bond.members || []).filter((id) => id !== member.id);
@@ -1221,11 +1218,11 @@ function renderLinkPorts(link) {
         const row = document.createElement('div');
 
         const head = document.createElement('div');
-        head.className = 'flex items-center justify-between mb-1';
-        head.innerHTML = `<span class="text-[10px] font-bold text-slate-600 truncate">${escapeHtml(node.name)}</span>`;
+        head.className = 'port-end-head';
+        head.innerHTML = `<span class="port-end-name">${escapeHtml(node.name)}</span>`;
 
         const addBtn = document.createElement('button');
-        addBtn.className = 'text-[10px] text-blue-600 hover:underline font-bold shrink-0 ml-1';
+        addBtn.className = 'link-btn';
         addBtn.textContent = hasPortGrid(node) ? '+ Port' : '+ NIC';
         addBtn.onclick = () => {
             link[key] = createIfaceFor(node, { grow: true }).id;
@@ -1235,21 +1232,18 @@ function renderLinkPorts(link) {
         row.appendChild(head);
 
         const chips = document.createElement('div');
-        chips.className = 'flex flex-wrap gap-1';
+        chips.className = 'chip-row';
 
         const interfaces = getInterfaces(node);
         if (!interfaces.length) {
-            chips.innerHTML = '<span class="text-[10px] text-slate-400 italic">No interfaces — add one.</span>';
+            chips.innerHTML = '<span class="rail-none">No interfaces — add one.</span>';
         }
 
         interfaces.forEach((iface) => {
             const selected = link[key] === iface.id;
             const takenBy = linksAtNode(node.id).find((l) => l.id !== link.id && ifaceIdOn(l, node.id) === iface.id && isExclusiveLink(l));
             const chip = document.createElement('button');
-            chip.className = 'px-1.5 py-0.5 rounded border text-[10px] font-mono font-bold transition ' + (
-                selected ? 'bg-amber-100 border-amber-500 text-amber-800'
-                    : takenBy ? 'bg-slate-100 border-slate-300 text-slate-400 hover:border-slate-400'
-                        : 'bg-white border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600');
+            chip.className = 'port-chip' + (selected ? ' picked' : takenBy ? ' taken' : '');
             chip.textContent = iface.name || iface.id;
 
             if (takenBy) {
@@ -1324,7 +1318,7 @@ function renderSiteRef(node) {
     open.classList.toggle('hidden', !entry);
     if (entry) {
         open.textContent = `↗ Open ${entry.name}`;
-        open.className = 'w-full mt-2 py-1 rounded text-[10px] font-bold transition text-center bg-amber-100 text-amber-800 hover:bg-amber-200';
+        open.className = 'rail-btn go';
         open.onclick = () => openFromLibrary(entry.id);
     }
 
@@ -1405,8 +1399,8 @@ function select(id, type) {
     const netProps = document.getElementById('nodeNetworkProps'), generalProps = document.getElementById('nodeGeneralProps'), linkProps = document.getElementById('linkProps');
     const nameInput = document.getElementById('propName'), jumpGwBtn = document.getElementById('jumpGwBtn');
 
-    if (!id) { clearPropertyInputs(); pPane.classList.add('hidden'); pPane.classList.remove('flex'); nPane.classList.remove('hidden'); renderCanvasOnly(); return; }
-    nPane.classList.add('hidden'); pPane.classList.remove('hidden'); pPane.classList.add('flex');
+    if (!id) { clearPropertyInputs(); pPane.classList.add('hidden'); nPane.classList.remove('hidden'); renderCanvasOnly(); return; }
+    nPane.classList.add('hidden'); pPane.classList.remove('hidden');
 
     if (type === 'node') {
         const node = getNode(id); if (!node) return;
@@ -1420,10 +1414,10 @@ function select(id, type) {
         // NAT toggle — only meaningful on routing devices
         const natRow = document.getElementById('natRow'), propNat = document.getElementById('propNat');
         if (isRoutingDevice(node.type)) {
-            natRow.classList.remove('hidden'); natRow.classList.add('flex');
+            natRow.classList.remove('hidden');
             propNat.checked = !!node.nat;
             propNat.onchange = (e) => { node.nat = e.target.checked; save(); renderCanvasOnly(); renderNodeDiagnostics(node); };
-        } else { natRow.classList.add('hidden'); natRow.classList.remove('flex'); }
+        } else { natRow.classList.add('hidden'); }
         // Netplan bridge toggle — on every node type, default off. Explicit
         // user intent, so nothing is gated; the hint below just flags devices
         // that usually run vendor firmware. See docs/netplan-bridge-design.md.

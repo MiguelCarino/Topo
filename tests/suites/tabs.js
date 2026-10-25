@@ -95,10 +95,10 @@ window.addEventListener('load', () => { setTimeout(() => {
   // inside it now (not just visually), and it must open and close predictably.
   const menuBtn = document.getElementById('exportMenuBtn');
   const menu = document.getElementById('exportMenu');
-  const menuOpen = () => menu && !menu.classList.contains('hidden');
+  const menuOpen = () => menu && !menu.hidden; // carino-ui.js toggles the hidden attribute
   ok('the export menu exists and starts closed', !!menuBtn && !!menu && !menuOpen());
-  // The panel sets display:flex, which once beat Tailwind's .hidden and left the
-  // menu open on first paint. It must be *computed* hidden, not just class-flagged.
+  // The panel sets display:flex, which once beat a utility .hidden and left the
+  // menu open on first paint. It must be *computed* hidden, not just flagged.
   ok('the export panel is genuinely hidden at load (not open behind display:flex)',
      getComputedStyle(menu).display === 'none', getComputedStyle(menu).display);
   ['copyUrlBtn', 'exportPngBtn', 'exportWebpBtn', 'exportJsonBtn', 'importFileBtn', 'saveTemplateBtn'].forEach((id) => {

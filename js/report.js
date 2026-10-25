@@ -908,17 +908,15 @@ function renderReportFields(seed) {
 
     REPORT_FIELDS.forEach(({ key, label, placeholder, multiline }) => {
         const wrap = document.createElement('label');
-        wrap.className = 'flex flex-col gap-1';
+        wrap.className = 'field';
         const cap = document.createElement('span');
-        cap.className = 'text-[10px] font-bold uppercase tracking-wider';
-        cap.style.color = 'var(--cs-text-muted)';
+        cap.className = 'prop-lbl';
         cap.textContent = t(label);
         const input = document.createElement(multiline ? 'textarea' : 'input');
         if (!multiline) input.type = 'text';
         else input.rows = 3;
         input.id = `report-${key}`;
-        input.className = 'w-full rounded px-2 py-1.5 text-xs';
-        input.style.cssText = 'background: var(--cs-bg-elev); border: 1px solid var(--cs-border); color: var(--cs-text)';
+        input.className = multiline ? 'textarea' : 'input';
         input.placeholder = t(placeholder) || '';
         input.value = meta[key];
         wrap.append(cap, input);

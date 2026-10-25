@@ -1,11 +1,3 @@
-/* Slim scrollbars in every engine. ::-webkit-scrollbar covers Chromium + WebKit;
-   Firefox has no pseudo-element, only these two inherited properties, so set them
-   on :root and they cascade to every scroll container. */
-:root { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-
 .grid-bg {
     background-color: #f8fafc;
     background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
@@ -55,311 +47,337 @@
 .fade-inactive { opacity: 0.25; filter: grayscale(100%); transition: opacity 0.3s, filter 0.3s; }
 .zone-bubble { transition: all 0.2s ease-out; pointer-events: none; }
 
-/* === Carino Systems Header === */
-:root {
-    --cs-bg: #050505;
-    --cs-bg-card: #0b0b0b;
-    --cs-bg-elev: #0d0d0d;
-    --cs-accent: #eab308;
-    --cs-accent-faint: rgba(234, 179, 8, 0.05);
-    --cs-accent-glow: rgba(234, 179, 8, 0.15);
-    --cs-accent-dim: rgba(234, 179, 8, 0.3);
-    --cs-border: #262626;
-    --cs-text: #ffffff;
-    --cs-text-sec: #a3a3a3;
-    --cs-text-muted: #666666;
+/* Tokens come from carino-ui.css. --tall is the landing's own measure:
+   how much taller this viewport is than the point where the landing stops
+   being short of room. Every size below it is written as
+   `base + --tall × rate`, which is zero under 900px and therefore leaves
+   every short screen exactly as it was, and grows continuously above it. A
+   calc rather than a media query because a breakpoint would step: any vh
+   expression steep enough to be worth having above 900px is already too
+   steep below it. Taken from dicom.carino.systems, which solved this first. */
+:root { --tall: max(0px, 100vh - 900px); }
 
-    /* Surplus height: how much taller this viewport is than the point where the
-       landing stops being short of room. Every size below it is written as
-       `base + --tall × rate`, which is zero under 900px and therefore leaves
-       every short screen exactly as it was, and grows continuously above it. A
-       calc rather than a media query because a breakpoint would step: any vh
-       expression steep enough to be worth having above 900px is already too
-       steep below it. Taken from dicom.carino.systems, which solved this first. */
-    --tall: max(0px, 100vh - 900px);
-}
+/* Visibility is a class here (js/*.js toggle 'hidden'); it wins over every
+   display a component sets. */
+.hidden { display: none !important; }
 
-.cs-header {
-    height: 70px;
-    flex-shrink: 0;
-    background: linear-gradient(180deg, #0f0f0f 0%, #050505 100%);
-    border-bottom: 1px solid var(--cs-border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 20px;
-    gap: 12px;
-    position: relative;
-    z-index: 20;
-    font-family: 'IBM Plex Sans', sans-serif;
-}
+body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 
-.cs-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-
-.cs-vdiv { width: 1px; height: 22px; background: var(--cs-border); flex-shrink: 0; }
+/* === Editor controls (relocated into the navbar) === */
+.cs-vdiv { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; }
 
 .cs-control-group {
     display: flex; align-items: center; gap: 6px;
-    border: 1px solid var(--cs-border); border-radius: 4px;
+    border: 1px solid var(--border); border-radius: 4px;
     padding: 0 8px; height: 32px; background: transparent;
 }
 .cs-trace-lbl {
     display: flex; align-items: center; gap: 6px; cursor: pointer;
     font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
-    color: var(--cs-accent); text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap;
+    color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap;
 }
-.cs-trace-lbl input[type="checkbox"] { width: 13px; height: 13px; accent-color: var(--cs-accent); cursor: pointer; }
-.cs-hdiv { width: 1px; height: 14px; background: var(--cs-border); }
+.cs-trace-lbl input[type="checkbox"] { width: 13px; height: 13px; accent-color: var(--accent); cursor: pointer; }
+.cs-hdiv { width: 1px; height: 14px; background: var(--border); }
 .cs-trace-port {
     width: 44px; background: transparent; border: none; outline: none;
-    color: var(--cs-text); font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
+    color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
 }
-.cs-trace-port::placeholder { color: var(--cs-text-muted); }
-.cs-trace-port:focus { color: var(--cs-accent); }
+.cs-trace-port::placeholder { color: var(--text-muted); }
+.cs-trace-port:focus { color: var(--accent); }
 
 .cs-trace-status {
     font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem;
-    color: var(--cs-text-muted); white-space: nowrap; min-width: 64px;
+    color: var(--text-muted); white-space: nowrap; min-width: 64px;
 }
-.cs-trace-status.active { color: var(--cs-accent); font-weight: 700; }
-
-.cs-btn {
-    display: flex; align-items: center; gap: 5px;
-    background: transparent; border: 1px solid var(--cs-border);
-    color: var(--cs-text-sec); font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em;
-    padding: 0 10px; height: 32px; border-radius: 4px; cursor: pointer; transition: 0.2s; white-space: nowrap;
-}
-.cs-btn:hover { border-color: var(--cs-accent); color: var(--cs-accent); background: var(--cs-accent-faint); }
-/* Disabled Undo/Redo read as unavailable, not clickable — dim, muted, no hover. */
-.cs-btn:disabled { opacity: 0.4; cursor: default; }
-.cs-btn:disabled:hover { border-color: var(--cs-border); color: var(--cs-text-sec); background: transparent; }
-
-/* Export / share / import dropdown — collapses six top-level buttons into one. */
-.cs-menu { position: relative; display: flex; }
-.cs-caret { font-size: 0.6rem; opacity: 0.7; margin-left: 1px; }
-.cs-menu-panel {
-    position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
-    min-width: 210px; padding: 6px;
-    background: var(--cs-bg-card); border: 1px solid var(--cs-border);
-    border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.55);
-    display: flex; flex-direction: column; gap: 1px;
-}
-.cs-menu-item {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    background: transparent; border: none; border-radius: 5px;
-    padding: 7px 10px; text-align: left; cursor: pointer; transition: 0.15s;
-    font-family: 'IBM Plex Sans', sans-serif; font-size: 0.72rem;
-    color: var(--cs-text-sec); white-space: nowrap;
-}
-.cs-menu-item:hover { background: var(--cs-accent-faint); color: var(--cs-accent); }
-.cs-menu-note {
-    margin-left: auto; padding-left: 14px; font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.6rem; color: var(--cs-text-muted);
-}
-.cs-menu-item:hover .cs-menu-note { color: var(--cs-accent-dim); }
-.cs-menu-div { height: 1px; background: var(--cs-border); margin: 4px 4px; }
-/* The panel forces display:flex, which would beat Tailwind's .hidden (equal
-   specificity, and app.css can load last) and leave the menu open on first paint.
-   This two-class rule outranks both, so `hidden` genuinely hides it. */
-.cs-menu-panel.hidden { display: none; }
+.cs-trace-status.active { color: var(--accent); font-weight: 700; }
 
 /* Configuration / Diagnostics sub-tabs in the selection panel. */
 .cfg-tab {
     flex: 1; padding: 6px 4px; background: transparent;
     border: none; border-bottom: 2px solid transparent; cursor: pointer;
     font-family: 'IBM Plex Sans', sans-serif; font-size: 10px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.04em; color: var(--cs-text-muted); transition: 0.15s;
+    text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); transition: 0.15s;
 }
-.cfg-tab:hover { color: var(--cs-text-sec); background: var(--cs-accent-faint); }
-.cfg-tab[aria-selected="true"] { color: var(--cs-accent); border-bottom-color: var(--cs-accent); background: var(--cs-accent-faint); }
-
-/* ============================================================
-   Carino branding pass — rebrand the app CHROME (sidebar +
-   floating controls) to gold-on-black so it matches the navbar.
-   The diagram canvas stays light: it is the exportable document.
-   Scoped overrides of the Tailwind light utilities used inline.
-   ============================================================ */
-body { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
-aside {
-    background: var(--cs-bg-card) !important;
-    border-right: 1px solid var(--cs-border) !important;
-    color: var(--cs-text-sec);
-}
-aside .bg-white, aside .bg-slate-50 { background: transparent !important; }
-aside .border-slate-100, aside .border-slate-200, aside .border-slate-300 { border-color: var(--cs-border) !important; }
-aside h2 { color: var(--cs-text-muted) !important; font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.1em; }
-aside .text-slate-800, aside .text-slate-700 { color: var(--cs-text) !important; }
-aside .text-slate-600, aside .text-slate-500 { color: var(--cs-text-sec) !important; }
-aside .text-slate-400 { color: var(--cs-text-muted) !important; }
-aside .text-orange-600 { color: var(--cs-accent) !important; }
-aside ul li .border { border-color: var(--cs-border) !important; background: var(--cs-bg-elev) !important; color: var(--cs-text-sec) !important; }
-/* form controls */
-aside input, aside select, aside textarea {
-    background: var(--cs-bg-elev) !important;
-    border: 1px solid var(--cs-border) !important;
-    color: var(--cs-text) !important;
-    border-radius: 6px !important;
-}
-aside input::placeholder { color: var(--cs-text-muted) !important; }
-aside input:focus, aside select:focus, aside textarea:focus {
-    outline: none !important;
-    border-color: var(--cs-accent) !important;
-    box-shadow: 0 0 0 3px var(--cs-accent-faint) !important;
-}
-aside select option { background: #111; color: var(--cs-text); }
-/* semantic accent labels/selects → gold family */
-aside .text-indigo-600, aside .text-emerald-600, aside .text-blue-600,
-aside .text-amber-600, aside .text-indigo-400 { color: var(--cs-accent) !important; }
-aside .border-indigo-300, aside .border-emerald-300 { border-color: var(--cs-border) !important; }
-aside .bg-indigo-50, aside .bg-emerald-50 { background: var(--cs-bg-elev) !important; }
-aside .focus\:outline-blue-500:focus, aside .focus\:outline-indigo-500:focus { outline-color: var(--cs-accent) !important; }
-aside a { color: var(--cs-accent) !important; }
-/* node-palette hardware buttons */
-#nodePalette button {
-    background: var(--cs-bg-elev) !important;
-    border: 1px solid var(--cs-border) !important;
-    color: var(--cs-text-sec) !important;
-    border-radius: 8px !important;
-    transition: 0.15s;
-}
-#nodePalette button:hover { border-color: var(--cs-accent) !important; color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
-#nodePalette button svg { stroke: currentColor !important; }
+.cfg-tab:hover { color: var(--text-sec); background: var(--accent-faint); }
+.cfg-tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); background: var(--accent-faint); }
 
 /* Library tabs: Nodes / Networks / Blocks */
 .lib-tab {
+    flex: 1; padding: 10px 8px; font-size: var(--fs-btn); font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em;
     background: transparent; border: none; border-bottom: 2px solid transparent;
-    color: var(--cs-text-muted); font-family: 'IBM Plex Mono', monospace;
+    color: var(--text-muted); font-family: 'IBM Plex Mono', monospace;
     cursor: pointer; transition: 0.15s; display: flex; align-items: center; justify-content: center; gap: 5px;
 }
-.lib-tab:hover { color: var(--cs-text-sec); background: var(--cs-accent-faint); }
-.lib-tab[aria-selected="true"] { color: var(--cs-accent); border-bottom-color: var(--cs-accent); background: var(--cs-accent-faint); }
+.lib-tab:hover { color: var(--text-sec); background: var(--accent-faint); }
+.lib-tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); background: var(--accent-faint); }
 .lib-key {
     font-family: 'IBM Plex Mono', monospace; font-size: 10px; line-height: 1;
-    border: 1px solid var(--cs-border); border-radius: 3px; padding: 2px 3px;
-    color: var(--cs-text-muted); background: var(--cs-bg-elev);
+    border: 1px solid var(--border); border-radius: 3px; padding: 2px 3px;
+    color: var(--text-muted); background: var(--bg-elev);
 }
-.lib-tab[aria-selected="true"] .lib-key { border-color: var(--cs-accent-dim); color: var(--cs-accent); }
+.lib-tab[aria-selected="true"] .lib-key { border-color: var(--accent-dim); color: var(--accent); }
 
 /* One row per template/block */
 .lib-item {
     display: flex; align-items: flex-start; gap: 8px; width: 100%; text-align: left;
-    background: var(--cs-bg-elev); border: 1px solid var(--cs-border); border-radius: 6px;
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px;
     padding: 7px 8px; cursor: pointer; transition: 0.15s;
 }
-.lib-item:hover { border-color: var(--cs-accent); background: var(--cs-accent-faint); }
+.lib-item:hover { border-color: var(--accent); background: var(--accent-faint); }
 .lib-item-icon { font-size: 14px; line-height: 1.1; flex-shrink: 0; }
-.lib-item-name { font-size: 11px; font-weight: 700; color: var(--cs-text); }
-.lib-item:hover .lib-item-name { color: var(--cs-accent); }
-.lib-item-blurb { font-size: 10px; color: var(--cs-text-muted); line-height: 1.3; margin-top: 1px; }
-.lib-item-del { color: var(--cs-text-muted); font-size: 10px; padding: 0 2px; background: none; border: none; cursor: pointer; }
+.lib-item-name { font-size: 11px; font-weight: 700; color: var(--text); }
+.lib-item:hover .lib-item-name { color: var(--accent); }
+.lib-item-blurb { font-size: 10px; color: var(--text-muted); line-height: 1.3; margin-top: 1px; }
+.lib-item-del { color: var(--text-muted); font-size: 10px; padding: 0 2px; background: none; border: none; cursor: pointer; }
 .lib-item-del:hover { color: #ef4444; }
 
 /* Shortcut cheatsheet */
 #shortcutHelp kbd {
     font-family: 'IBM Plex Mono', monospace; font-size: 10px;
-    border: 1px solid var(--cs-border); border-radius: 4px; padding: 2px 6px;
-    color: var(--cs-accent); background: var(--cs-bg-elev); white-space: nowrap;
+    border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px;
+    color: var(--accent); background: var(--bg-elev); white-space: nowrap;
 }
-/* jump-to-gateway (dark slate button) → outline gold */
-#jumpGwBtn { background: transparent !important; border: 1px solid var(--cs-border) !important; color: var(--cs-text-sec) !important; border-radius: 6px !important; }
-#jumpGwBtn:hover { border-color: var(--cs-accent) !important; color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
+/* ============================================================
+   Workspace: the rail (carino-ui.css .ws-rail, 340px) and the canvas.
+   The rail is dark chrome in Branding tokens; the canvas stays light on
+   purpose — it is the exportable document.
+   ============================================================ */
+.topo-ws { flex: 1; min-height: 0; position: relative; }
+.topo-rail { padding: 0; gap: 0; overflow: hidden; z-index: 10; }
+.topo-rail .ws-rail-foot { margin-top: 0; padding: 10px 16px 12px; }
+.lib-tabs { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.rail-lib { flex: 1; min-height: 200px; overflow-y: auto; padding: 16px; border-bottom: 1px solid var(--border); }
+.rail-props { flex-shrink: 0; max-height: 50%; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; position: relative; }
+.palette-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.palette-item {
+    display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px;
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text-sec); cursor: pointer; transition: 0.15s;
+}
+.palette-item:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); }
+.palette-item span { font-size: var(--fs-micro); font-weight: 500; text-transform: uppercase; text-align: center; line-height: 1.2; }
+.mode-switch {
+    width: 100%; margin-top: 12px; padding: 6px; border: 1px dashed var(--border); border-radius: 4px;
+    background: transparent; color: var(--text-muted); cursor: pointer; transition: 0.15s;
+    font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.mode-switch:hover { color: var(--text-sec); border-color: var(--text-muted); }
+.lib-list { display: flex; flex-direction: column; gap: 4px; }
+.rail-subsec { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.rail-sub { font-family: var(--mono); font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin: 0 0 6px; }
+.rail-note { font-size: var(--fs-micro); color: var(--text-muted); line-height: 1.35; margin: 4px 0 8px; }
+.rail-title { font-family: var(--mono); font-size: var(--fs-label); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin: 0 0 8px; }
+.rail-filter { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.rail-empty { text-align: center; padding: 32px 0; font-size: var(--fs-label); font-style: italic; color: var(--text-muted); }
+.cfg-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.cfg-panel { display: flex; flex-direction: column; flex: 1; }
 
-/* Status + selection tints emitted by js/ui.js and js/diagnostics.js are the
-   light Tailwind ones; on the dark chrome they map to the ok/warn/err tokens
-   (#22c55e / gold / #ef4444) as faint fills with readable text. */
-aside .bg-slate-100 { background: var(--cs-bg-elev) !important; }
-aside .text-emerald-700 { color: #22c55e !important; }
-/* div/button only: the Link Material select also carries bg-emerald-50 and must
-   keep the bg-elev the form-control rules above give it. */
-aside div.bg-emerald-50, aside button.bg-emerald-50, aside .bg-emerald-100 { background: rgba(34, 197, 94, 0.1) !important; }
-aside .border-emerald-200, aside .border-emerald-400 { border-color: rgba(34, 197, 94, 0.4) !important; }
-aside .hover\:border-emerald-600:hover { border-color: #22c55e !important; }
-aside .text-red-600, aside .text-red-700 { color: #ef4444 !important; }
-aside .bg-red-50, aside .bg-red-100 { background: rgba(239, 68, 68, 0.12) !important; }
-aside .border-red-200, aside .border-red-400 { border-color: rgba(239, 68, 68, 0.5) !important; }
-aside .hover\:bg-red-100:hover { background: rgba(239, 68, 68, 0.2) !important; }
-aside .text-amber-700, aside .text-amber-800 { color: var(--cs-accent) !important; }
-aside .bg-amber-50, aside .bg-amber-100 { background: var(--cs-accent-faint) !important; }
-aside .border-amber-200, aside .border-amber-500 { border-color: var(--cs-accent-dim) !important; }
-/* stray blue hovers → gold */
-aside .hover\:text-blue-600:hover { color: var(--cs-accent) !important; }
-aside .hover\:border-blue-400:hover { border-color: var(--cs-accent) !important; }
-/* every sidebar checkbox ticks gold, whatever accent-* utility it carries */
-aside input[type="checkbox"] { accent-color: var(--cs-accent); }
+/* Selection properties */
+.topo-rail .input, .topo-rail .select { padding: 5px 8px; font-size: var(--fs-sm); border-radius: 6px; }
+.topo-rail .mono { font-family: var(--mono); }
+#propertiesPane { display: flex; flex-direction: column; gap: 12px; padding-bottom: 24px; }
+.prop-name { font-weight: 700; }
+.prop-lbl { display: block; font-family: var(--mono); font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-sec); margin-bottom: 4px; }
+.prop-lbl.accent { color: var(--accent); }
+.prop-sec { padding-top: 8px; border-top: 1px solid var(--border); }
+.prop-stack { display: flex; flex-direction: column; gap: 12px; }
+.prop-headrow { display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; margin-bottom: 4px; }
+.prop-headrow .prop-lbl { margin-bottom: 0; }
+.prop-links { display: flex; gap: 8px; flex-shrink: 0; }
+.prop-links .link-btn { white-space: nowrap; }
+.prop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.prop-grid .span2 { grid-column: span 2; }
+.prop-check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.prop-check .prop-lbl { margin: 0; }
+.prop-check input, .topo-rail input[type="checkbox"] { accent-color: var(--accent); }
+.prop-foot { margin-top: auto; padding-top: 8px; }
+.port-ends { display: flex; flex-direction: column; gap: 8px; }
+.link-btn { background: none; border: none; padding: 0; cursor: pointer; font-size: var(--fs-micro); font-weight: 700; color: var(--accent); }
+.link-btn.quiet { color: var(--text-sec); }
+.link-btn:hover { text-decoration: underline; }
+/* Full-width outline buttons in the rail (Jump to gateway, Open config, the
+   linked site) and the danger-styled Delete. */
+.rail-btn {
+    display: block; width: 100%; margin-top: 8px; padding: 5px 8px; text-align: center; text-decoration: none; cursor: pointer;
+    background: transparent; border: 1px solid var(--border); border-radius: 6px; transition: 0.15s;
+    color: var(--text-sec); font-size: var(--fs-label); font-weight: 700;
+}
+.rail-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); }
+.rail-btn.go { border-color: var(--accent-dim); color: var(--accent); background: var(--accent-faint); }
+.rail-btn.danger { margin-top: 0; color: var(--err); border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.12); font-size: var(--fs-sm); }
+.rail-btn.danger:hover { background: rgba(239, 68, 68, 0.2); color: var(--err); }
+
+/* Interface rows (js/ui.js). The address field must show a full
+   255.255.255.255/32 (tests/suites/ui.js), so every other control in the
+   row is kept as narrow as it can be. */
+.if-list { display: flex; flex-direction: column; gap: 8px; }
+.if-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.if-sub { padding-left: 12px; }
+.if-in {
+    min-width: 0; padding: 4px; border: 1px solid var(--border); border-radius: 4px;
+    background: var(--bg-elev); color: var(--text); font-family: var(--mono); font-size: var(--fs-sm);
+}
+.if-in:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-faint); }
+.if-in::placeholder { color: var(--text-muted); }
+.if-name { width: 56px; flex-shrink: 0; }
+.if-ip { flex: 1; }
+.if-in.bad { border-color: rgba(239, 68, 68, 0.7); background: rgba(239, 68, 68, 0.12); }
+.if-in.warn { border-color: var(--accent-dim); background: var(--accent-faint); }
+.if-in.bond { border-color: var(--accent-dim); background: var(--accent-faint); font-weight: 700; }
+.if-select { flex: 1; min-width: 0; padding: 3px 4px; font-size: var(--fs-micro); border: 1px solid var(--accent-dim); border-radius: 4px; background: var(--bg-elev); color: var(--text); }
+.if-zone { display: flex; align-items: center; gap: 1px; flex-shrink: 0; font-size: var(--fs-micro); font-weight: 700; color: var(--text-sec); cursor: pointer; }
+.if-zone input { width: 12px; height: 12px; margin: 0; cursor: pointer; }
+.if-ico { flex-shrink: 0; padding: 0; background: none; border: none; line-height: 1; cursor: pointer; font-size: var(--fs-micro); color: var(--text-muted); }
+.if-ico.free { color: var(--border); cursor: default; }
+.if-ico.linked:hover { color: var(--accent); }
+.if-del { flex-shrink: 0; padding: 0 2px; background: none; border: none; cursor: pointer; color: var(--text-muted); }
+.if-del:hover { color: var(--err); }
+.if-tick { flex-shrink: 0; font-size: var(--fs-micro); color: var(--text-muted); }
+.if-tick.bond { color: var(--accent); }
+.if-note { flex: 1; min-width: 0; padding: 0 4px; font-size: var(--fs-micro); font-style: italic; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.if-mac { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-left: 12px; margin-bottom: 4px; }
+.if-mac-out { font-size: var(--fs-micro); line-height: 1.3; padding-left: 16px; color: var(--text-sec); }
+.if-mac-out .bad { color: var(--err); }
+.if-mac-out .warn { color: var(--accent); }
+.if-mac-out .muted { color: var(--text-muted); }
+.rail-none { font-size: var(--fs-micro); font-style: italic; color: var(--text-muted); }
+
+/* Switch/AP faceplate and the link's port chips */
+.faceplate { margin-bottom: 8px; }
+.faceplate-count { width: 56px; padding: 2px 4px; text-align: right; font-size: var(--fs-micro); }
+.chip-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.port-chip {
+    min-width: 24px; height: 24px; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+    background: var(--bg-elev); color: var(--text-sec); font-family: var(--mono); font-size: var(--fs-micro); font-weight: 700; transition: 0.15s;
+}
+.faceplate .port-chip { padding: 0; width: 24px; color: var(--text-muted); }
+.port-chip:hover { border-color: var(--accent); color: var(--accent); }
+.port-chip.on { border-color: rgba(34, 197, 94, 0.55); background: rgba(34, 197, 94, 0.1); color: var(--ok); }
+.port-chip.on:hover { border-color: var(--ok); }
+.port-chip.picked { border-color: var(--accent); background: var(--accent-faint); color: var(--accent); }
+.port-chip.taken { color: var(--text-muted); opacity: 0.7; }
+.port-end-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.port-end-name { font-size: var(--fs-micro); font-weight: 700; color: var(--text-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Node diagnostics (js/diagnostics.js) */
+.diag-list { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-micro); }
+.diag-pill { font-size: var(--fs-micro); font-weight: 700; padding: 2px 6px; border-radius: 4px; background: var(--bg-elev); color: var(--text-sec); }
+.diag-pill.bad { background: rgba(239, 68, 68, 0.12); color: var(--err); }
+.diag-pill.warn { background: var(--accent-faint); color: var(--accent); }
+.diag-pill.good { background: rgba(34, 197, 94, 0.1); color: var(--ok); }
+.dg-row { border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; background: var(--bg-elev); color: var(--text-sec); }
+.dg-row.good { border-color: rgba(34, 197, 94, 0.4); background: rgba(34, 197, 94, 0.1); color: var(--ok); }
+.dg-row.bad { border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.12); color: var(--err); }
+.dg-row.warn { border-color: var(--accent-dim); background: var(--accent-faint); color: var(--accent); }
+.dg-head { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; }
+.dg-text { line-height: 1.35; margin-top: 2px; }
+
+/* The canvas: a light document surface inside the dark chrome. */
+.topo-canvas { position: relative; overflow: hidden; padding: 0; }
+.topo-svg { position: absolute; inset: 0; width: 100%; height: 100%; user-select: none; cursor: grab; }
+.topo-svg:active { cursor: grabbing; }
+.topo-svg.linking, .topo-svg.linking:active { cursor: crosshair; }
+.ann-editor { position: absolute; z-index: 40; outline: none; }
+.zoom-ctl {
+    position: absolute; bottom: 16px; right: 16px; z-index: 10; display: flex; flex-direction: column; overflow: hidden;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; color: var(--text-sec);
+}
+.zoom-ctl button { padding: 8px; background: none; border: none; border-bottom: 1px solid var(--border); cursor: pointer; color: inherit; }
+.zoom-ctl button:last-child { border-bottom: none; }
+.zoom-ctl button:hover { background: var(--accent-faint); color: var(--accent); }
+.zoom-ctl .zoom-reset { font-weight: 700; font-size: var(--fs-sm); }
+
+/* Validation alerts over the canvas: a dark card so they read on the light
+   document. Click-through except the dismiss button and the list. */
+#conflictAlert {
+    position: absolute; top: 16px; right: 16px; z-index: 20; max-width: 28rem; pointer-events: none; padding: 12px;
+    background: var(--bg-card); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 6px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); transition: all 0.15s;
+}
+.ca-wrap { display: flex; gap: 8px; }
+.ca-icon { color: var(--accent); font-weight: 700; font-size: var(--fs-lg); }
+.ca-main { flex: 1; min-width: 0; }
+.ca-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.ca-head h4 { margin: 0; font-size: var(--fs-label); font-weight: 700; text-transform: uppercase; color: var(--accent); }
+#conflictHideBtn { pointer-events: auto; background: none; border: none; cursor: pointer; color: var(--accent); font-size: var(--fs-label); font-weight: 700; line-height: 1; padding: 0 4px; margin-top: -2px; }
+#conflictMsgList { pointer-events: auto; margin: 4px 0 0; padding-left: 12px; list-style: disc; max-height: 38vh; overflow-y: auto; font-size: var(--fs-label); color: #fde68a; }
+#conflictMsgList li + li { margin-top: 4px; }
+#conflictPill {
+    position: absolute; top: 16px; right: 16px; z-index: 20; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+    background: var(--bg-card); border: 1px solid var(--accent-dim); color: var(--accent); font-size: var(--fs-label); font-weight: 700;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); transition: 0.15s;
+}
+#conflictPill:hover { border-color: var(--accent); background: var(--accent-faint); }
+
+/* Dialogs: Branding's .modal-scrim/.modal, with a padded body of our own. */
+.topo-dlg { z-index: 2147483100; }
+.topo-card { max-width: 28rem; max-height: 100%; overflow-y: auto; padding: 20px; color: var(--text-sec); }
+.topo-card.sm { max-width: 24rem; }
+.dlg-title { margin: 0 0 4px; font-family: var(--mono); font-size: var(--fs-label); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }
+.dlg-blurb { margin: 0 0 12px; font-size: var(--fs-label); color: var(--text-muted); }
+.dlg-blurb.strong { color: var(--text); margin-bottom: 8px; }
+.dlg-dim { opacity: 0.7; }
+.dlg-list { display: flex; flex-direction: column; gap: 8px; }
+.dlg-fields { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.dlg-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.dlg-check { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: var(--fs-label); color: var(--text); cursor: pointer; }
+.dlg-row { display: flex; gap: 8px; margin-bottom: 4px; }
+.dlg-row .input { flex: 1; min-width: 0; }
+.dlg-result { margin-bottom: 12px; }
+.dlg-error { min-height: 1.25em; margin: 4px 0 12px; font-size: var(--fs-label); color: #f87171; }
+.dlg-headrow { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.topo-card .input { font-size: var(--fs-sm); padding: 6px 8px; }
+.share-link { width: 100%; font-family: var(--mono); font-size: var(--fs-micro); word-break: break-all; color: var(--text-muted); }
+.setup-rows { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; max-height: 60vh; overflow-y: auto; }
+.shortcut-body { font-size: var(--fs-label); }
+.sc-sub { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin: 4px 0 6px; color: var(--text-muted); }
+.sc-hint { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; color: var(--text-sec); }
+.sc-hint b { color: var(--text); }
+.sc-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; }
+.sc-keys { display: flex; gap: 4px; flex-shrink: 0; }
+.sc-keyboard { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.mode-option { display: flex; align-items: flex-start; gap: 10px; text-align: left; border-radius: 6px; padding: 10px; }
+.mode-option .mo-icon { font-size: var(--fs-lg); line-height: 1; }
+.mode-option b { display: block; font-size: var(--fs-sm); color: var(--text); }
+.mode-option .mo-blurb { display: block; font-size: var(--fs-micro); line-height: 1.3; color: var(--text-muted); }
+.setup-tile { display: flex; flex-direction: column; align-items: center; gap: 4px; border-radius: 6px; padding: 10px; text-align: center; }
+.setup-tile .st-label { font-size: var(--fs-micro); font-weight: 500; line-height: 1.2; color: var(--text-sec); }
+.setup-tile .setup-count { font-size: var(--fs-body); color: var(--text); }
+.setup-tile .st-steps { display: flex; gap: 6px; }
+.lib-item-open { display: flex; align-items: flex-start; gap: 8px; flex: 1; min-width: 0; background: transparent; border: 0; padding: 0; text-align: left; cursor: pointer; color: inherit; }
+.lib-item-open .lib-item-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-item-open .lib-item-blurb { display: block; }
 
 /* ✕ delete control on the selected canvas node */
 .node-delete { cursor: pointer; }
 .node-delete:hover circle { fill: #b91c1c; }
 
-/* netplan-bridge "Open config" link — styled like jumpGwBtn, gold outline.
-   display:block would outrank Tailwind's .hidden (same trap as .cs-menu-panel),
-   so the two-class guard below keeps `hidden` honest. */
-#openNetcfgBtn { display: block; background: transparent; border: 1px solid var(--cs-border); color: var(--cs-text-sec); border-radius: 6px; }
-#openNetcfgBtn:hover { border-color: var(--cs-accent); color: var(--cs-accent); background: var(--cs-accent-faint); }
-#openNetcfgBtn.hidden { display: none; }
-/* floating zoom controls over the light canvas → dark card */
-#canvasContainer > .absolute.bottom-4.right-4 { background: var(--cs-bg-card) !important; border: 1px solid var(--cs-border) !important; color: var(--cs-text-sec) !important; border-radius: 8px; overflow: hidden; }
-#canvasContainer > .absolute.bottom-4.right-4 button { border-color: var(--cs-border) !important; }
-#canvasContainer > .absolute.bottom-4.right-4 button:hover { background: var(--cs-accent-faint) !important; color: var(--cs-accent) !important; }
-/* validation alert → solid dark card so it reads on the light canvas */
-#conflictAlert { background: var(--cs-bg-card) !important; border: 1px solid var(--cs-border) !important; border-left: 4px solid var(--cs-accent) !important; box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important; }
-#conflictAlert h4 { color: var(--cs-accent) !important; }
-#conflictAlert .text-amber-800, #conflictAlert ul { color: #fde68a !important; }
-#conflictPill { background: var(--cs-bg-card) !important; border: 1px solid var(--cs-accent-dim) !important; color: var(--cs-accent) !important; box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important; }
-#conflictPill:hover { border-color: var(--cs-accent) !important; background: var(--cs-accent-faint) !important; }
-#conflictAlert .text-amber-500 { color: var(--cs-accent) !important; }
-
 /* ============================================================
-   Mobile / tablet adaptation (≤1024px). Logic lives in
-   js/mobile.js. The desktop layout keeps a fixed sidebar beside
-   the canvas and the app controls in the navbar; on a narrow
-   screen the sidebar becomes an off-canvas drawer opened by ☰,
-   and the navbar's action cluster folds into a section at the
-   top of that drawer — the same pattern as netplan.carino.systems.
-   The drawer is opened from the floating "handy" bar (bottom
-   center, same pattern as quote.carino.systems), which also
-   carries trace / undo / redo / clear. All helper elements are
-   hidden by default and only the media query below turns them on.
+   Phone / tablet (≤900px). The rail is carino-ui.css's workspace
+   drawer (carino-ui.js opens and closes it); js/mobile.js folds the
+   navbar's action cluster into a section at the top of that drawer
+   and adds the floating "handy" bar (bottom centre, thumb reach),
+   whose ☰ is the drawer's [data-ws-toggle]. The helpers are hidden
+   by default and only the media query below turns them on.
    ============================================================ */
 #mobileActions { display: none; }
-#mobileScrim { display: none; }
 .handy-bar { display: none; }
 
-@media (max-width: 1024px) {
-    /* aside → off-canvas left drawer, tucked under the 60px navbar. !important
-       overrides the inline Tailwind width (w-96) and z-index (z-10). */
-    aside {
-        position: fixed !important;
-        top: 60px; left: 0; bottom: 0;
-        width: min(88vw, 360px) !important;
-        max-width: none !important;
-        z-index: 2147482000 !important; /* below navbar (2147483000), above canvas */
-        transform: translateX(-100%);
-        transition: transform 0.25s ease;
-        box-shadow: 0 0 44px rgba(0, 0, 0, 0.6);
-    }
-    aside.drawer-open { transform: translateX(0); }
-
-    #mobileScrim {
-        display: block; position: fixed; inset: 60px 0 0 0;
-        background: rgba(0, 0, 0, 0.55); opacity: 0;
-        pointer-events: none; transition: opacity 0.25s ease;
-        z-index: 2147481000;
-    }
-    #mobileScrim.open { opacity: 1; pointer-events: auto; }
-
+@media (max-width: 900px) {
+    /* The closed drawer's shadow would show along the light canvas's edge. */
+    .topo-ws:not(.drawer-open) .topo-rail { box-shadow: none; }
     /* Actions section pinned at the top of the drawer. */
     #mobileActions {
         display: block; flex-shrink: 0;
         padding: 12px 14px;
-        border-bottom: 1px solid var(--cs-border);
-        background: var(--cs-bg-elev);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-elev);
     }
     .mobile-actions-title {
         font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 700;
         text-transform: uppercase; letter-spacing: 0.1em;
-        color: var(--cs-text-muted); margin-bottom: 10px;
+        color: var(--text-muted); margin-bottom: 10px;
     }
     #mobileActionsSlot .cn-actions {
         display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
@@ -370,41 +388,33 @@ aside input[type="checkbox"] { accent-color: var(--cs-accent); }
     #mobileActionsSlot .cs-control-group { height: auto; padding: 6px 10px; flex-wrap: wrap; }
     #mobileActionsSlot .cs-trace-status { min-width: 0; }
 
-    /* Canvas takes the full width now that the sidebar floats above it. */
-    body.drawer-lock { overflow: hidden; }
-
-    /* Floating handy bar — bottom center, thumb reach. Sits below the scrim
-       layer, and drawer-lock hides it outright so it never floats over an
-       open drawer. */
+    /* Floating handy bar — bottom center, thumb reach. Hidden outright while
+       the drawer is open, so it never floats over it. */
     .handy-bar {
         display: flex; align-items: center; gap: 4px;
         position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
         z-index: 2147480000;
         padding: 6px;
         background: rgba(13, 13, 13, 0.92);
-        border: 1px solid var(--cs-border); border-radius: 12px;
+        border: 1px solid var(--border); border-radius: 12px;
         box-shadow: 0 14px 38px rgba(0, 0, 0, 0.6);
         backdrop-filter: blur(8px);
         max-width: calc(100vw - 24px);
     }
-    body.drawer-lock .handy-bar { display: none; }
+    body:has(.ws.drawer-open) .handy-bar { display: none; }
     .handy-btn {
         width: 38px; height: 38px; flex-shrink: 0;
         display: inline-flex; align-items: center; justify-content: center;
         background: transparent; border: 1px solid transparent; border-radius: 8px;
-        color: var(--cs-text); font-size: 1.05rem; line-height: 1;
+        color: var(--text); font-size: 1.05rem; line-height: 1;
         cursor: pointer; transition: 0.2s;
     }
-    .handy-btn:hover { border-color: var(--cs-accent); color: var(--cs-accent); background: var(--cs-accent-faint); }
-    .handy-btn.active { border-color: var(--cs-accent); color: var(--cs-accent); background: var(--cs-accent-faint); }
+    .handy-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); }
+    .handy-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); }
     .handy-btn:disabled { opacity: 0.35; cursor: default; }
-    .handy-btn:disabled:hover { border-color: transparent; color: var(--cs-text); background: transparent; }
-    .handy-div { width: 1px; height: 22px; background: var(--cs-border); flex-shrink: 0; }
+    .handy-btn:disabled:hover { border-color: transparent; color: var(--text); background: transparent; }
+    .handy-div { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; }
 }
-
-/* branding pass: gateway-jump button in fleet gold, not slate */
-#jumpGwBtn { background: var(--cs-accent-dim); color: var(--cs-accent); border: 1px solid var(--cs-accent); }
-#jumpGwBtn:hover { background: var(--cs-accent); color: #050505; }
 
 /* ---- Simple mode (body.simple-mode) --------------------------------------
    For non-technical users: hides every panel that assumes networking
@@ -442,12 +452,12 @@ body.simple-mode .port-label { display: none !important; }
 
 /* Mode picker options ("Something missing? Try another mode" / #setup) —
    the one place modes are switched; there is deliberately no header toggle. */
-.mode-option { background: transparent; border: 1px solid var(--cs-border); cursor: pointer; }
-.mode-option:hover { border-color: var(--cs-accent); background: var(--cs-accent-faint); }
+.mode-option { background: transparent; border: 1px solid var(--border); cursor: pointer; }
+.mode-option:hover { border-color: var(--accent); background: var(--accent-faint); }
 
 /* Setup wizard device tiles: icon + label + count, steppers below. */
-.setup-tile { border: 1px solid var(--cs-border); transition: opacity 0.15s, border-color 0.15s; }
-.setup-tile:hover { border-color: var(--cs-accent-dim); }
+.setup-tile { border: 1px solid var(--border); transition: opacity 0.15s, border-color 0.15s; }
+.setup-tile:hover { border-color: var(--accent-dim); }
 .setup-tile.off { opacity: 0.45; }
 
 /* Reduced view trims the export menu to the two things a reporter needs:
@@ -476,13 +486,13 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
    deliberately not a light "document" surface — the canvas is
    the document, this is the way in.
    ============================================================ */
-/* :not(.hidden) is load-bearing, not tidiness. `display: flex` on an ID beats
-   Tailwind's `.hidden { display: none }` on specificity alone, so the plain
-   rule left this overlay painted over the editor forever — the same trap
-   .cs-menu-panel.hidden documents above, and the reason the assertions below it
-   check computed visibility rather than the class. */
+/* :not(.hidden) is load-bearing, not tidiness. `display: flex` on an ID once
+   beat a utility `.hidden { display: none }` on specificity alone and left this
+   overlay painted over the editor forever — the reason the assertions in
+   tests/suites/library.js check computed visibility rather than the class. */
 #landing {
-    background: radial-gradient(1100px 560px at 50% -8%, rgba(234, 179, 8, 0.08), transparent 70%), var(--cs-bg);
+    position: absolute; inset: 0; z-index: 40; overflow-y: auto;
+    background: radial-gradient(1100px 560px at 50% -8%, rgba(234, 179, 8, 0.08), transparent 70%), var(--bg);
     font-family: 'IBM Plex Sans', system-ui, sans-serif;
 }
 #landing:not(.hidden) { display: flex; }
@@ -543,6 +553,11 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 
 /* ---- Hero ---- */
 .landing-hero { width: 100%; text-align: center; }
+/* It is also Branding's .short-hero (the tool's empty state), and shares its
+   name with Branding's .landing-hero; the landing keeps its own, larger
+   dicom-style sizes and its own background. */
+.landing-hero.short-hero { display: block; max-width: none; margin: 0; padding: 0; background: none; }
+.landing-privacy { order: 5; justify-content: center; max-width: 680px; }
 .landing-mark {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: min(26px, calc(4px + var(--tall) * 0.045));
@@ -564,25 +579,25 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
     .landing-mark img { height: clamp(46px, 13vw, 78px); }
 }
 .netline polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.netline .trace { stroke: var(--cs-accent); stroke-width: 2; opacity: 0.14; }
+.netline .trace { stroke: var(--accent); stroke-width: 2; opacity: 0.14; }
 .netline .pulse {
-    stroke: var(--cs-accent); stroke-width: 2.4; stroke-dasharray: 16 120;
+    stroke: var(--accent); stroke-width: 2.4; stroke-dasharray: 16 120;
     filter: drop-shadow(0 0 6px rgba(234, 179, 8, 0.9));
     animation: netline-flow 2.6s linear infinite;
 }
-.netline .dots rect { fill: var(--cs-bg); stroke: var(--cs-accent); stroke-width: 1.6; opacity: 0.55; }
+.netline .dots rect { fill: var(--bg); stroke: var(--accent); stroke-width: 1.6; opacity: 0.55; }
 @keyframes netline-flow { from { stroke-dashoffset: 136; } to { stroke-dashoffset: 0; } }
 /* Same courtesy the link-flow keyframes above extend: keep the shape, drop the loop. */
 @media (prefers-reduced-motion: reduce) { .netline .pulse { animation: none; stroke-dasharray: none; opacity: 0.5; } }
 
 .landing-hero h1 {
-    line-height: 1.1; font-weight: 800; letter-spacing: -0.01em; color: var(--cs-text);
+    line-height: 1.1; font-weight: 800; letter-spacing: -0.01em; color: var(--text);
     font-size: min(3.6rem, calc(clamp(1.6rem, 3.6vw + 0.4vh, 2.7rem) + var(--tall) * 0.035));
     margin: 0 0 min(56px, calc(clamp(8px, 1.5vh, 16px) + var(--tall) * 0.1));
 }
-.landing-hero h1 .gold { color: var(--cs-accent); }
+.landing-hero h1 .gold { color: var(--accent); }
 .landing-lede {
-    color: var(--cs-text-sec); line-height: 1.55;
+    color: var(--text-sec); line-height: 1.55;
     max-width: min(820px, calc(660px + var(--tall) * 0.35));
     font-size: min(1.28rem, calc(clamp(0.9rem, 0.55rem + 0.5vh, 1.02rem) + var(--tall) * 0.012));
     margin: 0 auto;
@@ -593,59 +608,59 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
     width: min(680px, 100%);
     padding: min(64px, calc(clamp(20px, 3vh, 38px) + var(--tall) * 0.07)) 32px;
     text-align: center; cursor: pointer;
-    border: 2px dashed var(--cs-border); border-radius: 16px;
+    border: 2px dashed var(--border); border-radius: 16px;
     background: linear-gradient(180deg, #0d0d0d, #080808); transition: 0.2s;
 }
 .landing-drop:hover, .landing-drop.drag {
-    border-color: var(--cs-accent); box-shadow: 0 0 32px var(--cs-accent-glow); transform: translateY(-2px);
+    border-color: var(--accent); box-shadow: 0 0 32px var(--accent-glow); transform: translateY(-2px);
 }
 /* Drawn rather than typed: a device glyph in the app's own line language, and
    no font on the reader's machine to be missing it. */
 .landing-drop-icon { width: auto; margin: 0 auto 12px; display: block;
     height: min(72px, calc(clamp(34px, 4vh, 46px) + var(--tall) * 0.07)); aspect-ratio: 48 / 40; }
 .landing-drop-icon rect, .landing-drop-icon path {
-    fill: none; stroke: var(--cs-accent); stroke-width: 2;
+    fill: none; stroke: var(--accent); stroke-width: 2;
     stroke-linecap: round; stroke-linejoin: round; opacity: 0.85;
 }
 .landing-drop:hover .landing-drop-icon rect, .landing-drop:hover .landing-drop-icon path,
 .landing-drop.drag .landing-drop-icon rect, .landing-drop.drag .landing-drop-icon path { opacity: 1; }
-.landing-drop h2 { font-weight: 800; margin: 0 0 8px; color: var(--cs-text);
+.landing-drop h2 { font-weight: 800; margin: 0 0 8px; color: var(--text);
     font-size: min(1.7rem, calc(1.2rem + var(--tall) * 0.011)); }
-.landing-drop p { margin: 0; color: var(--cs-text-muted); line-height: 1.5;
+.landing-drop p { margin: 0; color: var(--text-muted); line-height: 1.5;
     font-size: min(1.05rem, calc(0.85rem + var(--tall) * 0.006)); }
-.landing-drop code { font-family: 'IBM Plex Mono', monospace; color: var(--cs-accent); }
+.landing-drop code { font-family: 'IBM Plex Mono', monospace; color: var(--accent); }
 .landing-drop-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
 .landing-drop-btn {
-    padding: 8px 16px; border: 1px solid var(--cs-border); background: #101010;
-    color: var(--cs-text-sec); border-radius: 6px; cursor: pointer;
+    padding: 8px 16px; border: 1px solid var(--border); background: #101010;
+    color: var(--text-sec); border-radius: 6px; cursor: pointer;
     font: 600 12px 'IBM Plex Sans', system-ui, sans-serif; transition: 0.15s;
 }
 .landing-drop-btn:hover, .landing-drop-btn:focus-visible {
-    border-color: var(--cs-accent); background: var(--cs-accent-faint); color: var(--cs-accent); outline: none;
+    border-color: var(--accent); background: var(--accent-faint); color: var(--accent); outline: none;
 }
-.landing-drop-btn.primary { border-color: var(--cs-accent); background: var(--cs-accent-faint); color: var(--cs-accent); }
-.landing-drop-btn.primary:hover, .landing-drop-btn.primary:focus-visible { background: var(--cs-accent); color: #050505; }
+.landing-drop-btn.primary { border-color: var(--accent); background: var(--accent-faint); color: var(--accent); }
+.landing-drop-btn.primary:hover, .landing-drop-btn.primary:focus-visible { background: var(--accent); color: #050505; }
 
 /* ---- The starting points, as chips ---- */
 .landing-chips { text-align: center; }
-.landing-chips-lbl { color: var(--cs-text-muted); font-size: 12px; margin-bottom: 9px; }
+.landing-chips-lbl { color: var(--text-muted); font-size: 12px; margin-bottom: 9px; }
 .landing-chips-row { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .landing-chip {
-    padding: 6px 12px; background: #101010; border: 1px solid var(--cs-border);
-    color: var(--cs-text-sec); border-radius: 5px; cursor: pointer;
+    padding: 6px 12px; background: #101010; border: 1px solid var(--border);
+    color: var(--text-sec); border-radius: 5px; cursor: pointer;
     font: 600 12px 'IBM Plex Sans', system-ui, sans-serif; transition: 0.15s;
 }
 .landing-chip:hover, .landing-chip:focus-visible {
-    border-color: var(--cs-accent); background: var(--cs-accent-faint); color: var(--cs-accent); outline: none;
+    border-color: var(--accent); background: var(--accent-faint); color: var(--accent); outline: none;
 }
-.landing-chip.accent { border-color: var(--cs-accent-dim); color: var(--cs-accent); background: var(--cs-accent-faint); }
-.landing-chips-note { margin-top: 10px; color: var(--cs-text-muted); font-size: 11px; }
+.landing-chip.accent { border-color: var(--accent-dim); color: var(--accent); background: var(--accent-faint); }
+.landing-chips-note { margin-top: 10px; color: var(--text-muted); font-size: 11px; }
 
 /* The shelf sits above the saved networks: it is the reason this visitor is
    here, and it is the only section with a deadline on it. */
 #landing.has-saved #landingShared { order: 1; }
 #landingShared { order: 1; }
-.landing-card.guest .landing-card-open { border-left: 2px solid var(--cs-accent-dim); }
+.landing-card.guest .landing-card-open { border-left: 2px solid var(--accent-dim); }
 /* Keep is a named action rather than a glyph, and it does not hide until hover:
    a card that can evaporate with the tab has to say what to do about it. */
 .landing-card-tools.guest { opacity: 1; }
@@ -657,17 +672,15 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
    under the label now sits under the pair. */
 .landing-section-head {
     display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
-    border-bottom: 1px solid var(--cs-border); padding-bottom: 6px; margin-bottom: 10px;
+    border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 10px;
 }
 .landing-section-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-/* The binder-only images row. Explicit rather than a Tailwind `flex` utility
-   beside `hidden`: those two have equal specificity, so which one wins depends
-   on stylesheet order — the same trap .cs-menu-panel.hidden documents above. */
+/* The binder-only images row: laid out only while it is shown. */
 #reportImagesRow:not(.hidden) { display: flex; align-items: flex-start; gap: 8px; }
 .landing-section-head .landing-chip { padding: 4px 9px; font-size: 11px; }
 .landing-section-title {
     font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.12em; color: var(--cs-text-muted);
+    text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-muted);
     margin: 0;
 }
 .landing-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(224px, 1fr)); gap: 10px; }
@@ -677,24 +690,24 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 .landing-card { position: relative; }
 .landing-card-open {
     display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left;
-    background: var(--cs-bg-card); border: 1px solid var(--cs-border); border-radius: 8px;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
     padding: 12px 13px 11px; cursor: pointer; transition: 0.15s;
 }
 .landing-card-open:hover, .landing-card-open:focus-visible {
-    border-color: var(--cs-accent); background: var(--cs-accent-faint); outline: none;
+    border-color: var(--accent); background: var(--accent-faint); outline: none;
 }
 /* A long site name truncates rather than reflowing the card to a different
    height than its neighbours — the grid reads as a grid. */
 .landing-card-name {
-    font-size: 0.79rem; font-weight: 600; color: var(--cs-text);
+    font-size: 0.79rem; font-weight: 600; color: var(--text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     padding-right: 44px;   /* clear of the tools */
 }
-.landing-card-stats { font-family: 'IBM Plex Mono', monospace; font-size: 0.63rem; color: var(--cs-text-muted); }
+.landing-card-stats { font-family: 'IBM Plex Mono', monospace; font-size: 0.63rem; color: var(--text-muted); }
 .landing-card-badges { display: flex; gap: 5px; margin-top: 4px; flex-wrap: wrap; }
 .landing-card-when {
     font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem;
-    color: var(--cs-text-muted); opacity: 0.75; margin-top: 3px;
+    color: var(--text-muted); opacity: 0.75; margin-top: 3px;
 }
 .landing-badge {
     font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 700;
@@ -710,50 +723,48 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 .landing-card:hover .landing-card-tools, .landing-card:focus-within .landing-card-tools { opacity: 1; }
 .landing-tool {
     width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
-    background: var(--cs-bg-elev); border: 1px solid var(--cs-border); border-radius: 4px;
-    color: var(--cs-text-muted); font-size: 0.62rem; line-height: 1; cursor: pointer; transition: 0.15s;
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-muted); font-size: 0.62rem; line-height: 1; cursor: pointer; transition: 0.15s;
 }
-.landing-tool:hover, .landing-tool:focus-visible { color: var(--cs-accent); border-color: var(--cs-accent); outline: none; }
+.landing-tool:hover, .landing-tool:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
 
 /* Not styled as a warning. It is a fact with a date on it, and something that
    turns red every visit is something people stop seeing. */
 .landing-binder-status {
     margin: 12px 0 0; text-align: center;
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; color: var(--cs-text-muted);
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.62rem; color: var(--text-muted);
 }
-.landing-binder-status.stale { color: var(--cs-accent); opacity: 0.85; }
+.landing-binder-status.stale { color: var(--accent); opacity: 0.85; }
 
 .landing-binder-target {
     margin: 4px 0 0; text-align: center;
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; color: var(--cs-text-muted);
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; color: var(--text-muted);
 }
 .landing-linkish {
     background: none; border: none; padding: 0 0 0 6px; cursor: pointer;
-    font: inherit; color: var(--cs-accent); text-decoration: underline; opacity: 0.8;
+    font: inherit; color: var(--accent); text-decoration: underline; opacity: 0.8;
 }
 .landing-linkish:hover, .landing-linkish:focus-visible { opacity: 1; outline: none; }
 
 /* The one thing a card list must say out loud: it is a browser, not an account. */
 .landing-footnote {
-    font-size: 0.66rem; line-height: 1.5; color: var(--cs-text-muted);
+    font-size: 0.66rem; line-height: 1.5; color: var(--text-muted);
     margin: 8px 0 0; text-align: center;
 }
 
-/* Undo, Export and Trace act on a document nobody has picked yet. Two things
-   this rule has to survive, both caused by carino-navbar.js lifting .cs-right
-   out of .cs-header and into its own bar (relocateActions): a descendant
-   selector under .cs-header stops matching once the navbar has booted, and the
-   navbar's own '#carinoNav .cn-actions{display:flex}' outranks any class-only
+/* Undo, Export and Trace act on a document nobody has picked yet. The
+   controls live in the navbar (carino-navbar.js moves .topo-actions there),
+   whose own '#carinoNav .cn-actions{display:flex}' outranks any class-only
    selector we could write — hence !important rather than a specificity race we
    would lose again the next time that file changes. The navbar itself stays
    put: the landing is a page of this app, not of the site. */
-body.landing-open .cs-right { display: none !important; }
+body.landing-open .topo-actions { display: none !important; }
 /* And the same controls before boot has decided anything at all — see the note
    on <body class="chrome-pending"> in index.html. The work area uses visibility
    rather than display so that revealing it costs no reflow, and so the page
    keeps its own background instead of collapsing to a white strip. */
-body.chrome-pending .cs-right { display: none !important; }
-body.chrome-pending aside, body.chrome-pending #canvasContainer { visibility: hidden; }
+body.chrome-pending .topo-actions { display: none !important; }
+body.chrome-pending .topo-rail, body.chrome-pending #canvasContainer { visibility: hidden; }
 body.chrome-pending .handy-bar { display: none !important; }
 /* The one exception: a sealed link asks for its passphrase during boot, before
    the work area it lives in is revealed. visibility is inherited but not
@@ -762,3 +773,4 @@ body.chrome-pending #unlockDialog { visibility: visible; }
 /* Same argument for the phone: js/mobile.js floats a bar of Undo/Redo/Delete
    over the canvas, and on the landing there is no canvas for it to act on. */
 body.landing-open .handy-bar { display: none !important; }
+.topo-card .field { min-width: 0; gap: 4px; }

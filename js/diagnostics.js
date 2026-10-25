@@ -40,22 +40,19 @@ function canReachCloud(sourceNode) {
 }
 
 function getStatusClasses(level) {
-    if (level === 'good') return 'bg-emerald-50 border-emerald-200 text-emerald-700';
-    if (level === 'bad') return 'bg-red-50 border-red-200 text-red-700';
-    if (level === 'warn') return 'bg-amber-50 border-amber-200 text-amber-700';
-    return 'bg-slate-50 border-slate-200 text-slate-600';
+    return level === 'good' || level === 'bad' || level === 'warn' ? level : '';
 }
 
 function diagnosticRow(label, level, text) {
     const icon = level === 'good' ? '✅' : level === 'bad' ? '❌' : level === 'warn' ? '⚠️' : 'ℹ️';
 
     return `
-        <div class="border rounded px-2 py-1 ${getStatusClasses(level)}">
-            <div class="flex justify-between gap-2">
-                <span class="font-bold">${escapeHtml(label)}</span>
+        <div class="dg-row ${getStatusClasses(level)}">
+            <div class="dg-head">
+                <span>${escapeHtml(label)}</span>
                 <span>${icon}</span>
             </div>
-            <div class="text-[10px] leading-snug mt-0.5">${escapeHtml(text)}</div>
+            <div class="dg-text">${escapeHtml(text)}</div>
         </div>
     `;
 }
@@ -529,7 +526,7 @@ function renderNodeDiagnostics(node) {
         if (placeholder) placeholder.classList.remove('hidden');
         body.innerHTML = '';
         summary.textContent = 'Idle';
-        summary.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold';
+        summary.className = 'diag-pill';
         return;
     }
 
@@ -553,11 +550,7 @@ function renderNodeDiagnostics(node) {
     const overall = hasBad ? 'Issues' : hasWarn ? 'Warnings' : 'OK';
 
     summary.textContent = overall;
-    summary.className = hasBad
-        ? 'text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold'
-        : hasWarn
-            ? 'text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold'
-            : 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold';
+    summary.className = 'diag-pill ' + (hasBad ? 'bad' : hasWarn ? 'warn' : 'good');
 
     body.innerHTML = checks
         .map(([label, result]) => diagnosticRow(label, result.level, result.text))

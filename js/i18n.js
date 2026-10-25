@@ -788,6 +788,9 @@ const MESSAGES = {
             'Cada equipo, cada subred, cada cable — con los conflictos de direcciones, los bucles y las puertas de enlace muertas encontrados por ti, y un informe que puedes entregar.',
         'It runs in this tab — no server, no upload, no account — which is why it still works in a comms room with no signal.':
             'Funciona en esta pestaña — sin servidor, sin subidas, sin cuenta — y por eso sigue funcionando en un site sin señal.',
+        'Runs in your browser. Nothing you add here is uploaded.': 'Funciona en tu navegador. Nada de lo que añadas aquí se sube.',
+        "The status panel, when opened, asks a public service for this device's IP address.":
+            'El panel de estado, al abrirlo, pide a un servicio público la dirección IP de este dispositivo.',
         'A blank canvas that has its own link from the first device.':
             'Un lienzo en blanco que tiene su propio enlace desde el primer dispositivo.',
         'Or drop a': 'O suelta aquí un archivo',
@@ -1089,6 +1092,9 @@ const MESSAGES = {
             'Cada equipamento, cada sub-rede, cada cabo — com os conflitos de endereço, os loops e os gateways mortos encontrados para você, e um relatório que dá para entregar.',
         'It runs in this tab — no server, no upload, no account — which is why it still works in a comms room with no signal.':
             'Roda nesta aba — sem servidor, sem upload, sem conta — e é por isso que continua funcionando numa sala de equipamentos sem sinal.',
+        'Runs in your browser. Nothing you add here is uploaded.': 'Funciona no seu navegador. Nada do que você adicionar aqui é enviado.',
+        "The status panel, when opened, asks a public service for this device's IP address.":
+            'O painel de status, quando aberto, pede a um serviço público o endereço IP deste dispositivo.',
         'A blank canvas that has its own link from the first device.':
             'Uma tela em branco que já tem seu próprio link desde o primeiro dispositivo.',
         'Or drop a': 'Ou solte aqui um arquivo',
@@ -1392,6 +1398,9 @@ const MESSAGES = {
             'Каждое устройство, каждая подсеть, каждый кабель — с найденными за вас конфликтами адресов, петлями и мёртвыми шлюзами, и отчётом, который можно отдать.',
         'It runs in this tab — no server, no upload, no account — which is why it still works in a comms room with no signal.':
             'Работает в этой вкладке — без сервера, без загрузки, без учётной записи — и поэтому продолжает работать в серверной без связи.',
+        'Runs in your browser. Nothing you add here is uploaded.': 'Работает в вашем браузере. Ничего из добавленного сюда не загружается.',
+        "The status panel, when opened, asks a public service for this device's IP address.":
+            'Панель состояния при открытии запрашивает у публичного сервиса IP-адрес этого устройства.',
         'A blank canvas that has its own link from the first device.':
             'Пустой холст, у которого есть своя ссылка с первого же устройства.',
         'Or drop a': 'Или перетащите сюда файл сборки',
@@ -1692,6 +1701,9 @@ const MESSAGES = {
             'すべての機器、すべてのサブネット、すべてのケーブルを。アドレスの重複、ループ、応答しないゲートウェイは自動で検出し、そのまま渡せるレポートになります。',
         'It runs in this tab — no server, no upload, no account — which is why it still works in a comms room with no signal.':
             'このタブ内で動作します。サーバーもアップロードもアカウントも不要なので、電波の届かない機械室でも使えます。',
+        'Runs in your browser. Nothing you add here is uploaded.': 'ブラウザ内で動作します。ここに追加したものはアップロードされません。',
+        "The status panel, when opened, asks a public service for this device's IP address.":
+            'ステータスパネルを開くと、この端末のIPアドレスを公開サービスに問い合わせます。',
         'A blank canvas that has its own link from the first device.': '空のキャンバス。最初の機器から専用リンクを持ちます。',
         'Or drop a': 'または',
         '✚ New network': '✚ 新規ネットワーク',

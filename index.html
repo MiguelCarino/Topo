@@ -10,8 +10,8 @@
          no Referer to anywhere, scripts from this origin only, and connect-src
          names every host the fleet diag panel asks for its public IP — a script
          that got in could not send the document anywhere else. Styles stay
-         'unsafe-inline' because Tailwind's browser build writes a <style> and
-         the markup uses style attributes; neither can execute. Meta-delivered,
+         'unsafe-inline' because the navbar and the canvas write style
+         attributes and <style> blocks; neither can execute. Meta-delivered,
          because GitHub Pages sets no headers (so no frame-ancestors, which a
          meta CSP ignores). tests/suites/privacy.js fails on any violation. -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://api4.ipify.org https://api6.ipify.org https://ipv4.icanhazip.com https://ipv6.icanhazip.com https://4.ident.me https://6.ident.me https://1.1.1.1 https://ipwho.is https://ipinfo.io https://ipapi.co; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'">
@@ -39,9 +39,9 @@
     <script type="application/json" id="carino-head-i18n">{"es": {"title": "Hacer diagramas de red — dibuja topologías en línea | Topo", "desc": "Dibuja diagramas de red en tu navegador: dispositivos, enlaces y direccionamiento IP en un lienzo interactivo, compartidos como enlace privado."}, "pt-BR": {"title": "Ferramenta de diagrama de rede — desenhe topologias online | Topo", "desc": "Desenhe diagramas de rede no navegador — dispositivos, links e endereçamento IP em uma tela interativa, compartilhados por link privado."}, "ja": {"title": "ネットワーク構成図作成ツール オンライン | Topo", "desc": "ブラウザでネットワーク構成図を作成。機器、接続、IPアドレスをインタラクティブなキャンバスに配置し、非公開リンクで共有。"}, "ru": {"title": "Схема сети онлайн — рисуйте топологию сети | Topo", "desc": "Рисуйте схемы сети в браузере: устройства, связи и IP-адресация на интерактивном холсте, с отправкой по приватной ссылке."}}</script>
     <script type="application/ld+json">{"@context": "https://schema.org", "@type": "WebApplication", "name": "Topo", "url": "https://topo.carino.systems/", "description": "Draw network diagrams in your browser — devices, links and IP addressing on an interactive canvas, shared as a private link.", "operatingSystem": "Any (runs in a web browser)", "isAccessibleForFree": true, "author": {"@type": "Person", "name": "Miguel Cariño", "url": "https://carino.systems/"}}</script>
     <!-- /carino:head -->
-    <!-- Vendored, not CDN — see vendor/README.md. Both MIT, keeping their own licences. -->
-    <script src="vendor/tailwind-browser-4.3.3.js"></script>
+    <!-- Vendored, not CDN — see vendor/README.md. MIT, keeping its own licence. -->
     <script src="vendor/ipaddr-2.1.0.min.js"></script>
+    <link rel="stylesheet" href="carino-ui.css">
     <link rel="stylesheet" href="fonts/carino-fonts.css">
     <link rel="stylesheet" href="css/app.css">
 </head>
@@ -54,10 +54,12 @@
      than a line of script because it has to be true before the first paint, and
      it is cleared unconditionally (in a finally) so a boot that throws leaves a
      usable editor rather than an invisible one. -->
-<body class="bg-gray-100 font-sans h-screen flex flex-col overflow-hidden text-slate-800 chrome-pending">
+<body class="chrome-pending">
 
-    <header class="cs-header">
-        <div class="cs-right">
+    <!-- The editor's controls. carino-navbar.js moves this node into the
+         navbar (data-carino-actions); below 900px js/mobile.js folds it into
+         the top of the rail's drawer. Every output sits in the one Export menu. -->
+    <div class="topo-actions" data-carino-actions>
             <div class="cs-control-group">
                 <label class="cs-trace-lbl" title="Trace reachable network paths from the selected node">
                     <input type="checkbox" id="toggleTrace" />
@@ -83,10 +85,11 @@
             <button id="tidyBtn" class="cs-btn" title="Auto-arrange the topology into tiers">⤢ Tidy</button>
 
             <!-- One menu for every get-data-in/out action, so the bar stays lean.
-                 Items keep their original ids, so their handlers wire up unchanged. -->
-            <div class="cs-menu">
+                 Items keep their original ids, so their handlers wire up unchanged.
+                 carino-ui.js opens and closes it (the hidden attribute). -->
+            <div class="cs-menu" data-priority="1">
                 <button id="exportMenuBtn" class="cs-btn" aria-haspopup="true" aria-expanded="false" title="Share, export & import builds">⤓ Export <span class="cs-caret">▾</span></button>
-                <div id="exportMenu" class="cs-menu-panel hidden" role="menu" aria-labelledby="exportMenuBtn">
+                <div id="exportMenu" class="cs-menu-panel" role="menu" aria-labelledby="exportMenuBtn" hidden>
                     <button id="myNetworksBtn" class="cs-menu-item" role="menuitem">🗂️ My networks <span class="cs-menu-note">saved here</span></button>
                     <button id="saveNetworkBtn" class="cs-menu-item" role="menuitem">💾 Save this network</button>
                     <div class="cs-menu-div"></div>
@@ -108,82 +111,83 @@
 
             <div class="cs-vdiv"></div>
             <button id="helpBtn" class="cs-btn" title="How to use — mouse & keyboard (press ?)" aria-label="Help">?</button>
-        </div>
-    </header>
+    </div>
 
-    <div class="flex flex-1 overflow-hidden relative">
-        <!-- w-96, not w-80: an interface row has to fit a name, a full /24 CIDR
-             (~146px) and its toggles, and 320px could not do it — long addresses
-             clipped to a shorter, still-valid-looking address. -->
-        <aside class="w-96 bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-sm z-10 h-full">
-            
-            <div class="flex border-b border-slate-200 shrink-0" id="libraryTabs" role="tablist">
-                <button data-tab="nodes" class="lib-tab flex-1 px-2 py-2.5 text-[11px] font-bold uppercase tracking-wider" role="tab">Nodes <span class="lib-key">1</span></button>
-                <button data-tab="templates" class="lib-tab flex-1 px-2 py-2.5 text-[11px] font-bold uppercase tracking-wider" role="tab">Networks <span class="lib-key">2</span></button>
-                <button data-tab="blocks" class="lib-tab flex-1 px-2 py-2.5 text-[11px] font-bold uppercase tracking-wider" role="tab">Blocks <span class="lib-key">3</span></button>
+    <!-- Workspace shell (carino-ui.css): the rail on the left, the canvas as
+         the pane. At 900px and below carino-ui.js turns the rail into a drawer. -->
+    <div class="ws topo-ws">
+        <!-- 340px (Branding's rail). An interface row has to fit a name, a full
+             /24 CIDR (~146px) and its toggles, so the row's own controls are
+             kept narrow in css/app.css rather than the rail made wider. -->
+        <aside class="ws-rail topo-rail">
+
+            <div class="lib-tabs" id="libraryTabs" role="tablist">
+                <button data-tab="nodes" class="lib-tab" role="tab">Nodes <span class="lib-key">1</span></button>
+                <button data-tab="templates" class="lib-tab" role="tab">Networks <span class="lib-key">2</span></button>
+                <button data-tab="blocks" class="lib-tab" role="tab">Blocks <span class="lib-key">3</span></button>
             </div>
 
-            <div class="p-4 border-b border-slate-100 flex-1 overflow-y-auto min-h-[200px]">
+            <div class="rail-lib">
                 <div id="tabPanel-nodes" class="lib-panel">
-                    <div class="grid grid-cols-3 gap-2" id="nodePalette"></div>
-                    <button id="modeSwitchBtn" data-i18n class="w-full mt-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600 border border-dashed border-slate-300 hover:border-slate-400 rounded transition">Something missing? Try another mode</button>
+                    <div class="palette-grid" id="nodePalette"></div>
+                    <button id="modeSwitchBtn" data-i18n class="mode-switch">Something missing? Try another mode</button>
                 </div>
 
                 <div id="tabPanel-templates" class="lib-panel hidden">
-                    <p data-i18n class="text-[10px] text-slate-400 mb-2 leading-tight">A whole network. Replaces the canvas.</p>
-                    <div id="templateList" class="flex flex-col gap-1"></div>
-                    <div id="userTemplateSection" class="hidden mt-3 pt-3 border-t border-slate-100">
-                        <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">My Networks</h3>
-                        <div id="userTemplateList" class="flex flex-col gap-1"></div>
+                    <p data-i18n class="rail-note">A whole network. Replaces the canvas.</p>
+                    <div id="templateList" class="lib-list"></div>
+                    <div id="userTemplateSection" class="hidden rail-subsec">
+                        <h3 class="rail-sub">My Networks</h3>
+                        <div id="userTemplateList" class="lib-list"></div>
                     </div>
                 </div>
 
                 <div id="tabPanel-blocks" class="lib-panel hidden">
-                    <p class="text-[10px] text-slate-400 mb-2 leading-tight">A reusable piece. Stamps onto what you already have.</p>
-                    <div id="blockList" class="flex flex-col gap-1"></div>
+                    <p class="rail-note">A reusable piece. Stamps onto what you already have.</p>
+                    <div id="blockList" class="lib-list"></div>
                 </div>
             </div>
 
-            <div class="p-4 border-t border-slate-100 bg-white flex flex-col shrink-0 max-h-[50%] overflow-y-auto relative">
+            <div class="rail-props">
                 <!-- Global canvas filter — independent of what's selected, so it sits above the tabs. -->
-                <div class="mb-3 pb-3 border-b border-slate-100" id="canvasFilterBox">
-                    <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filter Canvas</h2>
-                    <input type="text" id="canvasFilter" placeholder="Search by name or IP..." class="w-full border border-slate-300 rounded px-2 py-1.5 text-xs focus:outline-blue-500" />
+                <div class="rail-filter" id="canvasFilterBox">
+                    <h2 class="rail-title">Filter Canvas</h2>
+                    <input type="text" id="canvasFilter" placeholder="Search by name or IP..." class="input" />
                 </div>
 
                 <!-- Configuration is the primary tab; Node Diagnostics is secondary. -->
-                <div class="flex gap-1 border-b border-slate-200 mb-3" role="tablist" aria-label="Selection panel">
+                <div class="cfg-tabs" role="tablist" aria-label="Selection panel">
                     <button id="configTabBtn" class="cfg-tab" data-cfgtab="config" role="tab" aria-selected="true">Configuration</button>
                     <button id="diagTabBtn" class="cfg-tab" data-cfgtab="diagnostics" role="tab" aria-selected="false">Diagnostics</button>
                 </div>
 
-                <div id="cfgPanel-config" class="cfg-panel flex flex-col flex-1">
-                <div id="noSelectionPane" data-i18n class="text-center py-8 text-slate-400 text-xs italic">Select a node or link to configure.</div>
+                <div id="cfgPanel-config" class="cfg-panel">
+                <div id="noSelectionPane" data-i18n class="rail-empty">Select a node or link to configure.</div>
 
-                <div id="propertiesPane" class="hidden flex-col gap-3 pb-6">
+                <div id="propertiesPane" class="hidden">
                     <div>
-                        <label data-i18n class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Name</label>
-                        <input type="text" id="propName" class="w-full border border-slate-300 rounded px-2 py-1 text-sm font-bold focus:outline-blue-500" />
+                        <label data-i18n class="prop-lbl">Name</label>
+                        <input type="text" id="propName" class="input prop-name" />
                     </div>
 
-                    <div id="linkProps" class="hidden pt-2 border-t border-slate-100">
-                        <label class="block text-[10px] font-bold text-indigo-600 mb-1 uppercase">VM Attachment Type</label>
-                        <select id="propAttachment" class="w-full border border-indigo-300 bg-indigo-50 rounded px-2 py-1 text-xs focus:outline-indigo-500">
+                    <div id="linkProps" class="hidden prop-sec">
+                        <label class="prop-lbl accent">VM Attachment Type</label>
+                        <select id="propAttachment" class="select">
                             <option value="bridged">Bridged (Routed by Host)</option>
                             <option value="passthrough">PCI Passthrough (Direct L2)</option>
                         </select>
-                        <p class="text-[10px] text-slate-400 mt-1 leading-tight">Passthrough bypasses the host OS, connecting the VM directly to the physical switch logic.</p>
+                        <p class="rail-note">Passthrough bypasses the host OS, connecting the VM directly to the physical switch logic.</p>
                     </div>
 
-                    <div id="linkPortProps" class="hidden pt-2 border-t border-slate-100">
-                        <label class="block text-[10px] font-bold text-amber-600 mb-1 uppercase">Plugged Into</label>
-                        <div id="linkPortBody" class="flex flex-col gap-2"></div>
-                        <p class="text-[10px] text-slate-400 mt-1 leading-tight">Pick the interface this link uses on each end. Occupied ports are marked — you can still pick one, and the node will flag the conflict.</p>
+                    <div id="linkPortProps" class="hidden prop-sec">
+                        <label class="prop-lbl accent">Plugged Into</label>
+                        <div id="linkPortBody" class="port-ends"></div>
+                        <p class="rail-note">Pick the interface this link uses on each end. Occupied ports are marked — you can still pick one, and the node will flag the conflict.</p>
                     </div>
 
-                    <div id="linkMediumProps" class="hidden pt-2 border-t border-slate-100">
-                        <label class="block text-[10px] font-bold text-emerald-600 mb-1 uppercase" id="linkMediumLabel">Link Material</label>
-                        <select id="propMedium" class="w-full border border-emerald-300 bg-emerald-50 rounded px-2 py-1 text-xs focus:outline-emerald-500">
+                    <div id="linkMediumProps" class="hidden prop-sec">
+                        <label class="prop-lbl accent" id="linkMediumLabel">Link Material</label>
+                        <select id="propMedium" class="select">
                             <option value="utp" data-simple="Network cable">UTP (Solid Gray)</option>
                             <option value="fiber" data-simple="Fiber cable">Fiber Optic (Solid Cyan)</option>
                             <option value="wireless" data-simple="Wi-Fi">Wireless (Dashed Purple)</option>
@@ -192,47 +196,47 @@
                         </select>
                     </div>
 
-                    <div id="nodeNetworkProps" class="space-y-3">
+                    <div id="nodeNetworkProps" class="prop-stack">
                         <div>
-                            <div class="flex justify-between items-end mb-1">
-                                <label class="block text-[10px] font-bold text-slate-500 uppercase">Interfaces (Port & IP)</label>
-                                <div class="flex gap-2">
-                                    <button id="bondIfaceBtn" class="text-[10px] text-indigo-600 hover:underline font-bold hidden" title="Fold every wired NIC into one bond: one MAC, one address">⇄ Bond NICs</button>
-                                    <button id="addMacBtn" class="text-[10px] text-slate-500 hover:underline font-bold" title="Show the hardware address under each interface — paste one and it is decoded">+ MAC</button>
-                                    <button id="addIfaceBtn" class="text-[10px] text-blue-600 hover:underline font-bold">+ Add Interface</button>
+                            <div class="prop-headrow">
+                                <label class="prop-lbl">Interfaces (Port & IP)</label>
+                                <div class="prop-links">
+                                    <button id="bondIfaceBtn" class="link-btn hidden" title="Fold every wired NIC into one bond: one MAC, one address">⇄ Bond NICs</button>
+                                    <button id="addMacBtn" class="link-btn quiet" title="Show the hardware address under each interface — paste one and it is decoded">+ MAC</button>
+                                    <button id="addIfaceBtn" class="link-btn">+ Add Interface</button>
                                 </div>
                             </div>
-                            <div id="ifaceListContainer" class="flex flex-col gap-2"></div>
-                            <p class="text-[10px] text-slate-400 mt-1 leading-tight">Unassigned switches act as L2 Backplanes.</p>
+                            <div id="ifaceListContainer" class="if-list"></div>
+                            <p class="rail-note">Unassigned switches act as L2 Backplanes.</p>
                         </div>
 
-                        <div class="grid grid-cols-2 gap-2">
+                        <div class="prop-grid">
                             <div>
-                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Gateway</label>
-                                <input type="text" id="propGw" placeholder="e.g. 10.0.0.1" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500" />
+                                <label class="prop-lbl">Gateway</label>
+                                <input type="text" id="propGw" placeholder="e.g. 10.0.0.1" class="input mono" />
                             </div>
                             <div>
-                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">DNS</label>
-                                <input type="text" id="propDns" placeholder="8.8.8.8" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500" />
+                                <label class="prop-lbl">DNS</label>
+                                <input type="text" id="propDns" placeholder="8.8.8.8" class="input mono" />
                             </div>
-                            <div class="col-span-2">
-                                <button id="jumpGwBtn" class="w-full hidden py-1 rounded text-[10px] font-bold transition">⏭️ Jump to Gateway</button>
+                            <div class="span2">
+                                <button id="jumpGwBtn" class="rail-btn hidden">⏭️ Jump to Gateway</button>
                             </div>
                         </div>
-                        <label id="natRow" class="hidden items-center gap-2 mt-2 cursor-pointer" title="NAT hides this device's private (inside) subnets from the WAN side — only the gateway itself is reachable from outside.">
-                            <input type="checkbox" id="propNat" class="accent-amber-500">
-                            <span class="text-[10px] font-bold text-slate-500 uppercase">NAT / Masquerade</span>
+                        <label id="natRow" class="hidden prop-check" title="NAT hides this device's private (inside) subnets from the WAN side — only the gateway itself is reachable from outside.">
+                            <input type="checkbox" id="propNat">
+                            <span class="prop-lbl">NAT / Masquerade</span>
                         </label>
 
                         <!-- Netplan bridge: one stored boolean; the link itself is derived
                              from the fields above at click time. docs/netplan-bridge-design.md -->
-                        <div class="pt-2 mt-2 border-t border-slate-100">
-                            <label class="flex items-center gap-2 cursor-pointer" title="This host keeps a network config file (netplan / systemd-networkd / NetworkManager). Opens the generator pre-filled from this node — review the guessed fields before applying anything.">
-                                <input type="checkbox" id="propNetcfg" class="accent-amber-500">
-                                <span class="text-[10px] font-bold text-slate-500 uppercase">Network config file</span>
+                        <div class="prop-sec">
+                            <label class="prop-check" title="This host keeps a network config file (netplan / systemd-networkd / NetworkManager). Opens the generator pre-filled from this node — review the guessed fields before applying anything.">
+                                <input type="checkbox" id="propNetcfg">
+                                <span class="prop-lbl">Network config file</span>
                             </label>
-                            <p id="netcfgHint" class="hidden text-[10px] text-slate-400 mt-1 leading-tight">These usually run vendor firmware, not netplan.</p>
-                            <a id="openNetcfgBtn" target="_blank" rel="noopener" class="hidden w-full mt-2 py-1 rounded text-[10px] font-bold transition text-center">⚙️ Open config → netplan.carino.systems</a>
+                            <p id="netcfgHint" class="hidden rail-note">These usually run vendor firmware, not netplan.</p>
+                            <a id="openNetcfgBtn" target="_blank" rel="noopener" class="hidden rail-btn">⚙️ Open config → netplan.carino.systems</a>
                         </div>
 
                         <!-- Inter-site link. A cloud is already this codebase's
@@ -242,57 +246,62 @@
                              English labels with no data-i18n, matching the netcfg
                              block and natRow — advanced sidebar vocabulary stays
                              untranslated on purpose (js/i18n.js). -->
-                        <div id="siteRefBlock" class="hidden pt-2 mt-2 border-t border-slate-100">
-                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase" title="Say that this cloud stands for another network in your binder, so the estate report can draw the link between them.">Stands for another site</label>
-                            <select id="propSiteRef" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500"></select>
-                            <p id="siteRefHint" class="hidden text-[10px] text-slate-400 mt-1 leading-tight"></p>
-                            <button id="openSiteRefBtn" type="button" class="hidden w-full mt-2 py-1 rounded text-[10px] font-bold transition text-center"></button>
+                        <div id="siteRefBlock" class="hidden prop-sec">
+                            <label class="prop-lbl" title="Say that this cloud stands for another network in your binder, so the estate report can draw the link between them.">Stands for another site</label>
+                            <select id="propSiteRef" class="select"></select>
+                            <p id="siteRefHint" class="hidden rail-note"></p>
+                            <button id="openSiteRefBtn" type="button" class="hidden rail-btn"></button>
                         </div>
                     </div>
 
-                    <div id="nodeGeneralProps" class="pt-3 border-t border-slate-100">
-                        <div class="grid grid-cols-2 gap-2 mb-2" id="osPortsRow">
-                            <div class="col-span-1">
-                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase">OS / Firmware</label>
-                                <input type="text" id="propOs" list="osDatalist" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:outline-blue-500" />
+                    <div id="nodeGeneralProps" class="prop-sec">
+                        <div class="prop-grid" id="osPortsRow">
+                            <div>
+                                <label class="prop-lbl">OS / Firmware</label>
+                                <input type="text" id="propOs" list="osDatalist" class="input" />
                                 <datalist id="osDatalist"></datalist>
                             </div>
-                            <div class="col-span-1">
-                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase" title="Blank = All ports open">Allowed Ports</label>
-                                <input type="text" id="propPorts" placeholder="80, 443" class="w-full border border-slate-300 rounded px-2 py-1 text-xs font-mono focus:outline-blue-500" />
+                            <div>
+                                <label class="prop-lbl" title="Blank = All ports open">Allowed Ports</label>
+                                <input type="text" id="propPorts" placeholder="80, 443" class="input mono" />
                             </div>
                         </div>
-                            </div>
-                        
-                            <div class="pt-2 mt-auto">
-                                <button id="deleteElementBtn" data-i18n class="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-1.5 rounded text-xs font-bold transition flex justify-center items-center gap-1">
-                                    Delete Selected
-                                </button>
-                            </div>
+                    </div>
+
+                    <div class="prop-foot">
+                        <button id="deleteElementBtn" data-i18n class="rail-btn danger">Delete Selected</button>
+                    </div>
                 </div>
                 </div>
 
                 <div id="cfgPanel-diagnostics" class="cfg-panel hidden">
-                    <div id="diagNoSelection" class="text-center py-8 text-slate-400 text-xs italic">Select a node to see its diagnostics.</div>
+                    <div id="diagNoSelection" class="rail-empty">Select a node to see its diagnostics.</div>
                     <div id="nodeDiagnosticsPanel" class="hidden">
-                        <div class="flex items-center justify-between mb-2">
-                            <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Node Diagnostics</h3>
-                            <span id="nodeDiagnosticsSummary" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold">Idle</span>
+                        <div class="prop-headrow">
+                            <h3 class="rail-sub">Node Diagnostics</h3>
+                            <span id="nodeDiagnosticsSummary" class="diag-pill">Idle</span>
                         </div>
-                        <div id="nodeDiagnosticsBody" class="space-y-1.5 text-[10px]"></div>
+                        <div id="nodeDiagnosticsBody" class="diag-list"></div>
                     </div>
                 </div>
             </div>
+
+            <!-- Kept on screen while editing: the canvas is someone's
+                 addressing plan. carino-diag.js only asks for this device's
+                 public IP when its status panel is opened, so that is named. -->
+            <div class="ws-rail-foot">
+                <p class="privacy-line"><span data-i18n>Runs in your browser. Nothing you add here is uploaded.</span>&nbsp;<span class="pl-also" data-i18n>The status panel, when opened, asks a public service for this device's IP address.</span></p>
+            </div>
         </aside>
 
-        <main class="flex-1 relative overflow-hidden grid-bg" id="canvasContainer">
-            <div class="absolute bottom-4 right-4 z-10 flex flex-col bg-white rounded shadow-md border border-slate-200 text-slate-600">
-                <button id="zoomInBtn" class="p-2 hover:bg-slate-100 border-b border-slate-200" title="Zoom In">➕</button>
-                <button id="zoomResetBtn" class="p-2 hover:bg-slate-100 border-b border-slate-200 font-bold text-xs" title="Reset">1:1</button>
-                <button id="zoomOutBtn" class="p-2 hover:bg-slate-100" title="Zoom Out">➖</button>
+        <main class="ws-pane topo-canvas grid-bg" id="canvasContainer">
+            <div class="zoom-ctl">
+                <button id="zoomInBtn" title="Zoom In">➕</button>
+                <button id="zoomResetBtn" class="zoom-reset" title="Reset">1:1</button>
+                <button id="zoomOutBtn" title="Zoom Out">➖</button>
             </div>
             
-            <svg id="networkCanvas" class="w-full h-full absolute inset-0 select-none cursor-grab active:cursor-grabbing" xmlns="http://www.w3.org/2000/svg">
+            <svg id="networkCanvas" class="topo-svg" xmlns="http://www.w3.org/2000/svg">
                 <g id="workspace">
                     <g id="layer-zones"></g>
                     <g id="layer-links"></g>
@@ -304,32 +313,32 @@
 
             <!-- Stays click-through so it never blocks the canvas beneath it; only the
                  dismiss button and the scrollable list take pointer events. -->
-            <div id="conflictAlert" class="absolute top-4 right-4 bg-amber-50 border-l-4 border-amber-500 rounded p-3 shadow-lg max-w-md hidden z-20 transition-all pointer-events-none">
-                <div class="flex gap-2">
-                    <span class="text-amber-500 font-bold text-lg">⚠️</span>
-                    <div class="flex-1 min-w-0">
-                        <div class="flex items-start justify-between gap-2">
-                            <h4 class="text-xs font-bold text-amber-900 uppercase">Validation Alerts</h4>
-                            <button id="conflictHideBtn" class="pointer-events-auto text-amber-500 hover:text-amber-700 text-xs font-bold leading-none px-1 -mt-0.5" title="Hide validation alerts">✕</button>
+            <div id="conflictAlert" class="hidden">
+                <div class="ca-wrap">
+                    <span class="ca-icon">⚠️</span>
+                    <div class="ca-main">
+                        <div class="ca-head">
+                            <h4>Validation Alerts</h4>
+                            <button id="conflictHideBtn" title="Hide validation alerts">✕</button>
                         </div>
-                        <ul id="conflictMsgList" class="text-[11px] text-amber-800 mt-1 list-disc pl-3 space-y-1 max-h-[38vh] overflow-y-auto pointer-events-auto"></ul>
+                        <ul id="conflictMsgList"></ul>
                     </div>
                 </div>
             </div>
 
             <!-- Collapsed form: hiding the panel should not hide that problems exist. -->
-            <button id="conflictPill" class="absolute top-4 right-4 hidden z-20 bg-amber-50 border border-amber-500 rounded-full shadow-lg px-2.5 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition" title="Show validation alerts">
+            <button id="conflictPill" class="hidden" title="Show validation alerts">
                 ⚠️ <span id="conflictPillCount">0</span>
             </button>
 
             <!-- Mode picker: the simple modes or the full editor. Opened by the
                  "Something missing?" button (switch flow) and by #setup (setup
                  flow, where a purpose choice continues into the counts step). -->
-            <div id="modePicker" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
-                <div class="rounded-lg shadow-2xl p-5 w-full max-w-sm" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
-                    <h4 id="modePickerTitle" class="text-[11px] font-bold uppercase tracking-wider mb-1" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">What are you documenting?</h4>
-                    <p data-i18n class="text-[11px] mb-3" style="color: var(--cs-text-muted)">Pick the view that fits — you can switch anytime, nothing is lost.</p>
-                    <div id="modePickerList" class="flex flex-col gap-2"></div>
+            <div id="modePicker" class="hidden modal-scrim topo-dlg">
+                <div class="modal topo-card sm">
+                    <h4 id="modePickerTitle" class="dlg-title">What are you documenting?</h4>
+                    <p data-i18n class="dlg-blurb">Pick the view that fits — you can switch anytime, nothing is lost.</p>
+                    <div id="modePickerList" class="dlg-list"></div>
                 </div>
             </div>
 
@@ -348,10 +357,10 @@
                  centred and everything disappears the moment a document is
                  open — a headline still sitting above someone's survey while
                  they work would be the wrong way round. -->
-            <div id="landing" class="hidden absolute inset-0 z-40 overflow-y-auto">
+            <div id="landing" class="hidden">
                 <div class="landing-inner">
 
-                    <section class="landing-hero">
+                    <section class="landing-hero short-hero">
                         <!-- The gold C-with-a-T, built like dcm.carino.systems' C-with-an-E:
                              the same arc, the same weight, the same #eab308. logo.webp
                              cannot appear here — it is a black silhouette on a black
@@ -412,6 +421,8 @@
                         <div class="landing-chips-note" id="landingEmpty" data-i18n>Networks you save are kept in this browser, and show up here.</div>
                     </div>
 
+                    <p class="privacy-line landing-privacy"><span data-i18n>Runs in your browser. Nothing you add here is uploaded.</span>&nbsp;<span class="pl-also" data-i18n>The status panel, when opened, asks a public service for this device's IP address.</span></p>
+
                     <!-- A binder someone sent, decoded from a 'b~' link. Its own
                          section, never merged into "Your networks" until the visitor
                          presses Keep: a link arrives by someone else's click, and
@@ -466,12 +477,12 @@
 
             <!-- Setup wizard (#setup / #setup-<profile>): count what you have,
                  the network draws itself, then you land in the simple view to rename. -->
-            <div id="setupWizard" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
-                <div class="rounded-lg shadow-2xl p-5 w-full max-w-md" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
-                    <h4 data-i18n class="text-[11px] font-bold uppercase tracking-wider mb-1" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">What do you have?</h4>
-                    <p data-i18n class="text-[11px] mb-3" style="color: var(--cs-text-muted)">Count what's in the building — the network draws itself. You can rename and adjust everything afterwards.</p>
-                    <div id="setupRows" class="grid grid-cols-3 gap-2 mb-4 max-h-[60vh] overflow-y-auto"></div>
-                    <div class="flex gap-2 justify-end">
+            <div id="setupWizard" class="hidden modal-scrim topo-dlg">
+                <div class="modal topo-card">
+                    <h4 data-i18n class="dlg-title">What do you have?</h4>
+                    <p data-i18n class="dlg-blurb">Count what's in the building — the network draws itself. You can rename and adjust everything afterwards.</p>
+                    <div id="setupRows" class="setup-rows"></div>
+                    <div class="dlg-actions">
                         <button id="setupCancelBtn" data-i18n class="cs-btn">Start empty</button>
                         <button id="setupBuildBtn" data-i18n class="cs-btn">✨ Build my network</button>
                     </div>
@@ -483,19 +494,19 @@
                  js/report.js so the form and the document cannot disagree. -->
             <!-- z-50, above the landing's z-40: the binder report is launched FROM
                  the landing and the landing stays up behind it. -->
-            <div id="reportDialog" class="hidden absolute inset-0 z-50 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
-                <div class="rounded-lg shadow-2xl p-5 w-full max-w-md max-h-full overflow-y-auto" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
-                    <h4 id="reportDialogTitle" data-i18n class="text-[11px] font-bold uppercase tracking-wider mb-1" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">Site report</h4>
-                    <p id="reportDialogBlurb" data-i18n class="text-[11px] mb-3" style="color: var(--cs-text-muted)">The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.</p>
-                    <div id="reportFields" class="flex flex-col gap-2.5 mb-4"></div>
+            <div id="reportDialog" class="hidden modal-scrim topo-dlg">
+                <div class="modal topo-card">
+                    <h4 id="reportDialogTitle" data-i18n class="dlg-title">Site report</h4>
+                    <p id="reportDialogBlurb" data-i18n class="dlg-blurb">The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.</p>
+                    <div id="reportFields" class="dlg-fields"></div>
                     <!-- Binder mode only. Two sibling spans rather than markup nested
                          inside one data-i18n element: applyStaticI18n sets textContent
                          and would eat any children. -->
-                    <label id="reportImagesRow" class="hidden text-[11px] mb-3" style="color: var(--cs-text-muted)">
-                        <input type="checkbox" id="reportImages" class="mt-0.5" checked>
-                        <span><span data-i18n>Include a diagram for each site</span><br><span class="opacity-70" data-i18n>Renders each network in turn — slower, and the file gets much larger.</span></span>
+                    <label id="reportImagesRow" class="hidden dlg-blurb">
+                        <input type="checkbox" id="reportImages" checked>
+                        <span><span data-i18n>Include a diagram for each site</span><br><span class="dlg-dim" data-i18n>Renders each network in turn — slower, and the file gets much larger.</span></span>
                     </label>
-                    <div class="flex gap-2 justify-end">
+                    <div class="dlg-actions">
                         <button id="reportCancelBtn" data-i18n class="cs-btn">Cancel</button>
                         <button id="reportBuildBtn" class="cs-btn">📋 Open report</button>
                     </div>
@@ -506,24 +517,24 @@
                  link is ciphertext and the passphrase travels another way.
                  z-50 like the report dialog — the binder link is launched from
                  the landing. Rendered by js/share.js. -->
-            <div id="shareDialog" class="hidden absolute inset-0 z-50 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
-                <div class="rounded-lg shadow-2xl p-5 w-full max-w-md max-h-full overflow-y-auto" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
-                    <h4 id="shareTitle" class="text-[11px] font-bold uppercase tracking-wider mb-1" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">Share this network</h4>
-                    <p id="shareBlurb" class="text-[11px] mb-3" style="color: var(--cs-text-muted)"></p>
-                    <label class="flex gap-2 items-center text-[11px] mb-2 cursor-pointer" style="color: var(--cs-text)">
+            <div id="shareDialog" class="hidden modal-scrim topo-dlg">
+                <div class="modal topo-card">
+                    <h4 id="shareTitle" class="dlg-title">Share this network</h4>
+                    <p id="shareBlurb" class="dlg-blurb"></p>
+                    <label class="dlg-check">
                         <input type="checkbox" id="shareSeal" checked>
                         <span data-i18n>Lock the link with a passphrase</span>
                     </label>
-                    <div id="sharePassRow" class="flex gap-2 mb-1">
-                        <input id="sharePass" type="text" autocomplete="off" spellcheck="false" class="flex-1 min-w-0 rounded px-2 py-1.5 text-xs" style="background: var(--cs-bg-elev); border: 1px solid var(--cs-border); color: var(--cs-text); font-family: 'IBM Plex Mono', monospace">
+                    <div id="sharePassRow" class="dlg-row">
+                        <input id="sharePass" type="text" autocomplete="off" spellcheck="false" class="input mono">
                         <button id="shareNewPass" data-i18n class="cs-btn" title="Make a new random passphrase">New</button>
                     </div>
-                    <p id="shareHint" class="text-[11px] mb-3" style="color: var(--cs-text-muted)"></p>
-                    <div id="shareResult" class="hidden mb-3">
-                        <p id="shareDone" class="text-[11px] mb-2" style="color: var(--cs-text)"></p>
-                        <textarea id="shareLink" readonly rows="3" class="w-full rounded px-2 py-1.5 text-[10px] break-all" style="background: var(--cs-bg-elev); border: 1px solid var(--cs-border); color: var(--cs-text-muted); font-family: 'IBM Plex Mono', monospace"></textarea>
+                    <p id="shareHint" class="dlg-blurb"></p>
+                    <div id="shareResult" class="hidden dlg-result">
+                        <p id="shareDone" class="dlg-blurb strong"></p>
+                        <textarea id="shareLink" readonly rows="3" class="textarea share-link"></textarea>
                     </div>
-                    <div class="flex gap-2 justify-end flex-wrap">
+                    <div class="dlg-actions">
                         <button id="shareCloseBtn" data-i18n class="cs-btn">Close</button>
                         <button id="sharePassCopyBtn" class="cs-btn hidden">🔑 Copy passphrase</button>
                         <button id="shareCopyBtn" class="cs-btn">🔗 Copy link</button>
@@ -535,26 +546,26 @@
                  boot awaits the answer, and prompt() would freeze a blank one.
                  z-50 and visibility:visible (css/app.css) so it shows while
                  chrome-pending still hides the rest of the work area. -->
-            <div id="unlockDialog" class="hidden absolute inset-0 z-50 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
-                <form id="unlockForm" class="rounded-lg shadow-2xl p-5 w-full max-w-sm" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
-                    <h4 data-i18n class="text-[11px] font-bold uppercase tracking-wider mb-1" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">This link is locked</h4>
-                    <p data-i18n class="text-[11px] mb-3" style="color: var(--cs-text-muted)">Whoever sent it should have given you a passphrase separately. Nothing is sent anywhere — it is checked in this browser.</p>
-                    <input id="unlockPass" type="password" autocomplete="off" spellcheck="false" class="w-full rounded px-2 py-1.5 text-xs mb-1" style="background: var(--cs-bg-elev); border: 1px solid var(--cs-border); color: var(--cs-text); font-family: 'IBM Plex Mono', monospace">
-                    <p id="unlockError" class="text-[11px] mb-3 min-h-[1.25em]" style="color: #f87171"></p>
-                    <div class="flex gap-2 justify-end">
+            <div id="unlockDialog" class="hidden modal-scrim topo-dlg">
+                <form id="unlockForm" class="modal topo-card sm">
+                    <h4 data-i18n class="dlg-title">This link is locked</h4>
+                    <p data-i18n class="dlg-blurb">Whoever sent it should have given you a passphrase separately. Nothing is sent anywhere — it is checked in this browser.</p>
+                    <input id="unlockPass" type="password" autocomplete="off" spellcheck="false" class="input mono">
+                    <p id="unlockError" class="dlg-error"></p>
+                    <div class="dlg-actions">
                         <button type="button" id="unlockCancelBtn" data-i18n class="cs-btn">Don't open</button>
                         <button type="submit" id="unlockOpenBtn" class="cs-btn">🔓 Open</button>
                     </div>
                 </form>
             </div>
 
-            <div id="shortcutHelp" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55)">
-                <div class="rounded-lg shadow-2xl p-5 w-full max-w-sm" style="background: var(--cs-bg-card); border: 1px solid var(--cs-border)">
-                    <div class="flex justify-between items-center mb-3">
-                        <h4 class="text-[11px] font-bold uppercase tracking-wider" style="color: var(--cs-accent); font-family: 'IBM Plex Mono', monospace">How to use</h4>
-                        <button id="shortcutClose" class="text-sm leading-none" style="color: var(--cs-text-muted)">✕</button>
+            <div id="shortcutHelp" class="hidden modal-scrim topo-dlg">
+                <div class="modal topo-card sm">
+                    <div class="dlg-headrow">
+                        <h4 class="dlg-title">How to use</h4>
+                        <button id="shortcutClose" class="modal-x" aria-label="Close">✕</button>
                     </div>
-                    <div id="shortcutBody" class="text-[11px]"></div>
+                    <div id="shortcutBody" class="shortcut-body"></div>
                 </div>
             </div>
 
@@ -572,6 +583,7 @@
     <script src="js/share.js"></script>
     <script src="js/app.js"></script>
 <script src="carino-navbar.js" data-app="Topo" data-repo="Topo" defer></script>
+<script src="carino-ui.js" defer></script>
 <script src="carino-lang.js" defer></script>
 <script src="js/mobile.js" defer></script>
 <script src="carino-diag.js" defer></script>
