@@ -49,6 +49,7 @@ paletteDefs.forEach((d) => {
     btn.dataset.type = d.type; // profile CSS overrides + purpose renames key off this
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[d.type]}</svg><span>${d.name}</span>`;
     btn.title = 'Click to add (connects to the selected node) — or drag onto the canvas';
+    btn.setAttribute('data-i18n-title', ''); // translated by applyLocale(), which runs after the locale is known
     // Click: add connected to the current selection (fast tree building)
     btn.onclick = () => spawnNode(d.type, { connectTo: (state.selectedType === 'node' && state.selectedId) ? state.selectedId : null });
     // Drag: drop onto the canvas at the cursor
@@ -68,8 +69,8 @@ paletteDefs.forEach((d) => {
 ].forEach((d) => {
     const btn = document.createElement('button');
     btn.className = 'palette-item';
-    btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${d.icon}</svg><span>${d.name}</span>`;
-    btn.title = d.title;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${d.icon}</svg><span data-i18n>${d.name}</span>`;
+    btn.title = d.title; btn.setAttribute('data-i18n-title', ''); // applyLocale() translates both
     btn.onclick = () => spawnAnnotation({ style: d.style, edit: true });
     btn.setAttribute('draggable', 'true');
     btn.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/carino-annotation', d.style); e.dataTransfer.effectAllowed = 'copy'; });
@@ -188,7 +189,7 @@ function renderAnnotation(a) {
         mark.textContent = '✕'; mark.style.pointerEvents = 'none';
         del.appendChild(mark);
         const tip = document.createElementNS(NS, 'title');
-        tip.textContent = 'Delete note';
+        tip.textContent = t('Delete note');
         del.appendChild(tip);
         del.addEventListener('mousedown', (e) => e.stopPropagation()); // no drag from the ✕
         del.addEventListener('click', (e) => { e.stopPropagation(); deleteSelected(); });
@@ -204,8 +205,8 @@ function renderAnnotation(a) {
         const ctlWrap = document.createElementNS(NS, 'g');
         ctlWrap.setAttribute('transform', `translate(${ctlX}, 0)`);
         [
-            { glyph: 'A−', dx: -18, step: -2, tipTxt: 'Smaller text' },
-            { glyph: 'A+', dx: 0,  step: 2,  tipTxt: 'Larger text' },
+            { glyph: 'A−', dx: -18, step: -2, tipTxt: t('Smaller text') },
+            { glyph: 'A+', dx: 0,  step: 2,  tipTxt: t('Larger text') },
         ].forEach((b) => {
             const ctl = document.createElementNS(NS, 'g');
             ctl.setAttribute('transform', `translate(${b.dx}, 0)`);
@@ -382,7 +383,7 @@ function renderNoteLeaders() {
                 mark.textContent = '✕'; mark.style.pointerEvents = 'none';
                 del.appendChild(mark);
                 const tip = document.createElementNS(NS, 'title');
-                tip.textContent = 'Delete note link';
+                tip.textContent = t('Delete note link');
                 del.appendChild(tip);
                 del.addEventListener('mousedown', (e) => e.stopPropagation());
                 del.addEventListener('click', (e) => { e.stopPropagation(); deleteSelected(); });
@@ -602,7 +603,7 @@ function renderCanvasOnly() {
             mark.textContent = '✕'; mark.style.pointerEvents = 'none';
             del.appendChild(mark);
             const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-            tip.textContent = 'Delete link';
+            tip.textContent = t('Delete link');
             del.appendChild(tip);
             del.addEventListener('mousedown', (e) => e.stopPropagation());
             del.addEventListener('click', (e) => { e.stopPropagation(); deleteSelected(); });
@@ -717,7 +718,7 @@ function renderCanvasOnly() {
             del.appendChild(mark);
 
             const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-            tip.textContent = 'Delete node';
+            tip.textContent = t('Delete node');
             del.appendChild(tip);
 
             del.addEventListener('mousedown', (e) => e.stopPropagation()); // no drag from the ✕
@@ -729,7 +730,7 @@ function renderCanvasOnly() {
             const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             hint.setAttribute('text-anchor', 'middle'); hint.setAttribute('y', '-34'); hint.setAttribute('font-size', '9');
             hint.setAttribute('font-family', 'sans-serif');
-            hint.setAttribute('font-weight', '700'); hint.setAttribute('fill', '#ca8a04'); hint.textContent = 'LINK TARGET...'; hint.style.pointerEvents = 'none';
+            hint.setAttribute('font-weight', '700'); hint.setAttribute('fill', '#ca8a04'); hint.textContent = t('LINK TARGET...'); hint.style.pointerEvents = 'none';
             g.appendChild(hint);
         }
 
@@ -1337,7 +1338,8 @@ function renderSiteRef(node) {
             // builds it, so renaming the palette entry cannot quietly turn this
             // into a check against a string nothing produces any more.
             const def = paletteDefs.find((pd) => pd.type === node.type);
-            if (node.name === `New ${def ? def.name : 'Node'}`) node.name = picked.name;
+            const base = def ? def.name : 'Node';
+            if (node.name === `New ${base}` || node.name === t(base)) node.name = picked.name; // Advanced / reduced spawn names
         }
         save(); renderCanvasOnly(); renderSiteRef(node);
         document.getElementById('propName').value = node.name;
@@ -1441,13 +1443,13 @@ function select(id, type) {
         renderSidebarData(node);
         renderNodeDiagnostics(node);
     } else if (type === 'notelink') {
-        nameInput.value = 'Note link'; nameInput.disabled = true;
+        nameInput.value = t('Note link'); nameInput.disabled = true;
         netProps.classList.add('hidden'); generalProps.classList.add('hidden'); linkProps.classList.add('hidden');
         if (document.getElementById('linkMediumProps')) document.getElementById('linkMediumProps').classList.add('hidden');
         document.getElementById('linkPortProps').classList.add('hidden');
         jumpGwBtn.classList.add('hidden');
     } else if (type === 'annotation') {
-        nameInput.value = 'Text note'; nameInput.disabled = true;
+        nameInput.value = t('Text note'); nameInput.disabled = true;
         netProps.classList.add('hidden'); generalProps.classList.add('hidden'); linkProps.classList.add('hidden');
         if (document.getElementById('linkMediumProps')) document.getElementById('linkMediumProps').classList.add('hidden');
         document.getElementById('linkPortProps').classList.add('hidden');

@@ -525,7 +525,7 @@ function renderNodeDiagnostics(node) {
         panel.classList.add('hidden');
         if (placeholder) placeholder.classList.remove('hidden');
         body.innerHTML = '';
-        summary.textContent = 'Idle';
+        summary.textContent = t('Idle');
         summary.className = 'diag-pill';
         return;
     }
@@ -549,7 +549,7 @@ function renderNodeDiagnostics(node) {
 
     const overall = hasBad ? 'Issues' : hasWarn ? 'Warnings' : 'OK';
 
-    summary.textContent = overall;
+    summary.textContent = t(overall);
     summary.className = 'diag-pill ' + (hasBad ? 'bad' : hasWarn ? 'warn' : 'good');
 
     body.innerHTML = checks

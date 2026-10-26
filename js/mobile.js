@@ -30,7 +30,7 @@
     var actionsSection = document.createElement('div');
     actionsSection.id = 'mobileActions';
     actionsSection.innerHTML =
-        '<h3 class="mobile-actions-title">Controls</h3>' +
+        '<h3 class="mobile-actions-title" data-i18n>Controls</h3>' +
         '<div id="mobileActionsSlot"></div>';
     aside.insertBefore(actionsSection, aside.firstChild);
     var slot = actionsSection.querySelector('#mobileActionsSlot');
@@ -65,6 +65,7 @@
         bar.className = 'handy-bar';
         bar.setAttribute('role', 'toolbar');
         bar.setAttribute('aria-label', 'Quick actions');
+        bar.setAttribute('data-i18n-aria-label', '');
 
         function btn(id, glyph, label, onClick) {
             var b = document.createElement('button');
@@ -72,6 +73,7 @@
             if (id) b.id = id;
             b.className = 'handy-btn';
             b.title = label; b.setAttribute('aria-label', label);
+            b.setAttribute('data-i18n-title', ''); b.setAttribute('data-i18n-aria-label', '');
             b.textContent = glyph;
             b.addEventListener('click', onClick);
             bar.appendChild(b);
@@ -128,6 +130,8 @@
         document.body.appendChild(bar);
     }
     buildHandyBar();
+    // Built after app.js's boot has already translated the page.
+    if (typeof window.applyStaticI18n === 'function') window.applyStaticI18n();
 
     // carino-navbar.js is deferred and injects the bar during its own run. This
     // file is deferred right after it, so the bar is normally present already;

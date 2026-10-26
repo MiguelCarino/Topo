@@ -82,13 +82,13 @@
 
             <div class="cs-vdiv"></div>
 
-            <button id="tidyBtn" class="cs-btn" title="Auto-arrange the topology into tiers">⤢ Tidy</button>
+            <button id="tidyBtn" class="cs-btn" data-i18n-title title="Auto-arrange the topology into tiers">⤢ Tidy</button>
 
             <!-- One menu for every get-data-in/out action, so the bar stays lean.
                  Items keep their original ids, so their handlers wire up unchanged.
                  carino-ui.js opens and closes it (the hidden attribute). -->
             <div class="cs-menu" data-priority="1">
-                <button id="exportMenuBtn" class="cs-btn" aria-haspopup="true" aria-expanded="false" title="Share, export & import builds">⤓ Export <span class="cs-caret">▾</span></button>
+                <button id="exportMenuBtn" class="cs-btn" aria-haspopup="true" aria-expanded="false" data-i18n-title title="Share, export & import builds">⤓ Export <span class="cs-caret">▾</span></button>
                 <div id="exportMenu" class="cs-menu-panel" role="menu" aria-labelledby="exportMenuBtn" hidden>
                     <button id="myNetworksBtn" class="cs-menu-item" role="menuitem">🗂️ My networks <span class="cs-menu-note">saved here</span></button>
                     <button id="saveNetworkBtn" class="cs-menu-item" role="menuitem">💾 Save this network</button>
@@ -98,10 +98,10 @@
                     <button id="copyUrlBtn" class="cs-menu-item" role="menuitem">🔗 Copy link <span class="cs-menu-note">short URL</span></button>
                     <div class="cs-menu-div"></div>
                     <button id="exportPngBtn" class="cs-menu-item" role="menuitem">🖼️ PNG image</button>
-                    <button id="exportWebpBtn" class="cs-menu-item" role="menuitem">🖼️ WEBP image</button>
+                    <button id="exportWebpBtn" class="cs-menu-item" role="menuitem" data-i18n>🖼️ WEBP image</button>
                     <button id="exportJsonBtn" class="cs-menu-item" role="menuitem">📄 Build file <span class="cs-menu-note">.nettopo</span></button>
                     <div class="cs-menu-div"></div>
-                    <button id="importFileBtn" class="cs-menu-item" role="menuitem">📂 Import build…</button>
+                    <button id="importFileBtn" class="cs-menu-item" role="menuitem" data-i18n>📂 Import build…</button>
                     <button id="saveTemplateBtn" class="cs-menu-item" role="menuitem">📐 Save as template <span class="cs-menu-note">reusable</span></button>
                 </div>
                 <input type="file" id="importFileInput" accept=".json,.nettopo,application/json" hidden>
@@ -110,7 +110,7 @@
             <button id="clearCanvasBtn" data-i18n class="cs-btn">Clear</button>
 
             <div class="cs-vdiv"></div>
-            <button id="helpBtn" class="cs-btn" title="How to use — mouse & keyboard (press ?)" aria-label="Help">?</button>
+            <button id="helpBtn" class="cs-btn" data-i18n-title data-i18n-aria-label title="How to use — mouse & keyboard (press ?)" aria-label="Help">?</button>
     </div>
 
     <!-- Workspace shell (carino-ui.css): the rail on the left, the canvas as
@@ -137,7 +137,7 @@
                     <p data-i18n class="rail-note">A whole network. Replaces the canvas.</p>
                     <div id="templateList" class="lib-list"></div>
                     <div id="userTemplateSection" class="hidden rail-subsec">
-                        <h3 class="rail-sub">My Networks</h3>
+                        <h3 class="rail-sub" data-i18n>My networks</h3>
                         <div id="userTemplateList" class="lib-list"></div>
                     </div>
                 </div>
@@ -151,14 +151,14 @@
             <div class="rail-props">
                 <!-- Global canvas filter — independent of what's selected, so it sits above the tabs. -->
                 <div class="rail-filter" id="canvasFilterBox">
-                    <h2 class="rail-title">Filter Canvas</h2>
-                    <input type="text" id="canvasFilter" placeholder="Search by name or IP..." class="input" />
+                    <h2 class="rail-title" data-i18n>Filter canvas</h2>
+                    <input type="text" id="canvasFilter" data-i18n-placeholder placeholder="Search by name or IP..." class="input" />
                 </div>
 
                 <!-- Configuration is the primary tab; Node Diagnostics is secondary. -->
-                <div class="cfg-tabs" role="tablist" aria-label="Selection panel">
-                    <button id="configTabBtn" class="cfg-tab" data-cfgtab="config" role="tab" aria-selected="true">Configuration</button>
-                    <button id="diagTabBtn" class="cfg-tab" data-cfgtab="diagnostics" role="tab" aria-selected="false">Diagnostics</button>
+                <div class="cfg-tabs" role="tablist" data-i18n-aria-label aria-label="Selection panel">
+                    <button id="configTabBtn" class="cfg-tab" data-cfgtab="config" role="tab" aria-selected="true" data-i18n>Configuration</button>
+                    <button id="diagTabBtn" class="cfg-tab" data-cfgtab="diagnostics" role="tab" aria-selected="false" data-i18n>Diagnostics</button>
                 </div>
 
                 <div id="cfgPanel-config" class="cfg-panel">
@@ -275,10 +275,10 @@
                 </div>
 
                 <div id="cfgPanel-diagnostics" class="cfg-panel hidden">
-                    <div id="diagNoSelection" class="rail-empty">Select a node to see its diagnostics.</div>
+                    <div id="diagNoSelection" class="rail-empty" data-i18n>Select a node to see its diagnostics.</div>
                     <div id="nodeDiagnosticsPanel" class="hidden">
                         <div class="prop-headrow">
-                            <h3 class="rail-sub">Node Diagnostics</h3>
+                            <h3 class="rail-sub" data-i18n>Node diagnostics</h3>
                             <span id="nodeDiagnosticsSummary" class="diag-pill">Idle</span>
                         </div>
                         <div id="nodeDiagnosticsBody" class="diag-list"></div>
@@ -296,9 +296,9 @@
 
         <main class="ws-pane topo-canvas grid-bg" id="canvasContainer">
             <div class="zoom-ctl">
-                <button id="zoomInBtn" title="Zoom In">➕</button>
-                <button id="zoomResetBtn" class="zoom-reset" title="Reset">1:1</button>
-                <button id="zoomOutBtn" title="Zoom Out">➖</button>
+                <button id="zoomInBtn" data-i18n-title title="Zoom in">➕</button>
+                <button id="zoomResetBtn" class="zoom-reset" data-i18n-title title="Reset zoom">1:1</button>
+                <button id="zoomOutBtn" data-i18n-title title="Zoom out">➖</button>
             </div>
             
             <svg id="networkCanvas" class="topo-svg" xmlns="http://www.w3.org/2000/svg">
@@ -318,8 +318,8 @@
                     <span class="ca-icon">⚠️</span>
                     <div class="ca-main">
                         <div class="ca-head">
-                            <h4>Validation Alerts</h4>
-                            <button id="conflictHideBtn" title="Hide validation alerts">✕</button>
+                            <h4 data-i18n>Validation alerts</h4>
+                            <button id="conflictHideBtn" data-i18n-title title="Hide validation alerts">✕</button>
                         </div>
                         <ul id="conflictMsgList"></ul>
                     </div>
@@ -327,7 +327,7 @@
             </div>
 
             <!-- Collapsed form: hiding the panel should not hide that problems exist. -->
-            <button id="conflictPill" class="hidden" title="Show validation alerts">
+            <button id="conflictPill" class="hidden" data-i18n-title title="Show validation alerts">
                 ⚠️ <span id="conflictPillCount">0</span>
             </button>
 
@@ -527,7 +527,7 @@
                     </label>
                     <div id="sharePassRow" class="dlg-row">
                         <input id="sharePass" type="text" autocomplete="off" spellcheck="false" class="input mono">
-                        <button id="shareNewPass" data-i18n class="cs-btn" title="Make a new random passphrase">New</button>
+                        <button id="shareNewPass" data-i18n data-i18n-title class="cs-btn" title="Make a new random passphrase">New</button>
                     </div>
                     <p id="shareHint" class="dlg-blurb"></p>
                     <div id="shareResult" class="hidden dlg-result">
@@ -562,8 +562,8 @@
             <div id="shortcutHelp" class="hidden modal-scrim topo-dlg">
                 <div class="modal topo-card sm">
                     <div class="dlg-headrow">
-                        <h4 class="dlg-title">How to use</h4>
-                        <button id="shortcutClose" class="modal-x" aria-label="Close">✕</button>
+                        <h4 class="dlg-title" data-i18n>How to use</h4>
+                        <button id="shortcutClose" class="modal-x" data-i18n-aria-label aria-label="Close">✕</button>
                     </div>
                     <div id="shortcutBody" class="shortcut-body"></div>
                 </div>

@@ -22,7 +22,14 @@ function spawnNode(type, opts = {}) {
     x = Math.round(x / GRID_SNAP) * GRID_SNAP;
     y = Math.round(y / GRID_SNAP) * GRID_SNAP;
 
-    const node = { id: nextId('n'), type, name: `New ${palette?.name || 'Node'}`, x, y, gw: defs.gw || '', dns: defs.dns || '', os: defs.os || '', ports: defs.ports || '', notes: '', nat: !!defs.nat, interfaces: cloneData(defs.interfaces) };
+    // The default name is the first label a reporter sees on the canvas, so in
+    // the reduced profiles it is the palette's localized (and renamed) word, as
+    // the setup wizard names its devices; Advanced keeps "New <type>" in English,
+    // like the rest of its vocabulary.
+    const prof = PROFILES[state.settings.profile];
+    const shown = (prof && prof.renames && prof.renames[type]) || palette?.name || 'Node';
+    const defaultName = isReduced() ? t(shown) : `New ${palette?.name || 'Node'}`;
+    const node = { id: nextId('n'), type, name: defaultName, x, y, gw: defs.gw || '', dns: defs.dns || '', os: defs.os || '', ports: defs.ports || '', notes: '', nat: !!defs.nat, interfaces: cloneData(defs.interfaces) };
 
     // Spawned onto an AP by radio: the seed data's eth0 is the wrong hardware,
     // so rename before it inherits an address.
@@ -200,13 +207,13 @@ function persistUserTemplates(tpls) {
 function templateSnapshot() { return serializeDoc(); }
 
 function saveUserTemplate() {
-    if (!state.nodes.length) { alert('Nothing to save — add some nodes first.'); return; }
-    const name = prompt('Save current canvas as template — name:'); if (!name) return;
+    if (!state.nodes.length) { alert(t('Nothing to save — add some nodes first.')); return; }
+    const name = prompt(t('Save current canvas as template — name:')); if (!name) return;
     const tpls = loadUserTemplates();
     tpls[name.trim()] = templateSnapshot();
-    if (!persistUserTemplates(tpls)) { alert('Could not save — browser storage is unavailable (private mode or full).'); return; }
+    if (!persistUserTemplates(tpls)) { alert(t('Could not save — browser storage is unavailable (private mode or full).')); return; }
     renderUserTemplates();
-    alert(`Saved template "${name.trim()}".`);
+    alert(t('Saved template "{name}".', { name: name.trim() }));
 }
 
 // A text annotation is document furniture, not a device: no interfaces, no
@@ -617,8 +624,8 @@ function redo() {
 
 function updateUndoButtons() {
     const u = document.getElementById('undoBtn'), r = document.getElementById('redoBtn');
-    if (u) { u.disabled = !_undoStack.length; u.title = _undoStack.length ? `Undo (${_undoStack.length}) — Ctrl+Z` : 'Nothing to undo'; }
-    if (r) { r.disabled = !_redoStack.length; r.title = _redoStack.length ? `Redo (${_redoStack.length}) — Ctrl+Shift+Z` : 'Nothing to redo'; }
+    if (u) { u.disabled = !_undoStack.length; u.title = _undoStack.length ? t('Undo ({n}) — Ctrl+Z', { n: _undoStack.length }) : t('Nothing to undo'); }
+    if (r) { r.disabled = !_redoStack.length; r.title = _redoStack.length ? t('Redo ({n}) — Ctrl+Shift+Z', { n: _redoStack.length }) : t('Nothing to redo'); }
 }
 
 // A site reference is a caption with a pointer attached, in that order of
@@ -903,8 +910,8 @@ const SHORTCUTS = [
       run: () => { state.settings.alertsHidden = !state.settings.alertsHidden; saveSettings(); validateTopology(); } },
     { keys: ['L'], label: 'Link from the selected node', test: (e) => e.key.toLowerCase() === 'l',
       run: () => { if (state.selectedType === 'node' && state.selectedId) { state.linkSourceId = state.selectedId; renderCanvasOnly(); } } },
-    { keys: ['1'], label: 'Nodes tab', test: (e) => e.key === '1', run: () => showLibraryTab('nodes') },
-    { keys: ['2'], label: 'Networks tab', test: (e) => e.key === '2', run: () => showLibraryTab('templates') },
+    { keys: ['1'], label: 'Nodes tab', simpleLabel: 'Devices tab', test: (e) => e.key === '1', run: () => showLibraryTab('nodes') },
+    { keys: ['2'], label: 'Networks tab', simpleLabel: 'Examples tab', test: (e) => e.key === '2', run: () => showLibraryTab('templates') },
     { keys: ['3'], label: 'Blocks tab', simpleHidden: true, test: (e) => e.key === '3', run: () => showLibraryTab('blocks') },
     { keys: ['/'], label: 'Search the canvas', simpleHidden: true, test: (e) => e.key === '/',
       run: () => { const f = document.getElementById('canvasFilter'); f.focus(); f.select(); } },
@@ -963,15 +970,15 @@ const MOUSE_HINTS = [
 ];
 
 function renderShortcutHelp() {
-    const subhead = (t) => `<div class="sc-sub">${t}</div>`;
+    const subhead = (txt) => `<div class="sc-sub">${escapeHtml(t(txt))}</div>`;
     const mouse = MOUSE_HINTS.map((h) => `
         <div class="sc-hint">
             <span>${h.icon}</span>
-            <span><b>${escapeHtml(h.verb)}:</b> ${escapeHtml(h.text)}</span>
+            <span><b>${escapeHtml(t(h.verb))}:</b> ${escapeHtml(t(h.text))}</span>
         </div>`).join('');
     const keys = SHORTCUTS.filter((sc) => !(isReduced() && sc.simpleHidden)).map((sc) => `
         <div class="shortcut-row sc-row">
-            <span>${escapeHtml(sc.label)}</span>
+            <span>${escapeHtml(t((isReduced() && sc.simpleLabel) || sc.label))}</span>
             <span class="sc-keys">${sc.keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join('')}</span>
         </div>`).join('');
     document.getElementById('shortcutBody').innerHTML =
@@ -1070,6 +1077,7 @@ function applyLocale(lang) {
     document.getElementById('exportMenuBtn').innerHTML = `⤓ ${t('Export')} <span class="cs-caret">▾</span>`;
     document.getElementById('copyUrlBtn').innerHTML = `🔗 ${t('Copy link')} <span class="cs-menu-note">${t('short URL')}</span>`;
     document.getElementById('exportPngBtn').textContent = `🖼️ ${t('PNG image')}`;
+    document.getElementById('exportJsonBtn').innerHTML = `📄 ${t('Build file')} <span class="cs-menu-note">.nettopo</span>`;
     document.getElementById('reportBtn').innerHTML = `📋 ${t('Site report')} <span class="cs-menu-note">${t('printable')}</span>`;
     document.getElementById('myNetworksBtn').innerHTML = `🗂️ ${t('My networks')} <span class="cs-menu-note">${t('saved here')}</span>`;
     document.getElementById('saveNetworkBtn').textContent = `💾 ${t('Save this network')}`;
@@ -1082,6 +1090,8 @@ function applyLocale(lang) {
     if (shareDialogOpen()) renderShareDialog();
     document.getElementById('binderReportBtn').innerHTML = `📋 ${t('Binder report')}`;
     document.getElementById('binderLinkBtn').innerHTML = `🔗 ${t('Copy binder link')}`;
+    renderLibrary();
+    updateUndoButtons();
     applyProfile();
     // The findings speak the locale now, and nothing above regenerates them:
     // renderCanvasOnly() ends in validateTopology(), which redraws the alert
@@ -1241,7 +1251,7 @@ function libraryItem({ icon, name, blurb }, onPick, onDelete) {
     row.appendChild(btn);
     if (onDelete) {
         const del = document.createElement('button');
-        del.className = 'lib-item-del shrink-0'; del.textContent = '✖'; del.title = `Delete "${name}"`;
+        del.className = 'lib-item-del shrink-0'; del.textContent = '✖'; del.title = t('Delete "{name}"', { name });
         del.onclick = (e) => { e.stopPropagation(); onDelete(); };
         row.appendChild(del);
     }
@@ -1250,7 +1260,7 @@ function libraryItem({ icon, name, blurb }, onPick, onDelete) {
 
 function applyTemplate(template) {
     if (!template) return;
-    if (!confirm('Replace current workspace with this network?')) return;
+    if (!confirm(t('Replace current workspace with this network?'))) return;
     loadTemplateState(template); autoBindLinks();
     // A template is a different document, so the card the canvas came from is
     // not this one — without dropping it, Save would overwrite that card with
@@ -1268,7 +1278,9 @@ function renderLibrary() {
     tplList.innerHTML = '';
     TEMPLATE_META.forEach((meta) => {
         if (!templatesData[meta.key]) return; // meta without data would render a dead row
-        tplList.appendChild(libraryItem(meta, () => applyTemplate(templatesData[meta.key])));
+        // The catalogue is chrome (the Examples tab of the simple view); Blocks
+        // below are Advanced vocabulary and keep their English names.
+        tplList.appendChild(libraryItem({ ...meta, name: t(meta.name), blurb: t(meta.blurb) }, () => applyTemplate(templatesData[meta.key])));
     });
 
     const blockList = document.getElementById('blockList');
@@ -1290,10 +1302,10 @@ function renderUserTemplates() {
     section.classList.toggle('hidden', !names.length);
     names.forEach((name) => {
         list.appendChild(libraryItem(
-            { icon: '📐', name, blurb: `${(saved[name].nodes || []).length} nodes · reusable template` },
+            { icon: '📐', name, blurb: t('{n} nodes · reusable template', { n: (saved[name].nodes || []).length }) },
             () => applyTemplate(saved[name]),
             () => {
-                if (!confirm(`Delete saved network "${name}"?`)) return;
+                if (!confirm(t('Delete saved network "{name}"?', { name }))) return;
                 const all = loadUserTemplates(); delete all[name];
                 persistUserTemplates(all);
                 renderUserTemplates();
@@ -1370,7 +1382,7 @@ document.getElementById('deleteElementBtn').onclick = deleteSelected;
 document.getElementById('zoomInBtn').onclick = () => { state.camera.zoom = Math.min(5, state.camera.zoom * 1.2); applyCamera(); };
 document.getElementById('zoomOutBtn').onclick = () => { state.camera.zoom = Math.max(0.2, state.camera.zoom / 1.2); applyCamera(); };
 document.getElementById('zoomResetBtn').onclick = () => { state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera(); };
-document.getElementById('clearCanvasBtn').onclick = () => { if (!confirm('Clear canvas?')) return; state.nodes = []; state.links = []; state.selectedId = null; state.selectedType = null; state.linkSourceId = null; save(); invalidateTidy(); select(null, null); renderCanvasOnly(); };
+document.getElementById('clearCanvasBtn').onclick = () => { if (!confirm(t('Clear canvas?'))) return; state.nodes = []; state.links = []; state.selectedId = null; state.selectedType = null; state.linkSourceId = null; save(); invalidateTidy(); select(null, null); renderCanvasOnly(); };
 // Copy link is the share path. It no longer writes the link into the address
 // bar: the bar stays bare so the network is not in this browser's history, and
 // the link exists only on the clipboard. The dialog offers a passphrase first
@@ -1438,7 +1450,7 @@ function downloadJson(payload, filename) {
 }
 
 function exportJsonFile() {
-    if (!state.nodes.length) { alert('Nothing to export. Add at least one node first.'); return; }
+    if (!state.nodes.length) { alert(t('Nothing to export. Add at least one node first.')); return; }
     downloadJson({ kind: 'nettopology', version: 1, doc: serializeDoc() }, 'network-build.nettopo.json');
 }
 
@@ -1461,7 +1473,7 @@ function applyImportedDoc(parsed) {
     if (applyImportedBinder(parsed)) return true;
     const doc = docFromImported(parsed);
     if (!doc) { alert(t('That file does not look like a Topo build or binder.')); return false; }
-    if (state.nodes.length && !confirm('Replace the current canvas with this build?')) return false;
+    if (state.nodes.length && !confirm(t('Replace the current canvas with this build?'))) return false;
     // A file is its own document: whatever saved network was open, this is not
     // it, so Save will ask for a name rather than overwrite that card.
     state.libraryId = null;
@@ -1552,10 +1564,10 @@ function captureCanvasImage(format, scale) {
 }
 
 function handleExport(format) {
-    if (!state.nodes.length) { alert('Nothing to export. Add at least one node first.'); return; }
+    if (!state.nodes.length) { alert(t('Nothing to export. Add at least one node first.')); return; }
     captureCanvasImage(format).then((out) => {
         const a = document.createElement('a'); a.href = out.url; a.download = `network-diagram.${out.ext}`; a.click();
-    }).catch(() => alert('Could not export image.'));
+    }).catch(() => alert(t('Could not export image.')));
 }
 
 document.getElementById('canvasFilter').addEventListener('input', (event) => {
@@ -1639,7 +1651,7 @@ document.getElementById('landingExampleBtn').onclick = () => {
 // asks who it is for first. js/report.js owns the fields, the model and the
 // layout; this is only the wiring.
 document.getElementById('reportBtn').onclick = () => {
-    if (!state.nodes.length) { alert('Nothing to report on yet. Add at least one device first.'); return; }
+    if (!state.nodes.length) { alert(t('Nothing to report on yet. Add at least one device first.')); return; }
     openReportDialog();
 };
 document.getElementById('reportCancelBtn').onclick = () => closeReportDialog();
@@ -1657,7 +1669,7 @@ document.getElementById('reportBuildBtn').onclick = async () => {
     closeReportDialog();
     btn.disabled = true;
     try { await (binder ? generateBinderReport(meta, { images }) : generateSiteReport()); }
-    catch (err) { console.warn('Could not build the report:', err); alert('Could not build the report.'); }
+    catch (err) { console.warn('Could not build the report:', err); alert(t('Could not build the report.')); }
     finally { btn.disabled = false; }
 };
 
