@@ -8,13 +8,22 @@ window.addEventListener('load', () => { setTimeout(() => {
   ok('three tabs exist', document.querySelectorAll('.lib-tab').length === 3);
   showLibraryTab('nodes');
   ok('nodes tab shows the palette', vis('tabPanel-nodes') && !vis('tabPanel-templates') && !vis('tabPanel-blocks'));
-  ok('palette still populated', document.querySelectorAll('#nodePalette button').length === paletteDefs.length,
+  // +2: the Text and Note annotation tools share the palette (js/ui.js), as
+  // tests/suites/simple.js already counts them.
+  ok('palette still populated', document.querySelectorAll('#nodePalette button').length === paletteDefs.length + 2,
      document.querySelectorAll('#nodePalette button').length + ' buttons');
 
   showLibraryTab('templates');
   ok('networks tab shows only itself', vis('tabPanel-templates') && !vis('tabPanel-nodes'));
-  const tplRows = document.querySelectorAll('#templateList .lib-item');
+  // Starting points in the list, everything else in the collapsed Examples group.
+  const tplRows = document.querySelectorAll('#templateList .lib-item, #exampleTemplateList .lib-item');
   ok('every template is listed', tplRows.length === TEMPLATE_META.length, `${tplRows.length} rows / ${TEMPLATE_META.length} meta`);
+  ok('the starting points are a short list',
+     document.querySelectorAll('#templateList .lib-item').length === TEMPLATE_META.filter(m => !m.example).length
+     && TEMPLATE_META.filter(m => !m.example).length <= 7);
+  ok('the rest are in the Examples group, collapsed',
+     document.querySelectorAll('#exampleTemplateList .lib-item').length === TEMPLATE_META.filter(m => m.example).length
+     && !document.getElementById('exampleTemplates').open);
   ok('no template metadata is orphaned', TEMPLATE_META.every(m => templatesData[m.key]),
      TEMPLATE_META.filter(m => !templatesData[m.key]).map(m => m.key).join(',') || 'all match');
   ok('no template is missing from the menu', Object.keys(templatesData).every(k => TEMPLATE_META.some(m => m.key === k)),
@@ -37,19 +46,24 @@ window.addEventListener('load', () => { setTimeout(() => {
   ok('stamping returns to the nodes tab', vis('tabPanel-nodes'));
 
   // ---- Shortcuts ----
-  state.settings.traceMode = false; document.getElementById('toggleTrace').checked = false;
+  setTraceMode(false);
   key('t');
   ok('T toggles trace on', state.settings.traceMode === true);
+  ok('T opens the Diagnostics tab, where the trace controls are',
+     !document.getElementById('cfgPanel-diagnostics').classList.contains('hidden'));
   key('T');
   ok('T (shifted) toggles trace off', state.settings.traceMode === false);
+  showConfigTab('config');
 
   key('2'); ok('2 opens the networks tab', vis('tabPanel-templates'));
   key('3'); ok('3 opens the blocks tab', vis('tabPanel-blocks'));
   key('1'); ok('1 opens the nodes tab', vis('tabPanel-nodes'));
 
-  state.settings.alertsHidden = false;
-  key('a'); ok('A hides alerts', state.settings.alertsHidden === true);
-  key('a'); ok('A shows them again', state.settings.alertsHidden === false);
+  // A goes to the Findings tab and back (the floating alert panel it used
+  // to hide is gone: the findings are a rail tab, p2-report).
+  showConfigTab('config');
+  key('a'); ok('A opens the Findings tab', vis('cfgPanel-findings') && findingsTabShown());
+  key('a'); ok('A again goes back to Configuration', vis('cfgPanel-config') && !findingsTabShown());
 
   key('?'); ok('? opens the help panel', vis('shortcutHelp'));
   key('Escape'); ok('Esc closes it', !vis('shortcutHelp'));
@@ -62,16 +76,16 @@ window.addEventListener('load', () => { setTimeout(() => {
 
   document.activeElement.blur();
   key('/');
-  ok('/ focuses the canvas filter', document.activeElement.id === 'canvasFilter', document.activeElement.id);
+  ok('/ focuses the search box', document.activeElement.id === 'queryInput', document.activeElement.id);
 
   // Typing in a field must not fire shortcuts — the classic bug.
-  const filter = document.getElementById('canvasFilter');
+  const filter = document.getElementById('queryInput');
   filter.focus();
   const traceBefore = state.settings.traceMode;
   key('t');
   ok('typing "t" in a field does not toggle trace', state.settings.traceMode === traceBefore);
   key('Escape');
-  ok('Esc escapes the field', document.activeElement.id !== 'canvasFilter');
+  ok('Esc escapes the field', document.activeElement.id !== 'queryInput');
 
   // Browser combos must pass through untouched.
   const before = state.settings.traceMode;
@@ -101,7 +115,7 @@ window.addEventListener('load', () => { setTimeout(() => {
   // menu open on first paint. It must be *computed* hidden, not just flagged.
   ok('the export panel is genuinely hidden at load (not open behind display:flex)',
      getComputedStyle(menu).display === 'none', getComputedStyle(menu).display);
-  ['copyUrlBtn', 'exportPngBtn', 'exportWebpBtn', 'exportJsonBtn', 'importFileBtn', 'saveTemplateBtn'].forEach((id) => {
+  ['copyUrlBtn', 'exportPngBtn', 'exportWebpBtn', 'exportSvgBtn', 'exportJsonBtn', 'importFileBtn', 'saveTemplateBtn'].forEach((id) => {
     const el = document.getElementById(id);
     ok(`${id} now lives inside the menu`, !!el && menu.contains(el));
   });

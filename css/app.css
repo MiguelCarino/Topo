@@ -56,6 +56,10 @@
    expression steep enough to be worth having above 900px is already too
    steep below it. Taken from dicom.carino.systems, which solved this first. */
 :root { --tall: max(0px, 100vh - 900px); }
+/* The one shadow every card floating over the canvas uses (the findings
+   panel, the top row, the document bar…), so they lift off the light
+   document alike. carino-ui.css has no shadow token to borrow. */
+:root { --topo-float-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
 
 /* Visibility is a class here (js/*.js toggle 'hidden'); it wins over every
    display a component sets. */
@@ -66,28 +70,15 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 /* === Editor controls (relocated into the navbar) === */
 .cs-vdiv { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; }
 
-.cs-control-group {
-    display: flex; align-items: center; gap: 6px;
-    border: 1px solid var(--border); border-radius: 4px;
-    padding: 0 8px; height: 32px; background: transparent;
-}
-.cs-trace-lbl {
-    display: flex; align-items: center; gap: 6px; cursor: pointer;
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
-    color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap;
-}
-.cs-trace-lbl input[type="checkbox"] { width: 13px; height: 13px; accent-color: var(--accent); cursor: pointer; }
-.cs-hdiv { width: 1px; height: 14px; background: var(--border); }
-.cs-trace-port {
-    width: 44px; background: transparent; border: none; outline: none;
-    color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
-}
-.cs-trace-port::placeholder { color: var(--text-muted); }
-.cs-trace-port:focus { color: var(--accent); }
-
+/* Trace, in the node Diagnostics tab (it used to be a group in this bar). */
+.trace-box { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.trace-port-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.trace-port-row .trace-port { width: 96px; flex-shrink: 0; }
+/* A port typed while the filter is off is kept, not used: show it as set aside. */
+.trace-port.suspended { opacity: 0.45; }
 .cs-trace-status {
-    font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem;
-    color: var(--text-muted); white-space: nowrap; min-width: 64px;
+    font-family: var(--mono); font-size: var(--fs-micro);
+    color: var(--text-muted); white-space: nowrap;
 }
 .cs-trace-status.active { color: var(--accent); font-weight: 700; }
 
@@ -144,7 +135,12 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
    purpose — it is the exportable document.
    ============================================================ */
 .topo-ws { flex: 1; min-height: 0; position: relative; }
+/* z-index 10 lifts the docked rail over the canvas's own layers. At 900px and
+   below the rail is carino-ui's drawer, which has to sit above its scrim
+   (.ws-scrim 1000, .ws-rail 1001): left at 10 there, the open drawer was under
+   its own scrim and every tap on it landed on the scrim. */
 .topo-rail { padding: 0; gap: 0; overflow: hidden; z-index: 10; }
+@media (max-width: 900px) { .topo-rail { z-index: 1001; } }
 .topo-rail .ws-rail-foot { margin-top: 0; padding: 10px 16px 12px; }
 .lib-tabs { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--border); }
 .rail-lib { flex: 1; min-height: 200px; overflow-y: auto; padding: 16px; border-bottom: 1px solid var(--border); }
@@ -165,10 +161,14 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .mode-switch:hover { color: var(--text-sec); border-color: var(--text-muted); }
 .lib-list { display: flex; flex-direction: column; gap: 4px; }
 .rail-subsec { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+/* The Networks tab's collapsed Examples group: a native <details>, so it opens
+   from the keyboard and needs no script. */
+.tpl-examples > summary { cursor: pointer; margin: 0; padding: 2px 0; }
+.tpl-examples > summary:hover, .tpl-examples > summary:focus-visible { color: var(--accent); }
+.tpl-examples[open] > summary { margin-bottom: 8px; }
 .rail-sub { font-family: var(--mono); font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin: 0 0 6px; }
 .rail-note { font-size: var(--fs-micro); color: var(--text-muted); line-height: 1.35; margin: 4px 0 8px; }
 .rail-title { font-family: var(--mono); font-size: var(--fs-label); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin: 0 0 8px; }
-.rail-filter { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .rail-empty { text-align: center; padding: 32px 0; font-size: var(--fs-label); font-style: italic; color: var(--text-muted); }
 .cfg-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
 .cfg-panel { display: flex; flex-direction: column; flex: 1; }
@@ -188,10 +188,58 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .prop-links .link-btn { white-space: nowrap; }
 .prop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .prop-grid .span2 { grid-column: span 2; }
+/* The rail is 340px: the fleet textarea's 84px floor is a paragraph there, and
+   a note is usually one line. It still grows by hand (resize: vertical). */
+.prop-notes { margin-top: 8px; }
+.topo-rail .prop-notes .textarea { min-height: 52px; padding: 5px 8px; font-size: var(--fs-sm); border-radius: 6px; }
 .prop-check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .prop-check .prop-lbl { margin: 0; }
 .prop-check input, .topo-rail input[type="checkbox"] { accent-color: var(--accent); }
-.prop-foot { margin-top: auto; padding-top: 8px; }
+.prop-foot { margin-top: auto; padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+/* The Asset group (js/assets.js): a fold in the device's panel. Its summary
+   is set like the panel's labels, with the tag and status beside it so a
+   closed group still says the box is retired. */
+.asset-group { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.asset-sum { cursor: pointer; display: flex; align-items: baseline; gap: 8px; min-width: 0; font-family: var(--mono); font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-sec); }
+.asset-sum:hover, .asset-sum:focus-visible { color: var(--accent); }
+.asset-group[open] > .asset-sum { margin-bottom: 8px; }
+.asset-sum-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--accent); }
+.notes-lint { color: var(--warn); margin-bottom: 0; }
+/* The pre-share lint in the share and report dialogs: the fleet alert, with
+   its "Show them" link set like a link. */
+#shareLint, #reportLint { margin: 10px 0; }
+.lint-show { color: inherit; text-decoration: underline; }
+/* Several selected (renderSelection, js/ui.js): counts, then what applies. */
+.sel-multi { display: flex; flex-direction: column; gap: 8px; padding-bottom: 24px; }
+.sel-counts { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.sel-count { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); }
+.sel-count dt { font-size: var(--fs-sm); color: var(--text-sec); }
+.sel-count dd { margin: 0; font-weight: 700; color: var(--text); }
+.sel-only { display: flex; flex-direction: column; }
+/* The bulk panel (js/bulk.js): the fleet's tabbar, made to fit three tabs in
+   the 340px rail in any language (they wrap rather than clip), then one
+   compact field per row. */
+.bulk { display: flex; flex-direction: column; gap: 8px; padding: 10px 0 2px; border-top: 1px solid var(--border); }
+.bulk-title { margin: 0; font-size: var(--fs-label); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-sec); }
+.bulk-tabs { flex-wrap: wrap; }
+.bulk-tabs .tabbtn { padding: 6px 8px; font-size: var(--fs-micro); }
+.bulk-pane { display: flex; flex-direction: column; gap: 8px; }
+.bulk-pane .rail-note { margin: 0; }
+.bulk-fields { display: flex; flex-direction: column; gap: 8px; }
+.bulk-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.bulk-field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.bulk-field-head .prop-lbl { margin: 0; }
+.topo-rail .bulk-in { padding: 5px 8px; border-radius: 6px; }
+.bulk-field.cleared .bulk-in { border-style: dashed; }
+.bulk-field.cleared .bulk-in::placeholder { color: var(--err); }
+.bulk-note { margin: 0; }
+.bulk-pair { display: flex; gap: 8px; }
+.bulk-pair .bulk-field { flex: 1; }
+.bulk-pair .bulk-start { flex: 0 0 5.5rem; }
+.bulk-go { width: 100%; justify-content: center; height: 32px; }
+/* The shift-drag box (startMarquee, js/app.js). Drawn in workspace
+   coordinates; its stroke width is set per zoom. */
+.selection-box { fill: var(--accent-faint); stroke: var(--accent); stroke-dasharray: 4 3; pointer-events: none; }
 .port-ends { display: flex; flex-direction: column; gap: 8px; }
 .link-btn { background: none; border: none; padding: 0; cursor: pointer; font-size: var(--fs-micro); font-weight: 700; color: var(--accent); }
 .link-btn.quiet { color: var(--text-sec); }
@@ -226,8 +274,6 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .if-in.warn { border-color: var(--accent-dim); background: var(--accent-faint); }
 .if-in.bond { border-color: var(--accent-dim); background: var(--accent-faint); font-weight: 700; }
 .if-select { flex: 1; min-width: 0; padding: 3px 4px; font-size: var(--fs-micro); border: 1px solid var(--accent-dim); border-radius: 4px; background: var(--bg-elev); color: var(--text); }
-.if-zone { display: flex; align-items: center; gap: 1px; flex-shrink: 0; font-size: var(--fs-micro); font-weight: 700; color: var(--text-sec); cursor: pointer; }
-.if-zone input { width: 12px; height: 12px; margin: 0; cursor: pointer; }
 .if-ico { flex-shrink: 0; padding: 0; background: none; border: none; line-height: 1; cursor: pointer; font-size: var(--fs-micro); color: var(--text-muted); }
 .if-ico.free { color: var(--border); cursor: default; }
 .if-ico.linked:hover { color: var(--accent); }
@@ -243,6 +289,33 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .if-mac-out .muted { color: var(--text-muted); }
 .rail-none { font-size: var(--fs-micro); font-style: italic; color: var(--text-muted); }
 
+/* The Subnets tab (js/networks.js): one card per declared network. Cards, not
+   a table: the rail is 340px, and eight columns of CIDR, VLAN, gateway, size,
+   use and next free address do not fit in it at any font size anyone reads. */
+.net-toolbar { align-items: center; margin-bottom: 8px; }
+.net-list { display: flex; flex-direction: column; gap: 8px; }
+.net-card {
+    display: flex; flex-direction: column; gap: 3px; min-width: 0;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elev);
+}
+.net-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.net-cidr { font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.net-name { font-size: var(--fs-sm); font-weight: 700; color: var(--text-sec); overflow-wrap: anywhere; }
+.net-line { font-size: var(--fs-micro); color: var(--text-sec); line-height: 1.4; overflow-wrap: anywhere; }
+.net-members { font-family: inherit; }
+.net-muted { color: var(--text-muted); font-weight: 400; }
+.net-actions { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
+.net-actions .link-btn:disabled { color: var(--text-muted); cursor: default; text-decoration: none; }
+.net-edit { margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); align-items: end; }
+.net-edit .input.bad { border-color: color-mix(in srgb, var(--err) 70%, transparent); background: color-mix(in srgb, var(--err) 12%, transparent); }
+.net-warn { color: var(--warn); margin: 0; }
+.net-undeclared { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.net-undecl-row { display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-sm); padding: 2px 0; }
+.net-undecl-row .mono { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.net-undecl-row .net-muted { font-size: var(--fs-micro); }
+#inheritNote { margin: 0 0 2px; }
+#inheritNote .link-btn { font-size: inherit; }
+
 /* Switch/AP faceplate and the link's port chips */
 .faceplate { margin-bottom: 8px; }
 .faceplate-count { width: 56px; padding: 2px 4px; text-align: right; font-size: var(--fs-micro); }
@@ -252,11 +325,43 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
     background: var(--bg-elev); color: var(--text-sec); font-family: var(--mono); font-size: var(--fs-micro); font-weight: 700; transition: 0.15s;
 }
 .faceplate .port-chip { padding: 0; width: 24px; color: var(--text-muted); }
+.faceplate-refusal { margin: 4px 0; font-size: var(--fs-micro); color: var(--err); }
+.faceplate-refusal[hidden] { display: none; }
 .port-chip:hover { border-color: var(--accent); color: var(--accent); }
 .port-chip.on { border-color: rgba(34, 197, 94, 0.55); background: rgba(34, 197, 94, 0.1); color: var(--ok); }
 .port-chip.on:hover { border-color: var(--ok); }
 .port-chip.picked { border-color: var(--accent); background: var(--accent-faint); color: var(--accent); }
 .port-chip.taken { color: var(--text-muted); opacity: 0.7; }
+/* A cable past an explicit port count, on the faceplate and in the link panel:
+   the fault colour, after .on/.picked so it wins over both. */
+.port-chip.over, .port-chip.over:hover { border-color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); color: var(--err); }
+/* A port with a label or a VLAN (node.portAttrs): a dot in the corner. */
+.port-chip.noted { position: relative; }
+.port-chip.noted::after {
+    content: ''; position: absolute; top: 2px; right: 2px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent);
+}
+/* The link panel's chip carries the port's label under its name. */
+.port-chip:has(.port-chip-sub) { height: auto; min-height: 24px; padding: 2px 6px; display: inline-flex; flex-direction: column; align-items: center; line-height: 1.2; }
+.port-chip-sub { display: block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--sans); font-weight: 400; font-size: var(--fs-micro); color: var(--text-sec); }
+/* Port names: a prefix and the number port 1 is called, with what they make. */
+.port-scheme { margin: 6px 0 8px; }
+.port-scheme-fields { display: flex; gap: 6px; }
+.port-scheme .port-prefix { flex: 1; min-width: 0; font-family: var(--mono); }
+.port-scheme .port-start { width: 64px; flex: none; text-align: right; }
+.port-scheme-preview { margin-top: 3px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--text-muted); overflow-wrap: anywhere; }
+/* A refused prefix says why here: a tooltip never shows on a phone. */
+.port-scheme-preview.bad { font-family: inherit; color: var(--err); overflow-wrap: break-word; }
+/* Each faceplate port's label and access VLAN, folded under the chips. */
+.port-attrs { margin-top: 8px; }
+.port-attrs > summary { cursor: pointer; font-size: var(--fs-micro); font-weight: 700; color: var(--text-sec); }
+.port-attrs > summary:hover { color: var(--accent); }
+.port-attr-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 320px; overflow-y: auto; }
+.port-attr { display: grid; grid-template-columns: minmax(36px, auto) minmax(0, 1fr) 56px; gap: 4px 6px; align-items: center; }
+.port-attr-name { font-size: var(--fs-micro); font-weight: 700; color: var(--text-sec); white-space: nowrap; }
+.port-attr .port-attr-vlan { text-align: right; font-family: var(--mono); }
+.port-attr .port-attr-vlan.bad { border-color: color-mix(in srgb, var(--err) 70%, transparent); background: color-mix(in srgb, var(--err) 12%, transparent); }
+.port-attr-peer { grid-column: 2 / -1; font-size: var(--fs-micro); color: var(--text-muted); overflow-wrap: anywhere; }
+.port-attr-peer:empty { display: none; }
 .port-end-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 .port-end-name { font-size: var(--fs-micro); font-weight: 700; color: var(--text-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -288,27 +393,337 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .zoom-ctl button:hover { background: var(--accent-faint); color: var(--accent); }
 .zoom-ctl .zoom-reset { font-weight: 700; font-size: var(--fs-sm); }
 
-/* Validation alerts over the canvas: a dark card so they read on the light
-   document. Click-through except the dismiss button and the list. */
-#conflictAlert {
-    position: absolute; top: 16px; right: 16px; z-index: 20; max-width: 28rem; pointer-events: none; padding: 12px;
-    background: var(--bg-card); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 6px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); transition: all 0.15s;
+/* The Findings tab (js/diagnostics.js): the open findings grouped by check,
+   then the accepted ones with their reasons. Docked in the rail; it used to
+   float over the map's corner and cover the devices it named. */
+.cfg-count { display: inline-block; min-width: 16px; margin-left: 2px; padding: 0 5px; border-radius: 999px; font-size: var(--fs-micro); line-height: 16px;
+    background: var(--bg-elev); color: var(--text-sec); letter-spacing: 0; }
+.cfg-count.warn { background: var(--accent-faint); color: var(--accent); }
+.cfg-count.bad { background: color-mix(in srgb, var(--err) 14%, transparent); color: var(--err); }
+.cfg-count.hidden { display: none; }
+.ca-list { margin: 0; padding: 0; list-style: none; font-size: var(--fs-label); color: var(--text); }
+/* Grouped by check (groupFindings() in js/diagnostics.js): a header that
+   opens and closes, then one line per finding, or per set of devices the
+   same finding names. Each line is a button that selects and centres what
+   it is about; Accept… sits at its end. */
+.ca-list .ca-group + .ca-group { margin-top: 8px; }
+.ca-group-head {
+    display: flex; align-items: center; gap: 6px; width: 100%; padding: 2px 0; background: none; border: none; cursor: pointer;
+    font: inherit; font-weight: 700; color: var(--accent); text-align: left;
 }
-.ca-wrap { display: flex; gap: 8px; }
-.ca-icon { color: var(--accent); font-weight: 700; font-size: var(--fs-lg); }
-.ca-main { flex: 1; min-width: 0; }
-.ca-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.ca-head h4 { margin: 0; font-size: var(--fs-label); font-weight: 700; text-transform: uppercase; color: var(--accent); }
-#conflictHideBtn { pointer-events: auto; background: none; border: none; cursor: pointer; color: var(--accent); font-size: var(--fs-label); font-weight: 700; line-height: 1; padding: 0 4px; margin-top: -2px; }
-#conflictMsgList { pointer-events: auto; margin: 4px 0 0; padding-left: 12px; list-style: disc; max-height: 38vh; overflow-y: auto; font-size: var(--fs-label); color: #fde68a; }
-#conflictMsgList li + li { margin-top: 4px; }
+.ca-group.bad > .ca-group-head { color: var(--err); }
+.ca-caret { width: 10px; flex: none; }
+.ca-check { flex: 1; min-width: 0; }
+.ca-count { flex: none; padding: 0 6px; border-radius: 999px; background: var(--bg-elev); color: var(--text-sec); font-size: var(--fs-micro); }
+.ca-items { list-style: none; margin: 2px 0 0; padding: 0 0 0 16px; }
+.ca-items li + li, .accepted-box .ca-item + .ca-item { margin-top: 4px; }
+.ca-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+.ca-line {
+    flex: 1 1 12rem; min-width: 0; padding: 2px 4px; border: none; border-radius: 4px; background: none; cursor: pointer;
+    font: inherit; color: inherit; text-align: left; overflow-wrap: anywhere;
+}
+.ca-line:hover:not(:disabled), .ca-line:focus-visible { background: var(--accent-faint); color: var(--accent); }
+.ca-line:disabled { cursor: default; color: var(--text-muted); }
+.ca-accept, .ca-reopen { flex: none; }
+.accepted-box > summary { cursor: pointer; }
+.accepted-box[open] > summary { margin-bottom: 4px; }
+.accepted-box .ca-item { padding: 4px 0; border-top: 1px dashed var(--border); }
+.accepted-box .ca-line { color: var(--text-sec); }
+.ca-reason { flex: 1 1 100%; margin: 0; padding: 0 4px; font-size: var(--fs-micro); color: var(--text-muted); overflow-wrap: anywhere; }
 #conflictPill {
     position: absolute; top: 16px; right: 16px; z-index: 20; padding: 4px 10px; border-radius: 999px; cursor: pointer;
     background: var(--bg-card); border: 1px solid var(--accent-dim); color: var(--accent); font-size: var(--fs-label); font-weight: 700;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); transition: 0.15s;
+    box-shadow: var(--topo-float-shadow); transition: 0.15s;
 }
+#conflictPill.bad { border-color: color-mix(in srgb, var(--err) 50%, transparent); color: var(--err); }
 #conflictPill:hover { border-color: var(--accent); background: var(--accent-faint); }
+
+/* Read-only banner (a document from a newer Topo): Branding's .alert.warn,
+   pinned bottom-left of the canvas, clear of the findings pill (top
+   right), the shared toast (top right) and the zoom control (bottom right).
+   Its own background is the warn tint over the card colour: the stock .alert
+   tint is transparent and would not read on the light document. Click-through:
+   the canvas under it can still be panned. */
+.alert.topo-readonly {
+    position: absolute; bottom: 16px; left: 16px; z-index: 21; max-width: min(28rem, calc(100% - 96px));
+    margin: 0; pointer-events: none; background: color-mix(in srgb, var(--warn) 10%, var(--bg-card));
+    box-shadow: var(--topo-float-shadow);
+}
+.alert.topo-readonly.hidden { display: none; }
+/* The same over-the-card tint for the toast, which also lands on the light
+   canvas. */
+#topoToast.toast.warn { background: color-mix(in srgb, var(--warn) 10%, var(--bg-card)); }
+body.doc-readonly #tidyBtn { opacity: 0.5; }
+/* A long toast (a merge result, a file error) wraps inside the fleet gutter
+   instead of running off the left edge of a phone. */
+#topoToast { max-width: calc(100vw - 40px); }
+
+/* The document bar (renderDocBar, js/library.js): where the read-only banner
+   sits, which it never shares the screen with. A kept network shows its name
+   and that it saved; anything else says it is not kept and offers to keep it.
+   Quiet when kept, because it is there all the time; the accent edge only
+   when there is something to do. */
+.topo-docbar {
+    position: absolute; bottom: 16px; left: 16px; z-index: 21; max-width: min(30rem, calc(100% - 96px));
+    display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 6px 10px;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: var(--topo-float-shadow);
+    font-size: var(--fs-label); color: var(--text-muted);
+}
+.topo-docbar.unkept { border-left: 3px solid var(--accent); color: var(--text-sec); }
+.docbar-name {
+    max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    padding: 0; background: none; border: none; cursor: pointer;
+    font: inherit; font-weight: 700; color: var(--text);
+}
+.docbar-name:hover, .docbar-name:focus-visible { color: var(--accent); outline: none; text-decoration: underline; }
+.docbar-name[hidden] { display: none; }
+.docbar-status { min-width: 0; }
+.docbar-status.failed { color: var(--err); font-weight: 700; }
+.cs-btn.docbar-keep { padding: 3px 9px; }
+.cs-btn.docbar-keep[hidden] { display: none; }
+/* Over the document bar, never instead of it: the bar still names the network
+   that did not save. */
+.alert.topo-storage {
+    position: absolute; bottom: 64px; left: 16px; z-index: 22; max-width: min(30rem, calc(100% - 96px));
+    display: flex; align-items: center; gap: 10px; margin: 0;
+    background: color-mix(in srgb, var(--err) 12%, var(--bg-card));
+    box-shadow: var(--topo-float-shadow);
+}
+.alert.topo-storage.hidden { display: none; }
+/* The sentence keeps a readable width and the buttons wrap under it, rather
+   than squeezing it into a column of single words beside two buttons. */
+.alert.topo-storage { flex-wrap: wrap; }
+.alert.topo-storage > span { flex: 1 1 14rem; }
+.alert.topo-storage .cs-btn { flex: none; }
+
+/* ============================================================
+   Map | Table (js/table.js). The table lies over the map instead of
+   replacing it, so the map keeps its size underneath and a row clicked
+   here is centred there. Dark chrome, unlike the light canvas: the table
+   is an editor, not the exportable document. Dense on purpose: a register
+   is read down a column, and the rail's 340px is what this escapes.
+   ============================================================ */
+/* The pane's top row: Map | Table, then the search box (js/query.js), which
+   both views share. Click-through between the two, so the canvas under the
+   gap still pans. On a phone the box's count and buttons wrap under it. */
+.topo-topbar {
+    position: absolute; top: 12px; left: 12px; right: 12px; z-index: 24; pointer-events: none;
+    display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px;
+}
+.topo-topbar > * { pointer-events: auto; }
+.view-switch {
+    display: flex; flex: none; gap: 2px; padding: 3px;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: var(--topo-float-shadow);
+}
+.view-switch .toggle-btn { padding: 5px 12px; border-color: transparent; }
+.topo-query, .topo-qtools, .q-error {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: var(--topo-float-shadow);
+}
+.topo-query { position: relative; flex: 0 1 17rem; min-width: 9rem; padding: 3px; }
+.topo-query.q-on { border-color: var(--accent-dim); }
+.topo-query .input { width: 100%; padding: 5px 26px 5px 8px; font-size: var(--fs-sm); border-radius: 6px; }
+.topo-query .input::-webkit-search-cancel-button { display: none; }
+.topo-query .input.bad { border-color: var(--err); }
+.q-clear {
+    position: absolute; top: 50%; right: 7px; transform: translateY(-50%); padding: 2px 5px; line-height: 1;
+    background: none; border: none; border-radius: 4px; cursor: pointer; color: var(--text-muted); font-size: var(--fs-micro);
+}
+.q-clear:hover, .q-clear:focus-visible { color: var(--accent); background: var(--accent-faint); outline: none; }
+.q-clear.hidden, .topo-qtools .hidden { display: none; }
+/* The count and the buttons: only while a search is on. */
+.topo-qtools { display: none; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 3px 3px 10px; }
+.topo-qtools.q-on { display: flex; }
+.q-count { font-family: var(--mono); font-size: var(--fs-micro); color: var(--text-sec); white-space: nowrap; }
+.topo-qtools.q-none .q-count { color: var(--err); }
+.cs-btn.q-btn { padding: 4px 9px; white-space: nowrap; }
+.q-error { flex: 0 1 100%; max-width: 36rem; margin: 0; padding: 4px 10px; font-size: var(--fs-micro); color: var(--err); overflow-wrap: anywhere; }
+.q-error.hidden { display: none; }
+/* A device or cable the search does not match: dimmed, still there to click.
+   Stylesheet-only on purpose, so an exported image is never dimmed. */
+.q-dim { opacity: 0.18; transition: opacity 0.15s; }
+/* The findings pill and the table start below the pane's top row, however
+   tall it is at the moment: --topbar-h is measured by js/query.js (the row
+   wraps on a narrow pane or in a longer language, and grows while a search is
+   on). The fallbacks are the one-line row. */
+#conflictPill { top: max(16px, calc(var(--topbar-h, 48px) + 12px)); }
+.topo-table {
+    position: absolute; inset: 0; z-index: 15; display: flex; flex-direction: column; min-width: 0;
+    padding: max(16px, calc(var(--topbar-h, 48px) + 8px)) 16px 64px; background: var(--bg); color: var(--text-sec);
+}
+/* The findings pill floats over the map's corner; over the table it would
+   cover rows, and the Findings column says the same thing per device. */
+body.table-view #conflictPill { display: none !important; }
+.tv-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+.tv-tabs { flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tv-tabs .tabbtn { padding: 8px 12px; white-space: nowrap; }
+/* Five tabs since Ports: at phone width they fit side by side, in every
+   language (Spanish "Dispositivos" is the longest row), with less air and no
+   tracking, rather than the last one scrolling out of sight. A pane narrower
+   than a phone's still scrolls the row (the tabbar's overflow-x). */
+@media (max-width: 640px) {
+    .tv-tabs { gap: 2px; }
+    .tv-tabs .tabbtn { padding: 8px 5px; letter-spacing: 0; }
+}
+.tv-bar { display: flex; align-items: center; gap: 10px; padding-bottom: 6px; }
+.tv-count { font-family: var(--mono); font-size: var(--fs-micro); color: var(--text-muted); white-space: nowrap; }
+.tv-hint { margin: 8px 0; font-size: var(--fs-micro); color: var(--text-muted); }
+.tv-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); }
+.tv-empty { margin: 0; padding: 24px 16px; font-size: var(--fs-sm); color: var(--text-muted); }
+table.data.tv-grid { width: max-content; min-width: 100%; }
+table.data.tv-grid th, table.data.tv-grid td { padding: 5px 10px; white-space: nowrap; }
+.tv-grid thead th { position: sticky; top: 0; z-index: 1; background: var(--bg-card); }
+.tv-grid tbody tr:hover td { background: var(--accent-faint); }
+.tv-sort {
+    display: inline-flex; align-items: center; gap: 4px; padding: 0; background: none; border: none; cursor: pointer;
+    font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;
+}
+.tv-sort:hover { color: var(--accent); }
+.tv-arrow { min-width: 0.8em; color: var(--accent); }
+.tv-chk, .tv-exp { width: 1%; text-align: center; }
+.tv-chk input { accent-color: var(--accent); vertical-align: middle; cursor: pointer; }
+.tv-twist { padding: 0 4px; background: none; border: none; cursor: pointer; color: var(--text-muted); font: inherit; }
+.tv-twist:hover { color: var(--accent); }
+.tv-cell { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; cursor: default; outline: none; }
+.tv-cell.tv-wide { max-width: 22rem; }
+.tv-cell.tv-edit { cursor: text; color: var(--text); }
+.tv-cell.tv-muted, .tv-muted { color: var(--text-muted); }
+.tv-cell.tv-muted.tv-edit { font-style: italic; }
+.tv-cell.tv-bad { color: var(--err); }
+.tv-sev.bad { color: var(--err); font-weight: 700; }
+.tv-sev.warn { color: var(--warn); }
+.tv-action { color: var(--accent); cursor: pointer; text-decoration: underline; }
+/* The cursor: the one cell the keyboard is on. */
+.tv-grid td.tv-cur { box-shadow: inset 0 0 0 2px var(--accent-dim); }
+.tv-grid td.tv-cur:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+.tv-grid tr.tv-sel td { background: var(--accent-faint); color: var(--text); }
+.tv-grid tr.tv-on td.tv-chk { box-shadow: inset 3px 0 0 var(--accent-dim); }
+/* An interface row open under its device: quieter, and each cell says what
+   it is, since it sits under the device's headers rather than its own. */
+table.data.tv-grid tr.tv-sub td { background: var(--bg-elev); padding-top: 3px; padding-bottom: 3px; }
+.tv-grid tr.tv-sub td[data-cap]::before {
+    content: attr(data-cap); margin-right: 6px; font-family: var(--mono); font-size: var(--fs-micro);
+    font-style: normal; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted);
+}
+table.data.tv-grid td.tv-editing { padding: 2px 4px; overflow: visible; max-width: none; }
+.tv-in {
+    width: 100%; min-width: 9rem; padding: 3px 6px; border: 1px solid var(--accent); border-radius: 4px;
+    background: var(--bg-elev); color: var(--text); font: inherit; outline: none;
+}
+textarea.tv-in { min-width: 16rem; resize: vertical; line-height: 1.4; }
+.tv-in.bad { border-color: var(--err); box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 20%, transparent); }
+
+/* Paste a column: the fleet's .modal, wide enough for a preview of rows. */
+.modal.topo-paste { max-width: 40rem; }
+.paste-blurb { margin-bottom: 6px; }
+.paste-target { margin: 0 0 12px; font-size: var(--fs-label); color: var(--text-muted); }
+.paste-field { margin-bottom: 10px; }
+.paste-field .textarea { min-height: 6rem; }
+.paste-counts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 6px; font-size: var(--fs-label); color: var(--text-sec); }
+.paste-count.zero { opacity: 0.45; }
+.paste-delta { margin: 0 0 8px; font-size: var(--fs-label); color: var(--text-sec); }
+.paste-delta-up { color: var(--err); font-weight: 700; }
+.paste-delta-down { color: var(--ok); font-weight: 700; }
+.paste-preview { max-height: 14rem; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+/* break-word, not anywhere: `anywhere` also lets the table shrink a column to
+   one letter, so a long reason in the last column squeezed the name and the
+   value into 'DE / V- / 01'. A token too long for any width scrolls the box. */
+.paste-preview table.data td { padding: 4px 8px; overflow-wrap: break-word; }
+/* A phone's modal is ~300px: four columns do not fit, so each row stacks: the
+   name (and field) across the top, then before → after under it. */
+@media (max-width: 640px) {
+    .paste-preview table.data tr {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        border-bottom: 1px solid var(--border);
+    }
+    .paste-preview table.data td { border-bottom: 0; overflow-wrap: anywhere; }
+    .paste-preview table.data td:first-child { grid-column: 1 / -1; padding-bottom: 0; }
+    .paste-preview table.data td.paste-mark { width: auto; }
+}
+.paste-mark { width: 1%; text-align: center; font-weight: 700; }
+/* The bulk preview reuses the paste preview's look; a row also says which
+   field it is about, under the device's name. */
+.bulk-what { display: block; font-size: var(--fs-micro); color: var(--text-muted); }
+.bulk-msgs { margin: 0 0 8px; }
+.bulk-msgs .alert { margin-bottom: 6px; padding: 8px 10px; }
+#bulkApplyBtn.danger { background: var(--err); border-color: var(--err); color: var(--text); }
+.paste-change .paste-mark { color: var(--accent); }
+
+/* Add devices (js/add.js): the fleet's .modal around the setup tiles. A
+   tile's count is typeable now, so it is an input between the steppers. */
+.modal.topo-add { max-width: 36rem; }
+.topo-add .setup-rows { max-height: 46vh; margin-bottom: 10px; }
+.setup-tile .st-steps { align-items: center; }
+.setup-tile .add-count { width: 3.25rem; padding: 3px 4px; text-align: center; font-family: var(--mono); font-size: var(--fs-sm); -moz-appearance: textfield; appearance: textfield; }
+.setup-tile .add-count::-webkit-inner-spin-button, .setup-tile .add-count::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.add-more { margin: 0 0 8px; }
+.add-more > summary { cursor: pointer; padding: 2px 0; font-size: var(--fs-label); color: var(--text-sec); }
+.add-more > summary:hover, .add-more > summary:focus-visible { color: var(--accent); }
+.add-more[open] > summary { margin-bottom: 8px; }
+.add-hint { margin: 2px 0 0; font-size: var(--fs-micro); line-height: 1.35; color: var(--text-muted); }
+.add-summary p { margin: 2px 0; font-size: var(--fs-label); color: var(--text-sec); overflow-wrap: anywhere; }
+.add-summary .add-warn { color: var(--warn); }
+/* The rail's "+ Add devices" and "Save the selection as a block". */
+.add-devices-btn { width: 100%; margin-top: 10px; justify-content: center; }
+#tabPanel-blocks .add-devices-btn { margin: 0 0 10px; }
+/* A phone's modal is ~300px: three tiles with a count and two steppers each
+   do not fit across it. */
+@media (max-width: 640px) {
+    .topo-add .setup-rows { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* table.data sets its cells' colour, so these say which table they mean. */
+.paste-preview table.data tr.paste-bad td { color: var(--err); }
+.paste-preview table.data tr.paste-same td, .paste-preview table.data tr.paste-skip td { color: var(--text-muted); }
+
+/* Spreadsheets (js/csv.js): the paste dialog's modal, a little wider for the
+   column mapping, with Export and Import on the fleet's .tabbar. */
+.modal.topo-csv { max-width: 44rem; }
+.csv-tabs { margin-bottom: 12px; }
+.csv-sheets { display: flex; flex-direction: column; gap: 8px; }
+.csv-sheet { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.csv-sheet-name { min-width: 0; font-size: var(--fs-label); color: var(--text-sec); overflow-wrap: anywhere; }
+.csv-sheet-file { margin-left: 6px; font-size: var(--fs-micro); color: var(--text-muted); }
+.csv-sheet-count { display: block; font-size: var(--fs-micro); color: var(--text-muted); }
+.csv-sheet-acts { display: flex; flex-shrink: 0; gap: 6px; }
+.csv-sheet-acts .btn { padding: 4px 10px; font-size: var(--fs-micro); }
+.csv-file-btn { margin-bottom: 10px; }
+.csv-headings { margin: 4px 0 6px; }
+/* Read as: the fleet's segmented .toggle-btn pair, wrapping on a phone. */
+.csv-readas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0 8px; }
+.csv-readas .prop-lbl { margin: 0 4px 0 0; }
+.csv-readas .toggle-btn { padding: 5px 10px; }
+/* One cell per column of the sheet: its heading and first values, and what
+   it is. Two across; one on a phone. */
+.csv-map { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; max-height: 16rem; overflow: auto; padding: 2px; }
+.csv-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.csv-col label { display: flex; flex-direction: column; min-width: 0; font-size: var(--fs-label); color: var(--text); }
+.csv-col .select { width: 100%; min-width: 0; }
+.csv-col:not(.mapped) .select { color: var(--text-muted); }
+.csv-sample { overflow: hidden; font-size: var(--fs-micro); color: var(--text-muted); white-space: nowrap; text-overflow: ellipsis; }
+.csv-kind-bad { color: var(--err); }
+.csv-note { display: block; font-size: var(--fs-micro); color: var(--warn); }
+.csv-preview { max-height: 18rem; }
+.csv-preview table.data td:first-child { min-width: 8rem; }
+@media (max-width: 640px) {
+    .csv-map { grid-template-columns: minmax(0, 1fr); }
+    .csv-sheet { flex-wrap: wrap; }
+    /* A review row has three cells, not the paste preview's four: the name
+       across the top, then the mark and what the row does. */
+    .paste-preview.csv-preview table.data tr { grid-template-columns: auto minmax(0, 1fr); }
+    .csv-preview table.data td:first-child { min-width: 0; }
+}
+
+/* The question modal (js/dialog.js): the fleet's .modal, sized for a sentence. */
+.modal.topo-ask { max-width: 26rem; }
+.ask-msg { margin: 0; white-space: pre-line; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }
+#topoAskInput { width: 100%; margin-top: 12px; }
+#topoAskInput[hidden] { display: none; }
+.topo-ask .modal-head[hidden] { display: none; }
+.topo-ask .modal-foot { flex-wrap: wrap; }
+.btn.ask-danger { border-color: var(--err); color: var(--err); }
+.btn.btn-primary.ask-danger { background: var(--err); color: var(--bg); }
 
 /* Dialogs: Branding's .modal-scrim/.modal, with a padded body of our own. */
 .topo-dlg { z-index: 2147483100; }
@@ -384,9 +799,6 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
     }
     /* Vertical dividers make no sense once the cluster wraps onto several rows. */
     #mobileActionsSlot .cs-vdiv { display: none; }
-    /* Let the Trace group and status line stretch instead of clipping. */
-    #mobileActionsSlot .cs-control-group { height: auto; padding: 6px 10px; flex-wrap: wrap; }
-    #mobileActionsSlot .cs-trace-status { min-width: 0; }
 
     /* Floating handy bar — bottom center, thumb reach. Hidden outright while
        the drawer is open, so it never floats over it. */
@@ -402,6 +814,14 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         max-width: calc(100vw - 24px);
     }
     body:has(.ws.drawer-open) .handy-bar { display: none; }
+    /* The read-only banner rises above the handy bar, clear of the zoom
+       control on the right. */
+    .alert.topo-readonly { bottom: 80px; right: 72px; max-width: none; }
+    .topo-docbar { bottom: 80px; right: 72px; max-width: none; }
+    .alert.topo-storage { bottom: 128px; right: 72px; max-width: none; }
+    /* Clear of the handy bar, which floats over the bottom of the pane. */
+    .topo-table { padding-bottom: 152px; }
+    .topo-query { flex: 1 1 0; }
     .handy-btn {
         width: 38px; height: 38px; flex-shrink: 0;
         display: inline-flex; align-items: center; justify-content: center;
@@ -421,28 +841,23 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
    knowledge (trace, diagnostics, IP configuration, blocks, validation).
    Display-only — the underlying data is untouched, so toggling back to
    Advanced (or sharing with someone who uses it) loses nothing.
-   Entry points: the header toggle, #simple, or ?simple in the URL. */
-body.simple-mode .cs-control-group,
-body.simple-mode #traceStatus,
-body.simple-mode #traceDivider,
-body.simple-mode #diagTabBtn,
-body.simple-mode #cfgPanel-diagnostics,
-body.simple-mode .lib-tab[data-tab="blocks"],
-body.simple-mode .lib-key,
-body.simple-mode #canvasFilterBox,
-body.simple-mode #linkProps,
-body.simple-mode #linkPortProps,
-body.simple-mode #nodeNetworkProps,
-body.simple-mode #osPortsRow,
-body.simple-mode #conflictAlert,
-body.simple-mode #conflictPill,
-body.simple-mode .palette-adv,
+   Entry points: #simple, #imagenology, '?profile=' or the mode picker.
+
+   One rule: whatever only the full editor shows carries `data-adv`, in
+   index.html or where js/ builds it (the palette's technical devices, the
+   canvas's IP and port labels, the phone's Trace button). It replaced about
+   25 per-id rules, which had to be kept in step with the markup by hand. The
+   two named here are the fleet's Sys. Status control, built by
+   carino-diag.js, which this app does not edit. */
+body.simple-mode [data-adv],
 body.simple-mode #cnDiagBtn,
-body.simple-mode #cnDiagBox,
-/* canvas: subnet zone bubbles, per-node IP addresses, per-link port names */
-body.simple-mode #layer-zones,
-body.simple-mode .node-ip,
-body.simple-mode .port-label { display: none !important; }
+body.simple-mode #cnDiagBox { display: none !important; }
+
+/* The other way round: the mode picker's button is for finding your way up
+   out of a reduced view. In the full editor it only offered a way down that
+   nobody there was looking for; the picker stays one click away in the
+   How to use dialog (renderShortcutHelp, js/app.js). */
+body:not(.simple-mode) #modeSwitchBtn { display: none; }
 
 /* The navbar Sys. Status control is just its yellow pulse dot everywhere —
    the label only ever repeated the tooltip. !important because carino-diag.js
@@ -460,14 +875,9 @@ body.simple-mode .port-label { display: none !important; }
 .setup-tile:hover { border-color: var(--accent-dim); }
 .setup-tile.off { opacity: 0.45; }
 
-/* Reduced view trims the export menu to the two things a reporter needs:
-   Copy link (the share URL IS the report) and a PNG. The rest returns with
-   Advanced. */
-body.simple-mode #exportWebpBtn,
-body.simple-mode #exportJsonBtn,
-body.simple-mode #importFileBtn,
-body.simple-mode #saveTemplateBtn,
-body.simple-mode #exportMenu .cs-menu-div { display: none !important; }
+/* The reduced view's export menu is the two things a reporter needs: Copy
+   link (the share URL IS the report) and a PNG. The rest carry data-adv
+   (the rule above) and come back with Advanced. */
 
 /* ---- Purpose profile: imagenology ----------------------------------------
    Inherits every simple-mode reduction above; these rules only reshape the
@@ -575,6 +985,9 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
    The mark takes the space and grows into it — a logo reads at a glance where a
    25px line does not. Removed rather than hidden, so it gives its height back. */
 @media (max-width: 640px) {
+    /* The hint is about keys and a double click; a phone has neither. */
+    .tv-hint { display: none; }
+
     .netline { display: none; }
     .landing-mark img { height: clamp(46px, 13vw, 78px); }
 }
@@ -670,10 +1083,15 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 .landing-section { width: 100%; margin-top: 8px; }
 /* The label and the one action share a baseline, and the rule that used to sit
    under the label now sits under the pair. */
+/* It wraps, and the label never shrinks: on a phone the three binder chips do
+   not fit beside it, and squeezing the label broke "Your networks" into a word
+   (or, in Japanese, half a word) per line. The chips take their own line
+   instead, and wrap there. */
 .landing-section-head {
-    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px;
     border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 10px;
 }
+.landing-section-head .landing-section-title { flex: none; }
 .landing-section-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 /* The binder-only images row: laid out only while it is shown. */
 #reportImagesRow:not(.hidden) { display: flex; align-items: flex-start; gap: 8px; }
@@ -701,14 +1119,28 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 .landing-card-name {
     font-size: 0.79rem; font-weight: 600; color: var(--text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    padding-right: 44px;   /* clear of the tools */
+    padding-right: 66px;   /* clear of the three tools */
 }
+/* Saved templates under the networks: the same cards, a quieter heading. */
+.landing-sub {
+    margin: 14px 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-muted);
+}
+.landing-badge.tpl { color: var(--accent); border-color: var(--accent-dim); background: var(--accent-faint); }
 .landing-card-stats { font-family: 'IBM Plex Mono', monospace; font-size: 0.63rem; color: var(--text-muted); }
 .landing-card-badges { display: flex; gap: 5px; margin-top: 4px; flex-wrap: wrap; }
 .landing-card-when {
     font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem;
     color: var(--text-muted); opacity: 0.75; margin-top: 3px;
 }
+/* "± 3 changes since the last back-up" (js/changes.js): the accent, quietly —
+   it is news about the card, not a fault in it. */
+.landing-card-changes {
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; color: var(--accent);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* A fourth tool (the list behind that line) needs the name to clear it too. */
+.landing-card.has-changes .landing-card-name { padding-right: 88px; }
 .landing-badge {
     font-family: 'IBM Plex Mono', monospace; font-size: 0.6rem; font-weight: 700;
     border-radius: 3px; padding: 1px 5px; border: 1px solid transparent; white-space: nowrap;

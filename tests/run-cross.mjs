@@ -13,23 +13,43 @@
 import { chromium, firefox, webkit } from 'playwright';
 import { createServer } from 'node:http';
 import { readFile, writeFile, unlink, readdir } from 'node:fs/promises';
-import { join, dirname, extname } from 'node:path';
+import { join, dirname, extname, resolve as resolvePath, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..'); // repo root
 const RUNFILE = '.crossrun.html';
-const PORT = Number(process.env.PORT || 8791);
+// Its own variable, not PORT, and an ephemeral port when unset. run.sh hands
+// its real-clock suites to this script with its environment, PORT included,
+// while its own python server is still listening on that port; reading PORT
+// here meant `PORT=8862 tests/run.sh` crashed this server with EADDRINUSE and
+// the suite failed as "real-clock run reported nothing".
+let PORT = Number(process.env.CROSS_PORT || 0);
 
 // Same boot-error probe run.sh injects, and for the same reason a file rather
 // than inline: index.html's CSP forbids inline script. It also collects CSP
 // violations for tests/suites/privacy.js.
 const PROBEFILE = '.crossprobe.js';
+// Rejections too, as run.sh's probe has them: most suites are async, and a
+// throw inside one is a rejection, not an error event. Without this listener
+// the failure still counted, but read "(suite reported nothing)" with no reason.
 const PROBE = 'window.addEventListener("error",(e)=>{if(document.getElementById("BOOTERR"))return;'
   + 'const p=document.createElement("pre");p.id="BOOTERR";'
   + 'p.textContent=e.message+" @ "+(e.filename||"").split("/").pop()+":"+e.lineno;'
   + 'document.documentElement.appendChild(p);});'
+  + 'window.addEventListener("unhandledrejection",(e)=>{if(document.getElementById("BOOTERR"))return;'
+  + 'const p=document.createElement("pre");p.id="BOOTERR";const r=e.reason;'
+  + 'p.textContent="unhandled rejection: "+(r&&r.stack?String(r.stack).split("\\n").slice(0,2).join(" | "):String(r));'
+  + 'document.documentElement.appendChild(p);});'
   + 'window.__cspViolations=[];document.addEventListener("securitypolicyviolation",(e)=>'
-  + 'window.__cspViolations.push(e.violatedDirective+" "+(e.blockedURI||"inline")));';
+  + 'window.__cspViolations.push(e.violatedDirective+" "+(e.blockedURI||"inline")));'
+  // Suites start after boot has decided, not merely on load — see run.sh.
+  + 'window.__topoReady=new Promise((r)=>window.addEventListener("topo:ready",r,{once:true}));'
+  + 'const _wadd=window.addEventListener;window.addEventListener=function(type,fn,opts){'
+  + 'const s=document.currentScript;'
+  + 'if(type==="load"&&fn&&s&&/(^|\\/)tests\\/suites\\//.test(s.getAttribute("src")||"")){'
+  + 'const f=typeof fn==="function"?fn:(e)=>fn.handleEvent(e);'
+  + 'return _wadd.call(this,type,(e)=>window.__topoReady.then(()=>f.call(window,e)),opts);}'
+  + 'return _wadd.call(this,type,fn,opts);};';
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.webp': 'image/webp', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json' };
@@ -39,12 +59,17 @@ function serve() {
     const server = createServer(async (req, res) => {
       try {
         const path = decodeURIComponent(req.url.split('?')[0]);
-        const buf = await readFile(join(ROOT, path === '/' ? 'index.html' : path));
+        // Contained to the repo: '/..%2F..%2F' decodes to a path that join()
+        // happily walks out of ROOT with, and anything that can reach the port
+        // while the suites run could read files elsewhere on the machine.
+        const file = resolvePath(ROOT, '.' + (path === '/' ? '/index.html' : path));
+        if (file !== ROOT && !file.startsWith(ROOT + sep)) { res.writeHead(403); res.end('forbidden'); return; }
+        const buf = await readFile(file);
         res.writeHead(200, { 'content-type': MIME[extname(path)] || 'application/octet-stream' });
         res.end(buf);
       } catch { res.writeHead(404); res.end('not found'); }
     });
-    server.listen(PORT, '127.0.0.1', () => resolve(server));
+    server.listen(PORT, '127.0.0.1', () => { PORT = server.address().port; resolve(server); });
   });
 }
 

@@ -8,16 +8,21 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
 
   // ---- The findings split ----
-  loadTemplateState(templatesData.errors); autoBindLinks(); renderCanvasOnly();
+  loadDocState(templatesData.errors); autoBindLinks(); renderCanvasOnly();
 
-  const panel = [...document.querySelectorAll('#conflictMsgList li')].map((li) => li.textContent);
+  const panel = [...document.querySelectorAll('#conflictMsgList .ca-line')].map((li) => li.textContent);
   const findings = topologyFindings();
 
-  ok('every alert line comes from a finding', findings.length === panel.length,
+  // The panel groups by check and folds identical wording into one line, so
+  // it is compared with the grouping of the findings, not line for line. On
+  // this template every finding is its own line.
+  const expected = groupFindings(findings).flatMap((g) => g.items.map(findingItemText));
+  ok('every alert line comes from a finding', findings.length === panel.length && expected.length === panel.length,
      `findings=${findings.length} alerts=${panel.length}`);
   ok('and reads exactly as the panel renders it',
-     findings.every((f, i) => f.line === panel[i]),
-     findings.find((f, i) => f.line !== panel[i])?.line?.slice(0, 60));
+     expected.every((line, i) => line === panel[i])
+       && findings.every((f) => panel.some((l) => l.toLowerCase().endsWith(f.detail.toLowerCase()))),
+     expected.find((line, i) => line !== panel[i])?.slice(0, 60));
   ok('each one names a device, a check and a severity',
      findings.every((f) => f.subject && f.check && ['bad', 'warn'].includes(f.level)),
      findings.find((f) => !f.subject || !f.check)?.line?.slice(0, 60));
@@ -76,7 +81,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
      sorted.map((f) => f.subject).join(','));
 
   // A clean network must not manufacture problems to justify the report.
-  loadTemplateState(templatesData.house); autoBindLinks(); renderCanvasOnly();
+  loadDocState(templatesData.house); autoBindLinks(); renderCanvasOnly();
   const clean = reportModel();
   ok('a clean network reports no findings', clean.findings.length === 0,
      clean.findings.map((f) => f.line).join(' | ').slice(0, 90));
@@ -97,7 +102,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('it declares a print size', html.includes('@page'));
   ok('the scope-and-method paragraph is never omitted', /no device was scanned/i.test(html));
 
-  loadTemplateState(templatesData.errors); autoBindLinks();
+  loadDocState(templatesData.errors); autoBindLinks();
   const withFaults = reportHtml(reportModel(), null);
   ok('and no finding is printed starting mid-sentence',
      !/<td>[a-z]/.test(withFaults), (withFaults.match(/<td>[a-z][^<]{0,40}/) || [])[0]);
@@ -120,7 +125,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
      JSON.stringify(serializeReportMeta(state.report)));
   const doc = serializeDoc();
   ok('the header serializes with the document', doc.report && doc.report.site === 'Clínica Norte');
-  loadTemplateState(doc);
+  loadDocState(doc);
   ok('and survives a reload', state.report && state.report.site === 'Clínica Norte',
      JSON.stringify(state.report));
 
@@ -138,7 +143,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // the ones that watch the seam itself. A single-site report must still be
   // exactly one sheet, with nothing in it that only makes sense once there are
   // several.
-  loadTemplateState(templatesData.errors); autoBindLinks();
+  loadDocState(templatesData.errors); autoBindLinks();
   const oneSite = reportHtml(reportModel(), null);
   const count = (hay, needle) => hay.split(needle).length - 1;
   ok('a single-site report is still one sheet', count(oneSite, 'class="sheet"') === 1,
@@ -155,7 +160,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // which is worse than dropping it: opening a shared link in a tab where a
   // report had been filled in left the PREVIOUS client's name on someone else's
   // network, and the next keystroke saved it there.
-  loadTemplateState(templatesData.hospital); autoBindLinks();
+  loadDocState(templatesData.hospital); autoBindLinks();
   state.report = { site: 'Torre A', client: 'Hospital San José', engineer: '', ref: '', date: '', scope: '' };
   save();
   const withHeader = '#' + encodeDoc(serializeDoc());
@@ -197,6 +202,53 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('and hands the canvas its own back afterwards',
      state.report && state.report.site === 'On screen', JSON.stringify(state.report));
   state.report = null;
+
+  // ---- The date is the reader's date ----
+  // toISOString() is UTC, so from late afternoon on in Mexico the report (and
+  // its filename) said tomorrow. Simulated with a clock whose UTC day is ahead
+  // of its local day, which is what UTC-6 at 23:30 looks like.
+  const RealDate = window.Date;
+  window.Date = class extends RealDate {
+    constructor(...a) { if (a.length) super(...a); else super(2026, 9, 24, 23, 30); }
+    toISOString() { return '2026-10-25T05:30:00.000Z'; }
+  };
+  let stamped;
+  try { stamped = todayISO(); } finally { window.Date = RealDate; }
+  ok('the report date is the local calendar day, not UTC', stamped === '2026-10-24', stamped);
+  ok('and a fresh header defaults to it', normalizeReportMeta({}).date === todayISO(), normalizeReportMeta({}).date);
+
+  // ---- A stored header with non-string fields cannot sink the estate report ----
+  let estateHtml = '', estateErr = '';
+  try {
+    estateHtml = binderHtml(binderModel([{ id: 'odd', name: 'Odd site', created: 1, updated: 1,
+      doc: { nodes: [], links: [], report: { site: 5, client: { x: 1 }, engineer: ['a'], ref: null, date: 7, scope: 9 } } }],
+      { site: 'Estate' }), {});
+  } catch (e) { estateErr = String(e); }
+  ok('a binder doc whose header holds numbers and objects still renders', !estateErr && /Odd site/.test(estateHtml), estateErr);
+
+  // ---- IP conflicts are between devices ----
+  state.nodes = [
+    { id: 'c1', type: 'cloud', name: 'ISP A', x: 0, y: 0, interfaces: [{ id: 'i1', name: 'wan0', ip: '8.8.8.8/32' }] },
+    { id: 'c2', type: 'cloud', name: 'ISP B', x: 100, y: 0, interfaces: [{ id: 'i1', name: 'wan0', ip: '8.8.8.8/32' }] },
+    { id: 'm', type: 'server', name: 'Multi', x: 0, y: 100, interfaces: [
+      { id: 'i1', name: 'eth0', ip: '10.9.0.5/24' }, { id: 'i2', name: 'eth1', ip: '10.9.0.5/24' }] }
+  ].map(normalizeLoadedNode);
+  state.links = [];
+  const conflicts = () => topologyFindings().filter((f) => f.check === t('IP Conflict'));
+  ok('two clouds on the default 8.8.8.8 are not an IP conflict', !conflicts().some((f) => /8\.8\.8\.8/.test(f.detail)),
+     conflicts().map((f) => f.detail).join(' | '));
+  ok('one device holding an address twice does not conflict with itself', !conflicts().some((f) => /Multi, Multi/.test(f.detail)),
+     conflicts().map((f) => f.detail).join(' | '));
+  state.nodes.push(normalizeLoadedNode({ id: 'pc', type: 'pc', name: 'Misconfigured PC', x: 0, y: 200,
+    interfaces: [{ id: 'i1', name: 'eth0', ip: '8.8.8.8/24' }] }));
+  ok('but a device of this site on a cloud\'s address still is',
+     conflicts().some((f) => /8\.8\.8\.8/.test(f.detail) && /Misconfigured PC/.test(f.detail)),
+     conflicts().map((f) => f.detail).join(' | '));
+  state.nodes.push(normalizeLoadedNode({ id: 'pc2', type: 'pc', name: 'Twin', x: 0, y: 300,
+    interfaces: [{ id: 'i1', name: 'eth0', ip: '10.9.0.5/24' }] }));
+  ok('and two devices sharing one still are, each named once',
+     conflicts().some((f) => f.detail.indexOf('Multi, Twin') > -1), conflicts().map((f) => f.detail).join(' | '));
+  state.nodes = []; state.links = [];
 
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);

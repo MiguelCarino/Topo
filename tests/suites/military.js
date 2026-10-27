@@ -1,9 +1,9 @@
 // Extracted from the scratchpad HTML this suite was first authored in.
 window.addEventListener('load',()=>{ setTimeout(()=>{
   const out=[]; const ok=(n,c,e)=>out.push(`${c?'PASS':'FAIL'} :: ${n}${e?' :: '+e:''}`);
-  loadTemplateState(templatesData.military); autoBindLinks(); renderCanvasOnly();
+  loadDocState(templatesData.military); autoBindLinks(); renderCanvasOnly();
 
-  const alerts=[...document.querySelectorAll('#conflictMsgList li')].map(li=>li.textContent);
+  const alerts=[...document.querySelectorAll('#conflictMsgList .ca-line')].map(li=>li.textContent);
   ok('military base validates clean', alerts.length===0, alerts.slice(0,2).join(' | '));
   ok('no node is badged', state.nodes.filter(n=>nodeSeverity(n)).length===0,
      state.nodes.filter(n=>nodeSeverity(n)).map(n=>n.name).join(', '));

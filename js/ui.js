@@ -40,12 +40,30 @@ const paletteDefs = [
 
 const lZones = document.getElementById('layer-zones'), lLinks = document.getElementById('layer-links'), lNodes = document.getElementById('layer-nodes'), lAnn = document.getElementById('layer-annotations');
 let isDraggingCanvas = false, isDraggingNode = false, draggedNode = null, dragOffset = { x: 0, y: 0 }, lastMouse = { x: 0, y: 0 };
+// dragGroup: everything a press moves, each with its offset from the pointer
+// and where it started — the pressed device alone, or every selected device
+// when the press lands on one of a set (plan 3.1). The mousemove handler in
+// js/app.js moves them all; the mouseup saves once, however many moved.
+// dragCollapse: a plain press on one device of a set keeps the set (it may be
+// the start of a drag), and a release that moved nothing narrows the
+// selection to that device, as a file manager does.
+let dragGroup = [], dragCollapse = null;
+function startDrag(event, items, pressed) {
+    // A read-only document can be inspected but not rearranged: the press
+    // selects and arms no drag, so nothing moves only to snap back on release.
+    isDraggingNode = !state.readOnly; draggedNode = state.readOnly ? null : pressed;
+    const pt = getWorkspacePoint(event.clientX, event.clientY);
+    dragOffset.x = pt.x - pressed.x; dragOffset.y = pt.y - pressed.y;
+    dragGroup = state.readOnly ? [] : items.map((item) => ({ item, dx: pt.x - item.x, dy: pt.y - item.y, x0: item.x, y0: item.y }));
+}
+// Shift, Ctrl or Cmd held: the press adds to the selection or takes out of it.
+const addsToSelection = (event) => !!(event.shiftKey || event.ctrlKey || event.metaKey);
 
 const paletteContainer = document.getElementById('nodePalette');
 paletteDefs.forEach((d) => {
     const btn = document.createElement('button');
     btn.className = 'palette-item';
-    if (!d.simple) btn.classList.add('palette-adv'); // hidden in reduced profiles (css/app.css)
+    if (!d.simple) btn.setAttribute('data-adv', ''); // hidden in reduced profiles (the one data-adv rule, css/app.css)
     btn.dataset.type = d.type; // profile CSS overrides + purpose renames key off this
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[d.type]}</svg><span>${d.name}</span>`;
     btn.title = 'Click to add (connects to the selected node) — or drag onto the canvas';
@@ -141,7 +159,7 @@ function renderAnnotation(a) {
     g.setAttribute('transform', `translate(${a.x}, ${a.y})`);
     g.style.cursor = 'move';
     if (state.linkSourceId === a.id) g.setAttribute('class', 'linking-glow');
-    const selected = state.selectedId === a.id;
+    const selected = inSelection('annotation', a.id);
 
     const rect = document.createElementNS(NS, 'rect');
     const text = document.createElementNS(NS, 'text');
@@ -264,9 +282,8 @@ function renderAnnotation(a) {
             state.linkSourceId = null; renderCanvasOnly(); return;
         }
         delete a._ctlPin;   // moving the card ends any pinned size-control run
-        isDraggingNode = true; draggedNode = a;
-        const pt = getWorkspacePoint(event.clientX, event.clientY);
-        dragOffset.x = pt.x - a.x; dragOffset.y = pt.y - a.y;
+        // A note is only ever selected (and dragged) on its own.
+        dragCollapse = null; startDrag(event, [a], a);
         select(a.id, 'annotation');
     });
     // Right-click arms link mode from this note, mirroring nodes: the next
@@ -320,7 +337,7 @@ function openAnnotationEditor(a) {
         // element currently represents this note (renderCanvasOnly follows anyway)
         const cur = document.getElementById(`ui-ann-${a.id}`);
         if (cur) cur.style.visibility = '';
-        if (!a.text.trim()) { state.annotations = state.annotations.filter((x) => x.id !== a.id); if (state.selectedId === a.id) { state.selectedId = null; state.selectedType = null; } }
+        if (!a.text.trim()) { state.annotations = state.annotations.filter((x) => x.id !== a.id); if (inSelection('annotation', a.id)) state.selection = new Set(); }
         save(); renderCanvasOnly();
     };
     const outside = (e) => { if (!ed.contains(e.target)) finish(true); };
@@ -349,7 +366,7 @@ function renderNoteLeaders() {
         (a.targets || []).forEach((tid) => {
             const t = noteLinkTarget(tid); if (!t) return;   // dangling: skip, self-heals
             const selId = `nl:${a.id}:${tid}`;
-            const isSel = state.selectedType === 'notelink' && state.selectedId === selId;
+            const isSel = inSelection('notelink', selId);
             const geo = noteLinkGeometry(a, t);
             const line = document.createElementNS(NS, 'line');
             line.setAttribute('id', `ui-annlink-${a.id}-${tid}`);
@@ -393,40 +410,115 @@ function renderNoteLeaders() {
     });
 }
 
+// ---- Subnet zones ----
+// A zone is a network's (R7): it used to be one checkbox per interface, so a
+// /24 of forty hosts had forty switches for one bubble. Now a declared
+// network says: drawZone true draws it, false never does, and unset (auto)
+// draws a private network and not a public one, as before. A subnet the
+// addressing uses that nobody has declared (undeclaredSubnets: a device
+// dropped on the canvas and given an address by hand, a seeded profile's
+// drawing) draws as an auto zone too, the way every inferred subnet always
+// did; declaring it is what gives it a name, a VLAN and a say over its zone.
+// The "Subnet zones" switch in the Subnets tab turns them all off.
+//
+// A zone's box is drawn round its own devices. A device on several of the
+// drawn networks (the router with a leg on each) is left out of their boxes
+// while each still has a device of its own: it belongs to all of them, so it
+// placed every bubble's corner on itself, and after Tidy, with the router at
+// the top and each network's hosts in their own block, the bubbles of every
+// LAN swallowed one another and their labels stacked on that corner.
+//
+// An auto zone is also left out when its devices interleave with another
+// zone's: two bubbles each reaching across the other's devices say nothing
+// about which device is where, and a bubble that lies is worse than none.
+// Interleaving is mutual — each zone's box holds a device of the other that is
+// not its own — so a small zone sitting inside a big one is still drawn. A
+// network set to draw is drawn regardless; that was asked for.
+// Read-only, so it runs in a lookup pass: the membership test parses every
+// address against every network, and the pass parses each once.
+function zonesToDraw() {
+    if (state.settings.subnetZones === false) return [];
+    return withLookupPass(zonesNow);
+}
+function zonesNow() {
+    const zones = [];
+    state.networks.forEach((net) => {
+        const p = parseValidCIDR(net.cidr);
+        if (!p || net.drawZone === false) return;
+        if (net.drawZone !== true && !p.isPrivate) return;
+        const nodes = networkMembers(net).map((m) => m.node).filter((n) => n.type !== 'cloud');
+        if (nodes.length) zones.push({ net, nodes, auto: net.drawZone !== true });
+    });
+    // The undeclared ones: an auto zone each, private ranges only, under a
+    // stand-in record with nothing but the address (the label says just that).
+    undeclaredSubnets().forEach((u) => {
+        if (!u.isPrivate) return;
+        const nodes = u.nodeIds.map(getNode).filter(Boolean);
+        if (nodes.length) zones.push({ net: { id: `undeclared:${u.cidr}`, cidr: u.cidr }, nodes, auto: true });
+    });
+    const count = new Map();
+    zones.forEach((z) => z.nodes.forEach((n) => count.set(n.id, (count.get(n.id) || 0) + 1)));
+    zones.forEach((z) => {
+        const own = z.nodes.filter((n) => count.get(n.id) === 1);
+        const framed = own.length ? own : z.nodes;
+        const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+        framed.forEach((n) => {
+            box.minX = Math.min(box.minX, n.x); box.minY = Math.min(box.minY, n.y);
+            box.maxX = Math.max(box.maxX, n.x); box.maxY = Math.max(box.maxY, n.y);
+        });
+        Object.assign(z, { box, framed, ids: new Set(z.nodes.map((n) => n.id)) });
+    });
+    // Inclusive: a row of hosts has no height, and two networks alternating
+    // along one row is the commonest interleave there is. What counts is a
+    // stranger inside the box as drawn: one of the other zone's framed
+    // devices that is not on this network at all.
+    const holdsStranger = (a, b) => b.framed.some((n) => !a.ids.has(n.id)
+        && n.x >= a.box.minX && n.x <= a.box.maxX && n.y >= a.box.minY && n.y <= a.box.maxY);
+    return zones.filter((z) => !z.auto || !zones.some((o) => o !== z && holdsStranger(z, o) && holdsStranger(o, z)));
+}
+
+// The drawing is one lookup pass (js/model.js): every cable asks for its two
+// devices, its fan of parallel cables and both ends' interfaces, and every
+// device for its diagnosis and its addresses, so without the indexes a
+// redraw was a scan of the document per cable and per device. Drawing only
+// reads the document (the listeners it attaches run later, outside the
+// pass). The panels after it are not drawn in it: they open passes of their
+// own and the table can write.
 function renderCanvasOnly() {
+    if (holdRender()) return;   // inside batch() (js/app.js): drawn once, when it ends
+    const { reach, diag } = withLookupPass(drawCanvas);
+    updateTraceStatus(reach);
+    validateTopology(diag);
+    renderNetworksPanel();   // js/networks.js: the Subnets tab's counts follow the drawing
+    renderTableView();       // js/table.js: so does the table view, while it shows
+    if (typeof updateQueryBar === 'function') updateQueryBar();   // js/query.js: the match count
+}
+
+// A device's glyph on the map: parsed once per type and cloned for each
+// device, rather than parsed from markup per device on every redraw. Built
+// inside an SVG <g> so the markup is read as SVG.
+const _canvasIcons = new Map();
+function canvasIcon(type) {
+    const key = iconPaths[type] ? type : 'custom';
+    if (!_canvasIcons.has(key)) {
+        const holder = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        holder.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" stroke="#334155" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[key]}</svg>`;
+        _canvasIcons.set(key, holder.firstChild);
+    }
+    return _canvasIcons.get(key).cloneNode(true);
+}
+
+function drawCanvas() {
     lZones.innerHTML = ''; lLinks.innerHTML = ''; lNodes.innerHTML = ''; lAnn.innerHTML = '';
     state.annotations.forEach(renderAnnotation);
     renderNoteLeaders();
     document.getElementById('networkCanvas').className = `topo-svg${state.linkSourceId ? ' linking' : ''}`;
 
-    // 1. Render Zone Bubbles (Controllable per interface)
-    const subnets = {};
-    state.nodes.forEach((node) => { 
-        if (node.type === 'cloud') return; // Suppress cloud public zones
-        if (!node.interfaces) return;
-
-        node.interfaces.forEach((iface) => {
-            const ipData = parseValidCIDR(iface.ip);
-            if (!ipData) return;
-
-            // Check explicit toggle first. If undefined, fallback to isPrivate rule.
-            const shouldDraw = iface.drawZone !== undefined ? iface.drawZone : ipData.isPrivate;
-            if (!shouldDraw) return;
-
-            const subnet = ipData.networkStr; 
-            if (!subnets[subnet]) subnets[subnet] = []; 
-            subnets[subnet].push(node); 
-        });
-    });
-
-    let labelOffsets = {}; 
-    Object.entries(subnets).forEach(([subnet, nodes]) => {
-        if (!nodes.length) return;
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        nodes.forEach((node) => {
-            minX = Math.min(minX, node.x); minY = Math.min(minY, node.y);
-            maxX = Math.max(maxX, node.x); maxY = Math.max(maxY, node.y);
-        });
+    // 1. Zone bubbles, one per network drawn (zonesToDraw above).
+    let labelOffsets = {};
+    zonesToDraw().forEach(({ net, nodes, box }) => {
+        const subnet = net.cidr;
+        const { minX, minY, maxX, maxY } = box;
 
         const padX = 45, padTop = 45, padBottom = 80;
         const hue = Array.from(subnet).reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
@@ -455,7 +547,9 @@ function renderCanvasOnly() {
         text.setAttribute('x', lx); text.setAttribute('y', ly);
         text.setAttribute('font-size', '11'); text.setAttribute('font-family', 'monospace');
         text.setAttribute('font-weight', 'bold'); text.setAttribute('fill', `hsla(${hue}, 70%, 34%, 1)`);
-        text.textContent = subnet;
+        // The address, and the name and VLAN when the network has them.
+        text.textContent = [isBlank(net.name) ? '' : net.name.trim(), subnet, Number.isInteger(net.vlan) ? `VLAN ${net.vlan}` : '']
+            .filter(Boolean).join(' · ');
         g.appendChild(text);
         lZones.appendChild(g);
         // Backdrop behind the text so crossing links don't bleed through it.
@@ -472,6 +566,14 @@ function renderCanvasOnly() {
     });
 
     const reach = state.settings.traceMode && state.selectedId && state.selectedType === 'node' ? calculateReachability(state.selectedId) : null;
+    // One findings pass for the whole render: the badges below and the alert
+    // panel at the end read the same verdicts (js/diagnostics.js).
+    const diag = currentDiagnosis();
+    // The search box (js/query.js): what does not match is dimmed, asked
+    // afresh on every redraw so an edit or a click never undoes it. A class,
+    // not an inline opacity, so the PNG export and the report's diagram
+    // (which serialize the SVG without the stylesheet) are never dimmed.
+    const qm = typeof queryMapMatches === 'function' ? queryMapMatches() : null;
 
     // 2. Render Links
     state.links.forEach((link) => {
@@ -484,7 +586,7 @@ function renderCanvasOnly() {
         applyLinkGeometry(line, geo);
         line.setAttribute('id', `ui-link-${link.id}`);
 
-        const isSelected = state.selectedId === link.id && state.selectedType === 'link';
+        const isSelected = inSelection('link', link.id);
         const medium = effectiveMedium(link, src, tgt);
 
         let defaultColor = '#94a3b8'; // utp
@@ -511,8 +613,40 @@ function renderCanvasOnly() {
             line.setAttribute('class', reach ? 'fade-inactive cursor-pointer' : 'cursor-pointer transition-colors');
             if (dashArray) line.setAttribute('stroke-dasharray', dashArray);
         }
-        line.addEventListener('mousedown', (event) => { event.stopPropagation(); select(link.id, 'link'); });
+        line.addEventListener('mousedown', (event) => {
+            event.stopPropagation();
+            if (addsToSelection(event)) toggleSelected('link', link.id); else select(link.id, 'link');
+        });
+        if (qm && !qm.links.has(link.id)) line.classList.add('q-dim');
         lLinks.appendChild(line);
+
+        // The cable's own label (link.cable, js/assets.js), lifted off the
+        // stroke at the middle of the run, where the selected cable's ✕ is not:
+        // the ✕ sits on the stroke, the label beside it. Explicit fonts and a
+        // white halo because the PNG export carries no stylesheet; data-adv so
+        // the reduced views (which hide cable details) leave it out.
+        const cableLabel = cableOf(link, 'label').trim();
+        if (cableLabel) {
+            const mid = geo.pointAt(0.5);
+            const span = Math.hypot(tgt.x - src.x, tgt.y - src.y) || 1;
+            const nx = -(tgt.y - src.y) / span, ny = (tgt.x - src.x) / span;
+            const tag = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            tag.setAttribute('class', qm && !qm.links.has(link.id) ? 'cable-label q-dim' : 'cable-label');
+            tag.setAttribute('data-adv', '');
+            tag.setAttribute('x', String(mid.x + nx * 16));
+            tag.setAttribute('y', String(mid.y + ny * 16 + 3));
+            tag.setAttribute('text-anchor', 'middle');
+            tag.setAttribute('font-size', '8');
+            tag.setAttribute('font-family', 'monospace');
+            tag.setAttribute('font-weight', '700');
+            tag.setAttribute('fill', '#334155');
+            tag.setAttribute('paint-order', 'stroke');
+            tag.setAttribute('stroke', '#ffffff');
+            tag.setAttribute('stroke-width', '3');
+            tag.textContent = cableLabel;
+            tag.style.pointerEvents = 'none';
+            lLinks.appendChild(tag);
+        }
 
         // Radio does not march down a wire, so a traced wireless link emits ")))"
         // arcs that ride the link itself — textPath rotates each glyph to follow
@@ -520,7 +654,7 @@ function renderCanvasOnly() {
         // bowed run.
         if (reach && reach.reachableLinks.has(link.id) && medium === 'wireless') {
             const waves = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            waves.setAttribute('class', 'flow-wave');
+            waves.setAttribute('class', qm && !qm.links.has(link.id) ? 'flow-wave q-dim' : 'flow-wave');
             waves.setAttribute('font-family', 'monospace');
             waves.setAttribute('font-size', '13');
             waves.setAttribute('font-weight', '700');
@@ -555,8 +689,11 @@ function renderCanvasOnly() {
             }
         }
 
-        // Port labels would bury the canvas if always on, so they ride the selection.
-        if (isSelected) {
+        // Port labels would bury the canvas if always on, so they ride the
+        // selection — of this one cable: a set (Ctrl+A) would bury it again.
+        // So does its ✕, which deletes the selection: on one cable of a set it
+        // would delete the whole set (the rail and the Del key do that).
+        if (isSelected && state.selection.size === 1) {
             // Place labels a fixed distance out rather than a fixed fraction, so
             // they clear the node's glyph and IP text on a short link without
             // drifting to the midpoint on a long one.
@@ -571,7 +708,7 @@ function renderCanvasOnly() {
                 const name = ifaceId ? ifaceLabel(node, ifaceId) : 'unbound';
                 const at = geo.pointAt(t);
                 const portLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                portLabel.setAttribute('class', 'port-label'); // hidden in Simple mode (css/app.css)
+                portLabel.setAttribute('class', 'port-label'); portLabel.setAttribute('data-adv', ''); // hidden in the reduced views (css/app.css)
                 portLabel.setAttribute('x', String(at.x + pnx * 10 * side));
                 portLabel.setAttribute('y', String(at.y + pny * 10 * side + 2.5));
                 portLabel.setAttribute('text-anchor', 'middle');
@@ -617,15 +754,23 @@ function renderCanvasOnly() {
         g.setAttribute('id', `ui-node-${node.id}`);
         g.setAttribute('transform', `translate(${node.x}, ${node.y})`);
 
-        const isSelected = state.selectedId === node.id && state.selectedType === 'node';
+        const isSelected = inSelection('node', node.id);
         const isLinkSource = state.linkSourceId === node.id;
         const isReachable = reach && reach.reachableNodes.has(node.id);
         const isInactiveTraceNode = reach && !isReachable;
-        const severity = nodeSeverity(node);
+        const severity = nodeSeverity(node, diag);
 
         let classes = state.linkSourceId ? (isLinkSource ? 'linking-glow cursor-crosshair' : 'cursor-crosshair') : 'cursor-grab active:cursor-grabbing';
         if (isInactiveTraceNode) classes += ' fade-inactive';
+        if (qm && !qm.nodes.has(node.id)) classes += ' q-dim';
         g.setAttribute('class', classes);
+        // Retired (js/assets.js): still in the register, no longer on the
+        // network. An attribute, not a class, because it is a fact about the
+        // device and the PNG export and the report's diagram should show it.
+        if (isRetired(node)) {
+            g.setAttribute('opacity', '0.4');
+            g.setAttribute('data-status', 'retired');
+        }
 
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('x', '-24'); rect.setAttribute('y', '-24'); rect.setAttribute('width', '48'); rect.setAttribute('height', '48'); rect.setAttribute('rx', '6');
@@ -642,7 +787,7 @@ function renderCanvasOnly() {
 
         const iconG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         iconG.setAttribute('transform', 'translate(-12, -14)');
-        iconG.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" stroke="#334155" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[node.type] || iconPaths.custom}</svg>`;
+        iconG.appendChild(canvasIcon(node.type));
         iconG.style.pointerEvents = 'none'; g.appendChild(iconG);
 
         const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -670,7 +815,7 @@ function renderCanvasOnly() {
         // Badge rides on top of selection/trace styling, so a flapping node stays
         // visible even while it is selected or lit up by a trace.
         if (severity) {
-            const issues = interfaceIssues(node);
+            const issues = nodeDiagnosis(node, diag).issues;
             const badge = document.createElementNS('http://www.w3.org/2000/svg', 'g');
             badge.setAttribute('transform', 'translate(19, -19)');
 
@@ -699,8 +844,10 @@ function renderCanvasOnly() {
         // the sidebar's Delete button. Top-LEFT corner: the severity badge owns
         // the top-right, and a warning must never hide behind a delete control.
         // Suppressed while link mode is armed so a mis-tap cannot destroy the
-        // node someone is aiming a cable at.
-        if (isSelected && !state.linkSourceId) {
+        // node someone is aiming a cable at. One device selected only: the ✕
+        // deletes the selection, and on one device of a set it would take
+        // them all (the rail's Delete and the Del key say so plainly).
+        if (isSelected && state.selection.size === 1 && !state.linkSourceId) {
             const del = document.createElementNS('http://www.w3.org/2000/svg', 'g');
             del.setAttribute('transform', 'translate(-19, -19)');
             del.setAttribute('class', 'node-delete');
@@ -735,10 +882,10 @@ function renderCanvasOnly() {
         }
 
         if (!isDumbDevice(node) && node.interfaces && node.interfaces.length > 0) {
-            const validDisplayIps = node.interfaces.map(i=>i.ip).filter((i) => i && i.trim() !== '');
+            const validDisplayIps = node.interfaces.map(i=>i.ip).filter((i) => typeof i === 'string' && i.trim() !== '');
             validDisplayIps.slice(0, 2).forEach((ip, idx) => {
                 const ipLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                ipLabel.setAttribute('class', 'node-ip'); // hidden in Simple mode (css/app.css)
+                ipLabel.setAttribute('class', 'node-ip'); ipLabel.setAttribute('data-adv', ''); // hidden in the reduced views (css/app.css)
                 ipLabel.setAttribute('text-anchor', 'middle'); ipLabel.setAttribute('y', String(48 + idx * 10));
                 ipLabel.setAttribute('font-size', '8'); ipLabel.setAttribute('font-family', 'monospace'); ipLabel.setAttribute('fill', '#64748b');
                 let text = ip; if (idx === 1 && validDisplayIps.length > 2) { text += ` (+${validDisplayIps.length - 2})`; }
@@ -750,10 +897,15 @@ function renderCanvasOnly() {
         g.addEventListener('mousedown', (event) => {
             event.stopPropagation();
             if (!state.linkSourceId) {
-                isDraggingNode = true; draggedNode = node;
-                const pt = getWorkspacePoint(event.clientX, event.clientY);
-                dragOffset.x = pt.x - node.x; dragOffset.y = pt.y - node.y;
-                select(node.id, 'node');
+                // Shift/Ctrl/Cmd edits the set and arms no drag: the press was
+                // about what is selected, not about where it is.
+                if (addsToSelection(event)) { toggleSelected('node', node.id); return; }
+                // One of a set: the whole set moves (startDrag), and a release
+                // that moved nothing selects this one alone (dragCollapse).
+                const ofSet = state.selection.size > 1 && inSelection('node', node.id);
+                startDrag(event, ofSet ? selectedOf('node').map(getNode).filter(Boolean) : [node], node);
+                dragCollapse = ofSet ? node.id : null;
+                if (!ofSet) select(node.id, 'node');
             }
         });
 
@@ -802,9 +954,8 @@ function renderCanvasOnly() {
 
         lNodes.appendChild(g);
     });
-    updateTraceStatus(reach);
-    validateTopology();
-};
+    return { reach, diag };
+}
 
 // Switch/AP faceplate: how many ports the device has, and what is in them.
 // Ports stay implicit unless one is given a name or IP, so a 48-port switch
@@ -822,12 +973,39 @@ function renderFaceplate(node, container) {
     count.type = 'number'; count.min = '0'; count.max = '96';
     count.value = String(portCountOf(node));
     count.className = 'if-in faceplate-count';
+    // Lowering the count under a port that has a cable in it is refused rather
+    // than applied: the cable would be left on a port the switch no longer has,
+    // which is a fault Topo made up, not one the network has. The field keeps
+    // what was typed, so the "2" on the way to "24" is only refused, never
+    // undone, and the next digit lands. Leaving the field puts the real count
+    // back.
+    const cabledUpTo = () => linksAtNode(node.id).reduce((max, l) => {
+        const m = /^p(\d+)$/.exec(ifaceIdOn(l, node.id) || '');
+        return m ? Math.max(max, Number(m[1])) : max;
+    }, 0);
+    const refusal = document.createElement('div');
+    refusal.className = 'faceplate-refusal';
+    refusal.id = 'portCountRefusal';
+    refusal.hidden = true;
+    const refuse = (n) => {
+        count.classList.add('bad');
+        refusal.textContent = t('Port {n} has a cable in it. Move that cable before going below {n} ports.', { n });
+        refusal.hidden = false;
+    };
+    count.onblur = () => {
+        if (refusal.hidden) return;
+        count.value = String(portCountOf(node));
+        count.classList.remove('bad');
+        refusal.hidden = true;
+    };
     count.oninput = (e) => {
         const next = parseInt(e.target.value, 10);
         if (!Number.isFinite(next) || next < 0) return;
+        const cabled = cabledUpTo();
+        if (next < cabled) { refuse(cabled); return; }
         const caret = e.target.selectionStart;
         node.portCount = Math.min(next, 96);
-        save(); renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node);
+        saveTyping(); renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node);
         // Redrawing the faceplate destroys the very field being typed into, so
         // focus lands on <body> and the second digit of "24" goes nowhere. Put
         // the cursor back on the replacement.
@@ -836,28 +1014,272 @@ function renderFaceplate(node, container) {
     };
     head.appendChild(count);
     wrap.appendChild(head);
+    wrap.appendChild(refusal);
+    wrap.appendChild(renderPortScheme(node));
 
     const grid = document.createElement('div');
     grid.className = 'chip-row';
     const ports = getInterfaces(node).filter((i) => /^p\d+$/.test(i.id));
+    // Cables past an explicit faceplate (port overflow, see js/model.js) are
+    // drawn after it and marked, so the finding has something to point at.
+    const total = portCountOf(node);
+    const over = [...new Set(linksAtNode(node.id).map((l) => ifaceIdOn(l, node.id))
+        .filter((id) => /^p\d+$/.test(id || '') && Number(id.slice(1)) > total))]
+        .sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
 
     if (!ports.length) {
         grid.innerHTML = '<span class="rail-none">No ports. Raise the count above.</span>';
     }
 
+    // The faceplate shows positions (1, 2, 3…), as the hardware is printed;
+    // the name the scheme gives a port, its label and its VLAN are in the
+    // chip's tooltip and in the list below. A dot marks a port with a label
+    // or a VLAN.
     ports.forEach((port) => {
         const link = linkOnIface(node.id, port.id);
         const neighbour = link ? getNode(link.source === node.id ? link.target : link.source) : null;
         const chip = document.createElement('button');
-        chip.className = 'port-chip' + (neighbour ? ' on' : '');
-        chip.textContent = port.name || port.id;
-        chip.title = neighbour ? `Port ${port.name} → ${neighbour.name}` : `Port ${port.name} — free`;
-        if (link) chip.onclick = () => select(link.id, 'link'); // jump to the cable in this port
+        chip.className = 'port-chip' + (neighbour ? ' on' : '') + (hasPortAttrs(node, port.id) ? ' noted' : '');
+        chip.dataset.port = port.id;
+        // (A port given a name of its own, an uplink called sfp1, shows it.)
+        const n = Number(port.id.slice(1));
+        chip.textContent = port.name && port.name !== portNameOf(node, n) ? port.name : String(n);
+        chip.title = portChipTitle(node, port.id);
+        // A cabled port jumps to its cable; a free one opens its line in the
+        // list, to label it.
+        chip.onclick = link ? () => select(link.id, 'link') : () => openPortAttr(node, port.id);
+        grid.appendChild(chip);
+    });
+    over.forEach((id) => {
+        const link = linkOnIface(node.id, id);
+        const chip = document.createElement('button');
+        chip.className = 'port-chip on over' + (hasPortAttrs(node, id) ? ' noted' : '');
+        chip.dataset.port = id;
+        chip.textContent = id.slice(1);
+        chip.title = portChipTitle(node, id);
+        if (link) chip.onclick = () => select(link.id, 'link');
         grid.appendChild(chip);
     });
 
     wrap.appendChild(grid);
+    wrap.appendChild(renderPortAttrs(node));
     container.appendChild(wrap);
+}
+
+// One port as a tooltip: its name, its label and VLAN, what is in it, and
+// whether it sits past the faceplate.
+function portChipTitle(node, portId) {
+    const a = portAttrOf(node, portId);
+    const link = linkOnIface(node.id, portId);
+    const neighbour = link ? getNode(link.source === node.id ? link.target : link.source) : null;
+    const head = [ifaceLabel(node, portId), a.label, a.vlan !== null ? `VLAN ${a.vlan}` : ''].filter(Boolean).join(' · ');
+    const title = neighbour ? t('Port {port} → {name}', { port: head, name: neighbour.name || neighbour.id }) : t('Port {port}: free', { port: head });
+    const total = portCountOf(node);
+    return Number(portId.slice(1)) > total ? `${title}\n${t('Past the {total}-port faceplate', { total })}` : title;
+}
+
+// What the faceplate says about its ports, brought up to date in place after
+// a label, a VLAN or the scheme is typed: the chips' dots and tooltips and
+// the list's count. Typing never redraws the faceplate (the field being typed
+// into would go), so without this they caught up only when the device was
+// selected again.
+function refreshPortMarks(node) {
+    const wrap = document.querySelector('#ifaceListContainer .faceplate');
+    if (!wrap) return;
+    wrap.querySelectorAll('.port-chip[data-port]').forEach((chip) => {
+        chip.classList.toggle('noted', hasPortAttrs(node, chip.dataset.port));
+        chip.title = portChipTitle(node, chip.dataset.port);
+    });
+    const sum = wrap.querySelector('#portAttrBox > summary');
+    if (sum) sum.textContent = portAttrsSummary(node);
+}
+function portAttrsSummary(node) {
+    const noted = faceplatePortIds(node).filter((id) => hasPortAttrs(node, id)).length;
+    return noted ? `${t('Port labels and VLANs')} (${noted})` : t('Port labels and VLANs');
+}
+
+// ---- Port names, labels and access VLANs (node.portScheme, node.portAttrs) ----
+// The vocabulary is the full editor's (Physical Ports, VLAN stay English);
+// the words around it are translated. Each field typed into is one undo step
+// (saveTyping), and typing never redraws the field being typed into.
+
+// How the box names its ports: a prefix and the number port 1 is called.
+// "Gi1/0/" from 1 names port 12 Gi1/0/12. Only the names change: cables stay
+// on the same positions.
+function renderPortScheme(node) {
+    const row = document.createElement('div');
+    row.className = 'port-scheme';
+    const cap = document.createElement('span');
+    cap.className = 'prop-lbl';
+    cap.textContent = t('Port names');
+    const scheme = node.portScheme || {};
+    const prefix = document.createElement('input');
+    prefix.type = 'text'; prefix.id = 'portPrefixInput';
+    prefix.className = 'if-in port-prefix';
+    prefix.value = typeof scheme.prefix === 'string' ? scheme.prefix : '';
+    prefix.placeholder = t('Prefix, e.g. Gi1/0/');
+    prefix.setAttribute('aria-label', t('Prefix'));
+    prefix.maxLength = PORT_PREFIX_MAX;
+    const start = document.createElement('input');
+    start.type = 'number'; start.id = 'portStartInput';
+    start.min = '0'; start.max = '9999';
+    start.className = 'if-in port-start';
+    start.value = String(Number.isInteger(scheme.start) ? scheme.start : 1);
+    start.title = t('The number port 1 is called');
+    start.setAttribute('aria-label', t('The number port 1 is called'));
+    const preview = document.createElement('div');
+    preview.className = 'port-scheme-preview';
+    const showPreview = () => {
+        const total = portCountOf(node);
+        preview.textContent = total > 1 ? `${portNameOf(node, 1)} … ${portNameOf(node, total)}` : portNameOf(node, 1);
+    };
+    // Each field is checked on its own, so a bad one never holds up the
+    // other: a start of -1 does not stop the prefix being written, and the
+    // other way round. A bad field writes what the scheme said when the
+    // field was entered (as the port VLAN does), not the keystroke before
+    // it: "Port " on the way to "Port 0" was never meant. Leaving it shows
+    // what is kept.
+    let entered = null;
+    const stored = () => ({ prefix: typeof (node.portScheme || {}).prefix === 'string' ? node.portScheme.prefix : '',
+        start: Number.isInteger((node.portScheme || {}).start) ? node.portScheme.start : 1 });
+    const mark = (input, bad, why) => {
+        input.classList.toggle('bad', bad);
+        if (bad) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+        if (why) input.title = bad ? why : (input === start ? t('The number port 1 is called') : '');
+    };
+    const apply = () => {
+        // Typed into without being entered (a script): the scheme as it is.
+        const was = entered || stored();
+        const n = start.value.trim() === '' ? 1 : Number(start.value);
+        const startOk = Number.isInteger(n) && n >= 0 && n <= 9999;
+        const prefixOk = portPrefixOk(prefix.value);
+        mark(start, !startOk);
+        const why = t('A prefix cannot end in a digit: the port number would run into it. End it with a separator, such as / or a space.');
+        mark(prefix, !prefixOk, why);
+        const next = normalizePortScheme({ prefix: prefixOk ? prefix.value : was.prefix, start: startOk ? n : was.start });
+        if (next) node.portScheme = next; else delete node.portScheme;
+        showPreview();
+        preview.classList.toggle('bad', !prefixOk);
+        if (!prefixOk) preview.textContent = why;
+        // The chips' tooltips, the list's names, the canvas port labels and
+        // the link panel all read the new names; the two fields stay.
+        const list = document.getElementById('portAttrList');
+        if (list) list.querySelectorAll('[data-port-name]').forEach((el) => { el.textContent = ifaceLabel(node, el.dataset.portName); });
+        refreshPortMarks(node);
+        // Held until the field is left: "Port " on the way to "Port 0/" is a
+        // scheme nobody chose, and an idle pause must not make it an undo step.
+        saveTyping(true); renderCanvasOnly();
+    };
+    prefix.addEventListener('input', apply);
+    start.addEventListener('input', apply);
+    [prefix, start].forEach((input) => {
+        input.addEventListener('focus', () => { entered = stored(); });
+        input.addEventListener('blur', () => {
+            entered = null;
+            if (!input.classList.contains('bad')) return;
+            const now = stored();
+            input.value = input === prefix ? now.prefix : String(now.start);
+            mark(input, false, true);
+            if (input === prefix) { preview.classList.remove('bad'); showPreview(); }
+        });
+    });
+    showPreview();
+    const fields = document.createElement('div');
+    fields.className = 'port-scheme-fields';
+    fields.appendChild(prefix); fields.appendChild(start);
+    row.appendChild(cap); row.appendChild(fields); row.appendChild(preview);
+    return row;
+}
+
+// Every faceplate port, one line each: its name, a label and an access VLAN.
+// Folded by default (a 48-port switch is 48 lines); open stays open while
+// the panel is redrawn, for as long as the page is.
+let _portAttrsOpen = false;
+function renderPortAttrs(node) {
+    const box = document.createElement('details');
+    box.className = 'port-attrs';
+    box.id = 'portAttrBox';
+    box.open = _portAttrsOpen;
+    box.addEventListener('toggle', () => { _portAttrsOpen = box.open; });
+    const ids = faceplatePortIds(node);
+    const sum = document.createElement('summary');
+    sum.textContent = portAttrsSummary(node);
+    box.appendChild(sum);
+    const list = document.createElement('div');
+    list.className = 'port-attr-list';
+    list.id = 'portAttrList';
+    ids.forEach((id) => {
+        const a = portAttrOf(node, id);
+        const line = document.createElement('div');
+        line.className = 'port-attr';
+        line.dataset.port = id;
+        const name = document.createElement('span');
+        name.className = 'port-attr-name mono';
+        name.dataset.portName = id;
+        name.textContent = ifaceLabel(node, id);
+        const label = document.createElement('input');
+        label.type = 'text'; label.className = 'if-in port-attr-label';
+        label.value = a.label;
+        label.placeholder = t('Label');
+        label.maxLength = 64;
+        label.setAttribute('aria-label', `${t('Label')} · ${ifaceLabel(node, id)}`);
+        label.addEventListener('input', () => {
+            setPortAttr(node, id, 'label', label.value);
+            refreshPortMarks(node);
+            saveTyping(); renderCanvasOnly();
+        });
+        const vlan = document.createElement('input');
+        vlan.type = 'text'; vlan.inputMode = 'numeric'; vlan.className = 'if-in port-attr-vlan';
+        vlan.value = a.vlan === null ? '' : String(a.vlan);
+        vlan.placeholder = 'VLAN';
+        vlan.setAttribute('aria-label', `VLAN · ${ifaceLabel(node, id)}`);
+        // 1-4094 or nothing. Anything else is marked and not written, as a
+        // half-typed address is: the field keeps it, the document does not.
+        // Typed digit by digit, "5000" passes through 5, 50 and 500, so a
+        // refused value also puts back what the port held when the field was
+        // entered; otherwise its last valid prefix (500, a VLAN nobody meant)
+        // would stay in the document, the report and the link. Leaving a
+        // refused field shows that value again.
+        let held = a.vlan === null ? undefined : a.vlan;
+        const vlanNow = () => { const v = portAttrOf(node, id).vlan; return v === null ? undefined : v; };
+        vlan.addEventListener('focus', () => { held = vlanNow(); });
+        vlan.addEventListener('input', () => {
+            const v = vlan.value.trim();
+            const n = v ? asVlan(v) : undefined;
+            const bad = !!v && n === undefined;
+            vlan.classList.toggle('bad', bad);
+            const want = bad ? held : n;
+            if (vlanNow() === want) return;
+            setPortAttr(node, id, 'vlan', want);
+            refreshPortMarks(node);
+            saveTyping(); renderCanvasOnly();
+        });
+        vlan.addEventListener('blur', () => {
+            if (!vlan.classList.contains('bad')) return;
+            const now = vlanNow();
+            vlan.value = now === undefined ? '' : String(now);
+            vlan.classList.remove('bad');
+        });
+        const link = linkOnIface(node.id, id);
+        const peer = link ? getNode(link.source === node.id ? link.target : link.source) : null;
+        const where = document.createElement('span');
+        where.className = 'port-attr-peer';
+        where.textContent = peer ? `→ ${peer.name || peer.id}` : '';
+        line.appendChild(name); line.appendChild(label); line.appendChild(vlan); line.appendChild(where);
+        list.appendChild(line);
+    });
+    box.appendChild(list);
+    return box;
+}
+
+// A free port's chip: the list opens on that port's label.
+function openPortAttr(node, portId) {
+    const box = document.getElementById('portAttrBox');
+    if (!box) return;
+    box.open = true; _portAttrsOpen = true;
+    const line = box.querySelector(`.port-attr[data-port="${portId}"]`);
+    const input = line && line.querySelector('.port-attr-label');
+    if (input) { input.focus(); line.scrollIntoView({ block: 'nearest' }); }
 }
 
 function renderSidebarData(node) {
@@ -885,7 +1307,7 @@ function renderSidebarData(node) {
             const div = document.createElement('div'); div.className = 'if-row';
             const nameInp = document.createElement('input'); nameInp.type = 'text'; nameInp.value = iface.name; nameInp.placeholder = 'eth0';
             nameInp.className = 'if-in if-name';
-            nameInp.addEventListener('input', (e) => { node.interfaces[i].name = e.target.value; save();
+            nameInp.addEventListener('input', (e) => { node.interfaces[i].name = e.target.value; saveTyping();
             renderCanvasOnly();
             renderNodeDiagnostics(node); });
 
@@ -897,24 +1319,9 @@ function renderSidebarData(node) {
             // the row earns more width, the hover says what it really holds.
             ipInp.title = iface.ip || '';
             if (iface.ip.trim() !== '' && !parseValidCIDR(iface.ip)) ipInp.classList.add('bad');
-            const zoneLabel = document.createElement('label');
-            zoneLabel.className = 'if-zone';
-            zoneLabel.title = 'Draw Subnet Zone Bubble';
-
-            const zoneCb = document.createElement('input');
-            zoneCb.type = 'checkbox';
-            
-            const initParsed = parseValidCIDR(iface.ip);
-            zoneCb.checked = iface.drawZone !== undefined ? iface.drawZone : (initParsed ? initParsed.isPrivate : false);
-
-            zoneCb.onchange = (e) => {
-                node.interfaces[i].drawZone = e.target.checked;
-                save();
-                renderCanvasOnly();
-            };
-
-            zoneLabel.appendChild(zoneCb);
-            zoneLabel.appendChild(document.createTextNode('Zone'));
+            // The "Zone" checkbox that sat here is the network's now (the
+            // Subnets tab): one switch per subnet rather than one per host,
+            // and the address field gets its width back.
 
             // Wirelessness is normally read off the name (wlan0, wlp1s0), but that
             // inference cannot see every case — macOS calls its Wi-Fi NIC en0,
@@ -943,13 +1350,10 @@ function renderSidebarData(node) {
                 const parsedData = parseValidCIDR(e.target.value);
                 if (e.target.value.trim() !== '' && !parsedData) ipInp.classList.add('bad');
                 else ipInp.classList.remove('bad');
+                // A new address can mean a new network to inherit from.
+                refreshInheritance(node);
 
-                // Auto-update checkbox fallback visual state if it was never explicitly set
-                if (node.interfaces[i].drawZone === undefined && parsedData) {
-                    zoneCb.checked = parsedData.isPrivate;
-                }
-
-                save();
+                saveTyping();   // one undo step per address, taken when the field is left
                 renderCanvasOnly();
                 renderNodeDiagnostics(node); 
             });
@@ -984,9 +1388,8 @@ function renderSidebarData(node) {
             // nor the radio override means anything on it.
             if (isBond(iface)) {
                 nameInp.classList.add('bond');
-                div.appendChild(zoneLabel);
             } else {
-                div.appendChild(kindBtn); div.appendChild(zoneLabel); div.appendChild(wire);
+                div.appendChild(kindBtn); div.appendChild(wire);
             }
             div.appendChild(del); ifCont.appendChild(div);
 
@@ -1057,7 +1460,7 @@ function renderMacLine(node, iface) {
         const d = api.decodeMac(raw);
         if (d.error) {
             inp.classList.add('bad');
-            out.innerHTML = `<span class="bad">${d.error}</span>`;
+            out.innerHTML = `<span class="bad">${escapeHtml(d.error)}</span>`;
             return;
         }
         const bits = [];
@@ -1074,14 +1477,18 @@ function renderMacLine(node, iface) {
 
         const v = d.vendor;
         const vendor = v.vendor
-            ? `<b>${v.vendor}</b>`
+            ? `<b>${escapeHtml(v.vendor)}</b>`
             : '<span class="muted">OUI not in the built-in table</span>';
 
         // A duplicate is the reason this field exists at all: the flapping
         // diagnostic could only ever guess at it from IP co-location.
         const dupes = (typeof duplicateMacs === 'function' ? duplicateMacs(state.nodes) : [])
             .find((x) => x.hex === api.normalizeMac(raw));
-        const others = dupes ? dupes.holders.filter((h) => h.iface.id !== iface.id) : [];
+        // "Is this holder me?" is a question about node AND interface: an
+        // interface id is only unique inside its node (every spawned device
+        // starts with i1, every AP with w1), so comparing ids alone dropped the
+        // most common duplicate of all, two fresh devices given the same MAC.
+        const others = dupes ? dupes.holders.filter((h) => !(h.node.id === node.id && h.iface.id === iface.id)) : [];
         if (others.length) inp.classList.add('bad');
 
         out.innerHTML =
@@ -1089,15 +1496,17 @@ function renderMacLine(node, iface) {
             (d.isLocal && !d.isMulticast && !d.isBroadcast
                 ? '<div class="warn">Randomised or hand-set — the vendor prefix means nothing here.</div>' : '') +
             (others.length
-                ? `<div class="bad">Also on ${others.map((h) => `${h.node.name} / ${h.iface.name}`).join(', ')} — two interfaces cannot share an address on one L2 domain.</div>`
+                // Names come from the document, which may be a stranger's
+                // shared link or file: escaped, as every other name in here is.
+                ? `<div class="bad">Also on ${others.map((h) => `${escapeHtml(h.node.name)} / ${escapeHtml(h.iface.name)}`).join(', ')} — two interfaces cannot share an address on one L2 domain.</div>`
                 : '') +
-            `<div class="muted">link-local ${d.ll}</div>`;
+            `<div class="muted">link-local ${escapeHtml(d.ll)}</div>`;
     }
 
     inp.addEventListener('input', () => {
         iface.mac = inp.value;
         paint();
-        save();
+        saveTyping();
         renderNodeDiagnostics(node);
     });
     // Leaving the field is when a half-typed address becomes a stored one, so
@@ -1107,7 +1516,9 @@ function renderMacLine(node, iface) {
         if (api && api.normalizeMac(inp.value).length === 12) {
             iface.mac = fmtColonSafe(inp.value);
             inp.value = iface.mac;
-            save();
+            // Still the typing's step: blur runs before the focusout that
+            // files it, so the tidied form is what gets filed, as one step.
+            saveTyping();
         }
     });
 
@@ -1169,7 +1580,7 @@ function renderBondMember(node, member, bond, container) {
     nameInp.addEventListener('input', (e) => {
         const real = node.interfaces.find((x) => x.id === member.id);
         if (real) real.name = e.target.value;
-        save(); renderCanvasOnly(); renderNodeDiagnostics(node);
+        saveTyping(); renderCanvasOnly(); renderNodeDiagnostics(node);
     });
 
     const note = document.createElement('span');
@@ -1226,7 +1637,7 @@ function renderLinkPorts(link) {
         addBtn.className = 'link-btn';
         addBtn.textContent = hasPortGrid(node) ? '+ Port' : '+ NIC';
         addBtn.onclick = () => {
-            link[key] = createIfaceFor(node, { grow: true }).id;
+            link[key] = createIfaceFor(node, { grow: true, user: true }).id;
             save(); renderCanvasOnly(); renderLinkPorts(link);
         };
         head.appendChild(addBtn);
@@ -1246,12 +1657,23 @@ function renderLinkPorts(link) {
             const chip = document.createElement('button');
             chip.className = 'port-chip' + (selected ? ' picked' : takenBy ? ' taken' : '');
             chip.textContent = iface.name || iface.id;
+            // A faceplate port's label is what the person at the rack is
+            // looking for ("Reception 2"), so it is on the chip itself; its
+            // VLAN is in the tooltip.
+            const attr = hasPortGrid(node) ? portAttrOf(node, iface.id) : { label: '', vlan: null };
+            if (attr.label) {
+                const sub = document.createElement('small');
+                sub.className = 'port-chip-sub';
+                sub.textContent = attr.label;
+                chip.appendChild(sub);
+            }
+            const facts = [attr.label, attr.vlan !== null ? `VLAN ${attr.vlan}` : ''].filter(Boolean).join(' · ');
 
             if (takenBy) {
                 const neighbour = getNode(takenBy.source === node.id ? takenBy.target : takenBy.source);
-                chip.title = `In use by ${neighbour?.name || 'another link'}`;
-            } else if (iface.ip) {
-                chip.title = iface.ip;
+                chip.title = [facts, neighbour ? t('In use by {name}', { name: neighbour.name || neighbour.id }) : t('In use by another cable')].filter(Boolean).join('\n');
+            } else if (iface.ip || facts) {
+                chip.title = [iface.ip, facts].filter(Boolean).join('\n');
             }
 
             chip.onclick = () => {
@@ -1262,6 +1684,19 @@ function renderLinkPorts(link) {
             };
             chips.appendChild(chip);
         });
+
+        // A cable past an explicit faceplate (port overflow, see js/model.js)
+        // is on a port getInterfaces() does not list. Show it, picked and
+        // marked like the faceplate's own overflow chip, so the panel does not
+        // claim this end of the cable is plugged in nowhere.
+        const current = link[key];
+        if (hasPortGrid(node) && /^p\d+$/.test(current || '') && !interfaces.some((i) => i.id === current)) {
+            const chip = document.createElement('button');
+            chip.className = 'port-chip picked over';
+            chip.textContent = ifaceLabel(node, current);
+            chip.title = t('Past the {total}-port faceplate', { total: portCountOf(node) });
+            chips.appendChild(chip);
+        }
 
         row.appendChild(chips);
         body.appendChild(row);
@@ -1276,10 +1711,11 @@ function clearPropertyInputs() {
     document.getElementById('propDns').value = '';
     document.getElementById('propOs').value = '';
     document.getElementById('propPorts').value = '';
+    document.getElementById('propNotes').value = '';
+    renderAssetFields(null);   // js/assets.js
+    renderCableFields(null);
     document.getElementById('ifaceListContainer').innerHTML = '';
     document.getElementById('jumpGwBtn').classList.add('hidden');
-    document.getElementById('propNetcfg').checked = false;
-    document.getElementById('netcfgHint').classList.add('hidden');
     refreshNetcfgLink(null);
     renderSiteRef(null);
     renderNodeDiagnostics(null);
@@ -1309,7 +1745,7 @@ function renderSiteRef(node) {
     // destroy the reference the sender wrote.
     if (ref && !entry) sel.appendChild(new Option(ref.name || '(unnamed site)', SITE_REF_UNRESOLVED));
     sel.appendChild(new Option('— not a site —', ''));
-    libraryEntries()
+    libraryNetworks()   // a saved template is not a site
         .filter((e) => e.id !== state.libraryId)   // a site cannot stand for itself
         .forEach((e) => sel.appendChild(new Option(e.name, e.id)));
     sel.value = entry ? entry.id : (ref ? SITE_REF_UNRESOLVED : '');
@@ -1346,21 +1782,25 @@ function renderSiteRef(node) {
     };
 }
 
-// ---- Netplan bridge link (docs/netplan-bridge-design.md) ----
-// Node types that usually run vendor firmware rather than a netplan-managed
-// Linux — the toggle stays available (the user may know better), it just gets
-// a one-line advisory. This array is all that survives of the old tier map.
-const NETCFG_ADVISORY = ['switch', 'camera', 'printer', 'cloud'];
+// ---- Netplan hand-off (docs/netplan-bridge-design.md) ----
+// "Open in Netplan ↗" is offered on the host types: the devices that run a
+// general-purpose OS whose network config is a file someone writes. It used to
+// be a stored per-node checkbox (netcfg) on every type, with an advisory on
+// the firmware ones; a setting that only ever revealed a link was one more
+// field to carry, so the link is now just there where it makes sense. Old
+// documents that carry `netcfg: true` still open; the key is no longer kept
+// (NODE_FIELDS, js/model.js).
+const NETPLAN_HOST_TYPES = ['pc', 'server', 'vm', 'container'];
 
 // The link is a plain <a href> pre-encoded ahead of the click — encoding is
 // async (CompressionStream), and a popup opened after an await would be eaten
-// by the blocker. Refreshed on select, on toggle, and on any sidebar edit; the
-// sequence counter drops stale encodings that resolve out of order.
+// by the blocker. Refreshed on select and on any sidebar edit; the sequence
+// counter drops stale encodings that resolve out of order.
 let _netcfgSeq = 0;
 function refreshNetcfgLink(node) {
     const a = document.getElementById('openNetcfgBtn');
     _netcfgSeq++;
-    if (!node || !node.netcfg) { a.classList.add('hidden'); a.removeAttribute('href'); return; }
+    if (!node || !NETPLAN_HOST_TYPES.includes(node.type)) { a.classList.add('hidden'); a.removeAttribute('href'); return; }
     const intent = bridgeIntent(node);
     // A node whose ports are all implicit faceplate slots or bonded members
     // projects to nothing — landing the user on an empty generator would only
@@ -1384,7 +1824,7 @@ function refreshNetcfgLink(node) {
 function _netcfgSidebarChanged() {
     if (state.selectedType !== 'node' || !state.selectedId) return;
     const node = getNode(state.selectedId);
-    if (node && node.netcfg) refreshNetcfgLink(node);
+    if (node) refreshNetcfgLink(node);
 }
 const _propsPane = document.getElementById('propertiesPane');
 _propsPane.addEventListener('input', _netcfgSidebarChanged);
@@ -1395,14 +1835,142 @@ _propsPane.addEventListener('click', (e) => {
     _netcfgSidebarChanged();
 });
 
+// The gateway and DNS hints, and the line under them naming the network a
+// blank field inherits from (a button: it opens that network in the Subnets
+// tab). Called on select and whenever an address of the device changes.
+function refreshInheritance(node) {
+    if (!node) return;
+    const hints = fieldHints(node);
+    document.getElementById('propGw').placeholder = hints.gw;
+    document.getElementById('propDns').placeholder = hints.dns;
+    document.getElementById('propGw').title = hints.gwFrom;
+    document.getElementById('propDns').title = hints.dnsFrom;
+    const note = document.getElementById('inheritNote');
+    if (!note) return;
+    const nets = [];
+    getValidIps(node).forEach((p) => { const net = networkOfIp(p.ip); if (net && !nets.includes(net)) nets.push(net); });
+    note.classList.toggle('hidden', !nets.length);
+    note.innerHTML = nets.length ? `${escapeHtml(t('Blank fields use the network\'s:'))} ${nets.map((net) =>
+        `<button type="button" class="link-btn" data-net="${escapeHtml(net.id)}">${escapeHtml(networkLabel(net))}</button>`).join(' ')}` : '';
+    note.querySelectorAll('[data-net]').forEach((b) => { b.onclick = () => openNetworkInTab(b.dataset.net); });
+}
+
+// Centre the canvas on a device, or on the middle of a cable, and select it:
+// what a click on a finding in the Findings tab does, and the gateway jump.
+// target: { type: 'node' | 'link', id }.
+function focusOnMap(target) {
+    if (!target) return false;
+    let at = null;
+    if (target.type === 'node') at = getNode(target.id);
+    else if (target.type === 'link') {
+        const link = getLink(target.id);
+        const a = link && getNode(link.source), b = link && getNode(link.target);
+        if (a && b) at = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    }
+    if (!at) return false;
+    const rect = document.getElementById('networkCanvas').getBoundingClientRect();
+    state.camera.x = (rect.width / 2) - at.x * state.camera.zoom; state.camera.y = (rect.height / 2) - at.y * state.camera.zoom;
+    applyCamera(); select(target.id, target.type);
+    return true;
+}
+
+// ---- The selection set (plan 3.1) ----
+// select() above is "this one thing"; these work on the set in
+// state.selection (js/state.js). Whatever the set holds, renderSelection()
+// draws the rail for it: nothing, the one thing's editor, or — for several —
+// their counts, Delete, and a way to narrow a mixed set to one kind; a set of
+// devices alone, or of cables alone, also gets the bulk panel (js/bulk.js).
+function renderSelection() {
+    const one = soleSelected(state.selection);
+    if (state.selection.size <= 1) { select(one ? one.id : null, one ? one.type : null); return; }
+    state.linkSourceId = null;
+    clearPropertyInputs();
+    document.getElementById('propertiesPane').classList.add('hidden');
+    document.getElementById('noSelectionPane').classList.add('hidden');
+    const pane = document.getElementById('multiSelectionPane');
+    pane.classList.remove('hidden');
+    const nodes = selectedOf('node').length, links = selectedOf('link').length;
+    const row = (label, n) => `<div class="sel-count"><dt>${escapeHtml(t(label))}</dt><dd class="mono">${n}</dd></div>`;
+    document.getElementById('selCounts').innerHTML = (nodes ? row('Devices', nodes) : '') + (links ? row('Cables', links) : '');
+    // Mixed: what applies to a device does not apply to a cable, so a set of
+    // both offers only Delete and the way to make it one kind.
+    document.getElementById('selOnlyRow').classList.toggle('hidden', !(nodes && links));
+    // Devices only or cables only, in the full editor: change all of them at once (js/bulk.js).
+    if (typeof renderBulkPanel === 'function') renderBulkPanel();
+    refreshSelectedNodeDiagnostics();   // which says to select one device
+    renderCanvasOnly();
+}
+
+function selectEntries(entries) { setSelectionEntries(entries); renderSelection(); }
+
+// Shift/Ctrl/Cmd-click: in or out of the set. A note or a leader cannot share
+// a set, so one selected before is let go (setSelectionEntries).
+function toggleSelected(type, id) {
+    const entries = [...state.selection];
+    const at = entries.findIndex((e) => e.type === type && e.id === id);
+    if (at >= 0) entries.splice(at, 1); else entries.push({ type, id });
+    selectEntries(entries);
+}
+
+// Ctrl+A: every device and every cable.
+function selectAll() {
+    selectEntries([...state.nodes.map((n) => ({ type: 'node', id: n.id })), ...state.links.map((l) => ({ type: 'link', id: l.id }))]);
+}
+
+// Narrow a mixed set to one kind.
+function selectOnly(type) { selectEntries(selectedOf(type).map((id) => ({ type, id }))); }
+
+// Undo, redo and a reverted read-only edit rebuild the model from a snapshot:
+// what was selected and is still there stays selected (as the new objects),
+// what is gone is dropped. Nothing else is kept from before.
+function pruneSelection() {
+    const alive = (e) => {
+        if (e.type === 'node') return !!getNode(e.id);
+        if (e.type === 'link') return !!getLink(e.id);
+        if (e.type === 'annotation') return !!getAnnotation(e.id);
+        if (e.type === 'notelink') {
+            const [, aid, tid] = String(e.id).split(':');
+            const a = getAnnotation(aid);
+            return !!(a && (a.targets || []).includes(tid) && noteLinkTarget(tid));
+        }
+        return false;
+    };
+    const kept = [...state.selection].filter(alive);
+    if (kept.length !== state.selection.size) state.selection = new Set(kept);
+}
+
+// Centre the map on a group of devices, zooming out only as far as it takes
+// to show them all (never in: the visitor chose this zoom). A network's
+// "Select members" lands here.
+function centreOnNodes(nodes) {
+    if (!nodes.length) return;
+    const rect = document.getElementById('networkCanvas').getBoundingClientRect();
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    nodes.forEach((n) => { minX = Math.min(minX, n.x); minY = Math.min(minY, n.y); maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y); });
+    const PAD = 120;
+    if (rect.width && rect.height) {
+        const fit = Math.min((rect.width - PAD) / ((maxX - minX) || 1), (rect.height - PAD) / ((maxY - minY) || 1));
+        state.camera.zoom = Math.max(0.2, Math.min(state.camera.zoom, fit));
+    }
+    state.camera.x = rect.width / 2 - ((minX + maxX) / 2) * state.camera.zoom;
+    state.camera.y = rect.height / 2 - ((minY + maxY) / 2) * state.camera.zoom;
+    applyCamera();
+}
+
 function select(id, type) {
-    state.selectedId = id; state.selectedType = type; state.linkSourceId = null;
+    setSelectionEntries(id ? [{ type, id }] : []); state.linkSourceId = null;
+    // The set has ended: what was typed into the bulk panel for it goes too.
+    if (typeof resetBulkDraft === 'function') resetBulkDraft();
+    document.getElementById('multiSelectionPane').classList.add('hidden');
     const pPane = document.getElementById('propertiesPane'), nPane = document.getElementById('noSelectionPane');
     const netProps = document.getElementById('nodeNetworkProps'), generalProps = document.getElementById('nodeGeneralProps'), linkProps = document.getElementById('linkProps');
     const nameInput = document.getElementById('propName'), jumpGwBtn = document.getElementById('jumpGwBtn');
 
     if (!id) { clearPropertyInputs(); pPane.classList.add('hidden'); nPane.classList.remove('hidden'); renderCanvasOnly(); return; }
     nPane.classList.add('hidden'); pPane.classList.remove('hidden');
+    // A device's tag and QR, or a cable's label (js/assets.js); a note has none.
+    document.getElementById('printLabelBtn').classList.toggle('hidden', type !== 'node' && type !== 'link');
+    if (type !== 'link') renderCableFields(null);
 
     if (type === 'node') {
         const node = getNode(id); if (!node) return;
@@ -1410,6 +1978,15 @@ function select(id, type) {
         if (document.getElementById('linkMediumProps')) document.getElementById('linkMediumProps').classList.add('hidden');
         document.getElementById('linkPortProps').classList.add('hidden');
         document.getElementById('propOs').value = node.os || ''; document.getElementById('propPorts').value = node.ports || '';
+        document.getElementById('propNotes').value = node.notes || '';
+        renderAssetFields(node);   // serial, asset tag, location, status (js/assets.js)
+        // Hints, not values: what a type default would have written is shown
+        // greyed out and stays out of the document (fieldHints in js/app.js).
+        // The gateway and DNS fields hold this device's own values, which
+        // override its network's (R7); left blank, the hint shows what it
+        // inherits and from which network.
+        refreshInheritance(node);
+        document.getElementById('propOs').placeholder = fieldHints(node).os;
 
         netProps.classList.remove('hidden');
         document.getElementById('propGw').value = node.gw || ''; document.getElementById('propDns').value = node.dns || '';
@@ -1420,24 +1997,15 @@ function select(id, type) {
             propNat.checked = !!node.nat;
             propNat.onchange = (e) => { node.nat = e.target.checked; save(); renderCanvasOnly(); renderNodeDiagnostics(node); };
         } else { natRow.classList.add('hidden'); }
-        // Netplan bridge toggle — on every node type, default off. Explicit
-        // user intent, so nothing is gated; the hint below just flags devices
-        // that usually run vendor firmware. See docs/netplan-bridge-design.md.
-        const netcfgCb = document.getElementById('propNetcfg');
-        netcfgCb.checked = !!node.netcfg;
-        document.getElementById('netcfgHint').classList.toggle('hidden', !NETCFG_ADVISORY.includes(node.type));
-        netcfgCb.onchange = (e) => { node.netcfg = e.target.checked; save(); refreshNetcfgLink(node); };
-        refreshNetcfgLink(node);
+        refreshNetcfgLink(node); // "Open in Netplan ↗", host types only
         renderSiteRef(node);
-        if (node.gw && node.gw.trim() !== '') {
+        if (effectiveGw(node)) {
             jumpGwBtn.classList.remove('hidden');
             jumpGwBtn.onclick = () => {
-                const gwIpStr = node.gw.trim(), targetNode = state.nodes.find((n) => getValidIps(n).some((ipData) => ipData.ip.toString() === gwIpStr));
+                const gwIpStr = effectiveGw(node), targetNode = state.nodes.find((n) => getValidIps(n).some((ipData) => ipData.ip.toString() === gwIpStr));
                 if (targetNode) {
-                    const rect = document.getElementById('networkCanvas').getBoundingClientRect();
-                    state.camera.x = (rect.width / 2) - targetNode.x * state.camera.zoom; state.camera.y = (rect.height / 2) - targetNode.y * state.camera.zoom;
-                    applyCamera(); select(targetNode.id, 'node');
-                } else { alert(`Gateway node (${gwIpStr}) not found in the topology.`); }
+                    focusOnMap({ type: 'node', id: targetNode.id });
+                } else { showToast(`Gateway node (${gwIpStr}) not found in the topology.`); }
             };
         } else { jumpGwBtn.classList.add('hidden'); }
         renderSidebarData(node);
@@ -1467,6 +2035,7 @@ function select(id, type) {
         } else { linkProps.classList.add('hidden'); }
 
         renderLinkPorts(link);
+        renderCableFields(link);   // label, length, colour, via (js/assets.js)
 
         const linkMediumProps = document.getElementById('linkMediumProps');
         linkMediumProps.classList.remove('hidden');

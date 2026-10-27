@@ -18,20 +18,23 @@ window.addEventListener('load', () => { setTimeout(async () => {
   setView('simple', false);
   ok('the reduced view engages', document.body.classList.contains('simple-mode'));
   ok('the setting persists', (JSON.parse(localStorage.getItem('nettopo_settings')) || {}).advanced === false);
-  // offsetParent, not computed display: the checkbox hides via its .cs-control-group parent.
-  ok('trace controls are hidden', document.getElementById('toggleTrace').offsetParent === null && gone('traceStatus'));
+  // offsetParent, not computed display: the controls hide with the Diagnostics tab that holds them.
+  ok('trace controls are hidden', document.getElementById('toggleTrace').offsetParent === null
+     && document.getElementById('traceStatus').offsetParent === null && gone('handyTrace'));
   ok('the Diagnostics tab is hidden', gone('diagTabBtn'));
   ok('the Blocks tab is hidden', getComputedStyle(document.querySelector('.lib-tab[data-tab="blocks"]')).display === 'none');
-  ok('the canvas filter is hidden', gone('canvasFilterBox'));
+  ok('the search box is hidden', gone('queryBar'));
   ok('IP configuration is hidden', gone('nodeNetworkProps'));
   ok('OS / ports are hidden', gone('osPortsRow'));
   ok('name and delete survive', !gone('propName') && !gone('deleteElementBtn'));
   ok('the document is untouched', JSON.stringify(state.nodes) === nodesBefore);
-  ok('the Notes field is gone for good (both modes)', !document.getElementById('propNotes'));
-  const advItems = document.querySelectorAll('#nodePalette .palette-adv');
+  // The full editor has a Notes field again (the field schema made notes an
+  // edited field, not only a printed one); the reduced views keep it hidden.
+  ok('the Notes field is hidden in the reduced view', gone('notesRow'));
+  const advItems = document.querySelectorAll('#nodePalette [data-adv]');
   ok('the palette is curated', advItems.length > 0 && [...advItems].every((b) => getComputedStyle(b).display === 'none'));
   // +2: the Text and Note annotation tools share the palette and stay in the reduced view.
-  ok('household devices remain', [...document.querySelectorAll('#nodePalette .palette-item:not(.palette-adv)')].length === paletteDefs.filter((d) => d.simple).length + 2);
+  ok('household devices remain', [...document.querySelectorAll('#nodePalette .palette-item:not([data-adv])')].length === paletteDefs.filter((d) => d.simple).length + 2);
   const diagBtn = document.getElementById('cnDiagBtn');
   ok('Sys. Status is hidden', !diagBtn || getComputedStyle(diagBtn).display === 'none');
   ok('zone bubbles are off the canvas', getComputedStyle(document.getElementById('layer-zones')).display === 'none');
@@ -41,7 +44,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
   // ---- Export trims to a reporter's needs ----
   ok('reduced export keeps Copy link and PNG', !gone('copyUrlBtn') && !gone('exportPngBtn'));
-  ok('reduced export drops the builder tools', gone('exportJsonBtn') && gone('importFileBtn') && gone('saveTemplateBtn') && gone('exportWebpBtn'));
+  ok('reduced export drops the builder tools', gone('exportJsonBtn') && gone('importFileBtn') && gone('saveTemplateBtn') && gone('exportWebpBtn') && gone('exportSvgBtn'));
 
   // ---- Plain words ----
   ok('Nodes reads Devices', /Devices/.test(document.querySelector('.lib-tab[data-tab="nodes"]').textContent));
@@ -124,56 +127,75 @@ window.addEventListener('load', () => { setTimeout(async () => {
   document.getElementById('modeSwitchBtn').click();
   const switchOptions = document.querySelectorAll('#modePickerList .mode-option');
   switchOptions[switchOptions.length - 1].click(); // Setup wizard
-  ok('picking Setup opens the device grid directly', document.getElementById('modePicker').classList.contains('hidden')
-      && !document.getElementById('setupWizard').classList.contains('hidden'));
-  closeSetupWizard();
+  const addOpen = () => !document.getElementById('addDevices').hidden;
+  ok('picking Setup opens the device grid directly', document.getElementById('modePicker').classList.contains('hidden') && addOpen());
+  closeAddDevices();
 
-  // ---- Setup wizard: no purpose question, straight to the devices ----
+  // ---- Setup (the Add devices intake): no purpose question, straight to the devices ----
   window.history.replaceState(null, '', '#setup');
   await load();
-  ok('#setup goes straight to the device grid', !document.getElementById('setupWizard').classList.contains('hidden')
+  ok('#setup goes straight to the device grid', addOpen()
       && document.getElementById('modePicker').classList.contains('hidden'));
-  closeSetupWizard();
+  ok('#setup keeps the advanced options folded away', !document.getElementById('addMore').open);
+  closeAddDevices();
   window.history.replaceState(null, '', '#setup-imagenology');
   await load();
   ok('#setup-imagenology opens the grid in the imagenology profile',
-     !document.getElementById('setupWizard').classList.contains('hidden') && state.settings.profile === 'imagenology' && !state.settings.advanced);
-  const setupRows = document.querySelectorAll('#setupRows .setup-count');
-  ok('one universal grid shows every device kind', setupRows.length === SETUP_ITEMS.length);
+     addOpen() && state.settings.profile === 'imagenology' && !state.settings.advanced);
+  const setupRows = document.querySelectorAll('#addRows .add-count');
+  ok('one universal grid shows every device kind', setupRows.length === ADD_KINDS.filter((k) => !k.addOnly).length);
   ok('every palette node is offered (router is the hub)', paletteDefs.every((d) =>
-      d.type === SETUP_HUB.type || SETUP_ITEMS.some((s) => s.type === d.type)));
-  ok('the most likely basic devices come first', SETUP_ITEMS[0].type === 'pc'
-      && SETUP_ITEMS.findIndex((d) => d.type === 'firewall') > SETUP_ITEMS.findIndex((d) => d.type === 'printer'));
-  const tile = document.querySelector('#setupRows .setup-tile');
-  ok('the checklist is a grid of device tiles with steppers below', getComputedStyle(document.getElementById('setupRows')).display === 'grid'
-      && !!tile.querySelector('svg') && !!tile.querySelector('.setup-dec')
-      && tile.querySelector('svg').getBoundingClientRect().top < tile.querySelector('.setup-dec').getBoundingClientRect().top);
-  document.querySelectorAll('#setupRows .setup-dec').forEach((b) => { b.click(); b.click(); b.click(); });
-  ok('zeroed tiles dim', [...document.querySelectorAll('#setupRows .setup-tile')].every((t) => t.classList.contains('off')));
-  document.querySelectorAll('#setupRows .setup-inc').forEach((b) => b.click());
-  ok('raising a count un-dims its tile', [...document.querySelectorAll('#setupRows .setup-tile')].every((t) => !t.classList.contains('off')));
-  document.querySelector('#setupRows .setup-inc').click(); // one more computer
-  const wanted = [...setupRows].reduce((s, el) => s + Number(el.textContent), 0);
-  document.getElementById('setupBuildBtn').click();
-  ok('the wizard closes on build', document.getElementById('setupWizard').classList.contains('hidden'));
+      d.type === ADD_HUB.type || ADD_KINDS.some((s) => s.type === d.type && !s.addOnly)));
+  ok('the most likely basic devices come first', ADD_KINDS[0].type === 'pc'
+      && ADD_KINDS.findIndex((d) => d.type === 'firewall') > ADD_KINDS.findIndex((d) => d.type === 'printer'));
+  const tile = document.querySelector('#addRows .setup-tile');
+  ok('the checklist is a grid of device tiles with steppers below', getComputedStyle(document.getElementById('addRows')).display === 'grid'
+      && !!tile.querySelector('svg') && !!tile.querySelector('.add-dec')
+      && tile.querySelector('svg').getBoundingClientRect().top < tile.querySelector('.add-dec').getBoundingClientRect().top);
+  document.querySelectorAll('#addRows .add-dec').forEach((b) => { b.click(); b.click(); b.click(); });
+  ok('zeroed tiles dim', [...document.querySelectorAll('#addRows .setup-tile')].every((t) => t.classList.contains('off')));
+  document.querySelectorAll('#addRows .add-inc').forEach((b) => b.click());
+  ok('raising a count un-dims its tile', [...document.querySelectorAll('#addRows .setup-tile')].every((t) => !t.classList.contains('off')));
+  // The count is typed now, and the cap of 9 is gone.
+  const pcCount = document.querySelector('#addRows .add-count[data-type="pc"]');
+  pcCount.value = '12'; pcCount.dispatchEvent(new Event('input'));
+  document.querySelector('#addRows .add-inc').click(); // one more computer: 13
+  ok('a count is typed and goes past 9', pcCount.value === '13');
+  pcCount.value = '5000'; pcCount.dispatchEvent(new Event('change'));
+  ok('but not past ADD_MAX', pcCount.value === String(ADD_MAX));
+  pcCount.value = '13'; pcCount.dispatchEvent(new Event('change'));
+  const wanted = [...setupRows].reduce((s, el) => s + Number(el.value), 0);
+  document.getElementById('addApplyBtn').click();
+  ok('the dialog closes on build', !addOpen());
   ok('the network built itself', state.nodes.length === wanted + 1, `${state.nodes.length} nodes for ${wanted} devices + hub`);
   const hub = state.nodes[0];
-  ok('everything hangs off the hub', state.links.length === wanted
-      && state.links.every((l) => l.source === hub.id || l.target === hub.id));
   ok('the hub router anchors the build', hub.name === 'Router' && hub.type === 'router');
-  ok('devices carry friendly numbered names', state.nodes.some((n) => /^Computer \d$/.test(n.name)));
+  // Switches are not leaves any more: the gear hangs off the router, the hosts off the first switch.
+  const firstSwitch = state.nodes.find((n) => n.type === 'switch');
+  const parentOf = (n) => { const l = state.links.find((x) => x.target === n.id); return l && l.source; };
+  ok('the switches, APs and routers-to-be hang off the router', state.nodes.filter((n) => n !== hub && ADD_INFRA.has(n.type)).every((n) => parentOf(n) === hub.id));
+  ok('and the hosts off the first switch', state.nodes.filter((n) => n !== hub && !ADD_INFRA.has(n.type)).every((n) => parentOf(n) === firstSwitch.id));
+  ok('every device has its cable', state.links.length === wanted);
+  ok('devices carry friendly numbered names', state.nodes.some((n) => /^Computer \d+$/.test(n.name)) && state.nodes.some((n) => n.name === 'Computer 13'));
   ok('devices inherited real addresses invisibly', state.nodes.filter((n) => n.id !== hub.id)
       .some((n) => (n.interfaces || []).some((i) => i.ip && i.ip.includes('/'))));
+  ok('no two devices share an address', (() => { const ips = state.nodes.flatMap((n) => (n.interfaces || []).map((i) => i.ip).filter(Boolean)); return new Set(ips).size === ips.length; })());
   ok('the build lands in the simple view — no IPs shown', !state.settings.advanced
       && document.body.classList.contains('simple-mode')
       && getComputedStyle(document.querySelector('.node-ip')).display === 'none');
-  // …even when the wizard was opened from the full editor via the picker.
+  // Only '#setup' switches the view: the same intake opened from the full
+  // editor (the mode picker, the landing) builds there and stays there.
   setView('simple', true);
   document.getElementById('modeSwitchBtn').click();
   const opts = document.querySelectorAll('#modePickerList .mode-option');
   opts[opts.length - 1].click(); // Setup wizard
-  document.getElementById('setupBuildBtn').click();
-  ok('building from full mode still lands in simple', !state.settings.advanced && document.body.classList.contains('simple-mode'));
+  document.getElementById('addApplyBtn').click();
+  ok('building from full mode stays in the full editor', state.settings.advanced === true && !document.body.classList.contains('simple-mode')
+      && state.nodes.length === 6);
+  ok('and names its devices in its own vocabulary', state.nodes.some((n) => n.name === 'Workstation 1') && state.nodes.some((n) => n.name === 'Printer'));
+  ok('with no gateway or DNS copied onto them', state.nodes.filter((n) => n.type !== 'router').every((n) => !n.gw && !n.dns));
+  ok('the network they are on is declared, with the router as its gateway',
+     state.networks.length === 1 && state.networks[0].gateway === getValidIps(state.nodes[0])[0].ip.toString());
 
   // ---- i18n: the reporter path speaks es / pt-BR / ja ----
   state.settings.lang = 'es'; saveSettings(); setLocale('es'); applyLocale();
@@ -186,13 +208,15 @@ window.addEventListener('load', () => { setTimeout(async () => {
   closeModePicker();
   window.history.replaceState(null, '', '#setup');
   await load();
-  ok('Spanish: the wizard tiles translate', document.querySelector('#setupRows .setup-tile span').textContent === 'Computadoras / laptops');
-  document.getElementById('setupBuildBtn').click();
+  ok('Spanish: the tiles translate', document.querySelector('#addRows .setup-tile .st-label').textContent === 'Computadoras / laptops');
+  ok('Spanish: the dialog translates', document.getElementById('addTitle').textContent === '¿Qué tienes?'
+      && document.querySelector('#addMore summary').textContent === 'Más opciones');
+  document.getElementById('addApplyBtn').click();
   ok('Spanish: built devices carry Spanish names', state.nodes.some((n) => /^Computadora \d$/.test(n.name)));
   state.settings.lang = 'ja'; saveSettings(); setLocale('ja'); applyLocale();
   window.history.replaceState(null, '', '#setup');
   await load();
-  document.getElementById('setupBuildBtn').click();
+  document.getElementById('addApplyBtn').click();
   ok('Japanese: computers are named PC, not コンピューター', state.nodes.some((n) => /^PC \d$/.test(n.name))
       && state.nodes.every((n) => !/コンピュータ/.test(n.name)));
   ok('Japanese: the html lang attribute follows', document.documentElement.lang === 'ja');

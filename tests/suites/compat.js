@@ -21,17 +21,32 @@ window.addEventListener('load', () => {
   const webpOk = { toDataURL: (t) => `data:${t};base64,AAAA` };
   ok('a real webp export keeps .webp', encodeCanvas(webpOk, 'webp').ext === 'webp', encodeCanvas(webpOk, 'webp').ext);
 
-  // ---- Saving a template survives storage that throws (Safari private mode) ----
-  ok('a normal template write succeeds', persistUserTemplates({ probe: 1 }) === true);
+  // ---- Saving survives storage that throws (Safari private mode, a full quota) ----
+  // Saved templates are library cards now, so this is the library's one guarded
+  // write. A failure must come back as false, never as a throw, and it must
+  // raise the persistent storage banner, because with autosave there is often
+  // nobody waiting on the return value.
+  // This is the localStorage fallback's write — the store a browser without
+  // usable IndexedDB keeps the library in. Where this browser gave the library
+  // IndexedDB, the page is put on the fallback for the rest of the suite
+  // (tests/suites/store.js covers IndexedDB refusing a write).
+  CarinoLibrary.releaseLibraryStore();
+  const heldLib = localStorage.getItem(CarinoLibrary.LIBRARY_KEY);
+  const banner = () => !document.getElementById('storageBanner').classList.contains('hidden');
+  ok('a normal library write succeeds', CarinoLibrary.persistLibrary({}) === true);
+  ok('and no storage banner is up', !banner());
 
   const origSet = Storage.prototype.setItem;
   Storage.prototype.setItem = () => { throw new Error('QuotaExceeded / private mode'); };
   let threw = false, res;
-  try { res = persistUserTemplates({ probe: 1 }); } catch (e) { threw = true; }
+  try { res = CarinoLibrary.persistLibrary({ probe: {} }); } catch (e) { threw = true; }
   Storage.prototype.setItem = origSet; // restore BEFORE asserting, so a failure can't wedge later suites
 
   ok('a throwing setItem is swallowed, not propagated', !threw);
   ok('and reported as a failed write so the caller can warn', res === false);
+  ok('the storage banner goes up and stays up', banner());
+  ok('the next write that gets through takes it down', CarinoLibrary.persistLibrary({}) === true && !banner());
+  if (heldLib === null) localStorage.removeItem(CarinoLibrary.LIBRARY_KEY); else localStorage.setItem(CarinoLibrary.LIBRARY_KEY, heldLib);
 
   // ---- Every SVG label sets an explicit font-family ----
   // The export rasterizes the SVG WITHOUT the page's CSS, so any text left to

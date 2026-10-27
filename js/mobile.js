@@ -6,7 +6,7 @@
    [data-ws-toggle]). This file adds the two things that are
    Topo's own:
 
-     1. the navbar's action cluster (Trace / Undo / Export / …)
+     1. the navbar's action cluster (Undo / Export / …)
         folds into a section at the top of that drawer, and
      2. a floating "handy" bar of the five things a phone needs
         mid-edit, whose ☰ is the drawer's toggle.
@@ -54,10 +54,10 @@
 
     // Floating "handy" bar, bottom-center, mobile only — the same pattern as
     // quote.carino.systems. It replaces the old navbar ☰: the five things a
-    // phone actually needs mid-edit (drawer, trace, undo, redo, clear) ride in
+    // phone actually needs mid-edit (drawer, trace, undo, redo, report) ride in
     // one thumb-reach pill instead of hiding behind the drawer. Every button
     // delegates to the REAL control (`.click()` / checkbox toggle), so behavior
-    // — including Clear's confirm() and disabled Undo/Redo — stays identical.
+    // — including the report's guard and disabled Undo/Redo — stays identical.
     function buildHandyBar() {
         if (document.getElementById('handyBar')) return;
         var bar = document.createElement('div');
@@ -90,16 +90,20 @@
         menuBtn.setAttribute('data-ws-toggle', '');
         menuBtn.setAttribute('aria-expanded', ws && ws.classList.contains('drawer-open') ? 'true' : 'false');
 
-        var traceBox = document.getElementById('toggleTrace');
+        // Trace lives in the node's Diagnostics tab now, with its state in
+        // state.settings; this button goes through the same setTraceMode() as
+        // the tab and the T key, and app.js announces every change
+        // ('topo:tracechange') so the button stays lit whichever way it moved.
+        // data-adv: the reduced views have no trace, so it goes with them.
         var traceBtn = btn('handyTrace', '🔍', 'Toggle trace', function () {
-            if (!traceBox) return;
-            traceBox.checked = !traceBox.checked;
-            traceBox.dispatchEvent(new Event('change'));
+            if (typeof window.setTraceMode === 'function') window.setTraceMode(!state.settings.traceMode);
         });
+        traceBtn.setAttribute('data-adv', '');
         function syncTrace() {
-            if (traceBox) traceBtn.classList.toggle('active', traceBox.checked);
+            // `state` is js/state.js's top-level const: in scope here, not on window.
+            traceBtn.classList.toggle('active', typeof state !== 'undefined' && !!state.settings.traceMode);
         }
-        if (traceBox) traceBox.addEventListener('change', syncTrace);
+        document.addEventListener('topo:tracechange', syncTrace);
         syncTrace();
 
         div();
@@ -122,9 +126,13 @@
 
         div();
 
-        btn('handyClear', '🗑', 'Clear canvas', function () {
-            var real = document.getElementById('clearCanvasBtn');
-            if (real) real.click(); // keeps the confirm() guard
+        // The fifth slot was Clear. It went with the toolbar's Clear (now New
+        // network, in the File menu, behind a confirm): one thumb-tap from
+        // emptying the canvas was the wrong thing to keep within reach, and the
+        // report is what a phone in the field is most often opened for.
+        btn('handyReport', '📋', 'Site report', function () {
+            var real = document.getElementById('reportBtn');
+            if (real) real.click(); // keeps the "nothing to report yet" guard
         });
 
         document.body.appendChild(bar);

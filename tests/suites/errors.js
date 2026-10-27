@@ -2,8 +2,13 @@ window.addEventListener('load', () => { setTimeout(() => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
 
-  loadTemplateState(templatesData.errors); autoBindLinks(); renderCanvasOnly();
-  const alerts = [...document.querySelectorAll('#conflictMsgList li')].map(li => li.textContent);
+  loadDocState(templatesData.errors); autoBindLinks(); renderCanvasOnly();
+  // Each line as the panel shows it, under its group's check name: the
+  // header carries "IP Conflict" or "L2 loop", the line under it does not
+  // repeat it.
+  const panelLines = () => [...document.querySelectorAll('#conflictMsgList .ca-line')]
+    .map(b => `${b.closest('.ca-group').querySelector('.ca-check').textContent}: ${b.textContent}`);
+  const alerts = panelLines();
   const has = (re) => alerts.some(a => re.test(a));
 
   ok('MAC flapping demonstrated', has(/MAC flapping/i), alerts.find(a => /MAC flapping/i.test(a))?.slice(0, 72));
@@ -32,15 +37,15 @@ window.addEventListener('load', () => { setTimeout(() => {
   out.push(`  total alerts raised: ${alerts.length}`);
   alerts.forEach(a => out.push('    • ' + a.slice(0, 104)));
 
-  // Block form must produce the same lesson on a clean canvas.
-  state.nodes = []; state.links = [];
-  stampSnippet('errors');
-  const blockAlerts = [...document.querySelectorAll('#conflictMsgList li')].map(li => li.textContent);
-  ok('block form raises the same errors as the template', blockAlerts.length === alerts.length, `block=${blockAlerts.length} template=${alerts.length}`);
-  ok('block form keeps the Wi-Fi-on-eth0 binding', blockAlerts.some(a => /carries the Wi-Fi link/i.test(a)));
+  // Common Errors was a block too, the same six faults in both menus (R8):
+  // it is a template only now.
+  ok('Common Errors is a template, not also a block', !SNIPPETS.errors && !SNIPPET_META.some(m => m.key === 'errors')
+     && TEMPLATE_META.some(m => m.key === 'errors' && !m.example));
 
   // Stamping twice must not collide ids.
-  stampSnippet('errors');
+  state.nodes = []; state.links = [];
+  insertBlock(builtinBlock('dmz'));
+  insertBlock(builtinBlock('dmz'));
   ok('stamping twice does not collide node ids', new Set(state.nodes.map(n => n.id)).size === state.nodes.length, `${state.nodes.length} nodes`);
   ok('stamping twice does not collide link ids', new Set(state.links.map(l => l.id)).size === state.links.length, `${state.links.length} links`);
 

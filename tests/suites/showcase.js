@@ -1,7 +1,7 @@
 window.addEventListener('load', () => { setTimeout(() => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
-  loadTemplateState(templatesData.showcase); autoBindLinks(); renderCanvasOnly();
+  loadDocState(templatesData.showcase); autoBindLinks(); renderCanvasOnly();
 
   const media = new Set(state.links.map(l => effectiveMedium(l)));
   ok('showcase demonstrates all 5 media', ['utp','fiber','wireless','powerline','vpn'].every(m => media.has(m)), [...media].join(', '));
@@ -40,7 +40,7 @@ window.addEventListener('load', () => { setTimeout(() => {
   const missing = paletteDefs.map(p => p.type).filter(t => !types.has(t));
   ok('still covers every node type', missing.length === 0, missing.join(',') || 'all present');
 
-  const alerts = [...document.querySelectorAll('#conflictMsgList li')].map(li => li.textContent);
+  const alerts = [...document.querySelectorAll('#conflictMsgList .ca-line')].map(li => li.textContent);
   ok('the showcase itself is clean', alerts.length === 0, alerts.slice(0,3).join(' | '));
   ok('no node is badged', state.nodes.filter(n => nodeSeverity(n)).length === 0,
      state.nodes.filter(n => nodeSeverity(n)).map(n => n.name + ':' + nodeSeverity(n)).join(', '));
@@ -57,7 +57,7 @@ window.addEventListener('load', () => { setTimeout(() => {
   ok('the bond reads healthy', evaluateBond(nas).level === 'good', evaluateBond(nas).text.slice(0, 60));
   // Same two NICs, same subnet, unbonded: the contrast the template is making.
   ok('while the unbonded PACS in Common Errors still flaps', (() => {
-    loadTemplateState(templatesData.errors); autoBindLinks();
+    loadDocState(templatesData.errors); autoBindLinks();
     return state.nodes.some(n => evaluateMultiHoming(n).level === 'bad');
   })());
 

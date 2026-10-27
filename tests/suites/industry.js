@@ -1,7 +1,7 @@
 // Extracted from the scratchpad HTML this suite was first authored in.
 window.addEventListener('load',()=>{ setTimeout(()=>{
   const out=[]; const ok=(n,c,e)=>out.push(`${c?'PASS':'FAIL'} :: ${n}${e?' :: '+e:''}`);
-  const load=(k)=>{ loadTemplateState(templatesData[k]); autoBindLinks(); renderCanvasOnly(); };
+  const load=(k)=>{ loadDocState(templatesData[k]); autoBindLinks(); renderCanvasOnly(); };
 
   load('imaging');
   ok('imaging: archive link is fibre', effectiveMedium(getLink('im13'))==='fiber');

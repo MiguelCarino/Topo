@@ -13,6 +13,7 @@ window.addEventListener('load', () => {
     const tpl = templatesData[key];
     state.nodes = tpl.nodes.map(normalizeLoadedNode);
     state.links = tpl.links.map(normalizeLoadedLink);
+    state.networks = normalizeNetworks(tpl.networks);   // gateway and DNS live on the networks (R7)
     autoBindLinks();
     return tpl;
   }
@@ -28,6 +29,12 @@ window.addEventListener('load', () => {
     load(k);
     const bad = state.nodes.filter((n) => nodeSeverity(n) === 'bad');
     ok(`${k} loads clean`, bad.length === 0, bad.map((n) => n.name).join(', '));
+    // The panel and the report now carry gateway and DNS reachability too, so
+    // "clean" covers them: the replica at site B reaches its gateway and its
+    // resolver on Node A over the tunnel, and the VM reaches its gateway
+    // through the host.
+    const findings = topologyFindings();
+    ok(`${k} raises no finding at all`, findings.length === 0, findings.map((f) => f.line.slice(0, 70)).join(' | '));
   });
 
   // ---- 3: the WAN is a leaf, not the root ----
@@ -48,9 +55,11 @@ window.addEventListener('load', () => {
   // the plan exists to avoid.
   KEYS.forEach((k) => {
     load(k);
-    const publicDns = state.nodes.filter((n) => n.dns && /^(8\.8\.|1\.1\.1\.1|9\.9\.9\.9)/.test(n.dns.trim()));
+    // effectiveDns: what each device uses, its own or its network's.
+    const publicDns = state.nodes.filter((n) => /^(8\.8\.|1\.1\.1\.1|9\.9\.9\.9)/.test(effectiveDns(n)));
     ok(`${k} resolves locally`, publicDns.length === 0,
-       publicDns.map((n) => `${n.name}=${n.dns}`).join(', '));
+       publicDns.map((n) => `${n.name}=${effectiveDns(n)}`).join(', '));
+    ok(`${k} still names a resolver for its clients`, state.nodes.some((n) => !isRoutingDevice(n.type) && n.type !== 'cloud' && effectiveDns(n)));
   });
 
   // ---- 5: each tier buys what its blurb says ----

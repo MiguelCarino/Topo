@@ -41,6 +41,8 @@
     <!-- /carino:head -->
     <!-- Vendored, not CDN — see vendor/README.md. MIT, keeping its own licence. -->
     <script src="vendor/ipaddr-2.1.0.min.js"></script>
+    <!-- QR codes for Print labels (js/assets.js), drawn here, never fetched. -->
+    <script src="vendor/qrcode-generator-1.4.4.min.js"></script>
     <link rel="stylesheet" href="carino-ui.css">
     <link rel="stylesheet" href="fonts/carino-fonts.css">
     <link rel="stylesheet" href="css/app.css">
@@ -58,56 +60,54 @@
 
     <!-- The editor's controls. carino-navbar.js moves this node into the
          navbar (data-carino-actions); below 900px js/mobile.js folds it into
-         the top of the rail's drawer. Every output sits in the one Export menu. -->
+         the top of the rail's drawer. Every output sits in the one File menu. -->
     <div class="topo-actions" data-carino-actions>
-            <div class="cs-control-group">
-                <label class="cs-trace-lbl" title="Trace reachable network paths from the selected node">
-                    <input type="checkbox" id="toggleTrace" />
-                    Trace
-                </label>
-                <div class="cs-hdiv"></div>
-                <label class="cs-trace-lbl" title="Filter the trace by a port. Off = IP reachability only — the port stays typed in, just ignored.">
-                    <input type="checkbox" id="tracePortToggle" />
-                    Port
-                </label>
-                <input type="text" id="tracePort" placeholder="443" class="cs-trace-port" title="Port to test when the Port filter is on">
-            </div>
-
-            <span id="traceStatus" class="cs-trace-status">Trace off</span>
-
-            <div class="cs-vdiv" id="traceDivider"></div>
-
+            <!-- Trace used to open this bar (a checkbox, a port filter and its
+                 status line). It is about one device, so it lives in that
+                 device's Diagnostics tab now; T still toggles it from anywhere. -->
             <button id="undoBtn" class="cs-btn" title="Nothing to undo" disabled>↶ Undo</button>
             <button id="redoBtn" class="cs-btn" title="Nothing to redo" disabled>↷ Redo</button>
 
             <div class="cs-vdiv"></div>
 
-            <button id="tidyBtn" class="cs-btn" data-i18n-title title="Auto-arrange the topology into tiers">⤢ Tidy</button>
+            <button id="tidyBtn" class="cs-btn" data-i18n-title title="Arrange the map by switch, 12 to a row. With two or more devices selected, only those.">⤢ Tidy</button>
 
             <!-- One menu for every get-data-in/out action, so the bar stays lean.
+                 Called File (plan R3): it opens, keeps and starts networks as
+                 well as exporting them, and its Open a file… is the landing's.
                  Items keep their original ids, so their handlers wire up unchanged.
                  carino-ui.js opens and closes it (the hidden attribute). -->
             <div class="cs-menu" data-priority="1">
-                <button id="exportMenuBtn" class="cs-btn" aria-haspopup="true" aria-expanded="false" data-i18n-title title="Share, export & import builds">⤓ Export <span class="cs-caret">▾</span></button>
+                <button id="exportMenuBtn" class="cs-btn" aria-haspopup="true" aria-expanded="false" data-i18n-title title="Share, export & import builds">📁 File <span class="cs-caret">▾</span></button>
                 <div id="exportMenu" class="cs-menu-panel" role="menu" aria-labelledby="exportMenuBtn" hidden>
+                    <!-- Was the toolbar's Clear, which emptied the canvas but kept the
+                         saved card, the notes, the report header and the undo history.
+                         A new network is a new document (newNetwork in js/app.js). -->
+                    <button id="newNetworkBtn" class="cs-menu-item" role="menuitem" data-i18n>✚ New network</button>
                     <button id="myNetworksBtn" class="cs-menu-item" role="menuitem">🗂️ My networks <span class="cs-menu-note">saved here</span></button>
-                    <button id="saveNetworkBtn" class="cs-menu-item" role="menuitem">💾 Save this network</button>
-                    <div class="cs-menu-div"></div>
+                    <!-- Only while the network is not kept: a kept one saves itself
+                         (autosave, js/library.js), and the bar on the canvas says so. -->
+                    <button id="saveNetworkBtn" class="cs-menu-item" role="menuitem">💾 Keep this network</button>
+                    <div class="cs-menu-div" data-adv></div>
                     <button id="reportBtn" class="cs-menu-item" role="menuitem">📋 Site report <span class="cs-menu-note">printable</span></button>
-                    <div class="cs-menu-div"></div>
+                    <div class="cs-menu-div" data-adv></div>
                     <button id="copyUrlBtn" class="cs-menu-item" role="menuitem">🔗 Copy link <span class="cs-menu-note">short URL</span></button>
-                    <div class="cs-menu-div"></div>
+                    <div class="cs-menu-div" data-adv></div>
                     <button id="exportPngBtn" class="cs-menu-item" role="menuitem">🖼️ PNG image</button>
-                    <button id="exportWebpBtn" class="cs-menu-item" role="menuitem" data-i18n>🖼️ WEBP image</button>
-                    <button id="exportJsonBtn" class="cs-menu-item" role="menuitem">📄 Build file <span class="cs-menu-note">.nettopo</span></button>
-                    <div class="cs-menu-div"></div>
-                    <button id="importFileBtn" class="cs-menu-item" role="menuitem" data-i18n>📂 Import build…</button>
-                    <button id="saveTemplateBtn" class="cs-menu-item" role="menuitem">📐 Save as template <span class="cs-menu-note">reusable</span></button>
+                    <button id="exportWebpBtn" data-adv class="cs-menu-item" role="menuitem" data-i18n>🖼️ WEBP image</button>
+                    <!-- The same drawing as a vector file (js/app.js, canvasSvgFile). -->
+                    <button id="exportSvgBtn" data-adv class="cs-menu-item" role="menuitem">🖼️ SVG image <span class="cs-menu-note">vector</span></button>
+                    <button id="exportJsonBtn" data-adv class="cs-menu-item" role="menuitem">📄 Back up this network <span class="cs-menu-note">.nettopo</span></button>
+                    <!-- Devices, interfaces, cables and findings as CSV / TSV, and a
+                         sheet imported back with a column mapping and a review
+                         (js/csv.js). The full editor's: a register's tool. -->
+                    <button id="csvMenuBtn" data-adv class="cs-menu-item" role="menuitem">📊 Spreadsheet <span class="cs-menu-note">CSV · TSV</span></button>
+                    <div class="cs-menu-div" data-adv></div>
+                    <button id="importFileBtn" data-adv class="cs-menu-item" role="menuitem" data-i18n>📂 Open a file…</button>
+                    <button id="saveTemplateBtn" data-adv class="cs-menu-item" role="menuitem">📐 Save as template <span class="cs-menu-note">reusable</span></button>
                 </div>
                 <input type="file" id="importFileInput" accept=".json,.nettopo,application/json" hidden>
             </div>
-
-            <button id="clearCanvasBtn" data-i18n class="cs-btn">Clear</button>
 
             <div class="cs-vdiv"></div>
             <button id="helpBtn" class="cs-btn" data-i18n-title data-i18n-aria-label title="How to use — mouse & keyboard (press ?)" aria-label="Help">?</button>
@@ -122,47 +122,163 @@
         <aside class="ws-rail topo-rail">
 
             <div class="lib-tabs" id="libraryTabs" role="tablist">
-                <button data-tab="nodes" class="lib-tab" role="tab">Nodes <span class="lib-key">1</span></button>
-                <button data-tab="templates" class="lib-tab" role="tab">Networks <span class="lib-key">2</span></button>
-                <button data-tab="blocks" class="lib-tab" role="tab">Blocks <span class="lib-key">3</span></button>
+                <button data-tab="nodes" class="lib-tab" role="tab">Nodes <span class="lib-key" data-adv>1</span></button>
+                <button data-tab="templates" class="lib-tab" role="tab">Templates <span class="lib-key" data-adv>2</span></button>
+                <button data-tab="blocks" class="lib-tab" role="tab" data-adv>Blocks <span class="lib-key" data-adv>3</span></button>
             </div>
 
             <div class="rail-lib">
                 <div id="tabPanel-nodes" class="lib-panel">
                     <div class="palette-grid" id="nodePalette"></div>
+                    <!-- Many at once (js/add.js): kinds × counts, a name pattern,
+                         onto the selected switch or AP's next free ports. -->
+                    <button id="addDevicesBtn" type="button" class="btn add-devices-btn" data-i18n>＋ Add devices…</button>
                     <button id="modeSwitchBtn" data-i18n class="mode-switch">Something missing? Try another mode</button>
                 </div>
 
                 <div id="tabPanel-templates" class="lib-panel hidden">
                     <p data-i18n class="rail-note">A whole network. Replaces the canvas.</p>
                     <div id="templateList" class="lib-list"></div>
+                    <!-- Everything that is not a real starting point (TEMPLATE_META's
+                         `example` rows, js/data.js): collapsed, so the list a person
+                         chooses from is short, and nothing is lost. -->
+                    <details id="exampleTemplates" class="rail-subsec tpl-examples">
+                        <summary id="exampleTemplatesSummary" class="rail-sub">Examples</summary>
+                        <div id="exampleTemplateList" class="lib-list"></div>
+                    </details>
                     <div id="userTemplateSection" class="hidden rail-subsec">
-                        <h3 class="rail-sub" data-i18n>My networks</h3>
+                        <!-- Templates are library cards flagged as such (js/library.js);
+                             this used to be a second store, also titled "My networks". -->
+                        <h3 class="rail-sub" data-i18n>My templates</h3>
                         <div id="userTemplateList" class="lib-list"></div>
                     </div>
                 </div>
 
+                <!-- Blocks are saved selections (js/add.js): inserted beside what
+                     is there, re-addressed into the next free network. The tab
+                     name is the full editor's vocabulary; its sentences are
+                     translated. -->
                 <div id="tabPanel-blocks" class="lib-panel hidden">
-                    <p class="rail-note">A reusable piece. Stamps onto what you already have.</p>
+                    <p class="rail-note" data-i18n>A saved selection. It goes in beside what you have, moved to the next free subnet.</p>
+                    <button id="saveBlockBtn" type="button" class="btn add-devices-btn" data-i18n>Save the selection as a block</button>
+                    <div id="userBlockSection" class="hidden rail-subsec">
+                        <h3 class="rail-sub" data-i18n>My blocks</h3>
+                        <div id="userBlockList" class="lib-list"></div>
+                    </div>
                     <div id="blockList" class="lib-list"></div>
                 </div>
             </div>
 
             <div class="rail-props">
-                <!-- Global canvas filter — independent of what's selected, so it sits above the tabs. -->
-                <div class="rail-filter" id="canvasFilterBox">
-                    <h2 class="rail-title" data-i18n>Filter canvas</h2>
-                    <input type="text" id="canvasFilter" data-i18n-placeholder placeholder="Search by name or IP..." class="input" />
-                </div>
-
                 <!-- Configuration is the primary tab; Node Diagnostics is secondary. -->
                 <div class="cfg-tabs" role="tablist" data-i18n-aria-label aria-label="Selection panel">
                     <button id="configTabBtn" class="cfg-tab" data-cfgtab="config" role="tab" aria-selected="true" data-i18n>Configuration</button>
-                    <button id="diagTabBtn" class="cfg-tab" data-cfgtab="diagnostics" role="tab" aria-selected="false" data-i18n>Diagnostics</button>
+                    <button id="diagTabBtn" data-adv class="cfg-tab" data-cfgtab="diagnostics" role="tab" aria-selected="false" data-i18n>Diagnostics</button>
+                    <!-- The declared networks (R7). Called Subnets because the
+                         library's tab of whole saved networks is already
+                         "Networks". Technical vocabulary: English, no data-i18n. -->
+                    <button id="netTabBtn" data-adv class="cfg-tab" data-cfgtab="networks" role="tab" aria-selected="false">Subnets</button>
+                    <!-- The findings of the whole map (js/diagnostics.js, "The
+                         Findings tab"), docked here instead of floating over
+                         the canvas. A plain word, so translated; the count is
+                         the open findings, accepted ones left out. -->
+                    <button id="findTabBtn" data-adv class="cfg-tab" data-cfgtab="findings" role="tab" aria-selected="false"><span data-i18n>Findings</span> <span id="findTabCount" class="cfg-count hidden"></span></button>
                 </div>
 
                 <div id="cfgPanel-config" class="cfg-panel">
                 <div id="noSelectionPane" data-i18n class="rail-empty">Select a node or link to configure.</div>
+
+                <!-- Several devices and/or cables selected (renderSelection,
+                     js/ui.js): their counts and what applies to all of them.
+                     A mixed set offers only Delete and a way to make it one
+                     kind (plan 3.1). Plain language, so translated. -->
+                <div id="multiSelectionPane" class="hidden sel-multi">
+                    <h2 class="rail-title" data-i18n>Selected</h2>
+                    <dl id="selCounts" class="sel-counts"></dl>
+                    <div id="selOnlyRow" class="sel-only hidden">
+                        <button id="selOnlyNodesBtn" type="button" class="rail-btn" data-i18n>Select only devices</button>
+                        <button id="selOnlyLinksBtn" type="button" class="rail-btn" data-i18n>Select only cables</button>
+                    </div>
+                    <p class="rail-note" data-i18n>Shift-click adds or removes one. Esc clears the selection.</p>
+                    <!-- The bulk panel (plan 3.4, js/bulk.js): two or more
+                         devices and no cables (or two or more cables and no
+                         devices: Set fields only), full editor only. Each action
+                         is previewed (the changes and the findings delta)
+                         before it is applied as one undo step. Field labels
+                         are technical vocabulary and stay English; the
+                         sentences are translated. -->
+                    <div id="bulkPanel" class="bulk hidden" data-adv>
+                        <h3 class="bulk-title" data-i18n>Change all of them</h3>
+                        <div id="bulkTabs" class="tabbar bulk-tabs" role="tablist">
+                            <button type="button" class="tabbtn active" data-bulk="set" role="tab" aria-selected="true" data-i18n>Set fields</button>
+                            <button type="button" class="tabbtn" data-bulk="rename" role="tab" aria-selected="false" data-i18n>Rename</button>
+                            <button type="button" class="tabbtn" data-bulk="move" role="tab" aria-selected="false" data-i18n>Move</button>
+                            <button type="button" class="tabbtn" data-bulk="recable" role="tab" aria-selected="false" data-i18n>Re-cable</button>
+                        </div>
+                        <div id="bulkPane-set" class="bulk-pane">
+                            <p class="rail-note" data-i18n>A field that says "mixed" differs between them. A field left blank, or as it is, is not changed.</p>
+                            <div id="bulkFields" class="bulk-fields"></div>
+                        </div>
+                        <div id="bulkPane-rename" class="bulk-pane hidden">
+                            <div class="bulk-field">
+                                <label for="bulkPattern" class="prop-lbl" data-i18n>New name</label>
+                                <input type="text" id="bulkPattern" class="input bulk-in mono" autocomplete="off" spellcheck="false" placeholder="CAM-{n:02}" />
+                            </div>
+                            <div class="bulk-field">
+                                <label for="bulkFind" class="prop-lbl" data-i18n>Find (optional)</label>
+                                <input type="text" id="bulkFind" class="input bulk-in" autocomplete="off" spellcheck="false" />
+                            </div>
+                            <div class="bulk-pair">
+                                <div class="bulk-field">
+                                    <label for="bulkOrder" class="prop-lbl" data-i18n>Count in order of</label>
+                                    <select id="bulkOrder" class="select bulk-in">
+                                        <option value="name" data-i18n>Name</option>
+                                        <option value="port" data-i18n>Switch port</option>
+                                        <option value="position" data-i18n>Place on the map</option>
+                                    </select>
+                                </div>
+                                <div class="bulk-field bulk-start">
+                                    <label for="bulkStart" class="prop-lbl" data-i18n>Start at</label>
+                                    <input type="number" id="bulkStart" class="input bulk-in mono" min="0" step="1" value="1" />
+                                </div>
+                            </div>
+                            <p class="rail-note" data-i18n>{n} counts up, {n:02} pads it to two digits, {name} is the current name. With Find filled, only that text in each name is replaced.</p>
+                        </div>
+                        <div id="bulkPane-move" class="bulk-pane hidden">
+                            <div class="bulk-field">
+                                <label for="bulkNet" class="prop-lbl">Subnet</label>
+                                <select id="bulkNet" class="select bulk-in"></select>
+                            </div>
+                            <p id="bulkNoNets" class="rail-note hidden" data-i18n>No subnet is declared yet. Declare one on the Subnets tab first.</p>
+                            <p class="rail-note" data-i18n>Each one takes the next free address there, and its gateway and DNS come from the subnet.</p>
+                        </div>
+                        <div id="bulkPane-recable" class="bulk-pane hidden">
+                            <div class="bulk-field">
+                                <label for="bulkSwitch" class="prop-lbl">Switch / AP</label>
+                                <select id="bulkSwitch" class="select bulk-in"></select>
+                            </div>
+                            <p id="bulkNoSwitches" class="rail-note hidden" data-i18n>There is no switch or access point on the map to move them to.</p>
+                            <div class="bulk-pair">
+                                <div class="bulk-field">
+                                    <label for="bulkRecableOrder" class="prop-lbl" data-i18n>Count in order of</label>
+                                    <select id="bulkRecableOrder" class="select bulk-in">
+                                        <option value="port" data-i18n>Switch port</option>
+                                        <option value="name" data-i18n>Name</option>
+                                        <option value="position" data-i18n>Place on the map</option>
+                                    </select>
+                                </div>
+                                <div class="bulk-field bulk-start">
+                                    <label for="bulkFrom" class="prop-lbl" data-i18n>From port</label>
+                                    <input type="text" id="bulkFrom" class="input bulk-in mono" autocomplete="off" spellcheck="false" placeholder="1" />
+                                </div>
+                            </div>
+                            <p class="rail-note" data-i18n>Each one's cable moves to the next free port there. The device keeps its address: Move gives it one on another subnet.</p>
+                        </div>
+                        <button id="bulkPreviewBtn" type="button" class="btn btn-primary bulk-go" data-i18n>Preview</button>
+                    </div>
+                    <button id="printLabelsBtn" type="button" class="rail-btn" data-adv data-i18n>Print labels</button>
+                    <button id="deleteSelectionBtn" type="button" class="rail-btn danger" data-i18n>Delete Selected</button>
+                </div>
 
                 <div id="propertiesPane" class="hidden">
                     <div>
@@ -170,7 +286,7 @@
                         <input type="text" id="propName" class="input prop-name" />
                     </div>
 
-                    <div id="linkProps" class="hidden prop-sec">
+                    <div id="linkProps" data-adv class="hidden prop-sec">
                         <label class="prop-lbl accent">VM Attachment Type</label>
                         <select id="propAttachment" class="select">
                             <option value="bridged">Bridged (Routed by Host)</option>
@@ -179,7 +295,7 @@
                         <p class="rail-note">Passthrough bypasses the host OS, connecting the VM directly to the physical switch logic.</p>
                     </div>
 
-                    <div id="linkPortProps" class="hidden prop-sec">
+                    <div id="linkPortProps" data-adv class="hidden prop-sec">
                         <label class="prop-lbl accent">Plugged Into</label>
                         <div id="linkPortBody" class="port-ends"></div>
                         <p class="rail-note">Pick the interface this link uses on each end. Occupied ports are marked — you can still pick one, and the node will flag the conflict.</p>
@@ -196,13 +312,13 @@
                         </select>
                     </div>
 
-                    <div id="nodeNetworkProps" class="prop-stack">
+                    <div id="nodeNetworkProps" data-adv class="prop-stack">
                         <div>
                             <div class="prop-headrow">
                                 <label class="prop-lbl">Interfaces (Port & IP)</label>
                                 <div class="prop-links">
-                                    <button id="bondIfaceBtn" class="link-btn hidden" title="Fold every wired NIC into one bond: one MAC, one address">⇄ Bond NICs</button>
-                                    <button id="addMacBtn" class="link-btn quiet" title="Show the hardware address under each interface — paste one and it is decoded">+ MAC</button>
+                                    <button id="bondIfaceBtn" class="link-btn hidden" data-i18n-title title="Fold every wired NIC into one bond: one MAC, one address">⇄ Bond NICs</button>
+                                    <button id="addMacBtn" class="link-btn quiet" data-i18n-title title="Show the hardware address under each interface — paste one and it is decoded">+ MAC</button>
                                     <button id="addIfaceBtn" class="link-btn">+ Add Interface</button>
                                 </div>
                             </div>
@@ -220,34 +336,32 @@
                                 <input type="text" id="propDns" placeholder="8.8.8.8" class="input mono" />
                             </div>
                             <div class="span2">
+                                <!-- Which network a blank gateway / DNS comes from
+                                     (refreshInheritance, js/ui.js). -->
+                                <p id="inheritNote" class="rail-note hidden"></p>
                                 <button id="jumpGwBtn" class="rail-btn hidden">⏭️ Jump to Gateway</button>
                             </div>
                         </div>
-                        <label id="natRow" class="hidden prop-check" title="NAT hides this device's private (inside) subnets from the WAN side — only the gateway itself is reachable from outside.">
+                        <label id="natRow" class="hidden prop-check" data-i18n-title title="NAT hides this device's private (inside) subnets from the WAN side — only the gateway itself is reachable from outside.">
                             <input type="checkbox" id="propNat">
                             <span class="prop-lbl">NAT / Masquerade</span>
                         </label>
 
-                        <!-- Netplan bridge: one stored boolean; the link itself is derived
-                             from the fields above at click time. docs/netplan-bridge-design.md -->
-                        <div class="prop-sec">
-                            <label class="prop-check" title="This host keeps a network config file (netplan / systemd-networkd / NetworkManager). Opens the generator pre-filled from this node — review the guessed fields before applying anything.">
-                                <input type="checkbox" id="propNetcfg">
-                                <span class="prop-lbl">Network config file</span>
-                            </label>
-                            <p id="netcfgHint" class="hidden rail-note">These usually run vendor firmware, not netplan.</p>
-                            <a id="openNetcfgBtn" target="_blank" rel="noopener" class="hidden rail-btn">⚙️ Open config → netplan.carino.systems</a>
-                        </div>
+                        <!-- Netplan hand-off: an action, not a stored setting. It used to be
+                             a per-node "Network config file" checkbox (netcfg) that revealed
+                             this link; now the link is simply offered on the host types,
+                             derived from the fields above. docs/netplan-bridge-design.md -->
+                        <a id="openNetcfgBtn" target="_blank" rel="noopener" class="hidden rail-btn" data-i18n-title title="Opens netplan.carino.systems pre-filled from this device (netplan / systemd-networkd / NetworkManager). Review the guessed fields before applying anything.">⚙️ Open in Netplan ↗</a>
 
                         <!-- Inter-site link. A cloud is already this codebase's
                              "something outside this drawing", and naming one after
                              another building was the existing workaround; this makes
                              the claim structured so the estate report can draw it.
-                             English labels with no data-i18n, matching the netcfg
-                             block and natRow — advanced sidebar vocabulary stays
+                             English labels with no data-i18n, matching the Netplan
+                             action and natRow — advanced sidebar vocabulary stays
                              untranslated on purpose (js/i18n.js). -->
                         <div id="siteRefBlock" class="hidden prop-sec">
-                            <label class="prop-lbl" title="Say that this cloud stands for another network in your binder, so the estate report can draw the link between them.">Stands for another site</label>
+                            <label class="prop-lbl" data-i18n-title title="Say that this cloud stands for another network in your binder, so the estate report can draw the link between them.">Stands for another site</label>
                             <select id="propSiteRef" class="select"></select>
                             <p id="siteRefHint" class="hidden rail-note"></p>
                             <button id="openSiteRefBtn" type="button" class="hidden rail-btn"></button>
@@ -255,26 +369,121 @@
                     </div>
 
                     <div id="nodeGeneralProps" class="prop-sec">
-                        <div class="prop-grid" id="osPortsRow">
+                        <div class="prop-grid" id="osPortsRow" data-adv>
+                            <div class="span2">
+                                <label class="prop-lbl" for="propPorts" data-i18n-title title="Blank = All ports open">Allowed Ports</label>
+                                <input type="text" id="propPorts" placeholder="80, 443" class="input mono" />
+                            </div>
+                        </div>
+                        <!-- The Asset group (plan section 4, js/assets.js): what a
+                             register holds about the box rather than its
+                             addressing. Collapsible, its open state remembered in
+                             this browser; full editor only, like the notes were
+                             (the reduced views drop it, tests/suites/simple.js).
+                             "Model / firmware" is the old OS field relabelled and
+                             stays English with the other technical labels; the
+                             plain words (Serial number, Location, Status…) are
+                             translated. -->
+                        <details id="assetGroup" class="asset-group" data-adv open>
+                            <summary class="asset-sum"><span data-i18n>Asset</span><span id="assetSummary" class="asset-sum-note"></span></summary>
+                            <div class="prop-grid">
+                                <div class="span2">
+                                    <label class="prop-lbl" for="propOs">Model / firmware</label>
+                                    <input type="text" id="propOs" list="osDatalist" class="input" />
+                                    <datalist id="osDatalist"></datalist>
+                                </div>
+                                <div>
+                                    <label class="prop-lbl" for="propSerial" data-i18n>Serial number</label>
+                                    <input type="text" id="propSerial" class="input mono" maxlength="64" autocomplete="off" spellcheck="false" />
+                                </div>
+                                <div>
+                                    <label class="prop-lbl" for="propAssetTag" data-i18n>Asset tag</label>
+                                    <input type="text" id="propAssetTag" class="input mono" maxlength="64" autocomplete="off" spellcheck="false" placeholder="CS-0042" />
+                                </div>
+                                <div>
+                                    <label class="prop-lbl" for="propLocation" data-i18n>Location</label>
+                                    <input type="text" id="propLocation" class="input" data-i18n-placeholder placeholder="Room · rack · U" />
+                                </div>
+                                <div>
+                                    <label class="prop-lbl" for="propStatus" data-i18n>Status</label>
+                                    <select id="propStatus" class="select">
+                                        <option value="">—</option>
+                                        <option value="planned" data-i18n>Planned</option>
+                                        <option value="active" data-i18n>Active</option>
+                                        <option value="retired" data-i18n>Retired</option>
+                                    </select>
+                                </div>
+                                <p id="statusNote" class="rail-note span2 hidden" data-i18n>Retired: dimmed on the map, and off the network for the checks and the trace.</p>
+                            </div>
+                            <div id="notesRow" data-adv class="prop-notes">
+                                <label class="prop-lbl" for="propNotes" data-i18n>Notes</label>
+                                <textarea id="propNotes" rows="2" class="textarea" data-i18n-placeholder placeholder="Where it is, who looks after it, anything the next person should know"></textarea>
+                                <!-- The notes lint (notesSecretHits, js/assets.js):
+                                     a password typed here would travel in every
+                                     link, file and report. -->
+                                <p id="notesLint" class="rail-note notes-lint hidden" role="status"></p>
+                            </div>
+                        </details>
+                    </div>
+
+                    <!-- A cable's own facts (link.cable, js/assets.js): the label
+                         on both ends of the run, its length and colour, and what it
+                         runs through. Full editor only. -->
+                    <div id="linkCableProps" data-adv class="hidden prop-sec">
+                        <div class="prop-grid">
                             <div>
-                                <label class="prop-lbl">OS / Firmware</label>
-                                <input type="text" id="propOs" list="osDatalist" class="input" />
-                                <datalist id="osDatalist"></datalist>
+                                <label class="prop-lbl" for="propCableLabel" data-i18n>Cable label</label>
+                                <input type="text" id="propCableLabel" class="input mono" maxlength="64" autocomplete="off" spellcheck="false" placeholder="WS-3B" />
                             </div>
                             <div>
-                                <label class="prop-lbl" title="Blank = All ports open">Allowed Ports</label>
-                                <input type="text" id="propPorts" placeholder="80, 443" class="input mono" />
+                                <label class="prop-lbl" for="propCableLength" data-i18n>Length</label>
+                                <input type="text" id="propCableLength" class="input" autocomplete="off" placeholder="3 m" />
+                            </div>
+                            <div>
+                                <label class="prop-lbl" for="propCableColor" data-i18n>Colour</label>
+                                <input type="text" id="propCableColor" class="input" autocomplete="off" />
+                            </div>
+                            <div>
+                                <label class="prop-lbl" for="propCableVia" data-i18n data-i18n-title title="What the run passes through: patch panel ports, wall jacks">Via</label>
+                                <input type="text" id="propCableVia" class="input mono" autocomplete="off" spellcheck="false" placeholder="PP-A:12 > WJ-3B" />
                             </div>
                         </div>
                     </div>
 
                     <div class="prop-foot">
+                        <!-- Tag + QR for a device, the label for a cable
+                             (printAssetLabels, js/assets.js). -->
+                        <button id="printLabelBtn" type="button" data-adv class="rail-btn" data-i18n>Print label</button>
                         <button id="deleteElementBtn" data-i18n class="rail-btn danger">Delete Selected</button>
                     </div>
                 </div>
                 </div>
 
-                <div id="cfgPanel-diagnostics" class="cfg-panel hidden">
+                <div id="cfgPanel-diagnostics" data-adv class="cfg-panel hidden">
+                    <!-- Trace: everything the selected device can reach, optionally
+                         only what answers on a port. The controls mirror
+                         state.settings (traceMode, tracePort, tracePortOn) and are
+                         never read back: js/diagnostics.js reads the settings.
+                         English labels, like the rest of this tab's technical
+                         vocabulary (js/i18n.js). Ticking it with nothing selected
+                         picks a start device, so it is shown before the selection
+                         empty state rather than inside the node's panel. -->
+                    <div id="traceBox" class="trace-box prop-sec">
+                        <div class="prop-headrow">
+                            <label class="prop-check" data-i18n-title title="Trace reachable network paths from the selected node">
+                                <input type="checkbox" id="toggleTrace">
+                                <span class="prop-lbl accent">Trace</span>
+                            </label>
+                            <span id="traceStatus" class="cs-trace-status">Trace off</span>
+                        </div>
+                        <div class="trace-port-row">
+                            <label class="prop-check" data-i18n-title title="Filter the trace by a port. Off = IP reachability only — the port stays typed in, just ignored.">
+                                <input type="checkbox" id="tracePortToggle">
+                                <span class="prop-lbl">Port filter</span>
+                            </label>
+                            <input type="text" id="tracePort" placeholder="443" class="input mono trace-port" autocomplete="off" spellcheck="false" data-i18n-title title="Port to test when the Port filter is on">
+                        </div>
+                    </div>
                     <div id="diagNoSelection" class="rail-empty" data-i18n>Select a node to see its diagnostics.</div>
                     <div id="nodeDiagnosticsPanel" class="hidden">
                         <div class="prop-headrow">
@@ -283,6 +492,37 @@
                         </div>
                         <div id="nodeDiagnosticsBody" class="diag-list"></div>
                     </div>
+                </div>
+
+                <!-- The declared networks (doc.networks, R7): one card each with
+                     its size, use and next free address, its gateway and DNS
+                     (which every member without its own inherits), Renumber
+                     and the zone. Built by js/networks.js. -->
+                <div id="cfgPanel-networks" data-adv class="cfg-panel hidden">
+                    <div class="prop-headrow net-toolbar">
+                        <label class="prop-check" data-i18n-title title="Draw each subnet's zone on the canvas. Off hides them all; each subnet can also be set to always or never draw.">
+                            <input type="checkbox" id="subnetZonesToggle">
+                            <span class="prop-lbl">Subnet zones</span>
+                        </label>
+                        <button id="addNetworkBtn" type="button" class="link-btn" data-i18n>+ Subnet</button>
+                    </div>
+                    <div id="networkList" class="net-list"></div>
+                    <div id="undeclaredBox" class="net-undeclared hidden"></div>
+                </div>
+
+                <!-- Grouped by check; a line selects and centres what it is
+                     about (click again for the next one). Accept… keeps a
+                     finding as known, with a reason, stored in the document:
+                     it moves to Accepted and stops counting. Check names are
+                     technical vocabulary; the sentences are translated. -->
+                <div id="cfgPanel-findings" data-adv class="cfg-panel hidden">
+                    <p id="findingsEmpty" class="rail-empty hidden" data-i18n>No findings: every check passes on the map as drawn.</p>
+                    <ul id="conflictMsgList" class="ca-list"></ul>
+                    <details id="acceptedBox" class="rail-subsec accepted-box hidden">
+                        <summary id="acceptedSummary" class="rail-sub">Accepted</summary>
+                        <p class="rail-note" data-i18n>Known and kept on purpose. They no longer count, and the report lists them with their reason.</p>
+                        <ul id="acceptedList" class="ca-list"></ul>
+                    </details>
                 </div>
             </div>
 
@@ -295,6 +535,30 @@
         </aside>
 
         <main class="ws-pane topo-canvas grid-bg" id="canvasContainer">
+            <!-- A document whose schema version is newer than this build's opens
+                 read-only (replaceDocument in js/app.js): saving it through this
+                 serializer would drop whatever the newer build added. -->
+            <div id="readOnlyBanner" class="alert warn topo-readonly hidden" role="status">
+                <b data-i18n>Read-only</b> <span data-i18n>This network was made by a newer version of Topo. You can look at it, report on it and export it as it is, but changes are not kept.</span>
+            </div>
+            <!-- Where this network stands: kept (and saving itself) or not.
+                 A demo, a template or a link someone sent is not kept until
+                 the visitor says so — autosaving those would fill the library
+                 with copies of the example, or keep a client's network in
+                 this browser without asking (renderDocBar, js/library.js). -->
+            <div id="docBar" class="topo-docbar hidden" role="status" aria-live="polite">
+                <button id="docBarName" type="button" class="docbar-name" data-i18n-title title="Rename"></button>
+                <span id="docBarStatus" class="docbar-status"></span>
+                <button id="docBarKeep" type="button" class="cs-btn primary docbar-keep" data-i18n>Keep this network</button>
+            </div>
+            <!-- A kept network that could not be written (storage full, or
+                 blocked): stays up until a write succeeds, because the toast
+                 that once said so in the console was never read. -->
+            <div id="storageBanner" class="alert err topo-storage hidden" role="alert">
+                <span><b data-i18n>Not saved</b> <span data-i18n>This browser's storage is full or blocked. Back up now so nothing is lost.</span></span>
+                <button id="storageBackupBtn" type="button" class="cs-btn" data-i18n>Back up now</button>
+                <button id="storageBackupAllBtn" type="button" class="cs-btn hidden" data-i18n>Back up all</button>
+            </div>
             <div class="zoom-ctl">
                 <button id="zoomInBtn" data-i18n-title title="Zoom in">➕</button>
                 <button id="zoomResetBtn" class="zoom-reset" data-i18n-title title="Reset zoom">1:1</button>
@@ -303,31 +567,74 @@
             
             <svg id="networkCanvas" class="topo-svg" xmlns="http://www.w3.org/2000/svg">
                 <g id="workspace">
-                    <g id="layer-zones"></g>
+                    <g id="layer-zones" data-adv></g>
                     <g id="layer-links"></g>
                     <g id="layer-nodes"></g>
                     <g id="layer-annotations"></g>
                 </g>
             </svg>
-            </main>
 
-            <!-- Stays click-through so it never blocks the canvas beneath it; only the
-                 dismiss button and the scrollable list take pointer events. -->
-            <div id="conflictAlert" class="hidden">
-                <div class="ca-wrap">
-                    <span class="ca-icon">⚠️</span>
-                    <div class="ca-main">
-                        <div class="ca-head">
-                            <h4 data-i18n>Validation alerts</h4>
-                            <button id="conflictHideBtn" data-i18n-title title="Hide validation alerts">✕</button>
-                        </div>
-                        <ul id="conflictMsgList"></ul>
+            <!-- Map | Table (plan 3.2, js/table.js). The table lies over the
+                 map rather than replacing it, so the map keeps its size and a
+                 row clicked in the table is centred on it for when the map
+                 comes back. Full editor only: the reduced views are drawings.
+                 Map and Table are plain words, so translated; the tabs and
+                 columns that name technical things (Interfaces, Subnets,
+                 Gateway…) stay English, like the rest of the full editor. -->
+            <div class="topo-topbar" data-adv>
+            <div id="viewSwitch" class="view-switch" role="group" data-adv data-i18n-aria-label aria-label="Map or table">
+                <button type="button" class="toggle-btn active" data-view="map" aria-pressed="true" data-i18n>Map</button>
+                <button type="button" class="toggle-btn" data-view="table" aria-pressed="false" data-i18n>Table</button>
+            </div>
+            <!-- The search box (plan 3.3, js/query.js), shared by the map and
+                 the table, so it sits beside the switch rather than in either.
+                 It replaced the rail's "Filter canvas". The prefixes it
+                 understands (type:, ip:, vlan:…) are syntax and stay English;
+                 the sentences around them are translated. -->
+            <div id="queryBar" class="topo-query" role="search" data-adv>
+                <input type="search" id="queryInput" class="input" autocomplete="off" spellcheck="false"
+                    data-i18n-placeholder placeholder="Search, e.g. type:camera"
+                    data-i18n-aria-label aria-label="Search the map and table"
+                    data-i18n-title title="Plain words match any field. Narrow with name:, type:, ip: (an address or a network such as 10.0.0.0/24), mac:, vlan:, switch: and has:finding. Put - in front of a word to leave it out. Enter frames the matches on the map.">
+                <button id="queryClearBtn" type="button" class="q-clear hidden" data-i18n-title title="Clear the search" data-i18n-aria-label aria-label="Clear the search">✕</button>
+            </div>
+            <!-- Only while a search is on. A card of its own, so on a phone it
+                 wraps under the switch and the box instead of squeezing them. -->
+            <div id="queryTools" class="topo-qtools" data-adv>
+                <span id="queryCount" class="q-count" aria-live="polite"></span>
+                <button id="queryZoomBtn" type="button" class="cs-btn q-btn" data-i18n>Zoom to matches</button>
+                <button id="querySelectBtn" type="button" class="cs-btn q-btn" data-i18n-title title="Select every device that matches (on the Cables tab, every cable)" data-i18n>Select matches</button>
+            </div>
+            <p id="queryError" class="q-error hidden" role="status" data-adv></p>
+            </div>
+            <section id="tableView" class="topo-table hidden" data-adv data-i18n-aria-label aria-label="Table">
+                <div class="tv-head">
+                    <div class="tabbar tv-tabs" role="tablist">
+                        <button type="button" class="tabbtn" role="tab" data-tvtab="devices" data-i18n>Devices</button>
+                        <button type="button" class="tabbtn" role="tab" data-tvtab="interfaces">Interfaces</button>
+                        <button type="button" class="tabbtn" role="tab" data-tvtab="cables" data-i18n>Cables</button>
+                        <button type="button" class="tabbtn" role="tab" data-tvtab="ports">Ports</button>
+                        <button type="button" class="tabbtn" role="tab" data-tvtab="subnets">Subnets</button>
+                    </div>
+                    <div class="tv-bar">
+                        <span id="tvCount" class="tv-count"></span>
+                        <button id="tvPasteBtn" type="button" class="cs-btn" data-i18n-title title="Paste a list of values into one column, one per row, with a preview first" data-i18n>Paste a column…</button>
                     </div>
                 </div>
-            </div>
+                <p class="tv-hint" data-i18n>Click a row to find it on the map. Enter or a double click edits a cell, Esc cancels. Ctrl+V pastes a list down a column.</p>
+                <div id="tvScroll" class="tv-scroll">
+                    <table id="tvGrid" class="data tv-grid"></table>
+                    <p id="tvEmpty" class="tv-empty hidden">Nothing here yet.</p>
+                </div>
+            </section>
+            </main>
 
-            <!-- Collapsed form: hiding the panel should not hide that problems exist. -->
-            <button id="conflictPill" class="hidden" data-i18n-title title="Show validation alerts">
+            <div id="topoToast" class="toast warn" role="status" aria-live="polite"></div>
+
+            <!-- The open findings, counted on the map; a click opens the rail's
+                 Findings tab (on a phone, the drawer with it). The list itself
+                 used to float here and covered the devices it named. -->
+            <button id="conflictPill" data-adv class="hidden" data-i18n-title title="Open the Findings tab">
                 ⚠️ <span id="conflictPillCount">0</span>
             </button>
 
@@ -403,7 +710,7 @@
                             <rect x="30" y="26" width="16" height="11" rx="2" />
                         </svg>
                         <h2 data-i18n>Start a new network</h2>
-                        <p><span data-i18n>A blank canvas that has its own link from the first device.</span><br><span data-i18n>Or drop a</span> <code>.nettopo</code> <span data-i18n>build file, or a whole binder, here.</span></p>
+                        <p><span data-i18n>A blank canvas that saves itself in this browser from the first device.</span><br><span data-i18n>Or drop a</span> <code>.nettopo</code> <span data-i18n>build file, or a whole binder, here.</span></p>
                         <div class="landing-drop-actions">
                             <button class="landing-drop-btn primary" id="landingNewBtn" data-i18n>✚ New network</button>
                             <button class="landing-drop-btn" id="landingOpenFileBtn" data-i18n>📂 Open a file</button>
@@ -416,7 +723,7 @@
                         <div class="landing-chips-lbl" data-i18n>First time here? Start from something that already exists.</div>
                         <div class="landing-chips-row">
                             <button class="landing-chip" id="landingExampleBtn" data-i18n>Open the example</button>
-                            <button class="landing-chip accent" id="landingWizardBtn" data-i18n>Set up from a count</button>
+                            <button class="landing-chip accent" id="landingAddBtn" data-i18n>Add devices</button>
                         </div>
                         <div class="landing-chips-note" id="landingEmpty" data-i18n>Networks you save are kept in this browser, and show up here.</div>
                     </div>
@@ -452,10 +759,16 @@
                             <div class="landing-section-actions">
                                 <button id="binderLinkBtn" class="landing-chip" data-i18n>🔗 Copy binder link</button>
                                 <button id="binderReportBtn" class="landing-chip" data-i18n>📋 Binder report</button>
-                                <button id="binderExportBtn" class="landing-chip" data-i18n>⤓ Export binder</button>
+                                <button id="binderExportBtn" class="landing-chip" data-i18n>⤓ Back up all</button>
                             </div>
                         </div>
                         <div id="landingCards" class="landing-cards"></div>
+                        <!-- Saved templates: cards like the networks above, in the
+                             same store and the same back-up file, kept apart
+                             because opening one edits the template itself, and
+                             Duplicate is how a new network starts from it. -->
+                        <h3 id="landingTemplatesHead" class="hidden landing-sub" data-i18n>Templates</h3>
+                        <div id="landingTemplateCards" class="landing-cards"></div>
                         <!-- Filled by binderStatus(). Says how long since the library
                              was last written to a file and how many networks have
                              changed since — the only form of "back this up" anyone
@@ -469,22 +782,43 @@
                             <span id="binderTargetName"></span>
                             <button id="binderRebindBtn" type="button" class="landing-linkish" data-i18n>change</button>
                         </p>
-                        <p id="landingFootnote" data-i18n class="landing-footnote">Saved networks live in this browser only — this is not an account, and clearing site data removes them. Export the binder for a copy that survives.</p>
+                        <p id="landingFootnote" data-i18n class="landing-footnote">Saved networks live in this browser only — this is not an account, and clearing site data removes them. Back up for a copy that survives.</p>
                     </div>
 
                 </div>
             </div>
 
-            <!-- Setup wizard (#setup / #setup-<profile>): count what you have,
-                 the network draws itself, then you land in the simple view to rename. -->
-            <div id="setupWizard" class="hidden modal-scrim topo-dlg">
-                <div class="modal topo-card">
-                    <h4 data-i18n class="dlg-title">What do you have?</h4>
-                    <p data-i18n class="dlg-blurb">Count what's in the building — the network draws itself. You can rename and adjust everything afterwards.</p>
-                    <div id="setupRows" class="setup-rows"></div>
-                    <div class="dlg-actions">
-                        <button id="setupCancelBtn" data-i18n class="cs-btn">Start empty</button>
-                        <button id="setupBuildBtn" data-i18n class="cs-btn">✨ Build my network</button>
+            <!-- Add devices (js/add.js): a tile per kind with a count, a name
+                 pattern and what to connect them to, previewed in a line or two
+                 and added as one undo step. The intake ('#setup', the landing,
+                 the mode picker's Setup wizard) is the same dialog building a
+                 new network around a router. Opened through CarinoUI.modal. -->
+            <div id="addDevices" class="modal-scrim" hidden>
+                <div class="modal topo-add" role="dialog" aria-modal="true" aria-labelledby="addTitle">
+                    <div class="modal-head">
+                        <h2 id="addTitle" class="modal-title">Add devices</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <p id="addBlurb" class="ask-msg paste-blurb"></p>
+                        <div id="addRows" class="setup-rows"></div>
+                        <details id="addMore" class="add-more">
+                            <summary data-i18n>More options</summary>
+                            <div class="field paste-field">
+                                <label for="addPattern" data-i18n>Name pattern</label>
+                                <input id="addPattern" class="input mono" autocomplete="off" spellcheck="false" placeholder="{type} {n}">
+                                <p class="add-hint" data-i18n>{n} counts up, {n:02} pads it to two digits, {type} is the kind of device. Numbering carries on after the names already on the map.</p>
+                            </div>
+                            <div id="addTargetField" class="field paste-field">
+                                <label for="addTarget" data-i18n>Connect to</label>
+                                <select id="addTarget" class="select"></select>
+                            </div>
+                        </details>
+                        <div id="addSummary" class="add-summary" role="status" aria-live="polite"></div>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" id="addCancelBtn" class="btn">Cancel</button>
+                        <button type="button" id="addApplyBtn" class="btn btn-primary">Add devices</button>
                     </div>
                 </div>
             </div>
@@ -499,6 +833,7 @@
                     <h4 id="reportDialogTitle" data-i18n class="dlg-title">Site report</h4>
                     <p id="reportDialogBlurb" data-i18n class="dlg-blurb">The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.</p>
                     <div id="reportFields" class="dlg-fields"></div>
+                    <div id="reportLint" class="alert warn hidden" role="status"></div>
                     <!-- Binder mode only. Two sibling spans rather than markup nested
                          inside one data-i18n element: applyStaticI18n sets textContent
                          and would eat any children. -->
@@ -530,6 +865,8 @@
                         <button id="shareNewPass" data-i18n data-i18n-title class="cs-btn" title="Make a new random passphrase">New</button>
                     </div>
                     <p id="shareHint" class="dlg-blurb"></p>
+                    <!-- Notes that look like they hold a password (js/assets.js). -->
+                    <div id="shareLint" class="alert warn hidden" role="status"></div>
                     <div id="shareResult" class="hidden dlg-result">
                         <p id="shareDone" class="dlg-blurb strong"></p>
                         <textarea id="shareLink" readonly rows="3" class="textarea share-link"></textarea>
@@ -559,6 +896,138 @@
                 </form>
             </div>
 
+            <!-- Every question the page asks (js/dialog.js): the native
+                 alert/confirm/prompt, in the page's own language and design.
+                 Opened through CarinoUI.modal, so it uses the [hidden]
+                 attribute rather than the .hidden class the older dialogs use. -->
+            <div id="topoAsk" class="modal-scrim" hidden>
+                <div class="modal topo-ask" role="dialog" aria-modal="true" aria-labelledby="topoAskTitle" aria-describedby="topoAskMsg">
+                    <div id="topoAskHead" class="modal-head"><h2 id="topoAskTitle" class="modal-title"></h2></div>
+                    <div class="modal-body">
+                        <p id="topoAskMsg" class="ask-msg"></p>
+                        <input id="topoAskInput" type="text" class="input" autocomplete="off" spellcheck="false" hidden>
+                    </div>
+                    <div id="topoAskFoot" class="modal-foot"></div>
+                </div>
+            </div>
+
+            <!-- Paste a column (js/table.js): a list pasted over the rows of one
+                 column, each value checked by the field schema, previewed with
+                 what the findings would become, and applied as one undo step.
+                 Opened through CarinoUI.modal, like #topoAsk. -->
+            <div id="pasteDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste" role="dialog" aria-modal="true" aria-labelledby="pasteTitle">
+                    <div class="modal-head">
+                        <h2 id="pasteTitle" class="modal-title" data-i18n>Paste a column</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="ask-msg paste-blurb" data-i18n>One value per line, in the order the rows are shown. A blank line leaves its row as it is.</p>
+                        <p id="pasteTarget" class="paste-target"></p>
+                        <div class="field paste-field">
+                            <label for="pasteColumn" data-i18n>Column</label>
+                            <select id="pasteColumn" class="select"></select>
+                        </div>
+                        <div class="field paste-field">
+                            <label for="pasteText" data-i18n>Values</label>
+                            <textarea id="pasteText" class="textarea mono" rows="5" autocomplete="off" spellcheck="false"></textarea>
+                        </div>
+                        <div id="pasteCounts" class="paste-counts" role="status" aria-live="polite"></div>
+                        <p id="pasteDelta" class="paste-delta"></p>
+                        <div id="pastePreviewWrap" class="paste-preview hidden">
+                            <table class="data"><tbody id="pastePreview"></tbody></table>
+                        </div>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" class="btn" data-close data-i18n>Cancel</button>
+                        <button type="button" id="pasteApplyBtn" class="btn btn-primary" data-i18n>Apply</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- The bulk panel's preview (js/bulk.js): what changes on which
+                 device, and what the findings would become. -->
+            <div id="bulkDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste" role="dialog" aria-modal="true" aria-labelledby="bulkTitle">
+                    <div class="modal-head">
+                        <h2 id="bulkTitle" class="modal-title"></h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <p id="bulkBlurb" class="ask-msg paste-blurb"></p>
+                        <div id="bulkCounts" class="paste-counts" role="status" aria-live="polite"></div>
+                        <div id="bulkMsgs" class="bulk-msgs hidden"></div>
+                        <p id="bulkDelta" class="paste-delta"></p>
+                        <div id="bulkPreviewWrap" class="paste-preview hidden">
+                            <table class="data"><tbody id="bulkPreview"></tbody></table>
+                        </div>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" class="btn" data-close data-i18n>Cancel</button>
+                        <button type="button" id="bulkApplyBtn" class="btn btn-primary">Apply</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Spreadsheets (js/csv.js): Export writes four CSV sheets or copies
+                 them as TSV; Import maps a pasted or opened sheet's columns, then
+                 shows what each row adds, changes or conflicts with before it is
+                 applied as one undo step. -->
+            <div id="csvDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-csv" role="dialog" aria-modal="true" aria-labelledby="csvTitle">
+                    <div class="modal-head">
+                        <h2 id="csvTitle" class="modal-title" data-i18n>Spreadsheet</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="csvTabs" class="tabbar csv-tabs" role="tablist">
+                            <button type="button" class="tabbtn active" data-csvtab="export" role="tab" aria-selected="true" data-i18n>Export</button>
+                            <button type="button" class="tabbtn" data-csvtab="import" role="tab" aria-selected="false" data-i18n>Import</button>
+                        </div>
+                        <div id="csvPane-export" class="csv-pane">
+                            <p class="ask-msg paste-blurb" data-i18n>Each sheet is a CSV file any spreadsheet opens (UTF-8, accents and all). Copy as TSV puts the same rows on the clipboard, to paste straight into an open sheet.</p>
+                            <div id="csvExportRows" class="csv-sheets"></div>
+                        </div>
+                        <div id="csvPane-import" class="csv-pane hidden">
+                            <div id="csvSource">
+                                <p class="ask-msg paste-blurb" data-i18n>Paste rows copied from a spreadsheet, or open a CSV file. Rows are matched to devices by id, MAC, IP or name; a row that matches none adds a device. Nothing changes until you apply it.</p>
+                                <p class="ask-msg paste-blurb" data-i18n>Or paste an ARP table or a DHCP lease list as a router, a switch, a server or a PC prints it, from any vendor: each address seen with its MAC becomes a row.</p>
+                                <div class="field paste-field">
+                                    <label for="csvText" data-i18n>Rows</label>
+                                    <textarea id="csvText" class="textarea mono" rows="5" autocomplete="off" spellcheck="false"></textarea>
+                                </div>
+                                <button type="button" id="csvFileBtn" class="btn csv-file-btn" data-i18n>Open a CSV file…</button>
+                                <input type="file" id="csvFileInput" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" hidden>
+                                <div id="csvMapWrap" class="csv-map-wrap hidden">
+                                    <div id="csvReadAs" class="csv-readas hidden" role="group" aria-labelledby="csvReadAsLbl">
+                                        <span id="csvReadAsLbl" class="prop-lbl" data-i18n>Read as</span>
+                                        <button type="button" class="toggle-btn" data-readas="sheet" aria-pressed="true" data-i18n>Spreadsheet rows</button>
+                                        <button type="button" class="toggle-btn" data-readas="seen" aria-pressed="false" data-i18n>Addresses seen (ARP, DHCP)</button>
+                                    </div>
+                                    <label class="check csv-headings"><input type="checkbox" id="csvHasHeadings"> <span data-i18n>First row is headings</span></label>
+                                    <p id="csvKind" class="paste-target"></p>
+                                    <div id="csvMap" class="csv-map"></div>
+                                </div>
+                            </div>
+                            <div id="csvReview" class="hidden">
+                                <div id="csvCounts" class="paste-counts" role="status" aria-live="polite"></div>
+                                <div id="csvMsgs" class="bulk-msgs hidden"></div>
+                                <p id="csvDelta" class="paste-delta"></p>
+                                <div id="csvPreviewWrap" class="paste-preview csv-preview hidden">
+                                    <table class="data"><tbody id="csvPreview"></tbody></table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" id="csvCloseBtn" class="btn" data-close data-i18n>Close</button>
+                        <button type="button" id="csvBackBtn" class="btn hidden" data-i18n>Back</button>
+                        <button type="button" id="csvReviewBtn" class="btn btn-primary hidden" data-i18n>Review</button>
+                        <button type="button" id="csvApplyBtn" class="btn btn-primary hidden" data-i18n>Apply</button>
+                    </div>
+                </div>
+            </div>
+
             <div id="shortcutHelp" class="hidden modal-scrim topo-dlg">
                 <div class="modal topo-card sm">
                     <div class="dlg-headrow">
@@ -578,9 +1047,18 @@
     <script src="js/data.js"></script>
     <script src="js/diagnostics.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/dialog.js"></script>
     <script src="js/report.js"></script>
     <script src="js/library.js"></script>
+    <script src="js/changes.js"></script>
     <script src="js/share.js"></script>
+    <script src="js/networks.js"></script>
+    <script src="js/table.js"></script>
+    <script src="js/query.js"></script>
+    <script src="js/bulk.js"></script>
+    <script src="js/add.js"></script>
+    <script src="js/csv.js"></script>
+    <script src="js/assets.js"></script>
     <script src="js/app.js"></script>
 <script src="carino-navbar.js" data-app="Topo" data-repo="Topo" defer></script>
 <script src="carino-ui.js" defer></script>

@@ -5,10 +5,9 @@
 // that the compressed form is actually smaller. Async because compression is.
 window.addEventListener('load', async () => {
   const out = [];
-  // keepGuestSites() can alert (nothing was kept), and a real dialog hangs a
-  // headless run outright rather than failing it.
-  const realAlert = window.alert, realConfirm = window.confirm, realPrompt = window.prompt;
-  window.alert = () => {}; window.confirm = () => true; window.prompt = () => null;
+  // Importing over a canvas asks first (js/dialog.js), and a question with
+  // nobody to answer it would wait forever: every question here is a yes.
+  const heldResponder = setDialogResponder((req) => (req.kind === 'prompt' ? null : req.kind === 'choice' ? (req.choices[0] || {}).id : true));
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
 
   // A real-ish diagram — big enough that compression clearly wins.
@@ -68,20 +67,24 @@ window.addEventListener('load', async () => {
   const reDoc = docFromImported(JSON.parse(JSON.stringify(payload)));
   ok('an exported build re-imports to the same node count', reDoc && reDoc.nodes.length === N, reDoc && String(reDoc.nodes.length));
 
-  // applyImportedDoc actually lands it on the canvas (empty first, so no confirm()).
+  // applyImportedDoc actually lands it on the canvas (empty first, so nothing to ask).
   state.nodes = []; state.links = [];
-  const took = applyImportedDoc(payload);
+  persistLibrary({});
+  const took = await applyImportedDoc(payload);
   ok('importing a build loads it onto an empty canvas', took === true && state.nodes.length === N, String(state.nodes.length));
+  ok('and keeps it, as a card of its own', !!state.libraryId && !!loadLibrary()[state.libraryId]
+     && loadLibrary()[state.libraryId].doc.nodes.length === N, String(state.libraryId));
   ok('the imported build keeps its NAT and port count', !!getNode('r') && getNode('r').nat === true && portCountOf(getNode('sw')) === 24);
+  state.libraryId = null;   // the binder section below counts cards from nothing
 
   // ---- The binder link ----
   // A third fragment format carrying many networks. The sharp edge is the
   // ordering in load(): a 'b~' hash reaching the document branch would be
   // atob()'d, throw, and quietly load the demo network — a failure that looks
   // exactly like a working app.
-  localStorage.removeItem(LIBRARY_KEY);
-  loadTemplateState(templatesData.hospital); autoBindLinks(); librarySave('Torre A');
-  loadTemplateState(templatesData.campus); autoBindLinks(); librarySave('Campus Norte');
+  persistLibrary({});
+  loadDocState(templatesData.hospital); autoBindLinks(); librarySave('Torre A');
+  loadDocState(templatesData.campus); autoBindLinks(); librarySave('Campus Norte');
   const binderJson = JSON.stringify(binderFile());
   const bFrag = await encodeBinderFragment(binderJson);
 
@@ -101,9 +104,9 @@ window.addEventListener('load', async () => {
      bFrag.length < summed, `${bFrag.length} vs ${summed}`);
 
   // Opening one: the shelf fills, the canvas is not touched, nothing is saved.
-  loadTemplateState(templatesData.errors); autoBindLinks();
+  loadDocState(templatesData.errors); autoBindLinks();
   const canvasBefore = JSON.stringify(serializeDoc());
-  const libBefore = localStorage.getItem(LIBRARY_KEY);
+  const libBefore = JSON.stringify(loadLibrary());
   window.history.replaceState(null, '', `#${bFrag}`);
   await load();
   ok('a binder link opens the landing, not a document',
@@ -111,7 +114,7 @@ window.addEventListener('load', async () => {
   ok('it fills the shelf with what was shared', guestSites().length === 2, String(guestSites().length));
   ok('and leaves the canvas exactly as it was', JSON.stringify(serializeDoc()) === canvasBefore);
   ok('nothing a stranger sent reached this browser\u2019s library',
-     localStorage.getItem(LIBRARY_KEY) === libBefore);
+     JSON.stringify(loadLibrary()) === libBefore);
 
   // The risk the ordering guards against, asserted directly.
   dismissGuestBinder();
@@ -129,7 +132,7 @@ window.addEventListener('load', async () => {
 
   // Keeping is the only way in, and it is the same merge the file drop uses.
   dismissGuestBinder();
-  localStorage.removeItem(LIBRARY_KEY);
+  persistLibrary({});
   window.history.replaceState(null, '', `#${bFrag}`);
   await load();
   // Guarded: keeping from an empty shelf would throw rather than fail, and a
@@ -157,11 +160,24 @@ window.addEventListener('load', async () => {
      Object.keys(loadLibrary()).length === 2 && guestSites().length === 0);
 
   dismissGuestBinder();
-  localStorage.removeItem(LIBRARY_KEY);
+  persistLibrary({});
   try { sessionStorage.removeItem(GUEST_BINDER_KEY); } catch (e) { /* private mode */ }
   window.history.replaceState(null, '', window.location.pathname + window.location.search);
 
-  window.alert = realAlert; window.confirm = realConfirm; window.prompt = realPrompt;
+  // ---- Id-less binder sites get ids from their content, not their position ----
+  // Keep stores a card under its shelf id, so a positional 'guest0' became a
+  // permanent library id that the next unrelated id-less binder minted again.
+  const idless = (name) => ({ name, doc: { nodes: [{ id: 'n', type: 'pc', name }], links: [] } });
+  const shelfA = withGuestIds([idless('Bodega Norte'), idless('Bodega Sur')]);
+  const shelfB = withGuestIds([idless('Clínica Este')]);
+  ok('two unrelated id-less binders do not mint the same id', shelfA[0].id !== shelfB[0].id,
+     `${shelfA[0].id} / ${shelfB[0].id}`);
+  ok('the same network mints the same id every time', withGuestIds([idless('Bodega Norte')])[0].id === shelfA[0].id);
+  ok('a site that brought its own id keeps it', withGuestIds([{ id: 'mine7', name: 'x', doc: { nodes: [] } }])[0].id === 'mine7');
+  const twice = withGuestIds([idless('Same'), idless('Same')]);
+  ok('the same network twice on one shelf still gets two cards', twice[0].id !== twice[1].id, twice.map((x) => x.id).join(','));
+
+  setDialogResponder(heldResponder);
 
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);

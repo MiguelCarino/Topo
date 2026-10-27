@@ -11,14 +11,18 @@ window.addEventListener('load', () => {
 
   // ---- One serializer, not two ----
   // templateSnapshot() used to keep its own shorter allowlist and silently drop
-  // portCount / socket bindings / nat. It is now just serializeDoc(), so the two
-  // are the same bytes by construction.
+  // portCount / socket bindings / nat. A saved template is now a library card
+  // whose doc IS serializeDoc() (librarySave in js/library.js), so the two are
+  // the same bytes by construction.
   state.nodes = [normalizeLoadedNode({ id: 'r', type: 'router', name: 'R', x: 0, y: 0, nat: true, portCount: undefined,
       interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.1/24' }] }),
     normalizeLoadedNode({ id: 'sw', type: 'switch', name: 'SW', x: 0, y: 100, portCount: 24, interfaces: [] })];
   state.links = [normalizeLoadedLink({ id: 'x', source: 'r', target: 'sw', sourceIface: 'i1', targetIface: 'p3' })];
-  ok('templateSnapshot() is exactly serializeDoc()',
-     JSON.stringify(templateSnapshot()) === JSON.stringify(serializeDoc()));
+  const heldLib = CarinoLibrary.loadLibrary();
+  const tplId = librarySave('Snapshot', null, { template: true });
+  ok('a saved template card holds exactly serializeDoc()',
+     !!tplId && JSON.stringify(CarinoLibrary.loadLibrary()[tplId].doc) === JSON.stringify(serializeDoc()));
+  CarinoLibrary.persistLibrary(heldLib);
   ok('the shared serializer keeps portCount and socket bindings',
      serializeDoc().nodes[1].portCount === 24 && serializeDoc().links[0].targetIface === 'p3');
 

@@ -1,6 +1,11 @@
 # Design note — Topology → netplan bridge (toggle + URL handoff)
 
-**Status:** approved design, not yet implemented.
+**Status:** implemented, then simplified (2026-10, R8 in the Topo plan): the
+per-node checkbox and its stored `netcfg` boolean are gone. "Open in Netplan ↗"
+is offered on the host types (`pc`, `server`, `vm`, `container`) and derives the
+intent from the node at click time exactly as §3.2 describes. Old documents that
+carry `netcfg: true` still open; the key is no longer written. §§1–3.1 below are
+the original design, kept for the reasoning.
 **Decision:** a per-node **toggle** plus a **cross-site URL handoff** to
 `netplan.carino.systems`. This supersedes the earlier draft's 19-type capability-tier
 map and the embedded-module option — both evaluated and rejected (see §7).

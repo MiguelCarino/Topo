@@ -10,14 +10,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const realAlert = window.alert, realConfirm = window.confirm, realPrompt = window.prompt;
   window.alert = () => {}; window.confirm = () => true; window.prompt = () => 'x';
 
-  const heldStore = localStorage.getItem(LIBRARY_KEY);
+  const heldStore = loadLibrary();
   const heldHash = window.location.hash;
-  localStorage.removeItem(LIBRARY_KEY);
+  persistLibrary({});
 
   // Three buildings. Two share a network on purpose, so the estate addressing
   // table has something only a multi-site document can find.
   const save2 = (name, key, report) => {
-    loadTemplateState(templatesData[key]); autoBindLinks();
+    loadDocState(templatesData[key]); autoBindLinks();
     state.report = report || null;
     return librarySave(name);
   };
@@ -30,7 +30,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // No shipped template raises an ADVISORY, so the register's severity ordering
   // had nothing to order. A bond of one member is the cheapest real one: it is a
   // NIC with extra steps, which the checks call an advisory rather than a fault.
-  loadTemplateState(templatesData.datacenter); autoBindLinks();
+  loadDocState(templatesData.datacenter); autoBindLinks();
   const bondHost = state.nodes.find((n) => (n.interfaces || []).length > 1) || state.nodes[0];
   bondHost.interfaces.push({ id: 'b1', name: 'bond0', ip: '10.77.0.9/24',
                              bond: { mode: '802.3ad', members: [bondHost.interfaces[0].id] } });
@@ -70,7 +70,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // A site's own numbers must be the numbers its own report would print — that
   // is the whole no-second-generator argument.
   const bodega = binder.sites.find((s) => s.name === 'Bodega Sur');
-  loadTemplateState(templatesData.errors); autoBindLinks();
+  loadDocState(templatesData.errors); autoBindLinks();
   const alone = reportModel();
   ok('a site inside the estate reports exactly what it reports on its own',
      bodega.counts.devices === alone.counts.devices && bodega.counts.critical === alone.counts.critical,
@@ -189,7 +189,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
      Number(line[1]) > Number(line[2]), `source edge y=${line[1]}, target edge y=${line[2]}`);
 
   // ---- The image sweep must not edit anything ----
-  loadTemplateState(templatesData.hospital); autoBindLinks(); save(); renderCanvasOnly(); initHistory();
+  loadDocState(templatesData.hospital); autoBindLinks(); save(); renderCanvasOnly(); initHistory();
   const before = { doc: JSON.stringify(serializeDoc()), hash: window.location.hash,
                    cam: JSON.stringify(state.camera), undo: document.getElementById('undoBtn').disabled };
   const sites = binderModel(libraryEntries(), {}).sites;
@@ -231,7 +231,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
      JSON.stringify(serializeDoc()) === doc0);
 
   // ---- Site references, drawn and stated ----
-  loadTemplateState(templatesData.campus); autoBindLinks();
+  loadDocState(templatesData.campus); autoBindLinks();
   const cloud = state.nodes.find((n) => n.type === 'cloud') || spawnNode('cloud');
   cloud.siteRef = { id: idErr, name: 'Bodega Sur' };
   const idCampus = librarySave('Campus Norte');
@@ -260,11 +260,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // relaxation is capped precisely so it terminates. The previous version of
   // this block re-read the same acyclic library and proved nothing — the cycle
   // has to be built.
-  loadTemplateState(templatesData.campus); autoBindLinks();
+  loadDocState(templatesData.campus); autoBindLinks();
   const c1 = state.nodes.find((n) => n.type === 'cloud') || spawnNode('cloud');
   c1.siteRef = { id: idErr, name: 'Bodega Sur' };
   const idA = librarySave('Cycle A');
-  loadTemplateState(templatesData.errors); autoBindLinks();
+  loadDocState(templatesData.errors); autoBindLinks();
   const c2 = state.nodes.find((n) => n.type === 'cloud') || spawnNode('cloud');
   c2.siteRef = { id: idA, name: 'Cycle A' };
   librarySave('Bodega Sur', idErr);
@@ -295,8 +295,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('and does not touch the document either', JSON.stringify(serializeDoc()) === canvasDocBefore);
   state.report = null;
 
-  localStorage.removeItem(LIBRARY_KEY);
-  if (heldStore !== null) localStorage.setItem(LIBRARY_KEY, heldStore);
+  persistLibrary(heldStore);
   window.history.replaceState(null, '', window.location.pathname + window.location.search + heldHash);
   window.alert = realAlert; window.confirm = realConfirm; window.prompt = realPrompt;
 

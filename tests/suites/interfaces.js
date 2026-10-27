@@ -76,7 +76,71 @@ window.addEventListener('load', () => {
   ], [
     { id: 'l1', source: 'sw', target: 'a' }, { id: 'l2', source: 'sw', target: 'b' }, { id: 'l3', source: 'sw', target: 'c' }
   ]);
-  ok('3rd cable grows the 2-port switch rather than vanishing', portCountOf(getNode('sw')) === 3, 'portCount=' + portCountOf(getNode('sw')));
+  // An explicit count is hardware someone described, so the 3rd cable is kept
+  // (Topo documents networks as they are) but the count is NOT grown to fit it:
+  // it is reported. Growing it silently turned every count elastic.
+  ok('3rd cable on an explicit 2-port switch is kept, not dropped',
+     state.links.length === 3 && state.links.every((l) => !!l.sourceIface && !!l.targetIface));
+  ok('and the explicit count is not grown to fit it', portCountOf(getNode('sw')) === 2, 'portCount=' + portCountOf(getNode('sw')));
+  ok('the overflow is a finding on the switch',
+     evaluatePorts(getNode('sw')).level === 'bad' && /3 cables on a 2-port switch/.test(evaluatePorts(getNode('sw')).text),
+     evaluatePorts(getNode('sw')).text);
+  ok('and reaches the alert panel and the report, not only the node tab',
+     topologyFindings().some((f) => f.subject === 'Tiny' && /3 cables on a 2-port/.test(f.detail)));
+  ok('the three cables sit on three different ports', new Set(state.links.map((l) => l.sourceIface)).size === 3,
+     state.links.map((l) => l.sourceIface).join(','));
+  // The cable past the faceplate is still a numbered socket everywhere it is
+  // named: the canvas label and the report's Connections table go through
+  // ifaceLabel(), the link panel through renderLinkPorts().
+  const overLink = state.links.find((l) => l.sourceIface === 'p3');
+  ok('a port past the faceplate is labelled like any port ("3", not "p3")',
+     !!overLink && ifaceLabel(getNode('sw'), 'p3') === '3'
+     && reportModel().connections.some((c) => c.fromIface === '3' || c.toIface === '3'),
+     overLink ? ifaceLabel(getNode('sw'), 'p3') : 'no cable on p3');
+  if (overLink) {
+    renderLinkPorts(overLink);
+    const panelChips = [...document.querySelectorAll('#linkPortBody .chip-row')][0];
+    const picked = panelChips ? panelChips.querySelector('.port-chip.picked') : null;
+    ok('the link panel shows that end on its port, picked and marked',
+       !!picked && picked.textContent === '3' && picked.classList.contains('over'),
+       picked ? picked.className + ' ' + picked.textContent : 'nothing picked');
+  }
+  // Each locale names the device in its own words: the sentence once carried
+  // the raw type ("switch") into ja and ru, and the Russian numeral agreement
+  // was wrong ("3 кабелей").
+  ['es', 'pt-BR', 'ru', 'ja'].forEach((loc) => {
+    setLocale(loc);
+    const text = evaluatePorts(getNode('sw')).text;
+    const raw = loc === 'ru' || loc === 'ja' ? /switch|\{|кабелей/.test(text) : /\{/.test(text);
+    ok(`overflow finding reads in ${loc} with no raw type or placeholder`, !raw && /3/.test(text) && /2/.test(text), text);
+  });
+  setLocale('en');
+  getNode('sw').type = 'ap';
+  ok('an access point names itself in the overflow finding', /3 cables on a 2-port access point/.test(evaluatePorts(getNode('sw')).text),
+     evaluatePorts(getNode('sw')).text);
+  getNode('sw').type = 'switch';
+
+  // A switch from the palette has no count yet: it is as big as what is in it,
+  // grows by being plugged into, and stores nothing, so it keeps growing.
+  reset([
+    { id: 'sw', type: 'switch', name: 'Palette switch', x: 0, y: 0, interfaces: [] },
+    ...Array.from({ length: 10 }, (_, k) => ({ id: `h${k}`, type: 'pc', name: `H${k}`, x: k * 40, y: 100,
+      interfaces: [{ id: 'i1', name: 'eth0', ip: `192.168.1.${20 + k}/24` }] }))
+  ], Array.from({ length: 10 }, (_, k) => ({ id: `l${k}`, source: 'sw', target: `h${k}` })));
+  ok('an implicit count grows to the cables in it', portCountOf(getNode('sw')) === 10, String(portCountOf(getNode('sw'))));
+  ok('with no finding', evaluatePorts(getNode('sw')).level === 'good', evaluatePorts(getNode('sw')).text);
+  ok('and stays implicit: nothing is stored', getNode('sw').portCount === undefined
+     && serializeDoc().nodes.find((n) => n.id === 'sw').portCount === undefined, String(getNode('sw').portCount));
+
+  // "+ Port" on a cable end is a person asking for a port, and it may raise an
+  // explicit count; only auto-binding may not.
+  reset([{ id: 'sw', type: 'switch', name: 'Two', x: 0, y: 0, portCount: 2, interfaces: [] }], []);
+  const asked = createIfaceFor(getNode('sw'), { grow: true, user: true });
+  ok('a port asked for raises an explicit count', portCountOf(getNode('sw')) === 3 && asked.id === 'p3',
+     `${portCountOf(getNode('sw'))} / ${asked.id}`);
+  const auto = createIfaceFor(getNode('sw'), { grow: true });
+  ok('an auto-bound one does not', portCountOf(getNode('sw')) === 3 && auto.id === 'p4',
+     `${portCountOf(getNode('sw'))} / ${auto.id}`);
 
   // ---- Scenario 6: L2 loop ----
   reset([

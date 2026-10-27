@@ -14,8 +14,8 @@
 // Async because deflate and PBKDF2 both are.
 window.addEventListener('load', async () => {
   const out = [];
-  const realAlert = window.alert, realConfirm = window.confirm, realPrompt = window.prompt;
-  window.alert = () => {}; window.confirm = () => true; window.prompt = () => null;
+  // In-page questions (js/dialog.js): yes to every question, no name typed.
+  const heldResponder = setDialogResponder((req) => (req.kind === 'prompt' ? null : req.kind === 'choice' ? (req.choices[0] || {}).id : true));
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
   const bare = () => window.location.pathname + window.location.search;
   const tick = () => new Promise((r) => setTimeout(r, 20));
@@ -26,7 +26,7 @@ window.addEventListener('load', async () => {
 
   try {
   // ---- 1. The live document is not in the URL ----
-  loadTemplateState(templatesData.hospital); autoBindLinks();
+  loadDocState(templatesData.hospital); autoBindLinks();
   window.history.replaceState(null, '', bare());
   save();
   spawnNode('router');
@@ -45,7 +45,7 @@ window.addEventListener('load', async () => {
   state.libraryId = null;
 
   // An arriving plain link: opened, then taken off the URL.
-  loadTemplateState(templatesData.house); autoBindLinks();
+  loadDocState(templatesData.house); autoBindLinks();
   const houseJson = JSON.stringify(serializeDoc());
   window.history.replaceState(null, '', '#' + await encodeShareFragment(houseJson));
   state.libraryId = 'someone-else';
@@ -108,7 +108,7 @@ window.addEventListener('load', async () => {
   ok('a binder seals the same way, and the kind rides inside', bBack.kind === SEAL_KIND.binder && bBack.json === binderJson);
 
   // ---- Opening one: the unlock dialog ----
-  loadTemplateState(templatesData.errors); autoBindLinks(); save();
+  loadDocState(templatesData.errors); autoBindLinks(); save();
   const beforeUnlock = JSON.stringify(serializeDoc());
   window.history.replaceState(null, '', '#' + sealed);
   let loading = load();
@@ -147,8 +147,12 @@ window.addEventListener('load', async () => {
   dismissGuestBinder(); landingHandledDocument();
 
   // ---- The share dialog ----
-  loadTemplateState(templatesData.hospital); autoBindLinks(); save();
+  loadDocState(templatesData.hospital); autoBindLinks(); save();
   const hospitalJson = JSON.stringify(serializeDoc());
+  // A link also carries the network's identity (identifiedDoc), so whoever
+  // keeps it keeps the same network: compared apart from the document.
+  const docPart = (json) => { const d = JSON.parse(json); delete d.id; delete d.updated; return JSON.stringify(d); };
+  const identOf = (json) => { const d = JSON.parse(json); return `${d.id}@${d.updated}`; };
   el('copyUrlBtn').click();
   ok('Copy link opens the share dialog', open('shareDialog'));
   ok('locked by default, with a passphrase already filled in',
@@ -156,8 +160,11 @@ window.addEventListener('load', async () => {
   el('shareCopyBtn').click();
   ok('it produces a sealed link', await until(() => el('shareLink').value.includes('#e~')), el('shareLink').value.slice(0, 40));
   const madeFrag = el('shareLink').value.split('#')[1];
-  ok('that the dialog’s passphrase opens to this network',
-     (await unsealFragment(madeFrag, el('sharePass').value)).json === hospitalJson);
+  const unsealed = (await unsealFragment(madeFrag, el('sharePass').value)).json;
+  ok('that the dialog’s passphrase opens to this network', docPart(unsealed) === hospitalJson);
+  ok('with the network’s identity inside the seal, not beside it',
+     state.docId && identOf(unsealed) === `${state.docId}@${JSON.parse(unsealed).updated}` && JSON.parse(unsealed).updated > 0
+     && !madeFrag.includes(state.docId), identOf(unsealed));
   ok('and offers the passphrase as a separate copy', open('sharePassCopyBtn'));
   ok('while the address bar stays bare', window.location.hash === '');
 
@@ -170,8 +177,9 @@ window.addEventListener('load', async () => {
      el('shareHint').textContent);
   el('shareCopyBtn').click();
   ok('and it is the ordinary ~ link', await until(() => el('shareLink').value.includes('#~')));
-  ok('that decodes without any passphrase',
-     (await decodeFragment(el('shareLink').value.split('#')[1])) === hospitalJson);
+  const plainJson = await decodeFragment(el('shareLink').value.split('#')[1]);
+  ok('that decodes without any passphrase', docPart(plainJson) === hospitalJson);
+  ok('and is the same network as the sealed one', identOf(plainJson) === identOf(unsealed), `${identOf(plainJson)} vs ${identOf(unsealed)}`);
   closeShareDialog();
 
   // ---- 3. The policy itself ----
@@ -197,7 +205,7 @@ window.addEventListener('load', async () => {
     dismissGuestBinder();
     try { sessionStorage.removeItem(GUEST_BINDER_KEY); } catch (e) { /* private mode */ }
     window.history.replaceState(null, '', bare());
-    window.alert = realAlert; window.confirm = realConfirm; window.prompt = realPrompt;
+    setDialogResponder(heldResponder);
     const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
     document.body.appendChild(pre);
   }

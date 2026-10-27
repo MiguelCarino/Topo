@@ -27,13 +27,49 @@ const REPORT_FIELDS = [
     { key: 'scope', label: 'Scope & notes', placeholder: 'What was surveyed, what was not, and anything the reader needs to know.', multiline: true }
 ];
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+// The LOCAL calendar date. toISOString() is UTC, so from late afternoon on in
+// Mexico (UTC-6) every report, and its filename, was dated tomorrow. Every
+// download is named <slug>-<this date> (docFileStem in js/app.js).
+const todayISO = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// A name as the first half of a filename. Accents fold to their letter
+// ("José" -> "jose") and every run of anything else becomes one hyphen, but a
+// letter is kept in any script: an ASCII-only slug turned every Japanese or
+// Russian site name into the same "network".
+function fileSlug(text, fallback = 'network') {
+    // NFKD then NFC: accents on a Latin letter are taken off in between, and
+    // any other mark (Japanese voicing, the breve of Russian й) goes back on
+    // its letter.
+    const slug = String(text || '').normalize('NFKD').replace(/([A-Za-z])[\u0300-\u036f]+/g, '$1').normalize('NFC').toLowerCase()
+        .replace(/[^\p{L}\p{M}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60).replace(/-+$/, '');
+    return slug || fallback;
+}
 
 function normalizeReportMeta(meta) {
     const m = meta || {};
     const out = {};
     REPORT_FIELDS.forEach(({ key }) => { out[key] = typeof m[key] === 'string' ? m[key] : ''; });
     if (!out.date) out.date = todayISO();
+    return out;
+}
+
+// The name the open network is kept under (its library card), or ''. A
+// report whose Site field was left blank is headed with it: the downloads
+// were already named after the card ("oficina-reforma-2026-10-26…") while
+// the report itself said "Site not named", one network under two names.
+// Only the report reads it; nothing is written into the header, so the
+// field stays blank (its placeholder says the name) and a later rename of
+// the card is what the next report says.
+function keptSiteName() {
+    const card = state.libraryId && typeof libraryEntry === 'function' ? libraryEntry(state.libraryId) : null;
+    return card && typeof card.name === 'string' ? card.name.trim() : '';
+}
+function siteReportMeta(meta) {
+    const out = normalizeReportMeta(meta);
+    if (!out.site.trim()) out.site = keptSiteName();
     return out;
 }
 
@@ -82,6 +118,10 @@ function reportInterface(node, iface) {
     const api = window.CarinoOUI;
     const decoded = hasMac(iface) && api ? api.decodeMac(iface.mac) : null;
     return {
+        // The interface's id, so a view built on these rows (the table,
+        // js/table.js) can find the interface it is about. Unique only inside
+        // its device, like every interface id.
+        id: iface.id,
         name: iface.name || iface.id,
         ip: iface.ip || '',
         mac: decoded && !decoded.error ? api.fmtColon(decoded.hex) : '',
@@ -94,78 +134,221 @@ function reportInterface(node, iface) {
 
 function reportDevices() {
     return state.nodes.map((node) => ({
+        // Which device the row is about: the table view (js/table.js) selects
+        // and edits by it. The rows themselves are never written back to.
+        id: node.id,
         name: node.name || node.id,
         type: node.type,
         typeName: typeName(node.type),
-        severity: nodeSeverity(node),
+        // The badge's severity: the engine's, so an issue accepted with a
+        // reason is not flagged here either.
+        severity: nodeDiagnosis(node).severity,
         // Explicit interfaces only. A 24-port switch would otherwise contribute
         // 24 blank rows to the inventory, which is noise, not documentation —
         // the faceplate is reported as a count instead.
         interfaces: (node.interfaces || []).map((iface) => reportInterface(node, iface)),
         ports: portUsage(node),
-        gw: node.gw || '',
-        dns: node.dns || '',
-        os: node.os || '',
-        allowedPorts: node.ports || '',
-        nat: !!node.nat,
-        notes: node.notes || ''
+        // gw, dns, os, allowedPorts, nat, notes: whatever NODE_FIELDS marks
+        // for the report (js/model.js), so a field added there reaches the
+        // inventory without being listed a second time here.
+        ...reportFieldsOf(node)
     }));
+}
+
+// Derived and read-only: these rows are built for reading, and nothing ever
+// writes back through them. A text field reads as '' when unset, a boolean as
+// true or false. The gateway and DNS are the ones in force (R7): a device
+// that inherits its network's is configured with it, and the inventory says
+// what the device uses, not which field it was typed into.
+const REPORT_EFFECTIVE = { gw: effectiveGw, dns: effectiveDns };
+function reportFieldsOf(node) {
+    const out = {};
+    NODE_FIELDS.forEach((f) => {
+        if (!f.report) return;
+        const v = REPORT_EFFECTIVE[f.key] ? REPORT_EFFECTIVE[f.key](node) : node[f.key];
+        out[f.report.key] = f.kind === 'bool' ? !!v : asText(v);
+    });
+    return out;
 }
 
 function reportConnections() {
     return state.links.map((link) => {
         const src = getNode(link.source), tgt = getNode(link.target);
         return {
+            id: link.id,
             from: src ? (src.name || src.id) : '—',
             fromIface: src ? ifaceLabel(src, link.sourceIface) : '—',
             to: tgt ? (tgt.name || tgt.id) : '—',
             toIface: tgt ? ifaceLabel(tgt, link.targetIface) : '—',
-            medium: mediumName(effectiveMedium(link))
+            medium: mediumName(effectiveMedium(link)),
+            mediumKey: effectiveMedium(link) || '',
+            // The cable's own facts (link.cable, CABLE_FIELDS in js/model.js).
+            label: cableOf(link, 'label').trim(),
+            length: cableOf(link, 'length').trim(),
+            color: cableOf(link, 'color').trim(),
+            via: cableOf(link, 'via').trim()
         };
     }).filter((c) => c.from !== '—' && c.to !== '—');
 }
 
-// One row per broadcast domain the addressing implies. This is the table an
-// auditor asks for and the one nobody has written down.
+// One row per network: the declared ones (R7) with what they say about
+// themselves (name, VLAN, gateway, DNS, DHCP), even with nobody on them yet,
+// then any subnet the addressing implies that nobody has declared. This is
+// the table an auditor asks for and the one nobody has written down.
+// `network`, `kind`, `isPrivate` and `devices` are what the estate report
+// compares across sites.
 function reportSubnets() {
     const byNet = new Map();
+    state.networks.forEach((net) => {
+        const p = parseValidCIDR(net.cidr);
+        if (!p || byNet.has(net.cidr)) return;
+        byNet.set(net.cidr, { id: net.id, network: net.cidr, kind: p.kind, isPrivate: p.isPrivate, declared: true,
+            name: asText(net.name).trim(), vlan: Number.isInteger(net.vlan) ? net.vlan : null, purpose: asText(net.purpose).trim(),
+            gateway: asText(net.gateway).trim(), dns: asText(net.dns).trim(), dhcp: !!net.dhcp, devices: [], nodeIds: [] });
+    });
     state.nodes.forEach((node) => {
         getValidIps(node).forEach((parsed) => {
-            if (!byNet.has(parsed.networkStr)) {
-                byNet.set(parsed.networkStr, { network: parsed.networkStr, kind: parsed.kind, isPrivate: parsed.isPrivate, devices: [] });
+            const net = networkOfIp(parsed.ip);
+            const key = net ? net.cidr : parsed.networkStr;
+            if (!byNet.has(key)) {
+                byNet.set(key, { id: null, network: key, kind: parsed.kind, isPrivate: parsed.isPrivate, declared: false,
+                    name: '', vlan: null, purpose: '', gateway: '', dns: '', dhcp: false, devices: [], nodeIds: [] });
             }
-            const entry = byNet.get(parsed.networkStr);
+            const entry = byNet.get(key);
             const name = node.name || node.id;
             if (!entry.devices.includes(name)) entry.devices.push(name);
+            // By id as well as by name: two devices may share a name, and the
+            // table view selects a network's devices from this list.
+            if (!entry.nodeIds.includes(node.id)) entry.nodeIds.push(node.id);
         });
     });
     return [...byNet.values()].sort((a, b) => a.network.localeCompare(b.network));
 }
 
-function reportModel() {
+// Every faceplate port of every switch and access point, cabled or free, in
+// port order: its name as the box gives it (node.portScheme), what is written
+// about it (node.portAttrs: a label, an access VLAN) and what is plugged in.
+// The rows of the table's Ports tab (js/table.js); derived, like every row
+// here, so an edit there is written to the node, never to the row.
+function reportPorts() {
+    const out = [];
+    state.nodes.filter(hasPortGrid).forEach((node) => {
+        const total = portCountOf(node);
+        faceplatePortIds(node).forEach((id) => {
+            const a = portAttrOf(node, id);
+            const n = Number(id.slice(1));
+            const link = linkOnIface(node.id, id);
+            const peerId = link ? (link.source === node.id ? link.target : link.source) : null;
+            const peer = peerId ? getNode(peerId) : null;
+            const peerIface = peer ? ifaceIdOn(link, peerId) : null;
+            out.push({ nodeId: node.id, portId: id, number: n, device: node.name || node.id, port: ifaceLabel(node, id),
+                label: a.label, vlan: a.vlan, over: n > total,
+                peerId: peer ? peer.id : null, peer: peer ? peer.name || peer.id : '', peerIface: peer ? ifaceLabel(peer, peerIface) : '',
+                linkId: link && peer ? link.id : null, cable: link ? cableOf(link, 'label').trim() : '' });
+        });
+    });
+    return out;
+}
+
+// Every device with a faceplate (a switch, an access point) and what is in
+// each of its ports, in port order: the page a technician tracing a cable at
+// the rack wants, which the connections table (one row per cable, in the
+// order they were drawn) is not. Named interfaces (an uplink called sfp1, an
+// AP's radio) follow the numbered ports, in name order; the free ports are
+// written as ranges ("3, 5–8") rather than as rows, except a free port
+// somebody labelled or gave a VLAN, which is a row of its own: that is the
+// jack the next device goes in. Ports read as the box names them
+// (node.portScheme), and the Label and VLAN columns appear on a switch whose
+// ports carry them.
+function reportPortMaps() {
+    const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+    return state.nodes.filter(hasPortGrid).map((node) => {
+        const rows = [];
+        linksAtNode(node.id).forEach((link) => {
+            const mine = ifaceIdOn(link, node.id);
+            const peerId = link.source === node.id ? link.target : link.source;
+            const peerIface = link.source === node.id ? link.targetIface : link.sourceIface;
+            const peer = getNode(peerId);
+            if (!peer) return;
+            const m = /^p(\d+)$/.exec(mine || '');
+            const a = portAttrOf(node, mine);
+            rows.push({ port: m ? Number(m[1]) : null, label: ifaceLabel(node, mine), linkId: link.id, peerId: peer.id,
+                peer: peer.name || peer.id, peerIface: ifaceLabel(peer, peerIface), ip: asText(ifaceOn(peer, peerIface)?.ip),
+                cable: cableOf(link, 'label').trim(), medium: mediumName(effectiveMedium(link)),
+                portLabel: a.label, vlan: a.vlan, free: false });
+        });
+        // Free ports with something written about them.
+        const cabled = new Set(rows.filter((r) => r.port !== null).map((r) => r.port));
+        Object.keys(node.portAttrs || {}).forEach((id) => {
+            const m = /^p(\d+)$/.exec(id);
+            if (!m || cabled.has(Number(m[1])) || !hasPortAttrs(node, id)) return;
+            const a = portAttrOf(node, id);
+            rows.push({ port: Number(m[1]), label: ifaceLabel(node, id), linkId: null, peerId: null, peer: '', peerIface: '', ip: '',
+                cable: '', medium: '', portLabel: a.label, vlan: a.vlan, free: true });
+        });
+        rows.sort((a, b) => ((a.port === null) - (b.port === null)) || (a.port !== null ? a.port - b.port : 0)
+            || byName(a.label, b.label) || byName(a.peer, b.peer));
+        const total = portCountOf(node);
+        const taken = new Set(rows.filter((r) => r.port !== null && !r.free).map((r) => r.port));
+        const listed = new Set(rows.filter((r) => r.port !== null).map((r) => r.port));
+        const free = [];
+        for (let i = 1; i <= total; i++) {
+            if (listed.has(i)) continue;
+            const last = free[free.length - 1];
+            if (last && last[1] === i - 1) last[1] = i; else free.push([i, i]);
+        }
+        const name = (n) => portNameOf(node, n);
+        return { id: node.id, name: node.name || node.id, typeName: typeName(node.type), total, used: taken.size, rows,
+            hasLabels: rows.some((r) => r.portLabel), hasVlans: rows.some((r) => r.vlan !== null),
+            free: free.map(([a, b]) => (a === b ? name(a) : `${name(a)}–${name(b)}`)).join(', ') };
+    }).filter((m) => m.rows.length)
+        .sort((a, b) => byName(a.name, b.name));
+}
+
+// Past this many devices the diagram no longer reads at the width of a page
+// of text, and it pushed the inventory pages down behind it: it goes to an
+// appendix at the end, on a page of its own, and the report says so where it
+// would have been.
+const REPORT_DIAGRAM_INLINE_MAX = 40;
+
+// Read-only, so the whole model is built in one lookup pass (js/model.js):
+// every device's row asks its diagnosis, its effective gateway and DNS and
+// its addresses, and the pass answers each from one index instead of a scan
+// or a whole-document key per device. withDoc() (binderSiteModels below)
+// swaps the document in first, so the pass indexes the site being reported.
+function reportModel() { return withLookupPass(reportModelNow); }
+function reportModelNow() {
     // Severity order, then the order the checks ran in. topologyFindings() walks
-    // nodes before links, so ties keep the reading order of the alert panel
+    // nodes before links, so ties keep the reading order of the Findings tab
     // rather than whatever the sort happens to do with equal keys.
-    const findings = topologyFindings()
+    // A finding accepted with a reason (js/diagnostics.js) is printed in a
+    // section of its own, "Known / accepted", with the reason, and is not
+    // counted: the totals are what is still open.
+    const all = topologyFindings()
         .map((f, seq) => ({ ...f, seq }))
         .sort((a, b) => (a.level === b.level ? a.seq - b.seq : (a.level === 'bad' ? -1 : 1)));
+    const findings = all.filter((f) => !f.accepted);
+    const accepted = all.filter((f) => f.accepted);
 
     const devices = reportDevices();
     const connections = reportConnections();
     const subnets = reportSubnets();
 
     return {
-        meta: normalizeReportMeta(state.report),
+        meta: siteReportMeta(state.report),
         findings,
+        accepted,
         devices,
         connections,
         subnets,
+        portMaps: reportPortMaps(),
         counts: {
             devices: devices.length,
             connections: connections.length,
             subnets: subnets.length,
             critical: findings.filter((f) => f.level === 'bad').length,
-            advisory: findings.filter((f) => f.level === 'warn').length
+            advisory: findings.filter((f) => f.level === 'warn').length,
+            accepted: accepted.length
         }
     };
 }
@@ -296,7 +479,7 @@ function binderHeaderDefaults(sites) {
         const tally = new Map();
         sites.forEach((s) => {
             const v = s.rawMeta && s.rawMeta[key];   // what was recorded, not what was defaulted
-            if (v) tally.set(v, (tally.get(v) || 0) + 1);
+            if (typeof v === 'string' && v) tally.set(v, (tally.get(v) || 0) + 1);
         });
         let best = '', bestN = 0;
         tally.forEach((n, v) => { if (n > bestN) { best = v; bestN = n; } });
@@ -407,6 +590,25 @@ function reportStyles() {
     .figure img { max-width: 100%; border: 1px solid #e2e8f0; border-radius: 4px; }
     .caption { font-size: 10px; color: #64748b; margin-top: 5px; }
 
+    /* The compact inventory: one line per interface. A device's first line
+       carries its name and its own fields; the lines after it only the
+       interface, without the rule between them, so a device reads as one block. */
+    .inv td { padding: 3px 6px; }
+    .inv tr.cont td { border-top: 0; }
+    .inv tr.dev td { border-top: 1px solid #e2e8f0; }
+    .inv tbody tr:first-child td { border-top: 0; }
+    /* The switch port map: one small table per switch, headed by its name. */
+    h3 { font-size: 12px; margin: 14px 0 4px; page-break-after: avoid; }
+    h3 .muted { font-weight: 400; }
+    .ports td:first-child, .ports th:first-child { width: 52px; }
+    .free { font-size: 10.5px; margin: 2px 0 8px; }
+    /* The changes table (js/changes.js): the change and the item stay narrow. */
+    .changes td:first-child { width: 70px; white-space: nowrap; }
+    .changes td:nth-child(2) { width: 34%; }
+    /* The accepted findings: the reason is the column that matters. */
+    .accepted td:last-child { color: #334155; }
+    .appendix { page-break-before: always; break-before: page; }
+
     .note { font-size: 10.5px; color: #475569; background: #f8fafc; border-left: 3px solid #cbd5e1;
             padding: 9px 12px; margin: 8px 0; white-space: pre-wrap; }
     footer { margin-top: 26px; padding-top: 10px; border-top: 1px solid #e2e8f0;
@@ -428,6 +630,9 @@ function reportStyles() {
 }
 
 function findingsSection(findings, opts = {}) {
+    if (!findings.length && opts.accepted) {
+        return `<div class="clean"><b>${escapeHtml(t('No open findings: every one raised is accepted, with its reason, below.'))}</b></div>`;
+    }
     if (!findings.length) {
         return `<div class="clean"><b>${t('No faults were raised by the documented configuration.')}</b><br>
             ${escapeHtml(t('Every automated check passed against the topology as recorded. That is a statement about the drawing, not a clean bill of health for the network — see Scope and method.'))}</div>`;
@@ -449,62 +654,139 @@ function findingsSection(findings, opts = {}) {
         <tbody>${rows}</tbody></table>`;
 }
 
-function ifaceCell(iface) {
-    const bits = [`<b>${escapeHtml(iface.name)}</b>`];
-    if (iface.ip) bits.push(`<span class="mono">${escapeHtml(iface.ip)}</span>`);
-    if (iface.bond) bits.push(`<span class="muted">${escapeHtml(t('bond'))} · ${escapeHtml(iface.bond)}</span>`);
-    else if (iface.member) bits.push(`<span class="muted">${escapeHtml(t('bond member'))}</span>`);
-    if (iface.wireless) bits.push(`<span class="muted">${escapeHtml(t('radio'))}</span>`);
-    if (iface.mac) bits.push(`<span class="mono muted">${escapeHtml(iface.mac)}${iface.vendor ? ` · ${escapeHtml(iface.vendor)}` : ''}</span>`);
-    return bits.join('<br>');
+// Known / accepted: what was raised and accepted, with who-knows-why written
+// down. The same columns as the findings, the reason in place of a severity.
+function acceptedSection(accepted) {
+    const rows = accepted.map((f, i) => `
+        <tr>
+            <td class="num">${i + 1}</td>
+            <td><b>${escapeHtml(f.subject || '—')}</b></td>
+            <td class="muted">${escapeHtml(f.check)}</td>
+            <td>${escapeHtml(sentenceCase(f.detail))}</td>
+            <td>${escapeHtml(f.accepted.reason)}</td>
+        </tr>`).join('');
+    return `<p class="muted">${escapeHtml(t('Raised by the checks and accepted as known, for the reason given. They are not counted in the summary.'))}</p>
+        <table class="accepted">
+        <thead><tr><th></th><th>${t('Device')}</th><th>${t('Check')}</th><th>${t('Finding')}</th><th>${t('Reason')}</th></tr></thead>
+        <tbody>${rows}</tbody></table>`;
 }
 
+// One small table per switch or access point, in port order. The Label and
+// VLAN columns are there only on a switch whose ports carry them, so a
+// report of a site nobody labelled reads as it always did.
+function portMapsSection(maps) {
+    return maps.map((m) => `
+        <h3>${escapeHtml(m.name)} <span class="muted">· ${escapeHtml(t(m.typeName))} · ${escapeHtml(t('{used} of {total} ports used', { used: m.used, total: m.total }))}</span></h3>
+        <table class="ports">
+        <thead><tr><th>${t('Port')}</th>${m.hasLabels ? `<th>${t('Label')}</th>` : ''}${m.hasVlans ? '<th>VLAN</th>' : ''}<th>${t('Device')}</th><th>${t('Interface')}</th><th>${t('Address')}</th><th>${t('Cable')}</th></tr></thead>
+        <tbody>${m.rows.map((r) => `<tr${r.free ? ' class="free-port"' : ''}>
+            <td class="mono"><b>${escapeHtml(r.label)}</b></td>
+            ${m.hasLabels ? `<td>${escapeHtml(r.portLabel)}</td>` : ''}
+            ${m.hasVlans ? `<td class="mono">${r.vlan === null ? '' : r.vlan}</td>` : ''}
+            ${r.free ? `<td class="muted" colspan="4">${escapeHtml(t('Free'))}</td>` : `
+            <td><b>${escapeHtml(r.peer)}</b></td>
+            <td class="mono muted">${escapeHtml(r.peerIface)}</td>
+            <td class="mono">${escapeHtml(r.ip) || '<span class="muted">—</span>'}</td>
+            <td>${r.cable ? `<span class="mono">${escapeHtml(r.cable)}</span> · ` : ''}<span class="muted">${escapeHtml(t(r.medium))}</span></td>`}
+        </tr>`).join('')}</tbody></table>
+        ${m.free ? `<p class="free muted">${escapeHtml(t('Free: {ports}', { ports: m.free }))}</p>` : ''}`).join('');
+}
+
+// An interface's own line: its name and what kind of port it is, then its
+// address and MAC in columns of their own.
+function ifaceNameCell(iface) {
+    const kind = iface.bond ? `${t('bond')} · ${iface.bond}` : iface.member ? t('bond member') : iface.wireless ? t('radio') : '';
+    return `<b>${escapeHtml(iface.name)}</b>${kind ? ` <span class="muted">${escapeHtml(kind)}</span>` : ''}`;
+}
+
+// The compact inventory: one line per interface, so a site of three hundred
+// devices is a few pages a technician can scan down, not a stack of cells. A
+// device's name, type, gateway, DNS and model are on its first line; a device
+// with no interface recorded still gets one line, which says so.
 function devicesSection(devices) {
+    // Gateway, DNS, Model / firmware: the schema rows that carry a report column.
+    const cols = reportColumns();
+    const empty = '<span class="muted">—</span>';
     const rows = devices.map((d) => {
-        const ifaces = d.interfaces.length
-            ? d.interfaces.map(ifaceCell).join('<hr style="border:0;border-top:1px solid #f1f5f9;margin:4px 0">')
-            : `<span class="muted">${escapeHtml(t('none recorded'))}</span>`;
         const extra = [
             d.ports ? `${escapeHtml(t('Ports'))}: ${d.ports.used}/${d.ports.total}` : '',
             d.nat ? escapeHtml(t('NAT')) : '',
             d.allowedPorts ? `${escapeHtml(t('Allowed'))}: ${escapeHtml(d.allowedPorts)}` : ''
         ].filter(Boolean).join(' · ');
-        return `<tr>
-            <td><b>${escapeHtml(d.name)}</b>${d.notes ? `<br><span class="muted">${escapeHtml(d.notes)}</span>` : ''}</td>
+        // The Asset group (js/assets.js): the tag, serial and place under the
+        // name, and a status other than in service, which a reader of the
+        // register has to see.
+        const asset = [d.assetTag ? `${t('Asset tag')} ${d.assetTag}` : '', d.serial ? `${t('Serial number')} ${d.serial}` : '', d.location]
+            .filter(Boolean).join(' · ');
+        const status = d.status && d.status !== 'active' ? ` <span class="muted">(${escapeHtml(statusName(d.status))})</span>` : '';
+        const ifaces = d.interfaces.length ? d.interfaces : [null];
+        return ifaces.map((iface, i) => {
+            const first = i === 0;
+            const own = iface
+                ? `<td>${ifaceNameCell(iface)}</td>
+            <td class="mono">${escapeHtml(iface.ip) || empty}</td>
+            <td class="mono">${iface.mac ? `${escapeHtml(iface.mac)}${iface.vendor ? ` <span class="muted">· ${escapeHtml(iface.vendor)}</span>` : ''}` : empty}</td>`
+                : `<td colspan="3"><span class="muted">${escapeHtml(t('none recorded'))}</span></td>`;
+            if (!first) return `<tr class="cont"><td></td><td></td>${own}${cols.map(() => '<td></td>').join('')}</tr>`;
+            return `<tr class="dev">
+            <td><b>${escapeHtml(d.name)}</b>${status}${asset ? `<br><span class="muted">${escapeHtml(asset)}</span>` : ''}${d.notes ? `<br><span class="muted">${escapeHtml(d.notes)}</span>` : ''}</td>
             <td>${escapeHtml(t(d.typeName))}${extra ? `<br><span class="muted">${extra}</span>` : ''}</td>
-            <td>${ifaces}</td>
-            <td class="mono">${escapeHtml(d.gw) || '<span class="muted">—</span>'}</td>
-            <td class="mono">${escapeHtml(d.dns) || '<span class="muted">—</span>'}</td>
-            <td>${escapeHtml(d.os) || '<span class="muted">—</span>'}</td>
+            ${own}
+            ${cols.map((f) => `<td${f.report.mono ? ' class="mono"' : ''}>${escapeHtml(d[f.report.key]) || empty}</td>`).join('\n            ')}
         </tr>`;
+        }).join('');
     }).join('');
-    return `<table>
-        <thead><tr><th>${t('Device')}</th><th>${t('Type')}</th><th>${t('Interfaces')}</th><th>${t('Gateway')}</th><th>${t('DNS')}</th><th>${t('OS / firmware')}</th></tr></thead>
+    return `<table class="inv">
+        <thead><tr><th>${t('Device')}</th><th>${t('Type')}</th><th>${t('Interface')}</th><th>${t('Address')}</th><th>${t('MAC')}</th>${cols.map((f) => `<th>${t(f.report.column)}</th>`).join('')}</tr></thead>
         <tbody>${rows}</tbody></table>`;
 }
 
+// The Cable column (label, length, colour, via) appears only when some cable
+// says something about itself, so a drawing that never used it reports as
+// it did before the column existed.
 function connectionsSection(connections) {
     if (!connections.length) return `<p class="muted">${escapeHtml(t('No connections recorded.'))}</p>`;
+    const withCable = connections.some((c) => c.label || c.length || c.color || c.via);
+    const cableCell = (c) => {
+        const facts = [c.length, c.color].filter(Boolean).join(' · ');
+        return [c.label ? `<b class="mono">${escapeHtml(c.label)}</b>` : '', facts ? `<span class="muted">${escapeHtml(facts)}</span>` : '',
+            c.via ? `<span class="mono muted">${escapeHtml(c.via)}</span>` : ''].filter(Boolean).join('<br>');
+    };
     const rows = connections.map((c) => `<tr>
         <td><b>${escapeHtml(c.from)}</b></td>
         <td class="mono muted">${escapeHtml(c.fromIface)}</td>
         <td><b>${escapeHtml(c.to)}</b></td>
         <td class="mono muted">${escapeHtml(c.toIface)}</td>
-        <td>${escapeHtml(t(c.medium))}</td>
+        <td>${escapeHtml(t(c.medium))}</td>${withCable ? `
+        <td>${cableCell(c)}</td>` : ''}
     </tr>`).join('');
     return `<table>
-        <thead><tr><th>${t('From')}</th><th>${t('Interface')}</th><th>${t('To')}</th><th>${t('Interface')}</th><th>${t('Medium')}</th></tr></thead>
+        <thead><tr><th>${t('From')}</th><th>${t('Interface')}</th><th>${t('To')}</th><th>${t('Interface')}</th><th>${t('Medium')}</th>${withCable ? `<th>${t('Cable')}</th>` : ''}</tr></thead>
         <tbody>${rows}</tbody></table>`;
 }
 
+// A declared network prints its name, VLAN, purpose, gateway, DNS and DHCP
+// under its address; one only implied by the addressing says so, since
+// nobody has said what it is for.
 function subnetsSection(subnets) {
     if (!subnets.length) return `<p class="muted">${escapeHtml(t('No addressing recorded.'))}</p>`;
-    const rows = subnets.map((s) => `<tr>
-        <td class="mono"><b>${escapeHtml(s.network)}</b></td>
-        <td>${escapeHtml(s.kind === 'ipv6' ? 'IPv6' : 'IPv4')} · ${escapeHtml(t(s.isPrivate ? 'Private' : 'Public / routable'))}</td>
+    const muted = (text) => `<span class="muted">${escapeHtml(text)}</span>`;
+    const rows = subnets.map((s) => {
+        const about = s.declared
+            ? [s.name ? `<b>${escapeHtml(s.name)}</b>` : '', s.vlan ? escapeHtml(`VLAN ${s.vlan}`) : '', s.purpose ? muted(s.purpose) : '']
+            : [muted(t('Not declared: implied by the addresses'))];
+        const service = [
+            s.gateway ? `${escapeHtml(t('Gateway'))} <span class="mono">${escapeHtml(s.gateway)}</span>` : '',
+            s.dns ? `${escapeHtml(t('DNS'))} <span class="mono">${escapeHtml(s.dns)}</span>` : '',
+            s.dhcp ? escapeHtml(t('DHCP')) : ''
+        ].filter(Boolean);
+        return `<tr>
+        <td><span class="mono"><b>${escapeHtml(s.network)}</b></span>${about.filter(Boolean).map((x) => `<br>${x}`).join('')}</td>
+        <td>${escapeHtml(s.kind === 'ipv6' ? 'IPv6' : 'IPv4')} · ${escapeHtml(t(s.isPrivate ? 'Private' : 'Public / routable'))}${service.length ? `<br>${service.join(' · ')}` : ''}</td>
         <td>${s.devices.length}</td>
         <td>${escapeHtml(s.devices.join(', '))}</td>
-    </tr>`).join('');
+    </tr>`;
+    }).join('');
     return `<table>
         <thead><tr><th>${t('Network')}</th><th>${t('Kind')}</th><th>${t('Devices')}</th><th>${t('Members')}</th></tr></thead>
         <tbody>${rows}</tbody></table>`;
@@ -647,6 +929,14 @@ function reportSheet(model, image, opts = {}) {
         .filter(({ key, multiline }) => !multiline && meta[key])
         .map(({ key, label }) => `<div><dt>${escapeHtml(t(label))}</dt><dd>${escapeHtml(meta[key])}</dd></div>`)
         .join('');
+    const accepted = model.accepted || [];
+    const portMaps = model.portMaps || [];
+    // A large site's diagram goes to an appendix (REPORT_DIAGRAM_INLINE_MAX).
+    const appendix = !!image && counts.devices > REPORT_DIAGRAM_INLINE_MAX;
+    const figure = image ? `<div class="figure">
+        <img src="${image.url}" alt="${escapeHtml(t('Network topology diagram'))}">
+        <div class="caption">${escapeHtml(meta.site ? `${t('Topology')} — ${meta.site}` : t('Topology'))}</div>
+    </div>` : '';
 
     return `<div class="sheet"${opts.anchorId ? ` id="${escapeHtml(opts.anchorId)}"` : ''}>
     <div class="rule"></div>
@@ -660,30 +950,43 @@ function reportSheet(model, image, opts = {}) {
         ${stat(counts.connections, 'Connections')}
         ${stat(counts.subnets, 'Subnets')}
         ${stat(counts.critical, 'Critical', 'crit')}
-        ${stat(counts.advisory, 'Advisory', 'adv')}
+        ${stat(counts.advisory, 'Advisory', 'adv')}${accepted.length ? `
+        ${stat(accepted.length, 'Accepted')}` : ''}
     </div>
 
     <h2>${escapeHtml(t('Findings'))}</h2>
-    ${findingsSection(model.findings)}
-
+    ${findingsSection(model.findings, { accepted: accepted.length > 0 })}
+${accepted.length ? `
+    <h2>${escapeHtml(t('Known / accepted'))}</h2>
+    ${acceptedSection(accepted)}
+` : ''}
     ${image ? `<h2>${escapeHtml(t('Topology'))}</h2>
-    <div class="figure">
-        <img src="${image.url}" alt="${escapeHtml(t('Network topology diagram'))}">
-        <div class="caption">${escapeHtml(meta.site ? `${t('Topology')} — ${meta.site}` : t('Topology'))}</div>
-    </div>` : ''}
+    ${appendix ? `<p class="muted">${escapeHtml(t('At {n} devices the diagram needs a page of its own: it is in the appendix at the end.', { n: counts.devices }))}</p>` : figure}` : ''}
 
     <h2>${escapeHtml(t('Device inventory'))}</h2>
     ${devicesSection(model.devices)}
-
+${portMaps.length ? `
+    <h2>${escapeHtml(t('Switch ports'))}</h2>
+    ${portMapsSection(portMaps)}
+` : ''}
     <h2>${escapeHtml(t('Connections'))}</h2>
     ${connectionsSection(model.connections)}
 
     <h2>${escapeHtml(t('Addressing'))}</h2>
     ${subnetsSection(model.subnets)}
 
+${model.changes ? `
+    <h2>${escapeHtml(t(model.changes.kind === 'report' ? 'Changes since the last report' : 'Changes since the last back-up'))}</h2>
+    ${changesSection(model.changes)}
+` : ''}
     <h2>${escapeHtml(t('Scope and method'))}</h2>
     ${methodSection(meta)}
-
+${appendix ? `
+    <div class="appendix">
+    <h2>${escapeHtml(t('Appendix: topology diagram'))}</h2>
+    ${figure}
+    </div>
+` : ''}
     <footer>
         <span>${escapeHtml(meta.ref || '')}</span>
         <span>${escapeHtml(t('Generated with Topo · topo.carino.systems'))}</span>
@@ -778,12 +1081,16 @@ function binderHtml(binder, images = {}) {
         // before filling the header is the ordinary way that happens — the
         // document's own name is the one that prints, because the single-site
         // report of the same document prints it too.
-        const recordedSite = (s.rawMeta.site || '').trim();
+        // rawMeta is the stored header exactly as the document carried it, and
+        // a binder or library doc is outside input: a non-string field must
+        // cost that field, not throw and abort the whole estate report.
+        const str = (v) => (typeof v === 'string' ? v : '');
+        const recordedSite = str(s.rawMeta.site).trim();
         sheetMeta.site = recordedSite && recordedSite !== s.name ? recordedSite : '';
-        sheetMeta.scope = s.rawMeta.scope || '';   // each building's own scope note always stands
+        sheetMeta.scope = str(s.rawMeta.scope);   // each building's own scope note always stands
         REPORT_FIELDS.forEach(({ key }) => {
             if (key === 'site' || key === 'scope') return;
-            const recorded = (s.rawMeta[key] || '').trim();
+            const recorded = str(s.rawMeta[key]).trim();
             if (recorded && recorded !== binder.meta[key]) sheetMeta[key] = recorded;
         });
         const sheetModel = Object.assign({}, s.model, { meta: sheetMeta });
@@ -798,11 +1105,12 @@ function binderHtml(binder, images = {}) {
 // a real fallback rather than an error message, and both paths hand over the
 // same bytes. The object URL outlives the call because revoking it immediately
 // leaves the new tab pointed at nothing.
-function deliverReport(html, meta) {
+// `kind` names the download ('report', or 'labels' for Print labels in
+// js/assets.js, which is delivered the same way).
+function deliverReport(html, meta, kind = 'report') {
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const slug = (meta.site || 'network').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'network';
-    const name = `${slug}-report-${meta.date || todayISO()}.html`;
+    const name = `${fileSlug(meta.site)}-${kind}-${meta.date || todayISO()}.html`;
 
     const tab = window.open(url, '_blank');
     // A blob: page inherits this page's CSP, which forbids inline handlers, so
@@ -821,42 +1129,51 @@ function deliverReport(html, meta) {
     return { url, name, opened: !!tab };
 }
 
-async function generateSiteReport() {
+// `meta` overrides the stored header for this one report: a read-only document
+// cannot keep what was typed into the dialog (commitReportMeta), but the report
+// the visitor asked for still carries it.
+//
+// A kept network's report says what changed since its last back-up or report
+// (js/changes.js), and is then its new baseline: the next report says what
+// changed since this one. Worked out before the baseline moves, or every
+// report would say nothing had changed.
+async function generateSiteReport(meta) {
     const model = reportModel();
+    if (meta) model.meta = siteReportMeta(meta);
+    const keptId = isKept() ? state.libraryId : null;
+    const doc = keptId ? serializeDoc() : null;
+    if (keptId) model.changes = reportChanges(keptId, doc);
     let image = null;
     try { image = await captureCanvasImage('png'); }
     catch (e) { console.warn('Report: could not rasterise the diagram; continuing without it.', e); }
-    return deliverReport(reportHtml(model, image), model.meta);
+    const out = deliverReport(reportHtml(model, image), model.meta);
+    if (keptId) takeSnapshot(keptId, 'report', doc);
+    return out;
 }
 
 // Draw a stored document onto the real canvas so it can be rasterised, then put
 // the editor back exactly as it was. withDoc() cannot do this: it is a pure
 // model swap that never renders, and it deliberately drops annotations — which
-// captureCanvasImage measures when it crops. Never calls save() or
-// invalidateTidy(), so the URL and the undo timeline are untouched: the user
-// asked for a report, not for their canvas to be edited.
+// captureCanvasImage measures when it crops. Never calls save(), so the URL
+// and the undo timeline are untouched: the user asked for a report, not for
+// their canvas to be edited.
 async function withDocRendered(doc, fn) {
     const held = {
-        nodes: state.nodes, links: state.links, annotations: state.annotations, report: state.report,
+        nodes: state.nodes, links: state.links, networks: state.networks, accepted: state.accepted, annotations: state.annotations, report: state.report,
         camera: { x: state.camera.x, y: state.camera.y, zoom: state.camera.zoom },
-        selectedId: state.selectedId, selectedType: state.selectedType,
+        selection: state.selection,   // the whole set: a getter pair would lose a set of several
     };
     borrowCanvas(true);   // save() refuses while the canvas is not the user's document
     try {
-        state.selectedId = null; state.selectedType = null;
-        state.nodes = cloneData(doc.nodes || []).map(normalizeLoadedNode);
-        state.links = cloneData(Array.isArray(doc.links) ? doc.links : []).map(normalizeLoadedLink)
-            .filter((l) => getNode(l.source) && getNode(l.target));
-        state.annotations = cloneData(doc.annotations || []).map(normalizeLoadedAnnotation);
-        state.report = doc.report && typeof doc.report === 'object' ? cloneData(doc.report) : null;
-        autoBindLinks();
+        state.selection = new Set();
+        loadDocState(doc || {});   // migrates a v1 card, as opening it would
         renderCanvasOnly();
         return await fn();
     } finally {
-        state.nodes = held.nodes; state.links = held.links;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.accepted = held.accepted;
         state.annotations = held.annotations; state.report = held.report;
         state.camera = held.camera;
-        state.selectedId = held.selectedId; state.selectedType = held.selectedType;
+        state.selection = held.selection;
         borrowCanvas(false);
         applyCamera(); renderCanvasOnly();
     }
@@ -880,15 +1197,22 @@ async function captureBinderImages(sites, onProgress, capture) {
 }
 
 async function generateBinderReport(estateMeta, opts = {}) {
-    const entries = libraryEntries();
-    if (!entries.length) { alert(t('Nothing to report on yet — save a network first.')); return null; }
+    // Sites only: a saved template is a starting point, not a building.
+    flushAutosave();
+    const entries = libraryNetworks();
+    if (!entries.length) { showToast(t('Nothing to report on yet — save a network first.')); return null; }
     const binder = binderModel(entries, estateMeta);
     // binderSiteModels drops the document once it has the model; the image
     // sweep needs it back, and matching by id keeps that lookup honest.
     const byId = new Map(entries.map((e) => [e.id, e.doc]));
     binder.sites.forEach((s) => { s.doc = byId.get(s.id); });
+    // Each site's sheet says what changed since that card's baseline, and the
+    // estate report is then every card's new one, as a site report is.
+    binder.sites.forEach((s) => { if (s.model) s.model.changes = reportChanges(s.id, s.doc); });
     const images = opts.images === false ? {} : await captureBinderImages(binder.sites, opts.onProgress, opts.capture);
-    return deliverReport(binderHtml(binder, images), { site: binder.meta.site || 'estate', date: binder.meta.date, ref: binder.meta.ref });
+    const out = deliverReport(binderHtml(binder, images), { site: binder.meta.site || 'estate', date: binder.meta.date, ref: binder.meta.ref });
+    entries.forEach((e) => takeSnapshot(e.id, 'report', e.doc));
+    return out;
 }
 
 // ---- The dialog ----
@@ -917,7 +1241,7 @@ function renderReportFields(seed) {
         else input.rows = 3;
         input.id = `report-${key}`;
         input.className = multiline ? 'textarea' : 'input';
-        input.placeholder = t(placeholder) || '';
+        input.placeholder = (key === 'site' && _reportMode === 'site' && keptSiteName()) || t(placeholder) || '';
         input.value = meta[key];
         wrap.append(cap, input);
         host.appendChild(wrap);
@@ -935,7 +1259,11 @@ function readReportFields() {
     return meta;
 }
 
+// A read-only document (one from a newer Topo) is never written, so its header
+// is read for this report and not stored; the dialog's blurb says so up front,
+// rather than save() reverting it with the generic read-only toast.
 function commitReportMeta() {
+    if (state.readOnly) return normalizeReportMeta(readReportFields());
     state.report = readReportFields();
     save();
     return normalizeReportMeta(state.report);
@@ -948,7 +1276,7 @@ function commitReportMeta() {
 // generates a binder.
 function renderReportDialog() {
     const binder = _reportMode === 'binder';
-    const entries = binder ? libraryEntries() : [];
+    const entries = binder ? libraryNetworks() : [];
     const title = document.getElementById('reportDialogTitle');
     const blurb = document.getElementById('reportDialogBlurb');
     const build = document.getElementById('reportBuildBtn');
@@ -957,9 +1285,13 @@ function renderReportDialog() {
     if (blurb) {
         blurb.textContent = binder
             ? t('Every saved network as one document: the estate totals, the findings across all sites, the addressing they share, then each network in full.')
-            : t('The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.');
+            : t('The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.')
+                + (state.readOnly ? ` ${t('This network is read-only, so the header is used for this report and not kept.')}` : '');
     }
     if (build) build.textContent = binder ? `📋 ${t('Open binder report')}` : `📋 ${t('Open report')}`;
+    // The report prints every device's notes: a password in one is named
+    // here, before the document is handed to anyone (js/assets.js).
+    renderSecretLint(document.getElementById('reportLint'), secretHitsFor(binder ? 'binder-report' : 'doc'), binder ? null : closeReportDialog);
     if (images) {
         images.classList.toggle('hidden', !binder);
         // On by default up to eight sites. Past that the sweep is slow and the
@@ -980,7 +1312,7 @@ function openReportDialog(mode) {
 }
 
 function openBinderReportDialog() {
-    if (!libraryEntries().length) { alert(t('Nothing to report on yet — save a network first.')); return; }
+    if (!libraryNetworks().length) { showToast(t('Nothing to report on yet — save a network first.')); return; }
     openReportDialog('binder');
 }
 

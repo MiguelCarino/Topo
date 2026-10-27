@@ -1,12 +1,14 @@
-// Saving your own network as a template goes through a different allowlist than
-// the URL hash, so it can lose fields the hash keeps. What you get back has to
-// be the network you saved.
+// Saving your own network as a template used to go through a different
+// allowlist than the URL hash, so it could lose fields the hash keeps. A saved
+// template is now a library card flagged `template` (js/library.js), written by
+// the same serializer; this keeps proving that what you get back is the
+// network you saved.
 window.addEventListener('load', () => {
   const out = [];
   const ok = (name, cond, extra) => out.push(`${cond ? 'PASS' : 'FAIL'} :: ${name}${extra ? ' :: ' + extra : ''}`);
 
-  const KEY = 'nettopo_user_templates';
-  localStorage.removeItem(KEY);
+  const heldLibrary = CarinoLibrary.loadLibrary();
+  CarinoLibrary.persistLibrary({});
 
   // A network using the features that make this tool worth using: a grown
   // switch, a bond, deliberate NAT, and cables in specific sockets.
@@ -36,12 +38,14 @@ window.addEventListener('load', () => {
 
   // Serialize with the app's own function — not a copy of it here, or this
   // suite would only prove that the test agrees with itself. Round-trip through
-  // localStorage for real, so anything unserializable shows up.
-  localStorage.setItem(KEY, JSON.stringify({ mine: templateSnapshot() }));
-  const back = JSON.parse(localStorage.getItem(KEY)).mine;
+  // the library's store for real (a card is held as JSON in either store), so
+  // anything unserializable shows up.
+  const tplId = librarySave('Mine', null, { template: true });
+  ok('the template card was stored', !!tplId && CarinoLibrary.loadLibrary()[tplId].template === true);
+  const back = CarinoLibrary.loadLibrary()[tplId].doc;
 
   state.nodes = []; state.links = [];
-  loadTemplateState(back);
+  loadDocState(back);
   autoBindLinks();
 
   ok('a 24-port switch comes back with 24 ports', portCountOf(getNode('sw')) === before.ports,
@@ -63,7 +67,7 @@ window.addEventListener('load', () => {
   ok('the saved network raises no new complaints', state.nodes.every((n) => nodeSeverity(n) === null),
      state.nodes.filter((n) => nodeSeverity(n)).map((n) => n.name).join(',') || 'none');
 
-  localStorage.removeItem(KEY);
+  CarinoLibrary.persistLibrary(heldLibrary);
 
   // ---- Loading a different network must not leave stale ids pointing at it ----
   // popstate reaches load() without a reload: paste a shared URL while link mode

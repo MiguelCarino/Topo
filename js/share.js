@@ -16,15 +16,27 @@
 
 let _shareMode = 'doc';          // 'doc' (Copy link) | 'binder' (Copy binder link)
 let _shareBusy = false;
+// Notes that look like they hold a password (secretHitsFor, js/assets.js),
+// found once when the dialog opens: the passphrase field redraws the dialog
+// on every keystroke, and the network cannot change under a modal.
+let _shareLintHits = [];
 
 const _shareEl = (id) => document.getElementById(id);
 
 function openShareDialog(mode) {
+    // A newer Topo's document does not go into a link: the serializer would
+    // trim it, and passing it through raw would let hand-edited keys past the
+    // allowlist (outgoingDoc in app.js). The build file carries it as it is.
+    if (mode !== 'binder' && state.readOnly) {
+        showToast(t('A network from a newer version of Topo cannot be shared as a link. Export the build file instead.'));
+        return;
+    }
     _shareMode = mode === 'binder' ? 'binder' : 'doc';
     const seal = _shareEl('shareSeal');
     seal.checked = canSeal();
     seal.disabled = !canSeal();
     _shareEl('sharePass').value = canSeal() ? generatePassphrase() : '';
+    _shareLintHits = secretHitsFor(_shareMode);
     resetShareResult();
     renderShareDialog();
     _shareEl('shareDialog').classList.remove('hidden');
@@ -59,6 +71,7 @@ function renderShareDialog() {
     const copy = _shareEl('shareCopyBtn');
     copy.disabled = _shareBusy || (sealed && pass.length < SEAL_MIN_PASSPHRASE);
     copy.textContent = _shareBusy ? `⏳ ${t('Locking…')}` : sealed ? `🔒 ${t('Copy locked link')}` : `🔗 ${t('Copy plain link')}`;
+    renderSecretLint(_shareEl('shareLint'), _shareLintHits, binder ? null : closeShareDialog);
     _shareEl('sharePassCopyBtn').textContent = `🔑 ${t('Copy passphrase')}`;
 }
 
@@ -71,9 +84,15 @@ function resetShareResult() {
 }
 
 // -> the full URL, or null when a binder is too big for one link.
+// What goes into the URL is always the serializer's output: the open document
+// via serializeDoc() (a read-only one is refused) with its identity added
+// (identifiedDoc in js/app.js, so whoever keeps it keeps the same network and
+// a later link of it updates their card), each binder site via
+// binderLinkFile(), which also leaves out sites from a newer Topo.
 async function buildShareLink(mode, sealed, passphrase) {
     const binder = mode === 'binder';
-    const json = JSON.stringify(binder ? binderFile() : serializeDoc());
+    if (!binder && state.readOnly) throw new Error('A read-only document is not shared as a link.');
+    const json = JSON.stringify(binder ? binderLinkFile().file : identifiedDoc(serializeDoc()));
     const frag = sealed
         ? await sealFragment(json, binder ? SEAL_KIND.binder : SEAL_KIND.doc, passphrase)
         : binder ? await encodeBinderFragment(json) : await encodeShareFragment(json);
@@ -87,6 +106,17 @@ async function copyShareLink() {
     if (_shareBusy) return;
     const sealed = shareSealed(), pass = sharePassphrase();
     if (sealed && pass.length < SEAL_MIN_PASSPHRASE) return;
+    if (_shareMode === 'binder') {
+        // Said before the link is made, not after: a link that quietly lacks
+        // some of the binder is the kind of loss nobody notices until the
+        // colleague asks where a building went.
+        const { newer } = binderLinkFile();
+        if (newer) {
+            closeShareDialog();
+            if (await askConfirm(t('{n} of these networks were made by a newer version of Topo and cannot travel in a link. Export the binder file instead?', { n: newer }), { ok: t('Back up all') })) exportBinder();
+            return;
+        }
+    } else if (state.readOnly) { closeShareDialog(); openShareDialog('doc'); return; }
     _shareBusy = true; renderShareDialog();
     let url;
     try { url = await buildShareLink(_shareMode, sealed, pass); }
@@ -96,7 +126,7 @@ async function copyShareLink() {
     if (url === null) {
         const n = binderFile().sites.length;
         closeShareDialog();
-        if (confirm(t('These {n} networks are too much for one link. Export the binder file instead?', { n }))) exportBinder();
+        if (await askConfirm(t('These {n} networks are too much for one link. Export the binder file instead?', { n }), { ok: t('Back up all') })) exportBinder();
         return;
     }
     const done = _shareEl('shareDone');

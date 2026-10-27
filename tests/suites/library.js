@@ -8,21 +8,26 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
 
-  // Dialogs would hang a headless run, and every answer here is part of the
-  // assertion anyway — "the user said yes" is a precondition, not a result.
+  // The page's questions (js/dialog.js) would wait forever for a click under
+  // the headless runner, and every answer here is part of the assertion anyway
+  // — "the user said yes" is a precondition, not a result. `confirms` counts the
+  // yes/no questions, so "it did not ask" can be asserted too.
   // Assertions whose answer only arrives from a promise; drained at the end.
   const late = [];
-  const realConfirm = window.confirm, realAlert = window.alert, realPrompt = window.prompt;
-  let answer = true, prompted = null, promptWith = 'Torre B';
-  window.confirm = () => answer;
-  window.alert = () => {};
-  window.prompt = (msg, def) => { prompted = { msg, def }; return promptWith; };
+  let answer = true, prompted = null, promptWith = 'Torre B', confirms = 0;
+  const heldResponder = setDialogResponder((req) => {
+    if (req.kind === 'prompt') { prompted = { msg: req.message, def: req.value }; return promptWith; }
+    if (req.kind === 'confirm') { confirms++; return answer; }
+    return req.kind === 'choice' ? null : undefined;
+  });
 
   // The suite writes to the real store, so hold whatever was there and put it
   // back at the end — a test run must not eat the tester's saved networks.
-  const heldStore = localStorage.getItem(LIBRARY_KEY);
+  // Through the library's own calls, so it holds whichever store this browser
+  // gave it (IndexedDB, or the localStorage fallback).
+  const heldStore = loadLibrary();
   const heldHash = window.location.hash;
-  localStorage.removeItem(LIBRARY_KEY);
+  persistLibrary({});
 
   // ---- Nothing of the editor shows before boot has decided ----
   // The editor used to paint in full — toolbar, sidebar, empty canvas — and the
@@ -38,7 +43,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   }).catch(() => late.push(['the markup ships with the editor hidden', false, 'could not read index.html']));
 
   // ---- The store round-trips the document ----
-  loadTemplateState(templatesData.hospital); autoBindLinks(); renderCanvasOnly();
+  loadDocState(templatesData.hospital); autoBindLinks(); renderCanvasOnly();
   const expected = JSON.stringify(serializeDoc());
   const idA = librarySave('Hospital San José — Torre A');
   ok('saving returns an id', !!idA, String(idA));
@@ -90,18 +95,22 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('an entry whose document did not survive is not offered',
      !entries.some((e) => e.id === 'broken'), entries.map((e) => e.id).join(','));
 
+  // The localStorage blob — the fallback store, and what IndexedDB merges in
+  // from — is writable by anything on this origin.
+  const heldBlob = localStorage.getItem(LIBRARY_KEY);
   localStorage.setItem(LIBRARY_KEY, '["not", "an", "object"]');
   ok('a store of the wrong shape reads as empty, not as a crash',
-     Object.keys(loadLibrary()).length === 0);
+     Object.keys(readLocalLibrary()).length === 0);
   localStorage.setItem(LIBRARY_KEY, '{oh no');
-  ok('and so does unparseable JSON', Object.keys(loadLibrary()).length === 0);
+  ok('and so does unparseable JSON', Object.keys(readLocalLibrary()).length === 0);
+  if (heldBlob === null) localStorage.removeItem(LIBRARY_KEY); else localStorage.setItem(LIBRARY_KEY, heldBlob);
 
   // ---- Summarising a document that is not on screen ----
   // The card claims a device count and a finding count for a network the editor
   // is not holding. If withDoc() leaked, the editor would be showing one
   // network and the diagnostics panel would be describing another.
-  localStorage.removeItem(LIBRARY_KEY);
-  loadTemplateState(templatesData.errors); autoBindLinks(); renderCanvasOnly();
+  persistLibrary({});
+  loadDocState(templatesData.errors); autoBindLinks(); renderCanvasOnly();
   const onCanvas = {
     nodes: state.nodes.length,
     doc: JSON.stringify(serializeDoc()),
@@ -123,7 +132,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
   // The counts on a card have to be the counts the panel would show, because a
   // card that under-reports is a survey someone thinks is finished.
-  loadTemplateState(templatesData.hospital); autoBindLinks(); renderCanvasOnly();
+  loadDocState(templatesData.hospital); autoBindLinks(); renderCanvasOnly();
   const live = topologyFindings();
   ok('a card counts the devices the canvas would', summary.devices === state.nodes.length,
      `${summary.devices} vs ${state.nodes.length}`);
@@ -137,15 +146,15 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('an unreadable document is marked, not silently reported as clean', broken.unreadable === true);
 
   // ---- The landing ----
-  localStorage.removeItem(LIBRARY_KEY);
+  persistLibrary({});
   openLanding(false);
   ok('with nothing saved the landing says so',
      !document.getElementById('landingEmpty').classList.contains('hidden')
      && document.getElementById('landingSaved').classList.contains('hidden'));
 
-  loadTemplateState(templatesData.errors); autoBindLinks();
+  loadDocState(templatesData.errors); autoBindLinks();
   const idBad = librarySave('Bodega Sur');
-  loadTemplateState(templatesData.house); autoBindLinks();
+  loadDocState(templatesData.house); autoBindLinks();
   const idOk = librarySave('<img src=x onerror=alert(1)>');
   renderLanding();
   const cards = document.querySelectorAll('#landing .landing-card');
@@ -176,7 +185,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // a reload or Back come back to it) and that the URL holds none of it.
   answer = true;
   window.history.replaceState({ topoDoc: '{"stale":true}' }, '', window.location.pathname + window.location.search + '#stale');
-  openFromLibrary(idBad);
+  await openFromLibrary(idBad);
   ok('opening a card closes the landing',
      document.getElementById('landing').classList.contains('hidden')
      && !document.body.classList.contains('landing-open'));
@@ -185,18 +194,32 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('the entry holds this network, and the URL none of it',
      liveDocJson() === JSON.stringify(serializeDoc()) && window.location.hash === '', window.location.hash.slice(0, 20));
   ok('and the canvas remembers which card it came from', state.libraryId === idBad, String(state.libraryId));
-  ok('so Save updates that card without asking for a name',
-     (prompted = null, saveCurrentToLibrary(), prompted === null && Object.keys(loadLibrary()).length === 2),
+  // A card opens kept: it saves itself, so Keep this network has nothing to
+  // ask and nothing to add.
+  prompted = null;
+  ok('so Keep this network on an open card asks for no name and adds no card',
+     (await keepThisNetwork()) === idBad && prompted === null && Object.keys(loadLibrary()).length === 2,
      `${Object.keys(loadLibrary()).length} entries`);
 
-  // Declining the replace has to leave the open diagram exactly as it was.
-  const beforeDecline = JSON.stringify(serializeDoc());
-  answer = false;
+  // A kept network has just been saved, so replacing it loses nothing and
+  // nothing is asked.
+  confirms = 0;
   openLanding(false);
-  openFromLibrary(idOk);
+  await openFromLibrary(idOk);
+  ok('replacing a kept network does not ask', confirms === 0 && state.libraryId === idOk, `${confirms} asked`);
+
+  // An unkept one (an example) is asked about, and declining the replace has
+  // to leave the open diagram exactly as it was.
+  replaceDocument(templatesData.house, { origin: 'template' });
+  const beforeDecline = JSON.stringify(serializeDoc());
+  answer = false; confirms = 0;
+  openLanding(false);
+  await openFromLibrary(idBad);
+  ok('replacing an example asks first', confirms === 1, `${confirms} asked`);
   ok('declining the replace keeps the diagram on screen',
-     JSON.stringify(serializeDoc()) === beforeDecline);
+     JSON.stringify(serializeDoc()) === beforeDecline && state.libraryId === null);
   answer = true;
+  closeLanding();
 
   // ---- A new network is a document from the first moment ----
   window.history.replaceState({ topoDoc: '{"stale":true}' }, '', window.location.pathname + window.location.search + '#stale');
@@ -207,23 +230,43 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('and a blank canvas is still a document of its own',
      liveDocJson() === JSON.stringify(serializeDoc()) && window.location.hash === '',
      window.location.hash.slice(0, 20));
-  ok('a blank canvas is not somebody else’s card', state.libraryId === null, String(state.libraryId));
-  ok('an empty canvas has nothing to save', (prompted = null, saveCurrentToLibrary(), prompted === null));
+  // A new network is kept from the start, under an id of its own, but it
+  // becomes a card only with its first device: New network pressed twice must
+  // not leave two empty cards behind.
+  const newId = state.libraryId;
+  ok('a blank canvas is kept under a new id, not somebody else’s card',
+     !!newId && newId !== idBad && newId !== idOk && !loadLibrary()[newId], String(newId));
+  prompted = null;
+  ok('an empty canvas has nothing to keep',
+     (await keepThisNetwork()) === null && prompted === null && Object.keys(loadLibrary()).length === 2);
+  flushAutosave();
+  ok('nor is it written as an empty card', Object.keys(loadLibrary()).length === 2);
   spawnNode('router');
+  flushAutosave();
+  ok('its first device makes it a card, with no name asked', prompted === null && !!loadLibrary()[newId],
+     Object.keys(loadLibrary()).join(','));
+  ok('called Untitled until someone names it', !!loadLibrary()[newId] && loadLibrary()[newId].name === 'Untitled network'
+     && loadLibrary()[newId].nameAuto === true, loadLibrary()[newId] && loadLibrary()[newId].name);
+  // The report header is the one place a site name has already been typed, so
+  // a card nobody named follows it.
+  state.report = { site: 'Clínica Norte' }; save(); flushAutosave();
+  ok('and follows the report header’s site once one is typed',
+     !!loadLibrary()[newId] && loadLibrary()[newId].name === 'Clínica Norte', loadLibrary()[newId] && loadLibrary()[newId].name);
+
+  // An example is not kept; Keep this network asks for a name, offering the
+  // report header's site.
+  replaceDocument(templatesData.house, { origin: 'template' });
+  ok('an example is not kept', state.libraryId === null);
+  state.report = { site: 'Casa Roma' }; save();
   prompted = null; promptWith = 'Nueva sede';
-  saveCurrentToLibrary();
-  ok('a network with no card behind it asks for a name', prompted !== null,
-     prompted && prompted.msg);
+  const keptId = await keepThisNetwork();
+  ok('keeping an example asks for a name', prompted !== null, prompted && prompted.msg);
+  ok('offering the report header as the default', !!prompted && prompted.def === 'Casa Roma', prompted && String(prompted.def));
   ok('and the name it was given is the one on the card',
-     libraryEntries().some((e) => e.name === 'Nueva sede'),
+     !!keptId && loadLibrary()[keptId].name === 'Nueva sede' && state.libraryId === keptId,
      libraryEntries().map((e) => e.name).join(' | '));
-  // The report header is the one place a site name has already been typed.
-  state.libraryId = null;
-  state.report = { site: 'Clínica Norte' };
-  prompted = null; saveCurrentToLibrary();
-  ok('and the report header is what it offers as the default',
-     prompted && prompted.def === 'Clínica Norte', prompted && String(prompted.def));
-  state.report = null;
+  state.report = null; save(); flushAutosave();
+  ok('from then on it saves itself', !!keptId && loadLibrary()[keptId].doc.report == null);
 
   // ---- The editor's controls are actually off the screen ----
   // Asserted on the computed style, not on the class that is supposed to cause
@@ -306,34 +349,34 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // Otherwise Save takes the "update the open card" branch, skips the name
   // prompt, and overwrites a surveyed network with a template. There is no undo
   // for a library entry.
-  localStorage.removeItem(LIBRARY_KEY);
-  loadTemplateState(templatesData.hospital); autoBindLinks();
+  persistLibrary({});
+  loadDocState(templatesData.hospital); autoBindLinks();
   const survey = librarySave('Torre A — surveyed');
   state.libraryId = survey;
-  applyTemplate(templatesData.house);
+  await applyTemplate(templatesData.house);
   ok('loading a template drops the card the canvas came from', state.libraryId === null, String(state.libraryId));
   ok('so the surveyed network is still what the card holds',
      loadLibrary()[survey].doc.nodes.length === templatesData.hospital.nodes.length,
      `${loadLibrary()[survey].doc.nodes.length} nodes`);
   state.libraryId = survey;
-  buildSetupNetwork();
-  ok('and so does the setup wizard', state.libraryId === null, String(state.libraryId));
+  buildNewNetwork({ items: [{ type: 'pc', count: 2 }] });
+  ok('and so does the setup intake (a network of its own)', state.libraryId !== survey, String(state.libraryId));
   ok('leaving the card untouched there too',
      loadLibrary()[survey].doc.nodes.length === templatesData.hospital.nodes.length);
-  localStorage.removeItem(LIBRARY_KEY);
+  persistLibrary({});
 
   // ---- Inter-site links ----
   // A change to the document model, so the first thing to prove is that it did
   // not change any document that does not use it. Everything else about the
   // feature is downstream of that.
-  loadTemplateState(templatesData.hospital); autoBindLinks();
+  loadDocState(templatesData.hospital); autoBindLinks();
   ok('a document that names no site is byte-identical to its pre-feature form',
      !JSON.stringify(serializeDoc()).includes('siteRef'));
 
-  localStorage.removeItem(LIBRARY_KEY);
-  loadTemplateState(templatesData.campus); autoBindLinks();
+  persistLibrary({});
+  loadDocState(templatesData.campus); autoBindLinks();
   const torreA = librarySave('Torre A');
-  loadTemplateState(templatesData.hospital); autoBindLinks();
+  loadDocState(templatesData.hospital); autoBindLinks();
 
   const cloud = state.nodes.find((n) => n.type === 'cloud') || spawnNode('cloud');
   cloud.siteRef = { id: torreA, name: 'Torre A' };
@@ -364,7 +407,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const captionOf = (id) => [...document.querySelectorAll(`#ui-node-${id} text`)].map((n) => n.textContent).find((x) => x.startsWith('↗'));
   ok('the canvas captions the cloud with the site it stands for',
      captionOf(cloud.id) === '↗ Torre A', String(captionOf(cloud.id)));
-  localStorage.removeItem(LIBRARY_KEY);   // the binder is gone; the claim is not
+  persistLibrary({});   // the binder is gone; the claim is not
   renderCanvasOnly();
   ok('and captions it identically when the site is not in this browser',
      captionOf(cloud.id) === '↗ Torre A', String(captionOf(cloud.id)));
@@ -381,11 +424,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // The file is the copy that outlives the browser, so the two things that
   // matter are that it carries the documents intact and that bringing it back
   // does not destroy work that is already here.
-  localStorage.removeItem(LIBRARY_KEY);
+  persistLibrary({});
   localStorage.removeItem(BINDER_EXPORT_KEY);
-  loadTemplateState(templatesData.hospital); autoBindLinks();
+  loadDocState(templatesData.hospital); autoBindLinks();
   const bId = librarySave('Torre A');
-  loadTemplateState(templatesData.errors); autoBindLinks();
+  loadDocState(templatesData.errors); autoBindLinks();
   const bId2 = librarySave('Bodega Sur');
 
   const file = binderFile();
@@ -469,17 +512,17 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // imports a network stamped a minute into the future to prove "newer wins",
   // and an entry dated after the export is legitimately "changed since" for as
   // long as that clock is ahead. Correct behaviour, useless starting point.
-  localStorage.removeItem(LIBRARY_KEY);
+  persistLibrary({});
   localStorage.removeItem(BINDER_EXPORT_KEY);
-  loadTemplateState(templatesData.house); autoBindLinks();
+  loadDocState(templatesData.house); autoBindLinks();
   const sId = librarySave('Casa Coyoacán');
   ok('with no export on record the landing says so outright',
-     /never|not exported/i.test(binderStatus()), binderStatus());
+     /not backed up/i.test(binderStatus()), binderStatus());
   recordBinderExport();
   ok('straight after an export it says only when', !/changed since/i.test(binderStatus()), binderStatus());
   // A network added since the export is "changed" too, which a bare timestamp
   // could not distinguish from one that was in the file.
-  loadTemplateState(templatesData.bank); autoBindLinks();
+  loadDocState(templatesData.bank); autoBindLinks();
   const addedAfter = librarySave('Sucursal Centro');
   ok('a network added since the export counts as changed',
      /changed since/i.test(binderStatus()), binderStatus());
@@ -499,7 +542,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('but renaming it to what it already was is not a change',
      !/changed since/i.test(binderStatus()), binderStatus());
   ok('the line disappears entirely when there is nothing saved',
-     (localStorage.removeItem(LIBRARY_KEY), binderStatus() === null), String(binderStatus()));
+     (persistLibrary({}), binderStatus() === null), String(binderStatus()));
 
   // ---- Which URLs are the front door ----
   // shouldShowLanding() reads only the URL, so it can be asked about each shape
@@ -522,11 +565,10 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('but a language choice is not a destination', asked('?lang=es', '') === true);
 
   // ---- Cleanup ----
-  localStorage.removeItem(LIBRARY_KEY);
   localStorage.removeItem(BINDER_EXPORT_KEY);
-  if (heldStore !== null) localStorage.setItem(LIBRARY_KEY, heldStore);
+  persistLibrary(heldStore);
   window.history.replaceState(null, '', window.location.pathname + window.location.search + heldHash);
-  window.confirm = realConfirm; window.alert = realAlert; window.prompt = realPrompt;
+  setDialogResponder(heldResponder);
 
   // Drain the async assertions before reporting. One extra tick is enough for a
   // same-origin fetch of a file the page already has in cache.

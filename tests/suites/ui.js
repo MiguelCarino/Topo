@@ -1,44 +1,42 @@
 window.addEventListener('load', () => { setTimeout(() => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
-  const panel = document.getElementById('conflictAlert');
+  const panel = document.getElementById('cfgPanel-findings');
   const pill  = document.getElementById('conflictPill');
   const vis = (el) => !el.classList.contains('hidden');
+  const el = (id) => document.getElementById(id);
 
-  // ---- Alerts: hide / restore / persist ----
-  localStorage.removeItem('nettopo_settings');
-  state.settings.alertsHidden = false;
+  // ---- Findings: a tab of the rail, counted by a pill on the map ----
+  // The list used to float over the canvas with a ✕ that hid it (and a
+  // stored alertsHidden). It is docked in the rail now (p2-report).
+  localStorage.setItem('nettopo_settings', JSON.stringify({ alertsHidden: true }));
+  loadSettings();
+  saveSettings();
+  ok('an old stored "alerts hidden" is ignored and no longer written', !('alertsHidden' in JSON.parse(localStorage.getItem('nettopo_settings'))));
   state.nodes = [normalizeLoadedNode({ id: 'a', type: 'server', name: 'Broken', x: 0, y: 0,
     interfaces: [{ id: 'i1', name: 'eth0', ip: 'not-an-ip' }] })];
   state.links = [];
+  state.networks = [];   // nothing left over from the boot document to inherit a gateway from
+  state.accepted = [];
+  showConfigTab('config');
   validateTopology();
-  ok('panel shows when there are errors', vis(panel) && !vis(pill));
-
-  document.getElementById('conflictHideBtn').click();
-  ok('dismiss hides the panel', !vis(panel), 'panel hidden=' + !vis(panel));
-  ok('dismiss leaves a pill so problems are not silently lost', vis(pill));
-  ok('pill reports the error count', document.getElementById('conflictPillCount').textContent === '1',
-     document.getElementById('conflictPillCount').textContent);
-  ok('preference persisted to localStorage', JSON.parse(localStorage.getItem('nettopo_settings')).alertsHidden === true);
-
-  // Stays hidden across re-validation (i.e. every render).
+  ok('the pill shows when there are findings', vis(pill));
+  ok('pill reports the count', el('conflictPillCount').textContent === '1', el('conflictPillCount').textContent);
+  ok('and so does the tab', el('findTabCount').textContent === '1' && vis(el('findTabCount')));
+  ok('a critical one colours them', pill.classList.contains('bad') && el('findTabCount').classList.contains('bad'));
+  ok('the finding is listed in the tab', el('conflictMsgList').querySelectorAll('.ca-line').length === 1 && !vis(el('findingsEmpty')));
+  ok('the panel is not shown until asked for', !vis(panel));
+  pill.click();
+  ok('the pill opens the Findings tab', vis(panel) && !vis(el('cfgPanel-config')) && el('findTabBtn').getAttribute('aria-selected') === 'true');
   validateTopology();
-  ok('stays hidden across re-renders', !vis(panel) && vis(pill));
+  ok('and it stays open across re-renders', vis(panel));
 
-  // Clean topology hides both.
+  // Clean topology: no pill, no count, and the tab says so.
   getNode('a').interfaces[0].ip = '192.168.1.5/24';
   validateTopology();
-  ok('no errors hides panel and pill alike', !vis(panel) && !vis(pill));
-
-  pill.click();
-  getNode('a').interfaces[0].ip = 'bad';
-  validateTopology();
-  ok('pill click restores the panel', vis(panel) && !vis(pill));
-  ok('restore persisted', JSON.parse(localStorage.getItem('nettopo_settings')).alertsHidden === false);
-
-  // The panel must not block the canvas beneath it.
-  ok('panel is click-through', getComputedStyle(panel).pointerEvents === 'none');
-  ok('dismiss button is still clickable', getComputedStyle(document.getElementById('conflictHideBtn')).pointerEvents === 'auto');
+  ok('no findings hides the pill and the count', !vis(pill) && !vis(el('findTabCount')));
+  ok('and the tab says there are none', vis(el('findingsEmpty')) && !el('conflictMsgList').children.length);
+  showConfigTab('config');
 
   // ---- Per-medium flow animation ----
   const media = ['utp','fiber','wireless','powerline','vpn'];
@@ -145,6 +143,45 @@ window.addEventListener('load', () => { setTimeout(() => {
     ok('so a two-digit port count can actually be typed', portCountOf(getNode('sw')) === 24,
        String(portCountOf(getNode('sw'))));
   }
+
+  // ---- Lowering the count under a cabled port is refused ----
+  // Applying it left the cable on a port the switch no longer had: a fault
+  // Topo invented. The refusal must still let "2" → "24" be typed, so the field
+  // keeps the keystroke and only the document refuses it.
+  state.nodes = [normalizeLoadedNode({ id: 'sw', type: 'switch', name: 'Core', x: 0, y: 0, portCount: 12, interfaces: [] }),
+    normalizeLoadedNode({ id: 'pc', type: 'pc', name: 'PC', x: 0, y: 100, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.2/24' }] })];
+  state.links = [normalizeLoadedLink({ id: 'l1', source: 'sw', target: 'pc', sourceIface: 'p10', targetIface: 'i1' })];
+  select('sw', 'node');
+  let field = document.getElementById('portCountInput');
+  field.focus();
+  field.value = '2';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  const refusal = document.getElementById('portCountRefusal');
+  ok('a count under a cabled port is refused', getNode('sw').portCount === 12, String(getNode('sw').portCount));
+  ok('and says why, naming the port', !!refusal && !refusal.hidden && /Port 10/.test(refusal.textContent),
+     refusal ? refusal.textContent : 'no refusal line');
+  ok('the field keeps the keystroke and is marked', field.value === '2' && field.classList.contains('bad'));
+  field.value = '24';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  ok('so the next digit still lands', getNode('sw').portCount === 24, String(getNode('sw').portCount));
+  field = document.getElementById('portCountInput');
+  field.focus();
+  field.value = '9';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.dispatchEvent(new Event('blur'));
+  ok('leaving a refused field puts the real count back', field.value === '24' && !field.classList.contains('bad')
+     && document.getElementById('portCountRefusal').hidden, `${field.value} / ${getNode('sw').portCount}`);
+  field.value = '10';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  ok('down to the cabled port itself is fine', getNode('sw').portCount === 10, String(getNode('sw').portCount));
+
+  // ---- A cable past an explicit faceplate shows on it ----
+  getNode('sw').portCount = 8;   // as an older build or a hand-edited file could leave it
+  select('sw', 'node');
+  const overChip = document.querySelector('#ifaceListContainer .faceplate .port-chip.over');
+  ok('a cable past the faceplate is drawn after it, marked', !!overChip && overChip.textContent === '10',
+     overChip ? overChip.textContent : 'no overflow chip');
+  select(null, null);
 
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);

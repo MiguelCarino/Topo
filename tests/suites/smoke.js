@@ -7,12 +7,15 @@ window.addEventListener('load', () => {
 
   Object.keys(templatesData).forEach((key) => {
     try {
-      loadTemplateState(templatesData[key]); autoBindLinks();
+      loadDocState(templatesData[key]); autoBindLinks();
       renderCanvasOnly();
-      const alerts = [...document.querySelectorAll('#conflictMsgList li')].map((li) => li.textContent);
+      const alerts = topologyFindings();
       // Only the interface-level checks count here; a template's own gateway/IP
-      // alerts are its business, and some are deliberate.
-      const mine = alerts.filter((a) => /flapping|ARP flux|port|Ports|interface|L2 loop|different subnets|cables/i.test(a));
+      // alerts are its business, and some are deliberate. Picked by check key,
+      // not by wording: a gateway finding that happens to say "interface" is
+      // not an interface complaint.
+      const MINE = ['interfaces', 'multihoming', 'bond', 'ports', 'radio', 'loop', 'cabling'];
+      const mine = alerts.filter((f) => MINE.includes(f.key)).map((f) => f.line);
       const badges = state.nodes.filter((n) => nodeSeverity(n)).map((n) => `${n.name}[${nodeSeverity(n)}]`);
       state.nodes.forEach((n) => calculateReachability(n.id)); // trace must not throw on bound links
 
@@ -33,7 +36,7 @@ window.addEventListener('load', () => {
   Object.keys(SNIPPETS).forEach((key) => {
     try {
       state.nodes = []; state.links = [];
-      stampSnippet(key);
+      insertBlock(builtinBlock(key));
       const badged = state.nodes.filter((n) => nodeSeverity(n)).map((n) => `${n.name}[${nodeSeverity(n)}]`);
       if (key === 'errors') {
         // The common-errors block is the one snippet that must badge — it is the demo.

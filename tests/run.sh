@@ -113,7 +113,29 @@ probe = ('const _be = (msg) => {'
          '"unhandled rejection: " + ((e.reason && (e.reason.stack || e.reason.message)) || e.reason)));'
          'window.__cspViolations = [];'
          'document.addEventListener("securitypolicyviolation", (e) =>'
-         ' window.__cspViolations.push(e.violatedDirective + " " + (e.blockedURI || "inline")));')
+         ' window.__cspViolations.push(e.violatedDirective + " " + (e.blockedURI || "inline")));'
+         # Boot is asynchronous (it opens the library's IndexedDB store, or
+         # finds there is none and settles on the fallback), so the window's
+         # load event can arrive before boot has
+         # decided. A suite's top-level load listener is held until the app's
+         # topo:ready as well; nothing else on the page is touched.
+         # No IndexedDB here. It works under the virtual clock, but every wait
+         # on it is idle time the clock skips across to the next timer (a
+         # toast's 3.2 s, the doc bar's 30 s), so a suite awaiting library
+         # writes spends its budget and reports nothing. Every suite in this
+         # runner therefore keeps the library on its localStorage fallback,
+         # as a browser without usable IndexedDB does. The IndexedDB store runs
+         # for real in tests/suites/idb.js (@realtime) and in run-cross.mjs,
+         # and its write-behind logic in tests/suites/store.js.
+         'Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true });'
+         'window.__topoReady = new Promise((r) => window.addEventListener("topo:ready", r, { once: true }));'
+         'const _wadd = window.addEventListener;'
+         'window.addEventListener = function (type, fn, opts) {'
+         ' const s = document.currentScript;'
+         ' if (type === "load" && fn && s && /(^|\\/)tests\\/suites\\//.test(s.getAttribute("src") || "")) {'
+         '  const f = typeof fn === "function" ? fn : (e) => fn.handleEvent(e);'
+         '  return _wadd.call(this, type, (e) => window.__topoReady.then(() => f.call(window, e)), opts); }'
+         ' return _wadd.call(this, type, fn, opts); };')
 open(probefile, 'w').write(probe)
 if '<head>' not in html or '</head>' not in html or '</body>' not in html:
     sys.exit('index.html is missing <head>, </head> or </body> to inject into')

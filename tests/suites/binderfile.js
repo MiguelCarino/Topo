@@ -16,10 +16,10 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
   const realPicker = window.showSaveFilePicker;
   delete window.showSaveFilePicker;
-  const realAlert = window.alert, realConfirm = window.confirm, realPrompt = window.prompt;
+  // The page's questions (js/dialog.js) are answered here: a question with
+  // nobody to click it would wait forever under the headless runner.
   let confirmAnswer = true;
-  window.alert = () => {}; window.prompt = () => null;
-  window.confirm = () => confirmAnswer;
+  const heldResponder = setDialogResponder((req) => (req.kind === 'confirm' ? confirmAnswer : req.kind === 'prompt' ? null : req.kind === 'choice' ? null : undefined));
 
   // IndexedDB's callbacks never fire under run.sh's virtual clock, so the real
   // store is swapped for an in-memory one. What is under test is everything
@@ -32,13 +32,18 @@ window.addEventListener('load', () => { setTimeout(async () => {
     del: () => { _mem = null; return Promise.resolve(); },
   });
 
-  const heldStore = localStorage.getItem(LIBRARY_KEY);
+  const heldStore = loadLibrary();
   const heldExport = localStorage.getItem(BINDER_EXPORT_KEY);
-  localStorage.removeItem(LIBRARY_KEY); localStorage.removeItem(BINDER_EXPORT_KEY);
+  persistLibrary({}); localStorage.removeItem(BINDER_EXPORT_KEY);
+  // Storage refusing the library's writes, in either store: the fallback's
+  // setItem throws, and IndexedDB's transactions are refused.
+  const idb = libraryStoreKind() === 'idb';
+  const realWrite = idb ? libraryAdapter().write : null;
+  const refuseIdb = (on) => { if (idb) libraryAdapter().write = on ? () => Promise.resolve(false) : realWrite; };
   await clearBinderHandle();
 
-  loadTemplateState(templatesData.hospital); autoBindLinks(); librarySave('Torre A');
-  loadTemplateState(templatesData.house); autoBindLinks(); librarySave('Casa Coyoacán');
+  loadDocState(templatesData.hospital); autoBindLinks(); librarySave('Torre A');
+  loadDocState(templatesData.house); autoBindLinks(); librarySave('Casa Coyoacán');
 
   // ---- Without the API, nothing changes ----
   ok('a browser without the API reports that it cannot bind', binderCanBind() === false);
@@ -48,7 +53,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
   await exportBinder();
   ok('exporting still hands over a file', downloads === 1, String(downloads));
   ok('and it is the binder, correctly named',
-     !!lastDownload && lastDownload.name === 'networks.nettopo-binder.json'
+     // Dated by the local calendar, like every download (docFileStem).
+     !!lastDownload && lastDownload.name === `networks-${todayISO()}.nettopo-binder.json`
      && lastDownload.payload.kind === 'nettopo-binder' && lastDownload.payload.sites.length === 2,
      lastDownload ? lastDownload.name : 'nothing was handed over');
   ok('the export is recorded, so the landing stops saying "never"',
@@ -197,15 +203,122 @@ window.addEventListener('load', () => { setTimeout(async () => {
      JSON.parse(newerFile.written).sites.some((x) => x.name === 'Edited elsewhere'),
      (JSON.parse(newerFile.written).sites.map((x) => x.name).join(',')));
 
+  // ---- The file is never thinner than what it held ----
+  // A double whose bytes persist across writes, as a real file's do: each
+  // export reads what the previous one (or another machine) left there.
+  const diskFile = (initial) => {
+    const h = handleWith('granted', 'granted');
+    h.written = initial;
+    h.getFile = () => Promise.resolve({ text: () => Promise.resolve(h.written || '') });
+    return h;
+  };
+  const namesIn = (h) => JSON.parse(h.written).sites.map((x) => x.name).sort().join(',');
+  const site = (id, name, updated) => ({ id, name, created: 1, updated, doc: { nodes: [], links: [] } });
+
+  // Declining "add them to this browser?" keeps them out of the LIBRARY. It
+  // used to delete them from the FILE too: the handle was bound and the
+  // library alone was written over it.
+  await clearBinderHandle();
+  const declined = diskFile(JSON.stringify({ kind: 'nettopo-binder', version: 1,
+    sites: [site('strangerX', 'Bodega X', 5), site('strangerY', 'Bodega Y', 6)] }));
+  window.showSaveFilePicker = () => Promise.resolve(declined);
+  confirmAnswer = false;
+  await exportBinder();
+  ok('declining the add leaves the library without them', !loadLibrary().strangerX && !loadLibrary().strangerY);
+  ok('but the file still holds them after the write',
+     /Bodega X/.test(namesIn(declined)) && /Bodega Y/.test(namesIn(declined)), namesIn(declined));
+  ok('alongside this browser\'s own networks', /Torre A|Edited elsewhere/.test(namesIn(declined)), namesIn(declined));
+  // A second export over the same file must not drop them either: they were
+  // carried, not exported by this browser, so they are not "deleted here".
+  await exportBinder();
+  ok('and a second export still carries them', /Bodega X/.test(namesIn(declined)) && /Bodega Y/.test(namesIn(declined)),
+     namesIn(declined));
+  ok('carried networks do not count as exported from here',
+     !Object.prototype.hasOwnProperty.call(loadLastExport().seen, 'strangerX'), Object.keys(loadLastExport().seen).join(','));
+
+  // A storage failure while adding them is the same story: still in the file.
+  await clearBinderHandle();
+  const unstorable = diskFile(JSON.stringify({ kind: 'nettopo-binder', version: 1, sites: [site('strangerZ', 'Bodega Z', 7)] }));
+  window.showSaveFilePicker = () => Promise.resolve(unstorable);
+  confirmAnswer = true;
+  const realSetItem = Storage.prototype.setItem;
+  let failNext = 1;
+  Storage.prototype.setItem = function (k, v) {
+    if (k === LIBRARY_KEY && failNext-- > 0) throw new Error('QuotaExceededError');
+    return realSetItem.call(this, k, v);
+  };
+  refuseIdb(true);
+  try { await exportBinder(); await libraryWritesSettled(); } finally { Storage.prototype.setItem = realSetItem; refuseIdb(false); }
+  ok('a merge that could not be stored still leaves them in the file', /Bodega Z/.test(namesIn(unstorable)), namesIn(unstorable));
+
+  // A bound file another machine has written to since: re-read at write time.
+  // Exporting used to write this browser's library over it unread.
+  await clearBinderHandle();
+  const synced = diskFile('');
+  window.showSaveFilePicker = () => Promise.resolve(synced);
+  await exportBinder();
+  const fromB = JSON.parse(synced.written);
+  fromB.sites.push(site('machineB', 'Added on machine B', Date.now()));
+  synced.written = JSON.stringify(fromB);
+  await exportBinder();
+  ok('a network another machine added to the bound file survives this one\'s export',
+     /Added on machine B/.test(namesIn(synced)), namesIn(synced));
+
+  // ...while a network deliberately deleted here really does leave the file.
+  // Otherwise nothing could ever be removed from a bound binder.
+  const goneId = Object.keys(loadLibrary()).find((id) => loadLibrary()[id].name === 'Casa Coyoacán');
+  ok('(setup: the local network to delete is in the file)', !!goneId && /Casa Coyoacán/.test(namesIn(synced)), namesIn(synced));
+  libraryDelete(goneId);
+  await exportBinder();
+  ok('a network deleted in this browser leaves the bound file on the next export',
+     !/Casa Coyoacán/.test(namesIn(synced)), namesIn(synced));
+  ok('without taking the other machine\'s network with it', /Added on machine B/.test(namesIn(synced)), namesIn(synced));
+
+  // A network both hold, newer in the file, while storage is full. The merge
+  // that would read the newer copy in cannot be stored, and the export used
+  // to write this browser's older copy over it.
+  const onDisk = JSON.parse(synced.written);
+  const bothId = Object.keys(loadLibrary()).find((id) => onDisk.sites.some((x) => x.id === id));
+  const theirCopy = onDisk.sites.find((x) => x.id === bothId);
+  ok('(setup: the shared network is in the file)', !!theirCopy, namesIn(synced));
+  if (theirCopy) {
+    theirCopy.name = 'Newer on machine B';
+    theirCopy.updated = (loadLibrary()[bothId].updated || 0) + 1000;
+    synced.written = JSON.stringify(onDisk);
+    Storage.prototype.setItem = function (k, v) {
+      if (k === LIBRARY_KEY) throw new Error('QuotaExceededError');
+      return realSetItem.call(this, k, v);
+    };
+    refuseIdb(true);
+    try { await exportBinder(); await libraryWritesSettled(); } finally { Storage.prototype.setItem = realSetItem; refuseIdb(false); }
+    ok('with storage full, the newer file copy is not overwritten by the older local one',
+       /Newer on machine B/.test(namesIn(synced)) && JSON.parse(synced.written).sites.filter((x) => x.id === bothId).length === 1,
+       namesIn(synced));
+    // The fallback could not take the newer copy, so this browser's version
+    // was not what went into the file. IndexedDB's library did take it (the
+    // disk refused, which the banner says), so the file holds the library's
+    // own version and is recorded as such.
+    if (idb) ok('the library took the newer copy, and the export records that version',
+       loadLibrary()[bothId].name === 'Newer on machine B' && loadLastExport().seen[bothId] === theirCopy.updated
+       && storageFailed(), String(loadLastExport().seen[bothId]));
+    else ok('and it is not recorded as exported from here',
+       !Object.prototype.hasOwnProperty.call(loadLastExport().seen, bothId), Object.keys(loadLastExport().seen).join(','));
+    // With storage back, the same export reads it in as usual.
+    await exportBinder();
+    ok('once storage works again the newer copy is read into the library',
+       loadLibrary()[bothId].name === 'Newer on machine B' && /Newer on machine B/.test(namesIn(synced)),
+       loadLibrary()[bothId].name);
+  }
+
   // ---- Cleanup ----
   await clearBinderHandle();
   window.downloadJson = realDownload;
   if (realPicker) window.showSaveFilePicker = realPicker; else delete window.showSaveFilePicker;
-  localStorage.removeItem(LIBRARY_KEY); localStorage.removeItem(BINDER_EXPORT_KEY);
-  if (heldStore !== null) localStorage.setItem(LIBRARY_KEY, heldStore);
+  localStorage.removeItem(BINDER_EXPORT_KEY);
+  persistLibrary(heldStore);
   if (heldExport !== null) localStorage.setItem(BINDER_EXPORT_KEY, heldExport);
   setHandleStore(realHandleStore);
-  window.alert = realAlert; window.confirm = realConfirm; window.prompt = realPrompt;
+  setDialogResponder(heldResponder);
   await refreshBinderBinding();
 
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');

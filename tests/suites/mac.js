@@ -108,6 +108,67 @@ window.addEventListener('load', () => {
   ok('normalizeLoadedNode keeps the address', round[0].interfaces[0].mac === '3C:07:54:11:22:33',
      String(round[0].interfaces[0].mac));
 
+  // ---- 9: ...and through the REAL persistence path ----
+  // Section 8 round-trips JSON of state.nodes, which never passes through the
+  // serializer's allowlist, and that is how the allowlist dropping `mac` went
+  // unseen: every save, Undo, library card, share link and export lost it.
+  // This goes the way the document actually travels, serializeDoc → applyDoc,
+  // and compares every interface field the allowlist names.
+  reset([
+    { id: 'a', type: 'server', name: 'A', x: 0, y: 0, interfaces: [
+      { id: 'i1', name: 'eth0', ip: '10.0.0.5/24', mac: '3C:07:54:11:22:33' },
+      { id: 'i2', name: 'wlan0', ip: '', mac: '02:11:22:33:44:55', wireless: true }] },
+    { id: 'b', type: 'server', name: 'B', x: 0, y: 100, interfaces: [
+      { id: 'i1', name: 'eth0', ip: '', mac: '' },
+      { id: 'i2', name: 'eth1', ip: '' },
+      { id: 'b1', name: 'bond0', ip: '10.0.0.6/24', mac: '52:54:00:AA:BB:CC', bond: { mode: '802.3ad', members: ['i1', 'i2'] } }] }
+  ]);
+  // drawZone is the network's since v3 (tests/suites/networks.js).
+  const IFACE_KEYS = ['id', 'name', 'ip', 'mac', 'wireless', 'bond'];
+  const ifaceView = () => state.nodes.map((n) => n.interfaces.map((i) =>
+    JSON.stringify(IFACE_KEYS.map((k) => [k, i[k] === '' ? undefined : i[k]]))));
+  const beforeTrip = JSON.stringify(ifaceView());
+  applyDoc(JSON.stringify(serializeDoc()));
+  const afterTrip = JSON.stringify(ifaceView());
+  ok('serializeDoc → applyDoc keeps every interface field, MAC included', afterTrip === beforeTrip,
+     afterTrip === beforeTrip ? '' : afterTrip.slice(0, 160));
+  ok('a MAC survives the trip', getNode('a').interfaces[0].mac === '3C:07:54:11:22:33',
+     String(getNode('a').interfaces[0].mac));
+  ok('so does a bond\'s', getNode('b').interfaces[2].mac === '52:54:00:AA:BB:CC');
+  ok('and the duplicate-MAC check still has something to read after Undo-style restore',
+     duplicateMacs(state.nodes).length === 0 && evaluateMac(getNode('a')).level === 'warn',
+     evaluateMac(getNode('a')).level);
+  // An empty MAC is omitted rather than written as "", so a document that
+  // never held one serializes byte-for-byte as it did before the fix.
+  reset([{ id: 'a', type: 'server', name: 'A', x: 0, y: 0,
+           interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.5/24', mac: '' }] }]);
+  ok('a document with no MACs carries no mac key at all',
+     !/"mac"/.test(JSON.stringify(serializeDoc())), JSON.stringify(serializeDoc().nodes[0].interfaces));
+
+  // ---- 10: the sidebar's own duplicate warning ----
+  // Interface ids repeat across nodes (every fresh device has i1), so the
+  // sidebar comparing ids alone dropped the other holder and showed nothing,
+  // while the Diagnostics tab reported the duplicate.
+  reset([
+    { id: 'a', type: 'pc', name: 'Workstation A', x: 0, y: 0,
+      interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.5/24', mac: '52:54:00:12:34:56' }] },
+    { id: 'b', type: 'pc', name: '<a href="https://example.org" id="macInjected" style="font-size:40px">Click to fix</a>', x: 0, y: 100,
+      interfaces: [{ id: 'i1', name: '<img id="macInjectedImg">', ip: '10.0.0.6/24', mac: '52:54:00:12:34:56' }] }
+  ]);
+  select('a', 'node');
+  const macOut = document.querySelector('#ifaceListContainer .if-mac-out');
+  const macIn = document.querySelector('#ifaceListContainer .if-mac input');
+  ok('two nodes sharing an interface id still show "Also on …"',
+     !!macOut && /Also on/.test(macOut.textContent), macOut ? macOut.textContent.slice(0, 80) : 'no MAC line');
+  ok('and the field turns red', !!macIn && macIn.classList.contains('bad'));
+  // The other holder's names come from the document, which may be a shared
+  // link or a stranger's file. They must arrive as text.
+  ok('a node name that is markup renders as text, not as a live link',
+     !document.getElementById('macInjected') && !!macOut && macOut.textContent.indexOf('<a href=') > -1);
+  ok('an interface name that is markup renders as text too',
+     !document.getElementById('macInjectedImg') && !!macOut && macOut.textContent.indexOf('<img') > -1);
+  select(null, null);
+
   const pre = document.createElement('pre');
   pre.id = 'TESTOUT';
   pre.textContent = out.join('\n');
