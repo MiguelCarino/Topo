@@ -60,6 +60,9 @@
    collapsed node it would go into is lit, the frames it would leave for no
    group fade, and a label at the pointer says which. Classes, not
    attributes: the cue is never in an export. */
+/* Eased so the target lights up and lets go as the pointer moves over it,
+   rather than flicking (the classes come and go within one drawn frame). */
+.grp-frame > rect:first-child, .grp-tab-pill { transition: stroke 0.15s, stroke-opacity 0.15s, stroke-width 0.15s, fill 0.15s; }
 .grp-frame.grp-drop > rect:first-child {
     stroke: var(--accent); stroke-opacity: 1; stroke-width: 3; stroke-dasharray: none;
     fill: var(--accent-faint);
@@ -769,6 +772,7 @@ body.rack-view #conflictPill { display: none !important; }
     color: var(--text); font: inherit; font-size: var(--fs-sm); line-height: calc(var(--rk-u) - 6px); text-align: left;
     cursor: grab; touch-action: pan-y; z-index: 1;
 }
+.rk-dev, .rk-guest { transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s, opacity 0.15s; }
 .rk-dev:hover, .rk-dev:focus-visible { border-color: var(--accent); outline: none; }
 /* A narrow face (the rail open on a small desktop) keeps room for the name:
    the units and the status go to the box's second line, out of sight on a
@@ -859,7 +863,7 @@ body.rack-view #conflictPill { display: none !important; }
    end, in a dot of the cable's colour). */
 .rk-wiring { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .rk-wires { position: absolute; left: 0; top: 0; overflow: visible; }
-.rk-cable { transition: opacity 0.12s; }
+.rk-cable, .rk-lbl { transition: opacity 0.15s; }
 .rk-wire { fill: none; stroke: var(--text-muted); stroke-linejoin: round; stroke-linecap: round; }
 .rk-wire.rk-stub { stroke-dasharray: 3 3; }
 /* From a line to its label where the label sits away from it (past the other
@@ -1709,3 +1713,6 @@ body.chrome-pending #unlockDialog { visibility: visible; }
    over the canvas, and on the landing there is no canvas for it to act on. */
 body.landing-open .handy-bar { display: none !important; }
 .topo-card .field { min-width: 0; gap: 4px; }
+
+/* A device on its way into a collapsed group (js/motion.js): a copy, never hit. */
+.motion-ghost { pointer-events: none; }

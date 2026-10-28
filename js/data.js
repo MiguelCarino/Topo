@@ -235,15 +235,21 @@ const OFFLINE_EXTENDED = {
 };
 
 const templatesData = {
+    // Two rooms and the hall cupboard the router lives in.
     house: {
+        groups: [
+            { id: 'g_cup', kind: 'room', name: 'Hall cupboard' },
+            { id: 'g_study', kind: 'room', name: 'Study' },
+            { id: 'g_living', kind: 'room', name: 'Living room' }
+        ],
         nodes: [
-            { id: 'h1', type: 'cloud', name: 'ISP', x: 400, y: 100, interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.1/30' }] },
-            { id: 'h2', type: 'router', name: 'Home Router', x: 400, y: 220, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.1/24' }, { id: 'i2', name: 'eth1', ip: '203.0.113.2/30' }, { id: 'i3', name: 'eth2', ip: '' }], gw: '203.0.113.1', dns: '8.8.8.8' },
-            { id: 'h3', type: 'pc', name: 'Home PC', x: 250, y: 350, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.50/24' }], gw: '192.168.1.1', dns: '8.8.8.8' },
-            { id: 'hp1', type: 'printer', name: 'Wireless Printer', x: 350, y: 350, gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.80/24' }] },
-            { id: 'hap', type: 'ap', name: 'WiFi AP', x: 500, y: 350, interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
-            { id: 'h5', type: 'iot', name: 'Smart TV', x: 450, y: 450, gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.101/24' }] },
-            { id: 'h6', type: 'camera', name: 'Porch Cam', x: 550, y: 450, gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.102/24' }] }
+            { id: 'h1', type: 'cloud', name: 'ISP', x: 400, y: 40, interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.1/30' }] },
+            { id: 'h2', type: 'router', name: 'Home Router', x: 400, y: 230, group: 'g_cup', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.1/24' }, { id: 'i2', name: 'eth1', ip: '203.0.113.2/30' }, { id: 'i3', name: 'eth2', ip: '' }], gw: '203.0.113.1', dns: '8.8.8.8' },
+            { id: 'h3', type: 'pc', name: 'Home PC', x: 140, y: 470, group: 'g_study', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.50/24' }], gw: '192.168.1.1', dns: '8.8.8.8' },
+            { id: 'hp1', type: 'printer', name: 'Wireless Printer', x: 240, y: 470, group: 'g_study', gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.80/24' }] },
+            { id: 'hap', type: 'ap', name: 'WiFi AP', x: 520, y: 230, group: 'g_cup', interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
+            { id: 'h5', type: 'iot', name: 'Smart TV', x: 560, y: 470, group: 'g_living', gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.101/24' }] },
+            { id: 'h6', type: 'camera', name: 'Porch Cam', x: 700, y: 470, gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.102/24' }] }
         ],
         links: [{ id: 'hl1', source: 'h1', target: 'h2', sourceIface: 'i1', targetIface: 'i2' }, { id: 'hl2', source: 'h2', target: 'h3', sourceIface: 'i1', targetIface: 'i1' }, { id: 'hl3', source: 'h2', target: 'hap', sourceIface: 'i3', targetIface: 'p1' }, { id: 'hl4', source: 'hap', target: 'h5', sourceIface: 'w1', targetIface: 'i1' }, { id: 'hl5', source: 'hap', target: 'h6', sourceIface: 'w1', targetIface: 'i1' }, { id: 'hl6', source: 'hap', target: 'hp1', sourceIface: 'w1', targetIface: 'i1' }]
     },
@@ -265,23 +271,35 @@ const templatesData = {
         ],
         links: [{ id: 'bl1', source: 'b1', target: 'b2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'bl2', source: 'b2', target: 'b3', sourceIface: 'i2', targetIface: 'i1' }, { id: 'bl3', source: 'b3', target: 'b4', sourceIface: 'i2', targetIface: 'p1' }, { id: 'bl4', source: 'b3', target: 'b8', sourceIface: 'i3', targetIface: 'p1' }, { id: 'bl5', source: 'b4', target: 'b5', sourceIface: 'p2', targetIface: 'i1' }, { id: 'bl6', source: 'b4', target: 'b6', sourceIface: 'p3', targetIface: 'i1' }, { id: 'bl7', source: 'b4', target: 'b7', sourceIface: 'p4', targetIface: 'i1' }, { id: 'bl8', source: 'b8', target: 'b9', sourceIface: 'p2', targetIface: 'i1' }, { id: 'bl9', source: 'b8', target: 'b10', sourceIface: 'p3', targetIface: 'i1' }, { id: 'bl10', source: 'b4', target: 'b11', sourceIface: 'p5', targetIface: 'i1' }]
     },
+    // Two racks in one data hall, an ops room beside it, and the web tier as
+    // VMs and a container on the app servers: the sample that shows groups,
+    // the rack view and hosts together (Review-Packs/Topo-groups.md).
     datacenter: {
+        groups: [
+            { id: 'g_dc',  kind: 'building', name: 'DC-1' },
+            { id: 'g_hall', kind: 'room', name: 'Data hall', parent: 'g_dc' },
+            { id: 'g_a01', kind: 'rack', name: 'A01 Network', parent: 'g_hall', uHeight: 42, width: '19in', depthMm: 1000 },
+            { id: 'g_a02', kind: 'rack', name: 'A02 Compute', parent: 'g_hall', uHeight: 42, width: '19in', depthMm: 1200 },
+            { id: 'g_ops', kind: 'room', name: 'Ops room', parent: 'g_dc' }
+        ],
         nodes: [
-            { id: 'd1',  type: 'cloud',        name: 'Internet Backbone', x: 480, y: 40,  interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
-            { id: 'd2',  type: 'edge',         name: 'Edge Router',       x: 480, y: 150, nat: true, gw: '203.0.113.1', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.2/30' }, { id: 'i2', name: 'eth1', ip: '198.51.100.2/30' }, { id: 'i3', name: 'eth2', ip: '172.16.0.1/24' }] },
-            { id: 'd3',  type: 'firewall',     name: 'Perimeter FW',      x: 480, y: 260, nat: true, gw: '172.16.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.0.2/24' }, { id: 'i2', name: 'eth1', ip: '172.16.1.1/24' }, { id: 'i3', name: 'eth2', ip: '172.16.2.1/24' }], ports: '443, 22' },
-            { id: 'd4',  type: 'loadbalancer', name: 'App Load Balancer', x: 260, y: 380, gw: '172.16.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.1.5/24' }, { id: 'i2', name: 'eth1', ip: '10.10.0.1/24' }], ports: '80, 443' },
-            { id: 'd5',  type: 'l3switch',     name: 'Core Fabric',       x: 640, y: 380, gw: '172.16.2.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.2.2/24' }, { id: 'i2', name: 'eth1', ip: '10.20.0.1/24' }, { id: 'i3', name: 'eth2', ip: '10.30.0.1/24' }] },
-            { id: 'd6',  type: 'vm',           name: 'Web Node 1',        x: 120, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.11/24' }], gw: '10.10.0.1', ports: '80, 443' },
-            { id: 'd7',  type: 'vm',           name: 'Web Node 2',        x: 220, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.12/24' }], gw: '10.10.0.1', ports: '80, 443' },
-            { id: 'd8',  type: 'container',    name: 'API Container',     x: 320, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.13/24' }], gw: '10.10.0.1', ports: '8080' },
-            { id: 'd9',  type: 'server',       name: 'App Server 1',      x: 470, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.0.11/24' }], gw: '10.20.0.1', ports: '8080' },
-            { id: 'd10', type: 'server',       name: 'App Server 2',      x: 570, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.0.12/24' }], gw: '10.20.0.1', ports: '8080' },
-            { id: 'd11', type: 'pc',           name: 'Jump Host',         x: 670, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.0.50/24' }], gw: '10.20.0.1', ports: '22' },
-            { id: 'd12', type: 'switch',       name: 'Storage Switch',    x: 820, y: 510, portCount: 8, interfaces: [] },
-            { id: 'd13', type: 'server',       name: 'DB Master',         x: 760, y: 640, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.10/24' }], gw: '10.30.0.1', ports: '5432' },
-            { id: 'd14', type: 'server',       name: 'DB Replica',        x: 850, y: 640, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.11/24' }], gw: '10.30.0.1', ports: '5432' },
-            { id: 'd15', type: 'server',       name: 'NAS Storage',       x: 940, y: 640, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.20/24' }], gw: '10.30.0.1', ports: '2049, 445' }
+            { id: 'd1',  type: 'cloud',        name: 'Internet Backbone', x: 470, y: 40,  interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
+            { id: 'd2',  type: 'edge',         name: 'Edge Router',       x: 220, y: 290, group: 'g_a01', rackU: 41, rackHeight: 1, rackFace: 'front', nat: true, gw: '203.0.113.1', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.2/30' }, { id: 'i2', name: 'eth1', ip: '198.51.100.2/30' }, { id: 'i3', name: 'eth2', ip: '172.16.0.1/24' }] },
+            { id: 'd3',  type: 'firewall',     name: 'Perimeter FW',      x: 220, y: 410, group: 'g_a01', rackU: 39, rackHeight: 1, rackFace: 'front', nat: true, gw: '172.16.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.0.2/24' }, { id: 'i2', name: 'eth1', ip: '172.16.1.1/24' }, { id: 'i3', name: 'eth2', ip: '172.16.2.1/24' }], ports: '443, 22' },
+            { id: 'd4',  type: 'loadbalancer', name: 'App Load Balancer', x: 120, y: 530, group: 'g_a01', rackU: 36, rackHeight: 2, rackFace: 'front', gw: '172.16.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.1.5/24' }, { id: 'i2', name: 'eth1', ip: '10.10.0.1/24' }], ports: '80, 443' },
+            { id: 'd5',  type: 'l3switch',     name: 'Core Fabric',       x: 320, y: 530, group: 'g_a01', rackU: 33, rackHeight: 2, rackFace: 'front', gw: '172.16.2.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.2.2/24' }, { id: 'i2', name: 'eth1', ip: '10.20.0.1/24' }, { id: 'i3', name: 'eth2', ip: '10.30.0.1/24' }] },
+            // Mounted from the back, where the storage cables land; half depth,
+            // so the front units in front of it stay free.
+            { id: 'd12', type: 'switch',       name: 'Storage Switch',    x: 320, y: 650, group: 'g_a01', rackU: 30, rackHeight: 1, rackFace: 'rear', rackDepth: 'half', portCount: 8, interfaces: [] },
+            { id: 'd9',  type: 'server',       name: 'App Server 1',      x: 640, y: 290, group: 'g_a02', rackU: 30, rackHeight: 2, rackFace: 'front', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.0.11/24' }], gw: '10.20.0.1', ports: '8080' },
+            { id: 'd10', type: 'server',       name: 'App Server 2',      x: 780, y: 290, group: 'g_a02', rackU: 27, rackHeight: 2, rackFace: 'front', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.0.12/24' }], gw: '10.20.0.1', ports: '8080' },
+            { id: 'd6',  type: 'vm',           name: 'Web Node 1',        x: 590, y: 410, host: 'd9',  interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.11/24' }], gw: '10.10.0.1', ports: '80, 443' },
+            { id: 'd7',  type: 'vm',           name: 'Web Node 2',        x: 690, y: 410, host: 'd9',  interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.12/24' }], gw: '10.10.0.1', ports: '80, 443' },
+            { id: 'd8',  type: 'container',    name: 'API Container',     x: 800, y: 410, host: 'd10', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.13/24' }], gw: '10.10.0.1', ports: '8080' },
+            { id: 'd13', type: 'server',       name: 'DB Master',         x: 590, y: 530, group: 'g_a02', rackU: 20, rackHeight: 2, rackFace: 'front', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.10/24' }], gw: '10.30.0.1', ports: '5432' },
+            { id: 'd14', type: 'server',       name: 'DB Replica',        x: 690, y: 530, group: 'g_a02', rackU: 17, rackHeight: 2, rackFace: 'front', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.11/24' }], gw: '10.30.0.1', ports: '5432' },
+            { id: 'd15', type: 'server',       name: 'NAS Storage',       x: 800, y: 530, group: 'g_a02', rackU: 6,  rackHeight: 4, rackFace: 'front', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.20/24' }], gw: '10.30.0.1', ports: '2049, 445' },
+            { id: 'd11', type: 'pc',           name: 'Jump Host',         x: 1010, y: 290, group: 'g_ops', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.0.50/24' }], gw: '10.20.0.1', ports: '22' }
         ],
         links: [
             { id: 'dl1', source: 'd1', target: 'd2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'dl2', source: 'd2', target: 'd3', sourceIface: 'i3', targetIface: 'i1' },
@@ -365,23 +383,32 @@ const templatesData = {
         ],
         links: [{ id: 'sl1', source: 's1', target: 's2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'sl2', source: 's2', target: 's3', sourceIface: 'i2', targetIface: 'p1' }, { id: 'sl3', source: 's3', target: 's4', sourceIface: 'p2', targetIface: 'i1' }, { id: 'sl_pass', source: 's4', target: 's5', attachment: 'passthrough', sourceIface: 'i2', targetIface: 'i1' }, { id: 'sl4', source: 's3', target: 's6', sourceIface: 'p3', targetIface: 'i1' }, { id: 'sl5', source: 's3', target: 's7', sourceIface: 'p4', targetIface: 'i1' }, { id: 'sl6', source: 's3', target: 's8', sourceIface: 'p5', targetIface: 'i1' }, { id: 'sl7', source: 's3', target: 's9', sourceIface: 'p6', targetIface: 'i1' }]
     },
+    // A wall-mount 12U comms rack and the agent floor around it: the call
+    // centre filed by room, with the voice gear racked.
     callcenter: {
+        groups: [
+            { id: 'g_cc', kind: 'floor', name: '3rd floor' },
+            { id: 'g_comms', kind: 'room', name: 'Comms room', parent: 'g_cc' },
+            { id: 'g_wall', kind: 'rack', name: 'Wall rack', parent: 'g_comms', uHeight: 12, width: '19in', depthMm: 450 },
+            { id: 'g_agents', kind: 'room', name: 'Agent floor', parent: 'g_cc' },
+            { id: 'g_sup', kind: 'room', name: 'Supervisor desk', parent: 'g_cc' }
+        ],
         nodes: [
-            { id: 'c1',  type: 'cloud',    name: 'Internet',           x: 460, y: 50,  interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
-            { id: 'c2',  type: 'router',   name: 'CC Gateway',         x: 460, y: 155, nat: true, gw: '203.0.113.1', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.2/30' }, { id: 'i2', name: 'eth1', ip: '10.5.0.1/24' }] },
-            { id: 'c3',  type: 'firewall', name: 'Firewall / UTM',     x: 460, y: 260, nat: true, gw: '10.5.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.0.2/24' }, { id: 'i2', name: 'eth1', ip: '10.5.10.1/24' }, { id: 'i3', name: 'eth2', ip: '10.5.20.1/24' }], ports: '443, 22' },
-            { id: 'c4',  type: 'switch',   name: 'Voice Switch',       x: 270, y: 370, portCount: 8, interfaces: [] },
-            { id: 'c5',  type: 'switch',   name: 'Data Switch',        x: 640, y: 370, portCount: 8, interfaces: [] },
-            { id: 'c6',  type: 'voip',     name: 'Agent Phone 1',      x: 110, y: 490, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.10.61/24' }], gw: '10.5.10.1', ports: '5060' },
-            { id: 'c7',  type: 'voip',     name: 'Agent Phone 2',      x: 200, y: 490, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.10.62/24' }], gw: '10.5.10.1', ports: '5060' },
-            { id: 'c8',  type: 'voip',     name: 'Agent Phone 3',      x: 290, y: 490, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.10.63/24' }], gw: '10.5.10.1', ports: '5060' },
-            { id: 'c9',  type: 'voip',     name: 'Supervisor Phone',   x: 380, y: 490, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.10.64/24' }], gw: '10.5.10.1', ports: '5060' },
-            { id: 'c10', type: 'custom',   name: 'PBX / Call Manager', x: 245, y: 600, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.10.10/24' }], gw: '10.5.10.1', ports: '5060, 5061' },
-            { id: 'c11', type: 'pc',       name: 'Agent PC 1',         x: 500, y: 490, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.20.51/24' }], gw: '10.5.20.1' },
-            { id: 'c12', type: 'pc',       name: 'Agent PC 2',         x: 590, y: 490, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.20.52/24' }], gw: '10.5.20.1' },
-            { id: 'c13', type: 'pc',       name: 'Supervisor PC',      x: 680, y: 490, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.20.53/24' }], gw: '10.5.20.1' },
-            { id: 'c14', type: 'server',   name: 'CRM / Recording',    x: 560, y: 600, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.20.10/24' }], gw: '10.5.20.1', ports: '80, 443, 5432' },
-            { id: 'c15', type: 'printer',  name: 'Office Printer',     x: 660, y: 600, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.20.80/24' }], gw: '10.5.20.1', ports: '9100' }
+            { id: 'c1',  type: 'cloud',    name: 'Internet',           x: 470, y: 40,  interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
+            { id: 'c2',  type: 'router',   name: 'CC Gateway',         x: 400, y: 290, group: 'g_wall', rackU: 12, rackHeight: 1, rackFace: 'front', rackDepth: 'half', nat: true, gw: '203.0.113.1', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.2/30' }, { id: 'i2', name: 'eth1', ip: '10.5.0.1/24' }] },
+            { id: 'c3',  type: 'firewall', name: 'Firewall / UTM',     x: 540, y: 290, group: 'g_wall', rackU: 11, rackHeight: 1, rackFace: 'front', rackDepth: 'half', nat: true, gw: '10.5.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.0.2/24' }, { id: 'i2', name: 'eth1', ip: '10.5.10.1/24' }, { id: 'i3', name: 'eth2', ip: '10.5.20.1/24' }], ports: '443, 22' },
+            { id: 'c4',  type: 'switch',   name: 'Voice Switch',       x: 400, y: 410, group: 'g_wall', rackU: 9, rackHeight: 1, rackFace: 'front', rackDepth: 'half', portCount: 8, interfaces: [] },
+            { id: 'c5',  type: 'switch',   name: 'Data Switch',        x: 540, y: 410, group: 'g_wall', rackU: 8, rackHeight: 1, rackFace: 'front', rackDepth: 'half', portCount: 8, interfaces: [] },
+            { id: 'c6',  type: 'voip',     name: 'Agent Phone 1',      x: 60, y: 780, group: 'g_agents', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.10.61/24' }], gw: '10.5.10.1', ports: '5060' },
+            { id: 'c7',  type: 'voip',     name: 'Agent Phone 2',      x: 160, y: 780, group: 'g_agents', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.10.62/24' }], gw: '10.5.10.1', ports: '5060' },
+            { id: 'c8',  type: 'voip',     name: 'Agent Phone 3',      x: 260, y: 780, group: 'g_agents', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.10.63/24' }], gw: '10.5.10.1', ports: '5060' },
+            { id: 'c9',  type: 'voip',     name: 'Supervisor Phone',   x: 700, y: 780, group: 'g_sup', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.10.64/24' }], gw: '10.5.10.1', ports: '5060' },
+            { id: 'c10', type: 'custom',   name: 'PBX / Call Manager', x: 400, y: 530, group: 'g_wall', rackU: 5, rackHeight: 2, rackFace: 'front', rackDepth: 'half', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.10.10/24' }], gw: '10.5.10.1', ports: '5060, 5061' },
+            { id: 'c11', type: 'pc',       name: 'Agent PC 1',         x: 60, y: 900, group: 'g_agents', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.20.51/24' }], gw: '10.5.20.1' },
+            { id: 'c12', type: 'pc',       name: 'Agent PC 2',         x: 160, y: 900, group: 'g_agents', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.20.52/24' }], gw: '10.5.20.1' },
+            { id: 'c13', type: 'pc',       name: 'Supervisor PC',      x: 800, y: 780, group: 'g_sup', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.20.53/24' }], gw: '10.5.20.1' },
+            { id: 'c14', type: 'server',   name: 'CRM / Recording',    x: 540, y: 530, group: 'g_wall', rackU: 2, rackHeight: 2, rackFace: 'front', rackDepth: 'half', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.20.10/24' }], gw: '10.5.20.1', ports: '80, 443, 5432' },
+            { id: 'c15', type: 'printer',  name: 'Office Printer',     x: 260, y: 900, group: 'g_agents', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.20.80/24' }], gw: '10.5.20.1', ports: '9100' }
         ],
         links: [
             { id: 'cl1', source: 'c1', target: 'c2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'cl2', source: 'c2', target: 'c3', sourceIface: 'i2', targetIface: 'i1' },
@@ -392,67 +419,89 @@ const templatesData = {
     },
     // A real mixed-use building — hospital, studio, office and call-center
     // tenants on-site, plus a branch office and a home both linked back over
-    // VPN. Exercises every node type, NAT, and the VPN overlay.
+    // VPN. Exercises every node type, NAT, and the VPN overlay — and the
+    // groups (Review-Packs/Topo-groups.md): the tower filed by floor and room,
+    // two racks in its server room with every device placed (a half-depth
+    // switch on the back of one), a wall rack in the call centre, the web tier
+    // as VMs on the app server with the API container inside the web VM, and
+    // the branch and the home as groups of their own.
     showcase: {
+        groups: [
+            { id: 'g_tower',  kind: 'building', name: 'Harbour Tower' },
+            { id: 'g_base',   kind: 'floor',    name: 'Basement', parent: 'g_tower' },
+            { id: 'g_srv',    kind: 'room',     name: 'Server room', parent: 'g_base' },
+            { id: 'g_rka',    kind: 'rack',     name: 'Rack A · Network', parent: 'g_srv', uHeight: 42, width: '19in', depthMm: 1000 },
+            { id: 'g_rkb',    kind: 'rack',     name: 'Rack B · Compute', parent: 'g_srv', uHeight: 42, width: '19in', depthMm: 1200 },
+            { id: 'g_f1',     kind: 'floor',    name: 'Floor 1', parent: 'g_tower' },
+            { id: 'g_hosp',   kind: 'room',     name: 'Hospital wing', parent: 'g_f1' },
+            { id: 'g_f2',     kind: 'floor',    name: 'Floor 2', parent: 'g_tower' },
+            { id: 'g_studio', kind: 'room',     name: 'Studio', parent: 'g_f2' },
+            { id: 'g_office', kind: 'room',     name: 'Office', parent: 'g_f2' },
+            { id: 'g_f3',     kind: 'floor',    name: 'Floor 3', parent: 'g_tower' },
+            { id: 'g_cc',     kind: 'room',     name: 'Call centre', parent: 'g_f3' },
+            { id: 'g_ccrk',   kind: 'rack',     name: 'Wall rack', parent: 'g_cc', uHeight: 12, width: '19in', depthMm: 450 },
+            { id: 'g_branch', kind: 'building', name: 'Branch office' },
+            { id: 'g_home',   kind: 'custom',   name: 'Home' }
+        ],
         nodes: [
             // --- Building edge / core ---
-            { id: 'net',  type: 'cloud',        name: 'Internet',            x: 820,  y: 40,  interfaces: [{ id: 'i1', name: 'eth0', ip: '' }, { id: 'i2', name: 'eth1', ip: '' }, { id: 'i3', name: 'eth2', ip: '' }, { id: 'i4', name: 'eth3', ip: '' }] },
-            { id: 'edge', type: 'edge',         name: 'Building Edge GW',    x: 420,  y: 150, nat: true, gw: '203.0.113.1', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.2/30' }, { id: 'i2', name: 'eth1', ip: '198.51.100.6/30' }, { id: 'i3', name: 'eth2', ip: '10.0.0.1/24' }] },
-            { id: 'vpn',  type: 'vpn',          name: 'VPN Concentrator',    x: 820,  y: 150, nat: true, gw: '203.0.113.9', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.10/30' }, { id: 'i2', name: 'eth1', ip: '10.0.0.3/24' }], ports: '443, 500, 4500' },
-            { id: 'fw',   type: 'firewall',     name: 'Core Firewall',       x: 420,  y: 270, nat: true, gw: '10.0.0.1', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.2/24' }, { id: 'i2', name: 'eth1', ip: '10.10.0.1/24' }, { id: 'i3', name: 'eth2', ip: '10.20.0.1/24' }], ports: '443, 22' },
-            { id: 'l3',   type: 'l3switch',     name: 'Core Distribution',   x: 300,  y: 390, gw: '10.10.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.2/24' }, { id: 'i2', name: 'eth1', ip: '10.10.10.1/24' }, { id: 'i3', name: 'eth2', ip: '10.10.20.1/24' }, { id: 'i4', name: 'eth3', ip: '10.10.30.1/24' }, { id: 'i5', name: 'eth4', ip: '10.10.40.1/24' }] },
-            { id: 'lb',   type: 'loadbalancer', name: 'Web Load Balancer',   x: 640,  y: 390, nat: true, gw: '10.20.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.0.5/24' }, { id: 'i2', name: 'eth1', ip: '10.30.0.1/24' }], ports: '80, 443' },
+            { id: 'net',  type: 'cloud',        name: 'Internet',            x: 1100, y: 40,  interfaces: [{ id: 'i1', name: 'eth0', ip: '' }, { id: 'i2', name: 'eth1', ip: '' }, { id: 'i3', name: 'eth2', ip: '' }, { id: 'i4', name: 'eth3', ip: '' }] },
+            { id: 'edge', type: 'edge',         name: 'Building Edge GW',    x: 300, y: 300, group: 'g_rka', rackU: 40, rackHeight: 1, rackFace: 'front', nat: true, gw: '203.0.113.1', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.2/30' }, { id: 'i2', name: 'eth1', ip: '198.51.100.6/30' }, { id: 'i3', name: 'eth2', ip: '10.0.0.1/24' }] },
+            { id: 'vpn',  type: 'vpn',          name: 'VPN Concentrator',    x: 500, y: 300, group: 'g_rka', rackU: 39, rackHeight: 1, rackFace: 'front', nat: true, gw: '203.0.113.9', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.10/30' }, { id: 'i2', name: 'eth1', ip: '10.0.0.3/24' }], ports: '443, 500, 4500' },
+            { id: 'fw',   type: 'firewall',     name: 'Core Firewall',       x: 300, y: 420, group: 'g_rka', rackU: 36, rackHeight: 2, rackFace: 'front', nat: true, gw: '10.0.0.1', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.2/24' }, { id: 'i2', name: 'eth1', ip: '10.10.0.1/24' }, { id: 'i3', name: 'eth2', ip: '10.20.0.1/24' }], ports: '443, 22' },
+            { id: 'l3',   type: 'l3switch',     name: 'Core Distribution',   x: 400, y: 540, group: 'g_rka', rackU: 31, rackHeight: 1, rackFace: 'front', gw: '10.10.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.2/24' }, { id: 'i2', name: 'eth1', ip: '10.10.10.1/24' }, { id: 'i3', name: 'eth2', ip: '10.10.20.1/24' }, { id: 'i4', name: 'eth3', ip: '10.10.30.1/24' }, { id: 'i5', name: 'eth4', ip: '10.10.40.1/24' }] },
+            { id: 'lb',   type: 'loadbalancer', name: 'Web Load Balancer',   x: 500, y: 420, group: 'g_rka', rackU: 33, rackHeight: 2, rackFace: 'front', nat: true, gw: '10.20.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.0.5/24' }, { id: 'i2', name: 'eth1', ip: '10.30.0.1/24' }], ports: '80, 443' },
             // --- Server farm (behind the LB) ---
-            { id: 'as',   type: 'server',       name: 'App Server',          x: 560,  y: 510, gw: '10.30.0.1', ports: '80, 443',
+            { id: 'as',   type: 'server',       name: 'App Server',          x: 760, y: 300, group: 'g_rkb', rackU: 30, rackHeight: 2, rackFace: 'front', gw: '10.30.0.1', ports: '80, 443',
               // Two subnets, not one: this is multi-homing done right — compare the
               // PACS server in the Common Errors template.
               interfaces: [{ id: 'a1', name: 'eth0', ip: '10.30.0.11/24' }, { id: 'a2', name: 'eth1', ip: '10.31.0.11/24' }, { id: 'a3', name: 'eth2', ip: '' }] },
-            { id: 'pvm',  type: 'vm',           name: 'GPU VM (passthrough)', x: 620, y: 630, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.14/24' }], gw: '10.30.0.1' },
-            { id: 'bsw',  type: 'switch',       name: 'Storage Switch',      x: 780,  y: 630, portCount: 8, interfaces: [] },
+            { id: 'pvm',  type: 'vm',           name: 'GPU VM (passthrough)', x: 760, y: 420, host: 'as', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.14/24' }], gw: '10.30.0.1' },
+            { id: 'bsw',  type: 'switch',       name: 'Storage Switch',      x: 960, y: 300, group: 'g_rkb', rackU: 40, rackHeight: 1, rackFace: 'rear', rackDepth: 'half', portCount: 8, interfaces: [] },
             // Two NICs on one subnet into one switch — the same shape as the PACS
             // server in Common Errors, except bonded. The address sits on bond0 and
             // the members carry only cables, so there is one MAC to learn and
             // nothing flaps. LACP is legal here precisely because both cables land
             // on the same switch.
-            { id: 'nas',  type: 'server',       name: 'NAS (LACP bond)',     x: 780,  y: 730, ports: '2049, 445',
+            { id: 'nas',  type: 'server',       name: 'NAS (LACP bond)',     x: 960, y: 420, group: 'g_rkb', rackU: 24, rackHeight: 4, rackFace: 'front', ports: '2049, 445',
               interfaces: [
                   { id: 'n1', name: 'eno1', ip: '' },
                   { id: 'n2', name: 'eno2', ip: '' },
                   { id: 'nb', name: 'bond0', ip: '10.31.0.10/24', bond: { mode: '802.3ad', members: ['n1', 'n2'] } }
               ] },
-            { id: 'wvm',  type: 'vm',           name: 'Web VM',              x: 650,  y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.12/24' }], gw: '10.30.0.1' },
-            { id: 'ctr',  type: 'container',    name: 'API Container',       x: 740,  y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.13/24' }], gw: '10.30.0.1', ports: '8080' },
+            { id: 'wvm',  type: 'vm',           name: 'Web VM',              x: 860, y: 420, host: 'as', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.12/24' }], gw: '10.30.0.1' },
+            { id: 'ctr',  type: 'container',    name: 'API Container',       x: 860, y: 540, host: 'wvm', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.13/24' }], gw: '10.30.0.1', ports: '8080' },
             // --- Hospital tenant (VLAN 10) ---
-            { id: 'hsw',  type: 'switch',       name: 'Hospital Switch',     x: 90,   y: 510, portCount: 8,  interfaces: [] },
-            { id: 'dcm',  type: 'dicom',        name: 'CT Modality',         x: 40,   y: 630, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.20/24' }], gw: '10.10.10.1', ports: '104' },
-            { id: 'pacs', type: 'server',       name: 'PACS Server',         x: 130,  y: 630, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.10/24' }], gw: '10.10.10.1', ports: '104, 11112' },
-            { id: 'radpc',type: 'pc',           name: 'Radiology WS',        x: 40,   y: 730, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.50/24' }], gw: '10.10.10.1' },
-            { id: 'wcam', type: 'camera',       name: 'Ward Camera',         x: 130,  y: 730, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.90/24' }], gw: '10.10.10.1', ports: '554' },
+            { id: 'hsw',  type: 'switch',       name: 'Hospital Switch',     x: 160, y: 860, group: 'g_hosp', portCount: 8,  interfaces: [] },
+            { id: 'dcm',  type: 'dicom',        name: 'CT Modality',         x: 60, y: 980, group: 'g_hosp', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.20/24' }], gw: '10.10.10.1', ports: '104' },
+            { id: 'pacs', type: 'server',       name: 'PACS Server',         x: 160, y: 980, group: 'g_hosp', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.10/24' }], gw: '10.10.10.1', ports: '104, 11112' },
+            { id: 'radpc',type: 'pc',           name: 'Radiology WS',        x: 260, y: 980, group: 'g_hosp', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.50/24' }], gw: '10.10.10.1' },
+            { id: 'wcam', type: 'camera',       name: 'Ward Camera',         x: 160, y: 1100, group: 'g_hosp', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.90/24' }], gw: '10.10.10.1', ports: '554' },
             // --- Studio tenant (VLAN 20) ---
-            { id: 'ssw',  type: 'switch',       name: 'Studio Switch',       x: 250,  y: 510, portCount: 8,  interfaces: [] },
-            { id: 'scam', type: 'camera',       name: 'Studio Cam',          x: 210,  y: 630, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.20.90/24' }], gw: '10.10.20.1', ports: '554' },
-            { id: 'epc',  type: 'pc',           name: 'Edit Bay',            x: 300,  y: 630, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.20.50/24' }], gw: '10.10.20.1' },
+            { id: 'ssw',  type: 'switch',       name: 'Studio Switch',       x: 600, y: 860, group: 'g_studio', portCount: 8,  interfaces: [] },
+            { id: 'scam', type: 'camera',       name: 'Studio Cam',          x: 550, y: 980, group: 'g_studio', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.20.90/24' }], gw: '10.10.20.1', ports: '554' },
+            { id: 'epc',  type: 'pc',           name: 'Edit Bay',            x: 650, y: 980, group: 'g_studio', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.20.50/24' }], gw: '10.10.20.1' },
             // --- On-site office tenant (VLAN 30, wireless) ---
-            { id: 'oap',  type: 'ap',           name: 'Office WiFi',         x: 440,  y: 510, interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
-            { id: 'opc',  type: 'pc',           name: 'Office WS',           x: 380,  y: 630, gw: '10.10.30.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.50/24' }] },
-            { id: 'opr',  type: 'printer',      name: 'Office Printer',      x: 470,  y: 630, gw: '10.10.30.1', ports: '9100', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.80/24' }] },
-            { id: 'oph',  type: 'voip',         name: 'Desk Phone',          x: 400,  y: 730, gw: '10.10.30.1', ports: '5060', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.60/24' }] },
-            { id: 'osen', type: 'iot',          name: 'Smart Sensor',        x: 490,  y: 730, gw: '10.10.30.1', ports: '1883', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.100/24' }] },
+            { id: 'oap',  type: 'ap',           name: 'Office WiFi',         x: 940, y: 860, group: 'g_office', interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
+            { id: 'opc',  type: 'pc',           name: 'Office WS',           x: 890, y: 980, group: 'g_office', gw: '10.10.30.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.50/24' }] },
+            { id: 'opr',  type: 'printer',      name: 'Office Printer',      x: 990, y: 980, group: 'g_office', gw: '10.10.30.1', ports: '9100', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.80/24' }] },
+            { id: 'oph',  type: 'voip',         name: 'Desk Phone',          x: 1090, y: 980, group: 'g_office', gw: '10.10.30.1', ports: '5060', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.60/24' }] },
+            { id: 'osen', type: 'iot',          name: 'Smart Sensor',        x: 990, y: 1100, group: 'g_office', gw: '10.10.30.1', ports: '1883', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.100/24' }] },
             // --- Call center tenant (VLAN 40) ---
-            { id: 'csw',  type: 'switch',       name: 'Call Center Switch',  x: 940,  y: 510, portCount: 24, interfaces: [] },
-            { id: 'cp1',  type: 'voip',         name: 'Agent Phone 1',       x: 860,  y: 630, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.61/24' }], gw: '10.10.40.1', ports: '5060' },
-            { id: 'cp2',  type: 'voip',         name: 'Agent Phone 2',       x: 950,  y: 630, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.62/24' }], gw: '10.10.40.1', ports: '5060' },
-            { id: 'capc', type: 'pc',           name: 'Agent WS',            x: 1040, y: 630, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.50/24' }], gw: '10.10.40.1' },
-            { id: 'pbx',  type: 'custom',       name: 'PBX Controller',      x: 940,  y: 730, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.10/24' }], gw: '10.10.40.1', ports: '5060' },
+            { id: 'csw',  type: 'switch',       name: 'Call Center Switch',  x: 1760, y: 860, group: 'g_ccrk', rackU: 10, rackHeight: 1, rackFace: 'front', portCount: 24, interfaces: [] },
+            { id: 'cp1',  type: 'voip',         name: 'Agent Phone 1',       x: 1400, y: 860, group: 'g_cc', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.61/24' }], gw: '10.10.40.1', ports: '5060' },
+            { id: 'cp2',  type: 'voip',         name: 'Agent Phone 2',       x: 1500, y: 860, group: 'g_cc', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.62/24' }], gw: '10.10.40.1', ports: '5060' },
+            { id: 'capc', type: 'pc',           name: 'Agent WS',            x: 1450, y: 980, group: 'g_cc', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.50/24' }], gw: '10.10.40.1' },
+            { id: 'pbx',  type: 'custom',       name: 'PBX Controller',      x: 1760, y: 980, group: 'g_ccrk', rackU: 6, rackHeight: 2, rackFace: 'front', rackDepth: 'half', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.10/24' }], gw: '10.10.40.1', ports: '5060' },
             // --- Branch office (over VPN) ---
-            { id: 'ro',   type: 'router',       name: 'Branch Office GW',    x: 1180, y: 150, nat: true, gw: '198.51.100.9', interfaces: [{ id: 'i1', name: 'eth0', ip: '198.51.100.10/30' }, { id: 'i2', name: 'eth1', ip: '172.16.5.1/24' }] },
-            { id: 'rsw',  type: 'switch',       name: 'Branch Switch',       x: 1180, y: 270, portCount: 8,  interfaces: [] },
-            { id: 'rmtpc',type: 'pc',           name: 'Branch WS',           x: 1130, y: 390, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.5.50/24' }], gw: '172.16.5.1' },
-            { id: 'rpr',  type: 'printer',      name: 'Branch Printer',      x: 1230, y: 390, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.5.80/24' }], gw: '172.16.5.1', ports: '9100' },
+            { id: 'ro',   type: 'router',       name: 'Branch Office GW',    x: 2100, y: 300, group: 'g_branch', nat: true, gw: '198.51.100.9', interfaces: [{ id: 'i1', name: 'eth0', ip: '198.51.100.10/30' }, { id: 'i2', name: 'eth1', ip: '172.16.5.1/24' }] },
+            { id: 'rsw',  type: 'switch',       name: 'Branch Switch',       x: 2100, y: 420, group: 'g_branch', portCount: 8,  interfaces: [] },
+            { id: 'rmtpc',type: 'pc',           name: 'Branch WS',           x: 2050, y: 540, group: 'g_branch', interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.5.50/24' }], gw: '172.16.5.1' },
+            { id: 'rpr',  type: 'printer',      name: 'Branch Printer',      x: 2150, y: 540, group: 'g_branch', interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.5.80/24' }], gw: '172.16.5.1', ports: '9100' },
             // --- Home (over VPN) ---
-            { id: 'hm',   type: 'router',       name: 'Home Router (VPN)',   x: 1460, y: 150, nat: true, gw: '198.51.100.13', interfaces: [{ id: 'i1', name: 'eth0', ip: '198.51.100.14/30' }, { id: 'i2', name: 'eth1', ip: '192.168.1.1/24' }] },
-            { id: 'hpc',  type: 'pc',           name: 'Home PC',             x: 1410, y: 270, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.50/24' }], gw: '192.168.1.1' },
-            { id: 'hiot', type: 'iot',          name: 'Smart Home Hub',      x: 1510, y: 270, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.100/24' }], gw: '192.168.1.1', ports: '1883' }
+            { id: 'hm',   type: 'router',       name: 'Home Router (VPN)',   x: 2450, y: 300, group: 'g_home', nat: true, gw: '198.51.100.13', interfaces: [{ id: 'i1', name: 'eth0', ip: '198.51.100.14/30' }, { id: 'i2', name: 'eth1', ip: '192.168.1.1/24' }] },
+            { id: 'hpc',  type: 'pc',           name: 'Home PC',             x: 2400, y: 420, group: 'g_home', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.50/24' }], gw: '192.168.1.1' },
+            { id: 'hiot', type: 'iot',          name: 'Smart Home Hub',      x: 2500, y: 420, group: 'g_home', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.100/24' }], gw: '192.168.1.1', ports: '1883' }
         ],
         links: [
             { id: 'k1',  source: 'net', target: 'edge', sourceIface: 'i1', targetIface: 'i1' }, { id: 'k2', source: 'net', target: 'vpn', sourceIface: 'i2', targetIface: 'i1' },
@@ -476,28 +525,39 @@ const templatesData = {
     // Interfaces are named and bound explicitly on the L3 downlinks: an L3 switch
     // has several same-priority interfaces, and letting auto-bind guess which VLAN
     // a cable lands on is a coin flip once more than one is free.
+    // Rooms on one floor, and the server room's 24U rack: groups as a clinic
+    // would file them, so the sample shows frames, collapse and the rack view.
     imaging: {
+        groups: [
+            { id: 'g_ic', kind: 'building', name: 'Imaging Centre' },
+            { id: 'g_gf', kind: 'floor', name: 'Ground floor', parent: 'g_ic' },
+            { id: 'g_ctmr', kind: 'room', name: 'CT & MRI', parent: 'g_gf' },
+            { id: 'g_usxr', kind: 'room', name: 'Ultrasound & X-ray', parent: 'g_gf' },
+            { id: 'g_srv', kind: 'room', name: 'Server room', parent: 'g_gf' },
+            { id: 'g_rk1', kind: 'rack', name: 'Rack 1', parent: 'g_srv', uHeight: 24, width: '19in', depthMm: 800 },
+            { id: 'g_read', kind: 'room', name: 'Reading room', parent: 'g_gf' }
+        ],
         nodes: [
-            { id: 'i_net', type: 'cloud',  name: 'Internet',            x: 480, y: 40,  interfaces: [{ id: 'i1', name: 'eth0', ip: '' }, { id: 'i2', name: 'eth1', ip: '' }] },
-            { id: 'i_rtr', type: 'router', name: 'Clinic Gateway',      x: 340, y: 150, nat: true, gw: '203.0.113.1', dns: '1.1.1.1', ports: '22',
+            { id: 'i_net', type: 'cloud',  name: 'Internet',            x: 500, y: 40,  interfaces: [{ id: 'i1', name: 'eth0', ip: '' }, { id: 'i2', name: 'eth1', ip: '' }] },
+            { id: 'i_rtr', type: 'router', name: 'Clinic Gateway',      x: 420, y: 290, group: 'g_rk1', rackU: 23, rackHeight: 1, rackFace: 'front', nat: true, gw: '203.0.113.1', dns: '1.1.1.1', ports: '22',
               interfaces: [{ id: 'w', name: 'eth0', ip: '203.0.113.2/30' }, { id: 'l', name: 'eth1', ip: '10.60.0.1/24' }] },
-            { id: 'i_vpn', type: 'vpn',    name: 'Teleradiology VPN',   x: 720, y: 150, nat: true, gw: '203.0.113.5', dns: '1.1.1.1', ports: '443, 500, 4500',
+            { id: 'i_vpn', type: 'vpn',    name: 'Teleradiology VPN',   x: 580, y: 290, group: 'g_rk1', rackU: 22, rackHeight: 1, rackFace: 'front', nat: true, gw: '203.0.113.5', dns: '1.1.1.1', ports: '443, 500, 4500',
               interfaces: [{ id: 'w', name: 'wan', ip: '203.0.113.6/30' }, { id: 'c', name: 'lan', ip: '10.60.0.3/24' }, { id: 't', name: 'tun0', ip: '10.60.30.1/24' }] },
-            { id: 'i_l3',  type: 'l3switch', name: 'Core L3',           x: 480, y: 270, gw: '10.60.0.1', dns: '1.1.1.1', ports: '22',
+            { id: 'i_l3',  type: 'l3switch', name: 'Core L3',           x: 500, y: 410, group: 'g_rk1', rackU: 20, rackHeight: 1, rackFace: 'front', gw: '10.60.0.1', dns: '1.1.1.1', ports: '22',
               interfaces: [{ id: 'c', name: 'vlan1', ip: '10.60.0.2/24' }, { id: 'm', name: 'vlan10', ip: '10.60.10.1/24' }, { id: 'o', name: 'vlan20', ip: '10.60.20.1/24' }] },
-            { id: 'i_msw', type: 'switch', name: 'Modality Switch',     x: 300, y: 390, portCount: 16, interfaces: [] },
-            { id: 'i_osw', type: 'switch', name: 'Reading Room Switch', x: 700, y: 390, portCount: 8, interfaces: [] },
-            { id: 'i_ct',  type: 'dicom',  name: 'CT Scanner',          x: 120, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.20/24' }], gw: '10.60.10.1', ports: '104' },
-            { id: 'i_mr',  type: 'dicom',  name: 'MRI',                 x: 220, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.21/24' }], gw: '10.60.10.1', ports: '104' },
-            { id: 'i_us',  type: 'dicom',  name: 'Ultrasound',          x: 320, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.22/24' }], gw: '10.60.10.1', ports: '104' },
-            { id: 'i_cr',  type: 'dicom',  name: 'CR / DX',             x: 420, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.23/24' }], gw: '10.60.10.1', ports: '104' },
-            { id: 'i_pacs',type: 'server', name: 'PACS Server',         x: 170, y: 630, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.10/24' }], gw: '10.60.10.1', ports: '104, 11112, 443' },
-            { id: 'i_vna', type: 'server', name: 'VNA Archive',         x: 290, y: 630, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.11/24' }], gw: '10.60.10.1', ports: '104, 11112' },
-            { id: 'i_prn', type: 'printer',name: 'DICOM Film Printer',  x: 410, y: 630, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.80/24' }], gw: '10.60.10.1', ports: '104' },
-            { id: 'i_ris', type: 'server', name: 'RIS / Worklist',      x: 600, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.20.10/24' }], gw: '10.60.20.1', ports: '80, 443' },
-            { id: 'i_ws1', type: 'pc',     name: 'Reading WS 1',        x: 700, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.20.50/24' }], gw: '10.60.20.1' },
-            { id: 'i_ws2', type: 'pc',     name: 'Reading WS 2',        x: 800, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.20.51/24' }], gw: '10.60.20.1' },
-            { id: 'i_rad', type: 'pc',     name: 'Remote Radiologist',  x: 920, y: 270, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.30.50/24' }], gw: '10.60.30.1' }
+            { id: 'i_msw', type: 'switch', name: 'Modality Switch',     x: 420, y: 530, group: 'g_rk1', rackU: 18, rackHeight: 1, rackFace: 'front', portCount: 16, interfaces: [] },
+            { id: 'i_osw', type: 'switch', name: 'Reading Room Switch', x: 580, y: 530, group: 'g_rk1', rackU: 17, rackHeight: 1, rackFace: 'front', portCount: 8, interfaces: [] },
+            { id: 'i_ct',  type: 'dicom',  name: 'CT Scanner',          x: 80, y: 290, group: 'g_ctmr', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.20/24' }], gw: '10.60.10.1', ports: '104' },
+            { id: 'i_mr',  type: 'dicom',  name: 'MRI',                 x: 180, y: 290, group: 'g_ctmr', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.21/24' }], gw: '10.60.10.1', ports: '104' },
+            { id: 'i_us',  type: 'dicom',  name: 'Ultrasound',          x: 80, y: 560, group: 'g_usxr', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.22/24' }], gw: '10.60.10.1', ports: '104' },
+            { id: 'i_cr',  type: 'dicom',  name: 'CR / DX',             x: 180, y: 560, group: 'g_usxr', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.23/24' }], gw: '10.60.10.1', ports: '104' },
+            { id: 'i_pacs',type: 'server', name: 'PACS Server',         x: 420, y: 650, group: 'g_rk1', rackU: 10, rackHeight: 2, rackFace: 'front', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.10/24' }], gw: '10.60.10.1', ports: '104, 11112, 443' },
+            { id: 'i_vna', type: 'server', name: 'VNA Archive',         x: 500, y: 650, group: 'g_rk1', rackU: 4, rackHeight: 4, rackFace: 'front', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.11/24' }], gw: '10.60.10.1', ports: '104, 11112' },
+            { id: 'i_prn', type: 'printer',name: 'DICOM Film Printer',  x: 130, y: 680, group: 'g_usxr', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.10.80/24' }], gw: '10.60.10.1', ports: '104' },
+            { id: 'i_ris', type: 'server', name: 'RIS / Worklist',      x: 580, y: 650, group: 'g_rk1', rackU: 13, rackHeight: 1, rackFace: 'front', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.20.10/24' }], gw: '10.60.20.1', ports: '80, 443' },
+            { id: 'i_ws1', type: 'pc',     name: 'Reading WS 1',        x: 860, y: 410, group: 'g_read', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.20.50/24' }], gw: '10.60.20.1' },
+            { id: 'i_ws2', type: 'pc',     name: 'Reading WS 2',        x: 960, y: 410, group: 'g_read', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.20.51/24' }], gw: '10.60.20.1' },
+            { id: 'i_rad', type: 'pc',     name: 'Remote Radiologist',  x: 1000, y: 40, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.30.50/24' }], gw: '10.60.30.1' }
         ],
         links: [
             { id: 'im1', source: 'i_net', target: 'i_rtr', targetIface: 'w', sourceIface: 'i1' },
@@ -704,7 +764,17 @@ const templatesData = {
 // already at DOC_VERSION — opening one runs no migration. Rewriting the data
 // below by hand into networks would be the same result with more chances to
 // get a gateway wrong.
-Object.keys(templatesData).forEach((key) => { templatesData[key] = migrateDoc({ ...templatesData[key], v: 2 }).doc; });
+// The groups, racks and hosts below are written as today's document has
+// them, so one step must not touch them: the v8 step (rackDepth turned
+// round to 'half', Review-Packs/Topo-groups.md "Round 2") drops every
+// rackDepth it meets, which here would turn a half-depth device full. It is
+// put back by id after the migration.
+Object.keys(templatesData).forEach((key) => {
+    const half = new Set((templatesData[key].nodes || []).filter((n) => n.rackDepth === 'half').map((n) => n.id));
+    const doc = migrateDoc({ ...templatesData[key], v: 2 }).doc;
+    if (half.size) doc.nodes.forEach((n) => { if (half.has(n.id)) n.rackDepth = 'half'; });
+    templatesData[key] = doc;
+});
 
 // Menu copy for the library tabs. Order here is the order shown; the key must
 // match templatesData / SNIPPETS.

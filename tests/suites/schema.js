@@ -73,10 +73,13 @@ window.addEventListener('load', () => {
     return o;
   };
   // The third: a VM's or a container's `host` (what it runs on, Round 3 of
-  // the groups work) came after the reference, which drops it. The Homelab
-  // block ships its VMs on its hypervisor, so it is read here without that
-  // key; tests/suites/hosts.js and hostseal.js hold `host` itself.
-  const currentMinusHost = (n) => { const o = serializeNode(n); delete o.host; return o; };
+  // the groups work) and a device's group and rack place came after the
+  // reference, which drops them. The Homelab block ships its VMs on its
+  // hypervisor and four templates ship groups and racks, so they are read
+  // here without those keys; tests/suites/hosts.js, groups.js and the rack
+  // suites hold the keys themselves.
+  const LATER_KEYS = ['host', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth'];
+  const currentMinusHost = (n) => { const o = serializeNode(n); LATER_KEYS.forEach((k) => delete o[k]); return o; };
   const both = (doc) => frozen(() => [
     pipe(doc, legacyNormalizeNode, legacyMinusNetcfg, legacyNormalizeLink, legacySerializeLink),
     pipe(doc, normalizeLoadedNode, currentMinusHost, normalizeLoadedLink, serializeLink)

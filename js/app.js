@@ -250,7 +250,8 @@ function nextFreeHost(networkStr, prefix) {
 // (tidyWithInnerGroups).
 // One batch: every node moves, and that is one step and one redraw.
 const TIDY_WRAP = 12;
-function tidyLayout() { batch(tidyLayoutNow); }
+// Played (js/motion.js): every device glides to its tidied place.
+function tidyLayout() { mapMotion(() => batch(tidyLayoutNow)); }
 function tidyLayoutNow() {
     if (!state.nodes.length || readOnlyRefuses()) return;
     const picked = selectedOf('node').map(getNode).filter(Boolean);
@@ -1293,14 +1294,14 @@ function undo() {
     if (!_undoStack.length) return;
     _redoStack.push(_present);
     _present = _undoStack.pop();
-    applyDoc(_present);
+    mapMotion(() => applyDoc(_present));   // what the step changed on the map is played back
 }
 function redo() {
     commitTyping();   // which, being an edit, forks the timeline: nothing to redo after it
     if (!_redoStack.length) return;
     _undoStack.push(_present);
     _present = _redoStack.pop();
-    applyDoc(_present);
+    mapMotion(() => applyDoc(_present));
 }
 
 function updateUndoButtons() {
@@ -1834,12 +1835,17 @@ function mapPointerUp(event) {
         // Let go on another device: a new group of them is offered, and the
         // move waits for the answer, so the move and the group are filed as
         // one undo step, or the move alone on Cancel (js/groupmap.js).
+        // A drop is played (js/motion.js): a VM set beside its host slides
+        // there from where it was let go, and the frame it went into eases
+        // to its new size and pulses.
+        let motion = null;
         if (moved && drop && drop.target && drop.target.pair) offerGroupFromPair(drop);
-        else if (moved && drop) batch(() => { said = applyGroupDrop(drop); save(); });
+        else if (moved && drop) { motion = mapMotionStart(); batch(() => { said = applyGroupDrop(drop); save(); }); }
         else save();
         if (said) { refreshGroupViews(true); showToast(said, 'ok'); }
         if (collapse) { select(collapse, 'node'); return; }   // select() redraws
         renderCanvasOnly(); // Render zones/traces only ONCE when mouse is released
+        if (motion) mapMotionPlay(motion, { pulse: drop.target && drop.target.gid });
     } else if (collapse) select(collapse, 'node');
     dragGroup = [];
 }

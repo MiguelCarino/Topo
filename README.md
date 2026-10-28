@@ -43,6 +43,7 @@ Switching views never loses anything; they show the same document.
 - **Blocks** (full editor) are saved selections: shipped ones (a DMZ, a VoIP closet, a Wi-Fi cell…) or your own. Inserting one moves each of its subnets to the next free one of the same size, so a second copy never conflicts with the first.
 - **Tidy** lays the map out in tiers (internet, router, switches), then each switch's devices in port order, at most 12 to a row, with each switch above its own devices and each tier above the one it serves. With groups, each group's devices are laid out as a block inside its parent's, and no two blocks overlap. With two or more devices selected it arranges only those.
 - Undo and redo work per action: a typed field, an inserted block, a batch of added devices or a Tidy is one step each.
+- **Motion.** A collapse, an expand, a Tidy, an undo or redo and a drop are played rather than jumped to: devices glide to their new places, fly into a group as it collapses and spread out of it as it opens, a frame eases to its new size and the one a drop went into pulses once. In the rack view a box that is moved or resized slides to its units and the cables fade back in. Only the picture moves; files, links and exports are the same either way. It is off when the system asks for reduced motion.
 
 ## Spreadsheets and pasted output
 
@@ -66,6 +67,7 @@ Switching views never loses anything; they show the same document.
 - **Back up** saves one network as a `.nettopo` file, or all of them in one binder file. After a back-up or a report, each card says how much has changed since ("± 3 changes since the last back-up") and lists the changes on request. That comparison copy stays in this browser and never goes into a file, link or binder.
 - If the browser refuses to save (storage full or blocked), a banner stays up with **Back up now** until a save gets through.
 - Opening a file of a network you already have offers to update it (the newer one wins) or to open it as a copy.
+- The starting points show groups: the Data Centre is a building with a data hall holding two 42U racks (every device placed, a half-depth switch on the back, the web tier as VMs and a container on the app servers) and an ops room; the Imaging Centre is filed by room with a 24U rack in its server room; the Call Centre has a 12U wall rack of half-depth gear; the Smart Home is filed by room. Under Examples, the Showcase files its tower by floor and room, with two racks in the server room, a wall rack in the call centre, the API container inside the web VM on the app server, and the branch office and the home as groups of their own.
 - Saved templates are cards in the same library, with Duplicate to start a network from one.
 - Every saved network records the version of the format it was written in. Older ones are upgraded when opened; one from a newer Topo opens read-only, so saving it here cannot drop what this version does not know. A read-only network can still be inspected, reported on and exported as it arrived.
 - Two tabs open on the library see each other's saves.

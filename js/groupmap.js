@@ -135,9 +135,13 @@ const isGroupCollapsed = (id) => collapsedGroupIds().has(id);
 function setGroupCollapsed(id, on) {
     if (!groupById(id)) return false;
     syncCollapsedDoc();
+    // Where everything is drawn before the change, so its devices can fly in
+    // or spread out (js/motion.js).
+    const motion = mapMotionStart();
     if (on) _collapsed.add(id); else _collapsed.delete(id);
     writeCollapsedStore();
     renderCanvasOnly();
+    mapMotionPlay(motion);
     renderGroupsPanel(true);
     return true;
 }
@@ -177,9 +181,11 @@ function setHostFolded(id, on) {
     if (!getNode(id)) return false;
     if (on && !state.nodes.some((n) => n && n.host === id)) return false;   // nothing to fold
     syncCollapsedDoc();
+    const motion = mapMotionStart();
     if (on) _foldedHosts.add(id); else _foldedHosts.delete(id);
     writeCollapsedStore();
     renderCanvasOnly();
+    mapMotionPlay(motion);
     return true;
 }
 const toggleHostFolded = (id) => setHostFolded(id, !isHostFolded(id));
@@ -841,6 +847,8 @@ async function offerGroupFromPair(drop) {
     const here = (n) => getNode(n.id) === n;
     if (!answer || !here(other) || !devices.every(here) || (parentId && !groupById(parentId)) || state.readOnly) return fileMove();
     let g = null, said = '';
+    // The devices step aside into place and the new frame fades in round them.
+    const motion = mapMotionStart();
     batch(() => {
         g = makeGroup({ name: groupName(answer.value), kind: asGroupKind(answer.pick), parent: parentId });
         state.groups = state.groups.concat(g);
@@ -848,6 +856,7 @@ async function offerGroupFromPair(drop) {
         said = applyGroupDrop({ target: { gid: g.id, fold: false }, changes: devices.concat(other) });
         save(); renderCanvasOnly();
     });
+    mapMotionPlay(motion, { pulse: g && g.id });
     refreshGroupViews(true);
     if (said) showToast(said, 'ok');
     return g;

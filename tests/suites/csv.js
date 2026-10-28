@@ -417,23 +417,32 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const orderName = { DIC: 'devices, interfaces, cables', IDC: 'interfaces, devices, cables', DCI: 'devices, cables, interfaces', ICD: 'interfaces, cables, devices' };
     orders.forEach((o) => ok(`every template round-trips through a blank map (${orderName[o]})`, !bad[o].length, bad[o].join(' ; ')));
 
-    // With subnets.csv, before the rest or after it, nothing is lost: the
-    // networks, every device's every field and the gateway and DNS each one
+    // With subnets.csv and groups.csv, before the rest or after it, nothing
+    // is lost: the networks, the groups (four templates ship them), every
+    // device's every field and the gateway and DNS each one
     // uses (most of them inherited from a network, so blank in devices.csv).
     // The final review's HIGH: compared only ids, cables and findings, the
     // test above passed while every network and every inherited gateway went.
     const netSig = () => JSON.stringify((serializeNetworks(state.networks) || []).slice().sort((a, b) => compareCidr(a.cidr, b.cidr)));
-    const devSig = () => state.nodes.map((n) => JSON.stringify(serializeNode(n))).sort().join('\n');
+    // A group by its path, not its id: devices.csv read before groups.csv
+    // makes the groups it names under ids of its own, and groups.csv then
+    // finds them by name (csvPlanGroups); nothing is lost, the ids differ.
+    const devSig = () => state.nodes.map((n) => { const o = serializeNode(n); if (o.group) o.group = groupPathOf(n); return JSON.stringify(o); }).sort().join('\n');
+    const grpSig = () => (serializeGroups(state.groups) || []).map((g) => JSON.stringify({ ...g, id: undefined, parent: undefined, path: groupPath(groupById(g.id)) })).sort().join('\n');
     const effSig = () => state.nodes.map((n) => `${n.id}:${effectiveGw(n)}|${effectiveDns(n)}`).sort().join(' ');
-    const full = { SDIC: [], DICS: [] };
+    const full = { SGDIC: [], DICSG: [] };
     Object.keys(templatesData).forEach((key) => {
       loadDocState(cloneData(templatesData[key])); autoBindLinks();
-      const want = { nodes: devSig(), cables: cableSig(), findings: fkeys(), nets: netSig(), eff: effSig() };
-      const sheets = { S: csvText(csvSubnetsSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
+      const want = { nodes: devSig(), cables: cableSig(), findings: fkeys(), nets: netSig(), grps: grpSig(), eff: effSig() };
+      const sheets = { S: csvText(csvSubnetsSheet()), G: csvText(csvGroupsSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
       Object.keys(full).forEach((order) => {
         blank();
-        const conflicts = importAll([...order].map((k) => sheets[k]));
-        const got = { nodes: devSig(), cables: cableSig(), findings: fkeys(), nets: netSig(), eff: effSig() };
+        // With the review's "make the groups the sheet names" ticked, as a
+        // person importing devices.csv on its own would.
+        const conflicts = [];
+        [...order].forEach((k) => { const sh = sheetOf(sheets[k]); const pl = csvPlan(sh, csvAutoMap(sh), { createGroups: true });
+          pl.rows.filter((r) => r.status === 'conflict').forEach((r) => conflicts.push(`: `)); applyCsvPlan(pl); });
+        const got = { nodes: devSig(), cables: cableSig(), findings: fkeys(), nets: netSig(), grps: grpSig(), eff: effSig() };
         const diff = Object.keys(want).filter((k) => got[k] !== want[k]);
         if (conflicts.length || diff.length) {
           const k0 = diff[0];
@@ -444,8 +453,19 @@ window.addEventListener('load', () => { setTimeout(async () => {
         }
       });
     });
-    ok('every template with its subnets round-trips whole: networks, every field, inherited gateway and DNS (subnets first)', !full.SDIC.length, full.SDIC.slice(0, 2).join(' ; '));
-    ok('and with subnets.csv imported last', !full.DICS.length, full.DICS.slice(0, 2).join(' ; '));
+    ok('every template with its subnets and groups round-trips whole: networks, groups, every field, inherited gateway and DNS (subnets and groups first)', !full.SGDIC.length, full.SGDIC.slice(0, 2).join(' ; '));
+    ok('and with subnets.csv and groups.csv imported last', !full.DICSG.length, full.DICSG.slice(0, 2).join(' ; '));
+
+    // The two things the round trip above found (Round 4 of the groups
+    // work): a group devices.csv makes for rows with units must be a rack, or
+    // the units go; and groups.csv read after it must find those groups.
+    blank();
+    const withGroups = (txt) => { const sh = sheetOf(txt); return csvPlan(sh, csvAutoMap(sh), { createGroups: true }); };
+    applyCsvPlan(withGroups('name,type,group,rack_u,rack_height\nSRV,server,Room 1 / Rack 9,12,2'));
+    const rk9 = state.groups.find((g) => g.name === 'Rack 9');
+    ok('a group devices.csv makes for a row with units is a rack, and the units stay', !!rk9 && rk9.kind === 'rack' && nodeByName('SRV').rackU === 12 && nodeByName('SRV').rackHeight === 2, JSON.stringify(state.groups));
+    applyCsvPlan(withGroups('group_id,name,kind,parent,u_height\ng1,Room 1,room,,\ng2,Rack 9,rack,g1,24'));
+    ok('groups.csv read after it finds those groups by name and updates them, adding none', state.groups.length === 2 && groupById(rk9.id).uHeight === 24 && nodeByName('SRV').group === rk9.id, JSON.stringify(state.groups));
     open();
 
     // ---- 11d: the final review ----

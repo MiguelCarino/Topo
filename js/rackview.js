@@ -236,6 +236,8 @@ function renderRackView(force) {
     // where that pane was scrolled to, unless it is another rack now.
     const was = body.querySelector('.rk-main');
     const scroll = was && body.dataset.rack === rack.id ? was.scrollTop : 0;
+    // Where each box was, so the rebuild can play the change (js/motion.js).
+    const motion = rackMotionStart(body);
     body.dataset.rack = rack.id;
     // Front, the cable manager, rear: the manager is between the faces, as the cables
     // are between the devices' fronts and backs.
@@ -268,6 +270,7 @@ function renderRackView(force) {
         if (b.top < m.top || b.bottom > m.bottom) main.scrollTop += b.top - m.top - Math.max(0, (m.height - b.height) / 2);
     }
     if (refocus) { const again = view.querySelector(refocus); if (again) again.focus(); }
+    rackMotionPlay(body, motion);
 }
 
 // The head's Size button and, opened, the rack's size fields under it: the

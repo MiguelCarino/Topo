@@ -128,6 +128,11 @@ probe = ('const _be = (msg) => {'
          # for real in tests/suites/idb.js (@realtime) and in run-cross.mjs,
          # and its write-behind logic in tests/suites/store.js.
          'Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true });'
+         # No motion (js/motion.js): this Chromium does not report
+         # navigator.webdriver, and a suite reads the map right after an
+         # action, where a device's copy flying into its group would be met.
+         # tests/suites/motion.js turns it on for itself.
+         'window.TOPO_MOTION = false;'
          'window.__topoReady = new Promise((r) => window.addEventListener("topo:ready", r, { once: true }));'
          'const _wadd = window.addEventListener;'
          'window.addEventListener = function (type, fn, opts) {'

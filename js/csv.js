@@ -1399,8 +1399,17 @@ function csvPlanPlace(v, existing, record, said, draftSets, out, ctx) {
             if (existing && (!now || now.id !== target.id)) out.changes.push({ field: label('group'), before: now ? groupPath(now) : '', after: groupPath(target, all()) });
         }
     }
-    const placeIn = target || (existing ? groupOfNode(existing) : groupById(record.group, all()));
     const keys = RACK_KEYS.filter((k) => Object.prototype.hasOwnProperty.call(v, k));
+    // A group this import makes from a path, that a row gives units in, is
+    // a rack: the path's last name ("A02 Compute") rarely says so, and
+    // leaving it custom would drop every unit the sheet holds. Only a group
+    // the plan made and nothing named a kind for; one on the map keeps its.
+    if (target && keys.length && !isRackGroup(target) && target.kind === 'custom' && ctx.groupMaker.made.includes(target)) {
+        target.kind = 'rack';
+        target.uHeight = RACK_U_DEFAULT;
+        target.width = RACK_WIDTH_DEFAULT;
+    }
+    const placeIn = target || (existing ? groupOfNode(existing) : groupById(record.group, all()));
     // Units in a rack the sheet names but nobody made are that rack's, not
     // the one the device is in now: they wait with the group.
     if (missing) return '';
@@ -1972,7 +1981,12 @@ function csvPlanSubnets(rows, plan) {
 }
 // ---- Groups ----
 // One row per group (groups.csv). Found by its id, then by its name inside
-// the parent the row gives (none: at the top); a row matching nothing makes a
+// the parent the row gives (none: at the top). The name is tried for a row
+// whose id is new here too: devices.csv imported first makes the groups it
+// names under ids of its own, and groups.csv after it must find those, not
+// add each group again beside them. Such a row's id then stands for the
+// group it found, for the rows under it that name it as their parent. A row
+// matching nothing makes a
 // group, under the sheet's id when no group here has it, so a second import
 // of the same sheet finds it again. Its parent is a group id (on the map or
 // further down the sheet) or a path on the map. A parent that would make a
@@ -1999,6 +2013,7 @@ function csvPlanGroups(rows, plan) {
     // The ids the sheet gives new groups, so a parent further down is found.
     const sheetIds = new Set(parsed.map((p) => p.values.id).filter((id) => id && !liveIds.has(id)));
     const claimed = new Set();     // group ids an earlier row was about
+    const alias = new Map();       // a sheet id -> the group here its row found by name
     const results = [];
     const show = (key, v) => (key === 'kind' ? groupKindName(v) : key === 'parent' ? (v ? (work.get(v) ? workPath(v) : v) : '')
         : key === 'numbering' ? t(v === 'top' ? 'Top down' : 'Bottom up') : key === 'width' ? rackWidthLabel(v)
@@ -2020,7 +2035,8 @@ function csvPlanGroups(rows, plan) {
         // The parent, as an id this plan knows.
         let parent;
         if (Object.prototype.hasOwnProperty.call(v, 'parent')) {
-            if (work.has(v.parent) || sheetIds.has(v.parent)) parent = v.parent;
+            if (alias.has(v.parent)) parent = alias.get(v.parent);
+            else if (work.has(v.parent) || sheetIds.has(v.parent)) parent = v.parent;
             else {
                 const r = findGroupByPath(v.parent);
                 if (!r.group) { conflict(r.ambiguous ? t('{path} names more than one group: write its whole path.', { path: v.parent }) : t('No group {name}.', { name: v.parent })); return; }
@@ -2028,11 +2044,12 @@ function csvPlanGroups(rows, plan) {
             }
         }
         let g = v.id ? work.get(v.id) || null : null;
-        if (!g && !v.id && v.name) {
+        if (!g && v.name) {
             const inside = parent === undefined ? null : parent;
             const hits = [...work.values()].filter((x) => (x.parent || null) === inside && placeKey(x.name || groupKindName(x.kind)) === placeKey(v.name));
             if (hits.length > 1) { conflict(t('{path} names more than one group: write its whole path.', { path: v.name })); return; }
             g = hits[0] || null;
+            if (g && v.id) alias.set(v.id, g.id);
         }
         if (g && claimed.has(g.id)) { conflict(t('Another row is this group.')); return; }
         if (!g) {
