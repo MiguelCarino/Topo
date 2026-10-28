@@ -151,8 +151,54 @@ function reportDevices() {
         // gw, dns, os, allowedPorts, nat, notes: whatever NODE_FIELDS marks
         // for the report (js/model.js), so a field added there reaches the
         // inventory without being listed a second time here.
-        ...reportFieldsOf(node)
+        ...reportFieldsOf(node),
+        // Where it is (Review-Packs/Topo-groups.md, "Location"): its group's
+        // path and, in a rack, its units, else the free text it was given
+        // (nodePlaceText). `location` above stays the free text, which is
+        // what its table cell edits.
+        place: nodePlaceText(node),
+        groupId: groupOfNode(node) ? node.group : '',
+        rackSpan: rackSpanText(node),
+        // What it runs on (js/model.js "Hosts"): the table's Runs on column,
+        // and the inventory lists it under its host.
+        hostId: hostOf(node) ? node.host : '',
+        host: hostOf(node) ? (hostOf(node).name || node.host) : ''
     }));
+}
+
+// The groups, in tree order (groupTree): each with its path, its kind, its
+// parent's path and how many devices it holds itself (own) and with the
+// groups inside it (deep). The table's Groups tab reads these rows, and the
+// report's inventory is laid out under them.
+function reportGroups() {
+    const counts = new Map(), deep = new Map();
+    const byId = new Map(state.groups.map((g) => [g.id, g]));
+    state.nodes.forEach((n) => {
+        if (!n.group || !byId.has(n.group)) return;
+        counts.set(n.group, (counts.get(n.group) || 0) + 1);
+        const seen = new Set();
+        for (let g = byId.get(n.group); g && !seen.has(g.id); g = byId.get(g.parent)) { seen.add(g.id); deep.set(g.id, (deep.get(g.id) || 0) + 1); }
+    });
+    return groupTree().map(({ group: g, depth }) => {
+        const parent = groupById(g.parent);
+        return {
+            id: g.id, depth,
+            name: groupLabel(g),
+            kind: g.kind,
+            kindName: groupKindName(g.kind),
+            path: groupPath(g),
+            parentId: parent ? parent.id : '',
+            parent: parent ? groupPath(parent) : '',
+            uHeight: isRackGroup(g) ? (g.uHeight || RACK_U_DEFAULT) : null,
+            // A rack's size (the table's Groups tab): its width, its depth
+            // in mm when one was given, and its numbering ('bottom'|'top').
+            width: isRackGroup(g) ? asRackWidth(g.width) : null,
+            depthMm: isRackGroup(g) && Number.isInteger(g.depthMm) ? g.depthMm : null,
+            numbering: isRackGroup(g) ? (rackTopDown(g) ? 'top' : 'bottom') : null,
+            own: counts.get(g.id) || 0,
+            deep: deep.get(g.id) || 0
+        };
+    });
 }
 
 // Derived and read-only: these rows are built for reading, and nothing ever
@@ -250,6 +296,74 @@ function reportPorts() {
     return out;
 }
 
+// Each rack as it would be drawn on the door (Review-Packs/Topo-groups.md,
+// step C): its units from the top down, front and rear, each run of units
+// one device or empty, then the devices in it with no unit yet, and its
+// cables as the rack view has them (rackCables, js/model.js): one line per
+// pair of its devices, and each cable out of it by the device it goes to.
+// A unit two devices claim (a sheet can say so; the rack view cannot) is a
+// row of its own naming both, marked, as the finding names them. A device
+// whose units are outside the rack is listed under the rack, not drawn in it.
+// Racks in the Groups tab's order; a rack nobody put anything in is left out
+// (an empty frame is a page of nothing).
+function reportRacks() {
+    return groupTree().map((e) => e.group).filter(isRackGroup).map((rack) => {
+        const top = rackTop(rack);
+        const members = rackMembers(rack);
+        if (!members.length) return null;
+        const placed = members.filter((n) => rackSpanOf(n));
+        const name = (n) => n.name || n.id;
+        const faces = RACK_FACES.map((face) => {
+            // Who is in each unit on this face: its own devices, and the
+            // backs of the full-depth ones mounted on the other.
+            const at = Array.from({ length: top + 1 }, () => []);
+            placed.forEach((n) => {
+                const s = rackSpanOf(n);
+                const back = s.face !== face;
+                if (back && !rackFullDepth(n)) return;
+                for (let u = Math.max(1, s.lo); u <= Math.min(top, s.hi); u++) at[u].push({ n, back });
+            });
+            const rows = [];
+            for (let u = top; u >= 1;) {
+                const here = at[u];
+                if (!here.length) { rows.push({ u, span: 1, empty: true }); u--; continue; }
+                const one = here.length === 1 ? here[0] : null;
+                const s = one ? rackSpanOf(one.n) : null;
+                // A device alone in all of its units is one cell over them.
+                let span = 1;
+                if (one) {
+                    const lo = Math.max(1, s.lo);
+                    if (Math.min(top, s.hi) === u && [...Array(u - lo + 1).keys()].every((k) => at[u - k].length === 1 && at[u - k][0].n === one.n)) span = u - lo + 1;
+                }
+                rows.push({ u, span, clash: here.length > 1,
+                    items: here.map(({ n, back }) => ({ name: name(n), type: n.type, typeName: typeName(n.type),
+                        units: (() => { const x = rackSpanOf(n); return rackUnitsText(rack, x.lo, x.hi); })(),
+                        back, full: rackFullDepth(n), status: n.status === 'planned' || n.status === 'retired' ? n.status : '',
+                        // What runs on it, on the face it is mounted on (its back is its units only).
+                        guests: back ? [] : guestTreeOf(n).map(name) })) });
+                u -= span;
+            }
+            return { face, rows };
+        });
+        const outside = placed.filter((n) => !rackSpanInside(rack, rackSpanOf(n).lo, rackSpanOf(n).hi)).map((n) => `${name(n)} (${rackSpanText(n)})`);
+        // A VM or a container on a host is listed in its host's units, not here.
+        const unplaced = members.filter((n) => !rackSpanOf(n) && !hostOf(n)).map(name);
+        const { pairs, stubs } = rackCables(rack);
+        const cableText = (links, from) => links.map((l) => { const x = rackCableText(l, from); return [x.ports, x.label, x.color].filter(Boolean).join(' · '); }).join('; ');
+        return {
+            // Its size as one line, and which way its units are numbered:
+            // the rows stay counted from the bottom (u), and the printed
+            // number of each is racksSection's to work out (topDown).
+            id: rack.id, path: groupPath(rack), top, size: rackSizeText(rack), topDown: rackTopDown(rack), inches: rackWidthInches(rack), faces, outside, unplaced,
+            // Each placed host and what runs on it, in full: a 1U box's cell
+            // has room for a few names at most, and cuts the rest.
+            hosts: placed.map((n) => ({ name: name(n), guests: guestTreeOf(n).map(name) })).filter((h) => h.guests.length),
+            pairs: pairs.map((pr) => ({ a: name(pr.a), b: name(pr.b), count: pr.links.length, text: cableText(pr.links, pr.a) })),
+            stubs: stubs.map((st) => ({ node: name(st.node), far: name(st.far), where: nodePlaceText(st.far), count: st.links.length, text: cableText(st.links, st.node) }))
+        };
+    }).filter(Boolean);
+}
+
 // Every device with a faceplate (a switch, an access point) and what is in
 // each of its ports, in port order: the page a technician tracing a cable at
 // the rack wants, which the connections table (one row per cable, in the
@@ -333,12 +447,16 @@ function reportModelNow() {
     const devices = reportDevices();
     const connections = reportConnections();
     const subnets = reportSubnets();
+    const groups = reportGroups();
+    const racks = reportRacks();
 
     return {
         meta: siteReportMeta(state.report),
         findings,
         accepted,
         devices,
+        groups,
+        racks,
         connections,
         subnets,
         portMaps: reportPortMaps(),
@@ -596,6 +714,8 @@ function reportStyles() {
     .inv td { padding: 3px 6px; }
     .inv tr.cont td { border-top: 0; }
     .inv tr.dev td { border-top: 1px solid #e2e8f0; }
+    .inv tr.guest > td:first-child { padding-left: calc(6px + var(--guest, 1) * 14px); }
+    .inv tr.grp td { border-top: 1px solid #cbd5e1; padding-top: 8px; background: #f8fafc; }
     .inv tbody tr:first-child td { border-top: 0; }
     /* The switch port map: one small table per switch, headed by its name. */
     h3 { font-size: 12px; margin: 14px 0 4px; page-break-after: avoid; }
@@ -608,6 +728,22 @@ function reportStyles() {
     /* The accepted findings: the reason is the column that matters. */
     .accepted td:last-child { color: #334155; }
     .appendix { page-break-before: always; break-before: page; }
+    /* The rack elevations: front and rear side by side, a unit a row, so a
+       42U rack is a third of a page and never splits. */
+    .rack { page-break-inside: avoid; break-inside: avoid; margin-bottom: 14px; }
+    .elevs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .elev { table-layout: fixed; border: 1.5px solid #64748b; }
+    .elev th { text-align: center; }
+    .elev td { padding: 0 6px; height: 13px; line-height: 12px; font-size: 9px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    .elev col.ruc { width: 30px; }
+    .elev td.ru { text-align: right; color: #94a3b8; font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; border-right: 1.5px solid #64748b; }
+    .elev td.rs { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .elev td.rs:not(.empty) { background: #f1f5f9; border: 1px solid #94a3b8; }
+    .elev td.back { background: repeating-linear-gradient(135deg, #fff 0 4px, #e2e8f0 4px 5px); }
+    .elev td.retired { color: #94a3b8; }
+    .elev td.clash { background: #fef2f2; border-color: #b91c1c; color: #991b1b; }
+    .elev .guests { color: #475569; font-style: italic; }
+    .rackcab td:first-child { width: 42%; }
 
     .note { font-size: 10.5px; color: #475569; background: #f8fafc; border-left: 3px solid #cbd5e1;
             padding: 9px 12px; margin: 8px 0; white-space: pre-wrap; }
@@ -674,6 +810,44 @@ function acceptedSection(accepted) {
 // One small table per switch or access point, in port order. The Label and
 // VLAN columns are there only on a switch whose ports carry them, so a
 // report of a site nobody labelled reads as it always did.
+// The racks: per rack, its path and height, front and rear side by side as
+// two columns of units, then what is not drawn in them and its cables.
+function racksSection(racks) {
+    const face = (f, rack) => {
+        // The number printed beside unit u: from the top on a rack set so.
+        const no = (u) => (rack.topDown ? rack.top - u + 1 : u);
+        const rows = f.rows.map((r) => {
+            const unit = Array.from({ length: r.span }, (_, k) => r.u - k);
+            if (r.empty) return `<tr><td class="ru">${no(r.u)}</td><td class="rs empty"></td></tr>`;
+            const cell = r.items.map((it) => `<b>${escapeHtml(it.name)}</b>`
+                + ` <span class="muted">${escapeHtml([t(it.typeName), it.units, it.back ? t('back') : it.full ? '' : t('half depth'), it.status ? statusName(it.status) : ''].filter(Boolean).join(' · '))}</span>`
+                + (it.guests && it.guests.length ? ` <span class="guests">${escapeHtml(t('Runs here: {names}', { names: it.guests.join(', ') }))}</span>` : '')).join(' / ');
+            const cls = ['rs', r.clash ? 'clash' : '', r.items.every((it) => it.back) ? 'back' : '',
+                r.items.some((it) => it.status === 'retired') ? 'retired' : ''].filter(Boolean).join(' ');
+            return unit.map((u, k) => `<tr><td class="ru">${no(u)}</td>${k === 0 ? `<td class="${cls}" rowspan="${r.span}">${cell}</td>` : ''}</tr>`).join('');
+        }).join('');
+        // As wide as the rack against a 19" one, as the rack view draws it
+        // (a 23" one fills its half of the page too: there is no wider).
+        const pct = Math.round(Math.min(1, (rack.inches || 19) / 19) * 100);
+        return `<table class="elev"${pct < 100 ? ` style="width:${pct}%"` : ''}><colgroup><col class="ruc"><col></colgroup><thead><tr><th colspan="2">${escapeHtml(t(f.face === 'rear' ? 'Rear' : 'Front'))}</th></tr></thead><tbody>${rows}</tbody></table>`;
+    };
+    return racks.map((rack) => {
+        const notes = [
+            rack.outside.length ? `<p class="free"><b>${escapeHtml(t('Outside its units'))}:</b> ${escapeHtml(rack.outside.join(', '))}</p>` : '',
+            rack.unplaced.length ? `<p class="free"><b>${escapeHtml(t('Not placed yet'))}:</b> ${escapeHtml(rack.unplaced.join(', '))}</p>` : '',
+            ...(rack.hosts || []).map((h) => `<p class="free"><b>${escapeHtml(t('Runs on {host}', { host: h.name }))}:</b> ${escapeHtml(h.guests.join(', '))}</p>`)
+        ].join('');
+        const cables = rack.pairs.map((c) => `<tr><td>${escapeHtml(c.a)} ↔ ${escapeHtml(c.b)}${c.count > 1 ? ` <span class="muted">×${c.count}</span>` : ''}</td><td class="mono">${escapeHtml(c.text)}</td></tr>`)
+            .concat(rack.stubs.map((c) => `<tr><td>${escapeHtml(c.node)} → ${escapeHtml(c.far)}${c.where ? ` <span class="muted">(${escapeHtml(c.where)})</span>` : ''}${c.count > 1 ? ` <span class="muted">×${c.count}</span>` : ''}</td><td class="mono">${escapeHtml(c.text)}</td></tr>`)).join('');
+        return `<div class="rack">
+        <h3>${escapeHtml(rack.path)} <span class="muted">${escapeHtml(rack.size || `${rack.top}U`)}${rack.topDown ? ` · ${escapeHtml(t('numbered from the top'))}` : ''}</span></h3>
+        <div class="elevs">${rack.faces.map((f) => face(f, rack)).join('')}</div>
+        ${notes}
+        ${cables ? `<table class="rackcab"><thead><tr><th>${escapeHtml(t('Cable'))}</th><th>${escapeHtml(t('Ports'))}</th></tr></thead><tbody>${cables}</tbody></table>` : ''}
+    </div>`;
+    }).join('');
+}
+
 function portMapsSection(maps) {
     return maps.map((m) => `
         <h3>${escapeHtml(m.name)} <span class="muted">· ${escapeHtml(t(m.typeName))} · ${escapeHtml(t('{used} of {total} ports used', { used: m.used, total: m.total }))}</span></h3>
@@ -703,11 +877,42 @@ function ifaceNameCell(iface) {
 // devices is a few pages a technician can scan down, not a stack of cells. A
 // device's name, type, gateway, DNS and model are on its first line; a device
 // with no interface recorded still gets one line, which says so.
-function devicesSection(devices) {
+//
+// With groups (reportGroups), the inventory is laid out under them in tree
+// order: a heading line per group that holds devices itself, its path and
+// kind, then those devices, and the devices in no group last under a heading
+// of their own. A device under its group's heading says only its units, if
+// any; the path is the heading. A site with no groups prints as before.
+// A host's guests listed straight under it, and a container in a VM under
+// the VM, each marked with its depth (d.guest), in the order given otherwise.
+// Only within `list`: a guest whose host is under another heading (a scratch
+// copy that skipped repairHosts) keeps its own place. Pure.
+function hostOrdered(list) {
+    const here = new Set(list.map((d) => d.id));
+    const under = (d) => !!d.hostId && d.hostId !== d.id && here.has(d.hostId);
+    const kids = new Map();
+    list.forEach((d) => { if (under(d)) { if (!kids.has(d.hostId)) kids.set(d.hostId, []); kids.get(d.hostId).push(d); } });
+    if (!kids.size) return list;
+    const out = [];
+    const seen = new Set();
+    const walk = (d, depth) => {
+        if (seen.has(d)) return;
+        seen.add(d);
+        out.push(depth ? Object.assign({}, d, { guest: depth }) : d);
+        (kids.get(d.id) || []).forEach((k) => walk(k, depth + 1));
+    };
+    list.forEach((d) => { if (!under(d)) walk(d, 0); });
+    list.forEach((d) => walk(d, 0));   // a loop nothing outside reaches (never after repairHosts)
+    return out;
+}
+
+function devicesSection(devices, groups) {
     // Gateway, DNS, Model / firmware: the schema rows that carry a report column.
     const cols = reportColumns();
     const empty = '<span class="muted">—</span>';
-    const rows = devices.map((d) => {
+    const known = new Set((groups || []).map((g) => g.id));
+    const grouped = known.size > 0 && devices.some((d) => d.groupId && known.has(d.groupId));
+    const deviceRows = (d) => {
         const extra = [
             d.ports ? `${escapeHtml(t('Ports'))}: ${d.ports.used}/${d.ports.total}` : '',
             d.nat ? escapeHtml(t('NAT')) : '',
@@ -716,9 +921,13 @@ function devicesSection(devices) {
         // The Asset group (js/assets.js): the tag, serial and place under the
         // name, and a status other than in service, which a reader of the
         // register has to see.
-        const asset = [d.assetTag ? `${t('Asset tag')} ${d.assetTag}` : '', d.serial ? `${t('Serial number')} ${d.serial}` : '', d.location]
+        const where = grouped && d.groupId ? d.rackSpan : (d.place !== undefined ? d.place : d.location);
+        const asset = [d.assetTag ? `${t('Asset tag')} ${d.assetTag}` : '', d.serial ? `${t('Serial number')} ${d.serial}` : '', where]
             .filter(Boolean).join(' · ');
         const status = d.status && d.status !== 'active' ? ` <span class="muted">(${escapeHtml(statusName(d.status))})</span>` : '';
+        // A guest, under its host: stepped in, and saying what it runs on.
+        const runs = d.hostId ? `<br><span class="muted">${escapeHtml(t('Runs on {host}', { host: d.host }))}</span>` : '';
+        const guestCls = d.guest ? ` guest" style="--guest:${Math.min(d.guest, HOST_DEPTH_MAX)}` : '';
         const ifaces = d.interfaces.length ? d.interfaces : [null];
         return ifaces.map((iface, i) => {
             const first = i === 0;
@@ -728,14 +937,26 @@ function devicesSection(devices) {
             <td class="mono">${iface.mac ? `${escapeHtml(iface.mac)}${iface.vendor ? ` <span class="muted">· ${escapeHtml(iface.vendor)}</span>` : ''}` : empty}</td>`
                 : `<td colspan="3"><span class="muted">${escapeHtml(t('none recorded'))}</span></td>`;
             if (!first) return `<tr class="cont"><td></td><td></td>${own}${cols.map(() => '<td></td>').join('')}</tr>`;
-            return `<tr class="dev">
-            <td><b>${escapeHtml(d.name)}</b>${status}${asset ? `<br><span class="muted">${escapeHtml(asset)}</span>` : ''}${d.notes ? `<br><span class="muted">${escapeHtml(d.notes)}</span>` : ''}</td>
+            return `<tr class="dev${guestCls}">
+            <td>${d.guest ? '<span class="muted">↳ </span>' : ''}<b>${escapeHtml(d.name)}</b>${status}${runs}${asset ? `<br><span class="muted">${escapeHtml(asset)}</span>` : ''}${d.notes ? `<br><span class="muted">${escapeHtml(d.notes)}</span>` : ''}</td>
             <td>${escapeHtml(t(d.typeName))}${extra ? `<br><span class="muted">${extra}</span>` : ''}</td>
             ${own}
             ${cols.map((f) => `<td${f.report.mono ? ' class="mono"' : ''}>${escapeHtml(d[f.report.key]) || empty}</td>`).join('\n            ')}
         </tr>`;
         }).join('');
-    }).join('');
+    };
+    const width = 5 + cols.length;
+    const heading = (title, note) => `<tr class="grp"><td colspan="${width}"><b>${escapeHtml(title)}</b>${note ? ` <span class="muted">· ${escapeHtml(note)}</span>` : ''}</td></tr>`;
+    let rows;
+    if (!grouped) rows = hostOrdered(devices).map(deviceRows).join('');
+    else {
+        const by = new Map();
+        devices.forEach((d) => { const k = d.groupId && known.has(d.groupId) ? d.groupId : ''; if (!by.has(k)) by.set(k, []); by.get(k).push(d); });
+        const count = (n) => t(n === 1 ? '{n} device' : '{n} devices', { n });
+        rows = groups.filter((g) => by.has(g.id)).map((g) => heading(g.path, `${g.kindName}${g.uHeight ? ` ${g.uHeight}U` : ''} · ${count(by.get(g.id).length)}`)
+            + hostOrdered(by.get(g.id)).map(deviceRows).join('')).join('')
+            + (by.has('') ? heading(t('Not in a group'), count(by.get('').length)) + hostOrdered(by.get('')).map(deviceRows).join('') : '');
+    }
     return `<table class="inv">
         <thead><tr><th>${t('Device')}</th><th>${t('Type')}</th><th>${t('Interface')}</th><th>${t('Address')}</th><th>${t('MAC')}</th>${cols.map((f) => `<th>${t(f.report.column)}</th>`).join('')}</tr></thead>
         <tbody>${rows}</tbody></table>`;
@@ -964,8 +1185,11 @@ ${accepted.length ? `
     ${appendix ? `<p class="muted">${escapeHtml(t('At {n} devices the diagram needs a page of its own: it is in the appendix at the end.', { n: counts.devices }))}</p>` : figure}` : ''}
 
     <h2>${escapeHtml(t('Device inventory'))}</h2>
-    ${devicesSection(model.devices)}
-${portMaps.length ? `
+    ${devicesSection(model.devices, model.groups)}
+${(model.racks || []).length ? `
+    <h2>${escapeHtml(t('Racks'))}</h2>
+    ${racksSection(model.racks)}
+` : ''}${portMaps.length ? `
     <h2>${escapeHtml(t('Switch ports'))}</h2>
     ${portMapsSection(portMaps)}
 ` : ''}
@@ -1159,7 +1383,7 @@ async function generateSiteReport(meta) {
 // their canvas to be edited.
 async function withDocRendered(doc, fn) {
     const held = {
-        nodes: state.nodes, links: state.links, networks: state.networks, accepted: state.accepted, annotations: state.annotations, report: state.report,
+        nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, accepted: state.accepted, annotations: state.annotations, report: state.report,
         camera: { x: state.camera.x, y: state.camera.y, zoom: state.camera.zoom },
         selection: state.selection,   // the whole set: a getter pair would lose a set of several
     };
@@ -1170,7 +1394,7 @@ async function withDocRendered(doc, fn) {
         renderCanvasOnly();
         return await fn();
     } finally {
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.accepted = held.accepted;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.accepted = held.accepted;
         state.annotations = held.annotations; state.report = held.report;
         state.camera = held.camera;
         state.selection = held.selection;

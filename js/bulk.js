@@ -16,6 +16,16 @@
 //   Move        to a declared network (R7): each device's address there is the
 //               next free one, and its gateway and DNS then come from the
 //               network by inheritance; nothing is copied onto the hosts.
+//   Group       move them into a group (js/groups.js), or out of every one:
+//               where they sit, not their addressing. A device moved
+//               anywhere but a rack leaves its units there behind, as the
+//               device editor's picker has it (rackKeysLost, js/model.js).
+//               A VM on a host is left where it is: it goes where its host
+//               goes (js/model.js "Hosts"), and a host moved takes its VMs.
+//   Host        put the VMs and containers of the set on one device, or on
+//               none (js/model.js "Hosts"): what each runs on, so where it
+//               is. A device of the set that is not virtual, or a host it
+//               may not run on (a VM on a VM), is refused on its row.
 //   Re-cable    onto another switch or access point (phase 3): each device's
 //               patch cable moves to the next free port there, from a port
 //               given or the first, counted in the order chosen (by switch
@@ -68,8 +78,14 @@ const bulkDraft = () => _bulk.draft || (_bulk.draft = {
     clear: new Set(),     // fields to empty on every device
     rename: { find: '', pattern: '', order: 'name', start: '1' },
     move: { net: '' },
-    recable: { target: '', from: '', order: 'port' }
+    recable: { target: '', from: '', order: 'port' },
+    group: { target: '' },      // a group id, BULK_NO_GROUP for out of every one, '' for not picked
+    host: { target: '' }        // a device id, BULK_NO_HOST for on none, '' for not picked
 });
+// Out of every group: a value no group id can be (ids are minted as g_…).
+const BULK_NO_GROUP = '-';
+// On no host: likewise no device id (ids are minted as n_…, s_…).
+const BULK_NO_HOST = '-';
 function resetBulkDraft() { _bulk.draft = null; }
 
 // The panel applies to a set of two or more devices and no cables, or two or
@@ -532,6 +548,90 @@ function bulkPlanRecable(ids, req) {
     return bulkFinish('recable', rows, ops, { target });
 }
 
+// ---- Move to group ----
+// Each device into the group picked (or out of every one), in name order.
+// One already there is unchanged. Out of a rack into anything else, its
+// units, height and face go with it (rackKeysLost): a U position in a room is
+// a position nobody can find. Into a rack, a device that was in none is in it
+// but not yet placed, which the preview says once.
+function bulkPlanGroup(ids, target) {
+    const none = target === BULK_NO_GROUP;
+    const g = none ? null : groupById(target);
+    if (!none && !g) return bulkFinish('group', [], [], { errors: [t('Pick a group to move them to.')] });
+    const field = t('Group');
+    const where = (node) => nodePlaceText(node) || '—';
+    const rows = [], ops = [];
+    let unplaced = 0, carried = 0;
+    bulkOrder(bulkSet(ids), 'name').forEach((node) => {
+        const before = groupOfNode(node) ? where(node) : '—';
+        const base = { nodeId: node.id, name: node.name, field, before };
+        // Where a VM on a host is, is the host's to say (repairHosts).
+        const host = hostOf(node);
+        if (host) {
+            rows.push(Object.assign(base, { status: 'skip', after: before, why: t('It runs on {host} and goes where {host} goes.', { host: host.name || host.id }) }));
+            return;
+        }
+        if ((node.group && groupById(node.group) ? node.group : null) === (g ? g.id : null)) {
+            rows.push(Object.assign(base, { status: 'same', after: before, why: g ? t('Already in {group}.', { group: groupLabel(g) }) : '' }));
+            return;
+        }
+        const op = { nodeId: node.id, set: {}, drop: rackKeysLost(node, g) };
+        if (g) op.set.group = g.id; else op.drop.push('group');
+        if (isRackGroup(g) && !Number.isInteger(node.rackU) && !isVirtualType(node.type)) unplaced++;
+        carried += bulkGuestsDeep(node).length;
+        rows.push(Object.assign(base, { status: 'change', after: g ? groupPath(g) : '—' }));
+        ops.push(op);
+    });
+    const notes = [];
+    if (carried) notes.push(t(carried === 1 ? 'One VM or container runs on them and goes with them.' : '{n} VMs and containers run on them and go with them.', { n: carried }));
+    if (unplaced) notes.push(t(unplaced === 1 ? 'One of them goes in without a unit: set it in its Asset section.' : '{n} of them go in without a unit: set each one in its Asset section.', { n: unplaced }));
+    const lost = ops.filter((op) => op.drop.some((k) => k !== 'group')).length;
+    if (lost) notes.push(t(lost === 1 ? 'One of them leaves its units in the rack behind.' : '{n} of them leave their units in the rack behind.', { n: lost }));
+    return bulkFinish('group', rows, ops, { group: g, none, notes });
+}
+
+// What runs on `host`, and what runs on that (a container on a VM).
+const bulkGuestsDeep = (host) => guestsOf(host).reduce((all, g) => all.concat(g, guestsOf(g)), []);
+
+// ---- Move to host ----
+// Each VM and container of the set onto the device picked (or onto none), in
+// name order. Its group becomes the host's (repairHosts), which the row says
+// when it changes; its map position and its cables stay as they are. A device
+// that is not virtual, the host itself, and a host it may not run on (a VM on
+// a VM or on a switch, anything on a container) are refused on their rows,
+// not dropped.
+function bulkPlanHost(ids, target) {
+    const none = target === BULK_NO_HOST;
+    const host = none ? null : getNode(target);
+    if (!none && !host) return bulkFinish('host', [], [], { errors: [t('Pick a device for them to run on.')] });
+    const field = t('Runs on');
+    const nameOf = (n) => (n ? n.name || n.id : '—');
+    const rows = [], ops = [];
+    let moved = 0;
+    const into = host ? (groupOfNode(hostRootOf(host) || host) || null) : null;
+    bulkOrder(bulkSet(ids), 'name').forEach((node) => {
+        const was = hostOf(node);
+        const base = { nodeId: node.id, name: node.name, field, before: nameOf(was) };
+        if (!isVirtualType(node.type)) { rows.push(Object.assign(base, { status: 'skip', before: '', after: '', why: t('Only a VM or a container runs on another device.') })); return; }
+        if (host && node.id === host.id) { rows.push(Object.assign(base, { status: 'skip', after: '', why: t('This is the device they are moving onto.') })); return; }
+        if (host && !canHost(node.type, host)) {
+            rows.push(Object.assign(base, { status: 'bad', after: '', why: t(node.type === 'vm' ? 'A VM runs on a server, a workstation or a custom device.' : 'A container runs on a server, a workstation, a custom device or a VM.') }));
+            return;
+        }
+        if ((was ? was.id : null) === (host ? host.id : null)) {
+            rows.push(Object.assign(base, { status: 'same', after: base.before, why: host ? t('Already on {host}.', { host: nameOf(host) }) : '' }));
+            return;
+        }
+        ops.push(host ? { nodeId: node.id, set: { host: host.id }, drop: [] } : { nodeId: node.id, set: {}, drop: ['host'] });
+        if (host && (node.group || null) !== (into ? into.id : null)) moved++;
+        rows.push(Object.assign(base, { status: 'change', after: nameOf(host) }));
+    });
+    const notes = [];
+    if (moved) notes.push(into ? t(moved === 1 ? 'One of them moves to {group}, where {host} is.' : '{n} of them move to {group}, where {host} is.', { n: moved, group: groupPath(into), host: nameOf(host) })
+        : t(moved === 1 ? 'One of them leaves its group: {host} is in none.' : '{n} of them leave their groups: {host} is in none.', { n: moved, host: nameOf(host) }));
+    return bulkFinish('host', rows, ops, { host, none, notes });
+}
+
 // ---- Delete ----
 function bulkPlanDelete(ids) {
     const nodes = bulkSet(ids);
@@ -570,6 +670,9 @@ function bulkWrite(plan, doc) {
             if (iface) iface.ip = op.iface.ip;
         }
     });
+    // The host rule over the result, as save() keeps it on the live one, so
+    // the preview's findings see the VMs where their hosts put them.
+    repairHosts(doc.nodes);
     if (!added.length) return;
     // A new cable's device end is the binder's pick, made on the document
     // being written: it is lent to the model's helpers for the length of the
@@ -586,7 +689,7 @@ function bulkWrite(plan, doc) {
 // The findings the plan would leave, against the ones there now.
 function bulkFindingsDelta(plan) {
     if (!plan.ops.length || plan.errors.length) return [];
-    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks });
+    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups });
     bulkWrite(plan, scratch);
     return findingsDelta(topologyFindings(), diagnoseDoc(scratch).findings);
 }
@@ -596,6 +699,8 @@ function bulkPlan(req) {
     if (req.action === 'rename') return bulkPlanRename(req.ids, req.rename);
     if (req.action === 'move') return bulkPlanMove(req.ids, req.net);
     if (req.action === 'recable') return bulkPlanRecable(req.ids, req.recable);
+    if (req.action === 'group') return bulkPlanGroup(req.ids, req.group);
+    if (req.action === 'host') return bulkPlanHost(req.ids, req.host);
     return bulkPlanDelete(req.ids);
 }
 
@@ -606,7 +711,7 @@ function applyBulkPlan(plan) {
     const n = plan.counts.change;
     if (plan.action === 'delete') {
         setSelectionEntries(plan.ops[0].deleteNodes.map((id) => ({ type: 'node', id })));
-        deleteSelected();
+        deleteSelected({ confirmed: true });   // the preview was the question
         showToast(t('Devices deleted: {n}', { n }), 'ok');
         return n;
     }
@@ -618,6 +723,7 @@ function applyBulkPlan(plan) {
     resetBulkDraft();
     renderSelection();
     renderBulkPanel(true);  // even with the focus in a field: see renderBulkFields
+    if (plan.action === 'group' || plan.action === 'host') renderGroupsPanel();   // its counts
     showToast(plan.kind === 'link' ? t('Cables changed: {n}', { n }) : t('Devices changed: {n}', { n }), 'ok');
     return n;
 }
@@ -644,7 +750,7 @@ function renderBulkPanel(force) {
         b.classList.toggle('hidden', kind === 'link' && b.dataset.bulk !== 'set');
         b.setAttribute('aria-selected', active ? 'true' : 'false');
     });
-    ['set', 'rename', 'move', 'recable'].forEach((k) => bulkEl(`bulkPane-${k}`).classList.toggle('hidden', k !== tab));
+    ['set', 'rename', 'move', 'recable', 'group', 'host'].forEach((k) => bulkEl(`bulkPane-${k}`).classList.toggle('hidden', k !== tab));
     renderBulkFields(recs, draft, force, kind);
     // Rename and Move keep what was typed; only the network list is rebuilt.
     bulkEl('bulkFind').value = draft.rename.find;
@@ -673,7 +779,39 @@ function renderBulkPanel(force) {
     bulkEl('bulkNoSwitches').classList.toggle('hidden', !!sws.length);
     bulkEl('bulkFrom').value = draft.recable.from;
     bulkEl('bulkRecableOrder').value = draft.recable.order;
+    // Group: the tree, as the device editor's picker shows it, and "out of
+    // every group" at the end. Nothing is picked until somebody picks.
+    const gPick = bulkEl('bulkGroup');
+    const tree = groupTree();
+    gPick.innerHTML = `<option value="">${escapeHtml(t('Pick a group'))}</option>`
+        + tree.map((e) => `<option value="${escapeHtml(e.group.id)}">${escapeHtml(groupOptionIndent(e.depth) + groupLabel(e.group))}</option>`).join('')
+        + `<option value="${BULK_NO_GROUP}">${escapeHtml(t('Out of every group'))}</option>`;
+    if (draft.group.target !== BULK_NO_GROUP && !groupById(draft.group.target)) draft.group.target = '';
+    gPick.value = draft.group.target;
+    gPick.classList.toggle('hidden', !tree.length);
+    bulkEl('bulkNoGroups').classList.toggle('hidden', !!tree.length);
+    renderBulkHostPick(recs, draft);
     updateBulkGo();
+}
+
+// Host: every device a container could run on (the widest rule; a VM's row
+// refuses a VM), the ones VMs usually run on first, and "on none" at the end.
+// Nothing is picked until somebody picks.
+function renderBulkHostPick(nodes, draft) {
+    const pick = bulkEl('bulkHost');
+    if (!pick) return;
+    const virt = nodes.filter((n) => isVirtualType(n.type));
+    const probe = { id: '', type: virt.some((n) => n.type === 'container') ? 'container' : 'vm' };
+    const list = hostCandidates(probe);
+    const opt = (n) => `<option value="${escapeHtml(n.id)}">${escapeHtml(`${n.name || n.id} · ${typeName(n.type)}`)}</option>`;
+    const first = list.filter((n) => isSuggestedHost(probe.type, n)), rest = list.filter((n) => !isSuggestedHost(probe.type, n));
+    pick.innerHTML = `<option value="">${escapeHtml(t('Pick a device'))}</option>`
+        + (first.length && rest.length ? `<optgroup label="${escapeHtml(t('Suggested'))}">${first.map(opt).join('')}</optgroup><optgroup label="${escapeHtml(t('Other devices'))}">${rest.map(opt).join('')}</optgroup>`
+            : list.map(opt).join(''))
+        + `<option value="${BULK_NO_HOST}">${escapeHtml(t('On no device'))}</option>`;
+    if (draft.host.target !== BULK_NO_HOST && !list.some((n) => n.id === draft.host.target)) draft.host.target = '';
+    pick.value = draft.host.target;
+    bulkEl('bulkNoVirtual').classList.toggle('hidden', virt.length > 0);
 }
 
 function renderBulkFields(nodes, draft, force, kind = 'node') {
@@ -794,6 +932,8 @@ function bulkRequest(action = _bulk.tab) {
     if (action === 'rename') return { action, ids, rename: Object.assign({}, draft.rename) };
     if (action === 'move') return { action, ids, net: draft.move.net };
     if (action === 'recable') return { action, ids, recable: Object.assign({}, draft.recable) };
+    if (action === 'group') return { action, ids, group: draft.group.target };
+    if (action === 'host') return { action, ids, host: draft.host.target };
     return { action: 'delete', ids };
 }
 // Preview is offered once the form asks for something.
@@ -803,6 +943,8 @@ function bulkAsksSomething(req) {
     if (req.action === 'rename') return !!(req.rename.pattern.trim() || req.rename.find);
     if (req.action === 'move') return !!req.net;
     if (req.action === 'recable') return !!req.recable.target;
+    if (req.action === 'group') return !!req.group;
+    if (req.action === 'host') return !!req.host;
     return req.ids.length > 0;
 }
 function updateBulkGo() {
@@ -811,7 +953,7 @@ function updateBulkGo() {
 }
 
 // ---- The preview ----
-const BULK_TITLES = { set: 'Set fields', rename: 'Rename', move: 'Move', recable: 'Re-cable', delete: 'Delete' };
+const BULK_TITLES = { set: 'Set fields', rename: 'Rename', move: 'Move', recable: 'Re-cable', group: 'Move to group', host: 'Move to host', delete: 'Delete' };
 function openBulkPreview(action = _bulk.tab) {
     if (!bulkApplies() || readOnlyRefuses()) return;
     const req = bulkRequest(bulkKind() === 'link' ? 'set' : action);
@@ -833,12 +975,18 @@ function renderBulkPreview(plan) {
     const c = plan.counts;
     const action = plan.action;
     bulkEl('bulkTitle').textContent = action === 'move' && plan.network ? t('Move to {network}', { network: networkLabel(plan.network) })
-        : action === 'recable' && plan.target ? t('Re-cable onto {switch}', { switch: plan.target.name || plan.target.id }) : t(BULK_TITLES[action]);
+        : action === 'recable' && plan.target ? t('Re-cable onto {switch}', { switch: plan.target.name || plan.target.id })
+            : action === 'group' && plan.group ? t('Move to {group}', { group: groupLabel(plan.group) })
+                : action === 'group' && plan.none ? t('Out of every group')
+                    : action === 'host' && plan.host ? t('Run on {host}', { host: plan.host.name || plan.host.id })
+                        : action === 'host' && plan.none ? t('On no device') : t(BULK_TITLES[action]);
     const blurb = {
         set: plan.kind === 'link' ? t('The same value on every cable.') : t('The same value on every device that can take it.'),
         rename: t('Numbered in the order shown.'),
         move: t('Each one takes the next free address there, and its gateway and DNS come from the subnet.'),
         recable: t('Each cable moves to the next free port there, in the order shown. The cable keeps its label, length and colour, and each device keeps its address.'),
+        group: plan.none ? t('They stay on the map, in no group.') : t('Each one moves into the group; its addressing and cables stay as they are.'),
+        host: plan.none ? t('They run on nothing in the register, and stay where they are.') : t('Each one runs on it and is where it is; its addressing, cables and place on the map stay as they are.'),
         delete: t('Every cable on these devices goes with them.')
     }[action];
     bulkEl('bulkBlurb').textContent = blurb;
@@ -918,6 +1066,8 @@ function deleteSelectionAsked() {
     bulkEl('bulkSwitch').addEventListener('change', (e) => { bulkDraft().recable.target = e.target.value; updateBulkGo(); });
     bulkEl('bulkFrom').addEventListener('input', (e) => { bulkDraft().recable.from = e.target.value; updateBulkGo(); });
     bulkEl('bulkRecableOrder').addEventListener('change', (e) => { bulkDraft().recable.order = e.target.value; updateBulkGo(); });
+    bulkEl('bulkGroup').addEventListener('change', (e) => { bulkDraft().group.target = e.target.value; updateBulkGo(); });
+    bulkEl('bulkHost').addEventListener('change', (e) => { bulkDraft().host.target = e.target.value; updateBulkGo(); });
     // Enter in any field of the panel is Preview.
     panel.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' || !e.target.matches('input')) return;

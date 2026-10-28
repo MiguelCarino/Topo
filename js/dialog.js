@@ -17,7 +17,7 @@
 //
 // So there is one modal (#topoAsk in index.html), opened through the fleet's
 // CarinoUI.modal (focus kept inside, Esc and the scrim dismiss, focus returned
-// to whatever asked), and four ways to ask it something. Each returns a
+// to whatever asked), and five ways to ask it something. Each returns a
 // Promise. Dismissing is always the cautious answer: false, null, or no choice.
 //
 // Questions queue. A second one asked while the first is open (a storage
@@ -75,6 +75,26 @@ function askPrompt(message, opts = {}) {
         .then((v) => (v === null || v === undefined ? null : String(v)));
 }
 
+// A line of text and one choice from a list, asked together: a new group's
+// name and its kind (js/groupmap.js, "A new group from two devices"). opts.pick
+// is { label, options: [{ id, label, text? }], value }. An option's `text` is
+// the line it suggests: choosing that option retypes the line, unless the
+// visitor has typed one of their own (the line no longer reads as the last
+// suggestion). -> { value, pick } or null when dismissed. A test's responder
+// may answer with that object, or with a string (the pick left as it was).
+function askPromptPick(message, opts = {}) {
+    const pick = opts.pick || {};
+    const options = (pick.options || []).filter((o) => o && o.id);
+    const first = options.some((o) => o.id === pick.value) ? pick.value : (options[0] ? options[0].id : '');
+    return ask({ kind: 'prompt', message, title: opts.title || '', value: opts.value == null ? '' : String(opts.value), ok: opts.ok,
+        pick: { label: pick.label || '', options, value: first } })
+        .then((v) => {
+            if (v === null || v === undefined) return null;
+            if (typeof v !== 'object') return { value: String(v), pick: first };
+            return { value: v.value == null ? '' : String(v.value), pick: options.some((o) => o.id === v.pick) ? v.pick : first };
+        });
+}
+
 // One of several answers, by id, or null. choices: [{ id, label, primary? }],
 // in the order they should read; Cancel is added after them.
 function askChoice(message, opts = {}) {
@@ -92,6 +112,8 @@ function showAsk(req) {
         const msg = document.getElementById('topoAskMsg');
         const input = document.getElementById('topoAskInput');
         const foot = document.getElementById('topoAskFoot');
+        const pickRow = document.getElementById('topoAskPickRow');
+        const pick = document.getElementById('topoAskPick');
 
         title.textContent = req.title || '';
         head.hidden = !req.title;
@@ -99,6 +121,29 @@ function showAsk(req) {
         input.hidden = req.kind !== 'prompt';
         input.value = req.kind === 'prompt' ? req.value : '';
         foot.innerHTML = '';
+        // The list under the line, for askPromptPick; hidden for every other
+        // question. Its options are text nodes, never markup: a group's kind
+        // is a word of ours, but the rule costs nothing.
+        const picking = !!(req.pick && pickRow && pick);
+        if (pickRow) pickRow.hidden = !picking;
+        if (pick) { pick.innerHTML = ''; pick.onchange = null; }
+        if (picking) {
+            document.getElementById('topoAskPickLabel').textContent = req.pick.label;
+            req.pick.options.forEach((o) => {
+                const el = document.createElement('option');
+                el.value = o.id;
+                el.textContent = o.label;
+                pick.appendChild(el);
+            });
+            pick.value = req.pick.value;
+            let suggested = (req.pick.options.find((o) => o.id === pick.value) || {}).text;
+            pick.onchange = () => {
+                const o = req.pick.options.find((x) => x.id === pick.value);
+                if (o && o.text != null && (input.value === suggested || !input.value.trim())) input.value = o.text;
+                suggested = o ? o.text : suggested;
+            };
+        }
+        const answer = () => (picking ? { value: input.value, pick: pick.value } : input.value);
 
         let done = false;
         const finish = (value) => {
@@ -107,6 +152,7 @@ function showAsk(req) {
             if (window.CarinoUI) CarinoUI.modal.close(scrim, 'answered');
             else scrim.hidden = true;
             input.onkeydown = null;
+            if (pick) pick.onchange = null;
             resolve(value);
         };
         const button = (label, value, primary, danger) => {
@@ -131,10 +177,10 @@ function showAsk(req) {
             req.choices.forEach((c) => { const b = button(c.label, c.id, !!c.primary); if (c.primary) main = b; });
         } else {
             button(req.cancel || t('Cancel'), ASK_DISMISSED[req.kind], false);
-            main = button(req.ok || t('Continue'), req.kind === 'prompt' ? () => input.value : true, true, req.danger);
+            main = button(req.ok || t('Continue'), req.kind === 'prompt' ? answer : true, true, req.danger);
         }
         if (req.kind === 'prompt') {
-            input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(input.value); } };
+            input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(answer()); } };
         }
 
         const onDismiss = () => finish(ASK_DISMISSED[req.kind]);
@@ -149,4 +195,4 @@ function showAsk(req) {
 }
 
 // Published for the suites, which reach the app as bare globals anyway.
-window.TopoDialog = { ask, tell, askConfirm, askPrompt, askChoice, setDialogResponder };
+window.TopoDialog = { ask, tell, askConfirm, askPrompt, askPromptPick, askChoice, setDialogResponder };

@@ -77,7 +77,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     open();
 
     // ---- 1: the view ----
-    ok('the Map | Table switch is on the pane', !!el('viewSwitch') && el('viewSwitch').querySelectorAll('[data-view]').length === 2);
+    // Rack joins them only while the network has a rack (tests/suites/rackview.js).
+    ok('the Map | Table switch is on the pane', !!el('viewSwitch') && el('viewSwitch').querySelectorAll('[data-view]:not([hidden])').length === 2
+       && el('viewSwitch').querySelector('[data-view="rack"]').hidden);
     setView('table');
     ok('Table shows the table over the map', tableShown() && document.body.classList.contains('table-view')
        && el('canvasContainer').contains(el('tableView')));

@@ -216,7 +216,8 @@ function dropSnapshot(id) {
 // and one added.
 //
 // -> { devices: { added, removed, changed, moved }, cables: { added, removed, changed },
-//      subnets: { added, removed, changed }, notes: { added, removed, changed },
+//      subnets: { added, removed, changed }, groups: { added, removed, changed },
+//      notes: { added, removed, changed },
 //      accepted: { added, reopened }, header: [labels], total }
 // Every list holds { id, name, ... }; `changed` adds what changed, as field
 // labels from the schema (js/model.js), the one list every other view reads.
@@ -277,6 +278,20 @@ function docChanges(baseDoc, curDoc) {
     });
     subnets.changed = subnets.changed.filter((c) => c.fields.length);
 
+    // Groups by their path as it is (or was): a restructure in the Groups tab
+    // is a change to the register even when no device field moved. A rename
+    // is said as one, like a device's; a new parent reads as "Inside", the
+    // word the Groups tab uses for it.
+    const groups = pair(base.groups, cur.groups, (g, doc) => ({ id: g.id, name: groupPath(g, doc.groups || []) }));
+    const groupsNow = byId(cur.groups);
+    groups.changed.forEach((c) => {
+        const old = c.old, now = groupsNow.get(c.id);
+        delete c.old;
+        c.fields = changedLabels(GROUP_FIELDS, old, now).filter((l) => l !== 'Name').map((l) => (l === 'Parent' ? 'Inside' : l));
+        if (groupLabel(old) !== groupLabel(now)) c.renamedFrom = groupLabel(old);
+    });
+    groups.changed = groups.changed.filter((c) => c.fields.length || c.renamedFrom !== undefined);
+
     // Text notes are counted, not listed: their text is the whole of them.
     const notes = pair(base.annotations, cur.annotations, (a) => ({ id: a.id }));
 
@@ -296,9 +311,9 @@ function docChanges(baseDoc, curDoc) {
     const header = REPORT_FIELDS.filter(({ key }) => key !== 'date' && (hWas[key] || '') !== (hNow[key] || '')).map(({ label }) => label);
 
     const count = (g) => g.added.length + g.removed.length + g.changed.length;
-    const total = count(devices) + devices.moved.length + count(cables) + count(subnets) + count(notes)
+    const total = count(devices) + devices.moved.length + count(cables) + count(subnets) + count(groups) + count(notes)
         + accepted.added + accepted.reopened + (header.length ? 1 : 0);
-    return { devices, cables, subnets, notes, accepted, header, total };
+    return { devices, cables, subnets, groups, notes, accepted, header, total };
 }
 
 // A device's interfaces, matched by id: added, removed, or what changed on one.
@@ -350,6 +365,16 @@ function changeRows(ch) {
     ch.subnets.added.forEach((s) => rows.push({ op: t('Added'), what: t('Subnet'), name: s.name, detail: '' }));
     ch.subnets.removed.forEach((s) => rows.push({ op: t('Removed'), what: t('Subnet'), name: s.name, detail: '' }));
     ch.subnets.changed.forEach((s) => rows.push({ op: t('Changed'), what: t('Subnet'), name: s.name, detail: labels(s.fields) }));
+    // Older callers' change sets (a test's, a cached one) have no groups.
+    const grp = ch.groups || { added: [], removed: [], changed: [] };
+    grp.added.forEach((g) => rows.push({ op: t('Added'), what: t('Group'), name: g.name, detail: '' }));
+    grp.removed.forEach((g) => rows.push({ op: t('Removed'), what: t('Group'), name: g.name, detail: '' }));
+    grp.changed.forEach((g) => {
+        const parts = [];
+        if (g.renamedFrom !== undefined) parts.push(t('renamed from {name}', { name: g.renamedFrom }));
+        if (g.fields.length) parts.push(labels(g.fields));
+        rows.push({ op: t('Changed'), what: t('Group'), name: g.name, detail: parts.join('; ') });
+    });
     const n = ch.notes;
     if (n.added.length + n.removed.length + n.changed.length) {
         rows.push({ op: t('Changed'), what: t('Text notes'), name: '',

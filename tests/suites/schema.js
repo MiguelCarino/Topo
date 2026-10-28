@@ -72,9 +72,14 @@ window.addEventListener('load', () => {
     (o.interfaces || []).forEach((i) => { delete i.drawZone; });
     return o;
   };
+  // The third: a VM's or a container's `host` (what it runs on, Round 3 of
+  // the groups work) came after the reference, which drops it. The Homelab
+  // block ships its VMs on its hypervisor, so it is read here without that
+  // key; tests/suites/hosts.js and hostseal.js hold `host` itself.
+  const currentMinusHost = (n) => { const o = serializeNode(n); delete o.host; return o; };
   const both = (doc) => frozen(() => [
     pipe(doc, legacyNormalizeNode, legacyMinusNetcfg, legacyNormalizeLink, legacySerializeLink),
-    pipe(doc, normalizeLoadedNode, serializeNode, normalizeLoadedLink, serializeLink)
+    pipe(doc, normalizeLoadedNode, currentMinusHost, normalizeLoadedLink, serializeLink)
   ]);
 
   // ---- 1: byte identity over everything Topo ships ----

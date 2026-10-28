@@ -645,14 +645,14 @@ function binderLinkFile() {
 // canvas the way withDoc() does, but keeps the notes and the report header,
 // which withDoc() drops because a summary has no use for them.
 function canonicalDoc(doc) {
-    const held = { nodes: state.nodes, links: state.links, networks: state.networks, accepted: state.accepted, annotations: state.annotations, report: state.report };
+    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, accepted: state.accepted, annotations: state.annotations, report: state.report };
     _borrowedState++;
     try {
         loadDocState(doc);
         return serializeDoc();
     } finally {
         _borrowedState--;
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.accepted = held.accepted;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.accepted = held.accepted;
         state.annotations = held.annotations; state.report = held.report;
     }
 }
@@ -944,7 +944,7 @@ function binderStatus() { const s = backupStatus(); return s ? s.text : null; }
 // malformed stored doc must not strand the editor holding someone else's
 // diagram.
 function withDoc(doc, fn) {
-    const held = { nodes: state.nodes, links: state.links, networks: state.networks, accepted: state.accepted, annotations: state.annotations, report: state.report };
+    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, accepted: state.accepted, annotations: state.annotations, report: state.report };
     _borrowedState++;
     try {
         // The same reader replaceDocument() uses, so a stored v1 card is
@@ -959,7 +959,7 @@ function withDoc(doc, fn) {
         return fn();
     } finally {
         _borrowedState--;
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.accepted = held.accepted;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.accepted = held.accepted;
         state.annotations = held.annotations; state.report = held.report;
     }
 }

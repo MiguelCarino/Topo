@@ -3,7 +3,7 @@
 // as one (an inventory, a DHCP export, a patch list) more often than as a
 // drawing. This is the way across, both ways, in the full editor's File menu.
 //
-// Export: six sheets, each a UTF-8 CSV file with a byte-order mark (Excel
+// Export: seven sheets, each a UTF-8 CSV file with a byte-order mark (Excel
 // reads a BOM-less UTF-8 file as the local code page, which turns "Cámara" and
 // every Japanese name into mojibake), or the same rows as TSV on the clipboard
 // to paste straight into an open sheet.
@@ -13,7 +13,11 @@
 //                it is patched (switch, port, and local_port, the device's
 //                own end), so the common case, one address per device, is
 //                one row. The NIC is the one the uplink is on, else the
-//                first: a router's row is its LAN side.
+//                first: a router's row is its LAN side. Where it sits is
+//                five of the NODE_FIELDS columns: group (the group's path,
+//                "Building A / Server room / Rack 3", not its id), rack_u,
+//                rack_height, rack_face and rack_depth (full or half for
+//                a device in a rack, blank elsewhere).
 //   interfaces   one row per interface, keyed by the device's id AND the
 //                interface's: interface ids repeat across devices (every PC
 //                has an i1), so the interface id alone names nothing. With
@@ -35,6 +39,11 @@
 //                inherits them; without this sheet a site came back from a
 //                spreadsheet with every network gone and every inheriting
 //                device with no gateway or DNS at all.
+//   groups       one row per group (doc.groups, the Groups tab), in tree
+//                order: its id, name, kind, parent (by id) and, for a rack,
+//                its height and width. devices.csv names a group by its path,
+//                which is all a device needs; this sheet carries what the
+//                path cannot (a group's kind, a rack's height, an empty one).
 //   findings     the findings, as the panel and the report word them. Export
 //                only: a finding is a conclusion, not a record.
 //
@@ -85,6 +94,19 @@
 // row asks for that import does not do (moving a cable that is already
 // plugged in elsewhere, NAT on a host) is said on the row and left as it is,
 // and the rest of the row still applies.
+//
+// A device row's group column is a path (or a name one group has). A path
+// the map lacks is not made on the quiet: the review lists the groups the
+// sheet names that are missing and offers to make them (a tick, off until
+// ticked), and until then those rows apply without their group. A row's
+// rack_u, rack_height, rack_face and rack_depth apply only in a rack.
+//
+// A sheet is groups (groups.csv) when a heading names a group_id column,
+// every column then against the group's fields (its "name" and "kind" are
+// the group's). A group row is found by its id, then by its name inside its
+// parent; an unknown one is a new group. Its parent is a group id (on the map
+// or in the sheet) or a path on the map. A row that would make a group its
+// own ancestor is a conflict.
 //
 // A sheet is devices (devices.csv, interfaces.csv, an inventory), cables
 // (cables.csv, a patch list), ports (ports.csv) or subnets (subnets.csv): a
@@ -205,6 +227,10 @@ function csvValue(field, v) {
     if (v == null) return '';
     return String(v);
 }
+// rack_depth says both answers, so a sheet reads the same either way round:
+// full (the default, not stored) or half for a device in a rack, and half
+// for one that kept the field out of a rack (a finding); blank elsewhere.
+const csvRackDepth = (node) => (node.rackDepth === 'half' ? 'half' : rackOfNode(node) ? 'full' : '');
 // The device columns: every NODE_FIELDS row with a csv name, in table order.
 // interfaces is a list, not a cell; it is the interfaces sheet.
 const csvNodeFields = () => NODE_FIELDS.filter((f) => f.csv && f.key !== 'interfaces');
@@ -244,7 +270,8 @@ function csvDevicesSheet() {
         // keeps its scheme in memory, but the file and the sealed link leave
         // it out (the schema's write), and a sheet that kept it would not
         // read back ("Only a switch or an access point has numbered ports").
-        const cells = fields.map((f) => ((f.key === 'nat' && !isRoutingDevice(node.type)) || (f.key === 'portScheme' && !hasPortGrid(node)) ? '' : csvValue(f, node[f.key])));
+        const cells = fields.map((f) => ((f.key === 'nat' && !isRoutingDevice(node.type)) || (f.key === 'portScheme' && !hasPortGrid(node)) ? ''
+            : f.key === 'rackDepth' ? csvRackDepth(node) : csvValue(f, node[f.key])));
         return cells.concat([nic ? nic.id : '', nic ? nic.name || '' : '', nic ? nic.ip || '' : '', nic && !isBlank(nic.mac) ? fmtColonSafe(nic.mac) : '',
             up ? up.peer.name || up.peer.id : '', up ? up.port : '', up && up.own ? ifaceLabel(node, up.own) : '']);
     });
@@ -324,12 +351,27 @@ function csvSubnetsSheet() {
         rows: nets.map((net) => NETWORK_FIELDS.map((f) => csvValue(f, net[f.key]))) };
 }
 
+// The groups, in the Groups tab's order (groupTree: every parent ahead of
+// what is inside it, so the sheet imports top down): every GROUP_FIELDS
+// column, under its csv name. A rack's size only on a rack: its height,
+// width, depth in mm (blank when none was given) and numbering, which says
+// "bottom" for the default rather than nothing, so the column reads.
+function csvGroupsSheet() {
+    return { name: 'groups', headers: GROUP_FIELDS.map((f) => f.csv),
+        rows: groupTree().map(({ group: g }) => GROUP_FIELDS.map((f) => {
+            const v = f.key === 'numbering' && isRackGroup(g) ? (rackTopDown(g) ? 'top' : 'bottom')
+                : f.write ? f.write(g[f.key], g) : g[f.key];
+            return csvValue(f, v === undefined ? '' : v);
+        })) };
+}
+
 const CSV_SHEETS = [
     { key: 'devices', label: 'Devices', plain: true, build: csvDevicesSheet },
     { key: 'interfaces', label: 'Interfaces', build: csvInterfacesSheet },
     { key: 'cables', label: 'Cables', plain: true, build: csvCablesSheet },
     { key: 'ports', label: 'Ports', build: csvPortsSheet },
     { key: 'subnets', label: 'Subnets', build: csvSubnetsSheet },
+    { key: 'groups', label: 'Groups', plain: true, build: csvGroupsSheet },
     { key: 'findings', label: 'Findings', plain: true, build: csvFindingsSheet }
 ];
 const csvSheetLabel = (s) => (s.plain ? t(s.label) : s.label);
@@ -394,6 +436,24 @@ const CSV_ALIASES = {
     assetTag: ['asset', 'asset id', 'asset tag', 'asset number', 'tag', 'inventory number', 'etiqueta', 'patrimonio', 'patrimônio', 'инвентарный номер', '資産番号'],
     location: ['room', 'rack', 'site location', 'ubicación', 'ubicacion', 'localização', 'местоположение', '場所', '設置場所'],
     status: ['state', 'lifecycle', 'estado', 'situação', 'статус', 'ステータス'],
+    // Groups (js/groups.js): where it sits, as a path, and its place in a rack.
+    group: ['group path', 'grupo', 'группа', 'グループ'],
+    rackU: ['rack u', 'u', 'rack unit', 'u position'],
+    rackHeight: ['rack height', 'height u', 'units', 'u height'],
+    rackFace: ['rack face', 'face', 'rack side', 'mounted on'],
+    rackDepth: ['rack depth', 'depth', 'full depth', 'half depth', 'mount depth'],
+    // What a VM or a container runs on (js/model.js "Hosts"). Not a bare
+    // "host": that is the hostname (name, above).
+    host: ['runs on', 'host device', 'vm host', 'hypervisor', 'hosted on', 'running on'],
+    // A group's own (groups.csv). Guessed only in a sheet of groups.
+    'grp:id': ['group id'],
+    'grp:name': ['group', 'group name', 'nombre', 'nome', 'имя', '名前'],
+    'grp:kind': ['type', 'tipo', 'тип', '種類'],
+    'grp:parent': ['inside', 'parent group', 'parent id', 'in'],
+    'grp:uHeight': ['height', 'height u', 'rack height', 'units'],
+    'grp:width': ['rack width'],
+    'grp:depthMm': ['depth', 'rack depth', 'depth (mm)', 'depth in mm'],
+    'grp:numbering': ['unit numbering', 'u numbering', 'numbered'],
     'lk:cable.label': ['label', 'cable label', 'cable id label', 'etiqueta del cable'],
     'lk:cable.length': ['length', 'cable length', 'longitud'],
     'lk:cable.color': ['color', 'colour', 'cable color', 'cable colour'],
@@ -485,6 +545,56 @@ const CSV_PARSERS = {
     // planned / active / retired, by key or by its name in the page's
     // language; a word that is none of them is refused, not blanked.
     status: (text) => { const r = tvStatusParse(text); return r.value === undefined ? { error: true } : r; },
+    // A path as written; which group it is (or whether it is one to make) is
+    // the plan's to say, against the map and the rest of the sheet.
+    group: (text) => (splitPlacePath(text).length ? { value: String(text).trim() } : { error: true }),
+    // A device's name or id as written; which device it is, and whether this
+    // one may run on it, is the plan's to say once every row is read
+    // (csvPlanHosts), since the host may be a new device further down.
+    host: (text) => (String(text).trim() ? { value: String(text).trim() } : { error: true }),
+    rackU: (text) => { const n = asRackU(String(text).trim()); return n === undefined ? { error: true } : { value: n }; },
+    rackHeight: (text) => { const n = asUnits(String(text).trim()); return n === undefined || n < 1 || n > RACK_U_MAX ? { error: true } : { value: n > 1 ? n : undefined }; },
+    // front / rear, or the word in the page's language.
+    rackFace: (text) => {
+        const v = csvLower(text);
+        const f = asRackFace(v) || RACK_FACES.find((x) => t(x).toLowerCase() === v);
+        return f ? { value: f } : { error: true };
+    },
+    // full (or "full depth", a yes, the words in the page's language), the
+    // default, which clears it, or half (half depth, shallow, one face, a no,
+    // the words in the page's language), stored as 'half'.
+    rackDepth: (text) => {
+        const v = csvLower(text);
+        if (['full', 'full depth', 'full-depth', csvLower(t('full depth'))].includes(v) || YES_RE.test(v)) return { value: undefined };
+        if (asRackDepth(v) || v === csvLower(t('half depth')) || NO_RE.test(v)) return { value: 'half' };
+        return { error: true };
+    },
+    'grp:id': (text) => ({ value: String(text).trim() }),
+    'grp:name': (text) => { const v = groupName(text); return v ? { value: v } : { error: true }; },
+    // A kind by its key or its name in the page's language ("Rack", "Sala").
+    'grp:kind': (text) => {
+        const v = csvLower(text);
+        const k = GROUP_KINDS.find((x) => x === v || groupKindName(x).toLowerCase() === v);
+        return k ? { value: k } : { error: true };
+    },
+    'grp:parent': (text) => ({ value: String(text).trim() }),
+    'grp:uHeight': (text) => { const n = asUnits(String(text).trim()); return n === undefined || n < 1 || n > RACK_U_MAX ? { error: true } : { value: n }; },
+    // 10in, 19in, 23in, or 19, 19", 19 inch... (rackWidthKey, js/model.js).
+    'grp:width': (text) => { const v = rackWidthKey(text); return v ? { value: v } : { error: true }; },
+    // A whole number of mm ("600", "600 mm"); not clamped, so a slip says so.
+    'grp:depthMm': (text) => {
+        const v = String(text).trim().replace(/\s*mm$/i, '');
+        const n = asRackDepthMm(v);
+        return n !== undefined && String(n) === String(Number(v)) ? { value: n } : { error: true };
+    },
+    // bottom (bottom up, the default) or top (top down), or the words in
+    // the page's language.
+    'grp:numbering': (text) => {
+        const v = csvLower(text);
+        if (['bottom', 'bottom up', 'bottom-up', 'from the bottom', 'ascending', csvLower(t('Bottom up'))].includes(v)) return { value: 'bottom' };
+        if (asRackNumbering(v) || v === csvLower(t('Top down'))) return { value: 'top' };
+        return { error: true };
+    },
     x: csvNumber, y: csvNumber,
     'if:ip': csvIpParse,
     'if:mac': (text) => { const r = csvTextParse(csvIfaceField('mac'))(text); return r.error ? r : { value: fmtColonSafe(r.value) }; },
@@ -516,7 +626,7 @@ function csvBuildTargets() {
         names: new Set([field && field.csv, field && field.label, label, ...(CSV_ALIASES[key] || [])].filter(Boolean).map(csvNorm)
             .filter((n) => !(CSV_NOT_NAMES[key] || []).includes(n)))
     });
-    const PLAIN = new Set(['name', 'type', 'notes', 'serial', 'assetTag', 'location', 'status']);
+    const PLAIN = new Set(['name', 'type', 'notes', 'serial', 'assetTag', 'location', 'status', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'host']);
     csvNodeFields().forEach((f) => add(f.key, 'device', f, null, PLAIN.has(f.key)));
     ['id', 'name', 'ip', 'mac', 'wireless', 'bond'].forEach((k) => add(`if:${k}`, 'iface', csvIfaceField(k)));
     add('cab:switch', 'cabling', null, 'Switch');
@@ -530,6 +640,9 @@ function csvBuildTargets() {
     add('pt:vlan', 'port', null, 'Access VLAN');
     // A subnet's own fields (NETWORK_FIELDS, js/model.js): subnets.csv.
     NETWORK_FIELDS.forEach((f) => add(`net:${f.key}`, 'network', f, null, f.key === 'name' || f.key === 'purpose'));
+    // A group's own fields (GROUP_FIELDS, js/model.js): groups.csv. Plain
+    // words, translated, but for the id and the width.
+    GROUP_FIELDS.forEach((f) => add(`grp:${f.key}`, 'grpdef', f, f.key === 'id' ? 'Group ID' : (f.key === 'parent' ? 'Inside' : null), f.key !== 'id' && f.key !== 'width'));
     return out;
 }
 let _csvTargets = null;
@@ -541,16 +654,25 @@ const csvTargetLabel = (tg) => (tg.plain ? t(tg.label) : tg.label);
 // are guessed only in a sheet of subnets, and there only they are: "name",
 // "gateway" and "dns" are a device's in every other sheet, and an inventory's
 // VLAN or Network column must not turn it into a sheet of subnets.
-function csvGuessByHeading(heading, subnets) {
+// A sheet of groups likewise, and there only a group's fields are guessed:
+// its "name", "kind" and "parent" are the group's, not a device's.
+// family: 'network' (true, as it was), 'grpdef', or none for a device sheet.
+const CSV_OWN_FAMILIES = ['network', 'grpdef'];
+function csvGuessByHeading(heading, family) {
     const h = csvNorm(heading);
     if (!h) return '';
-    const hit = csvTargets().find((tg) => (tg.group === 'network') === !!subnets && tg.names.has(h));
+    const fam = family === true ? 'network' : (family || null);
+    const hit = csvTargets().find((tg) => (fam ? tg.group === fam : !CSV_OWN_FAMILIES.includes(tg.group)) && tg.names.has(h));
     return hit ? hit.key : '';
 }
 // A sheet of subnets says so in its headings: a network_id or a cidr column
-// (subnets.csv has both). No device sheet calls a column either.
+// (subnets.csv has both). No device sheet calls a column either. A sheet of
+// groups by its group_id column (groups.csv).
 const CSV_SUBNET_HEADINGS = new Set(['network id', 'cidr']);
+const CSV_GROUP_HEADINGS = new Set(['group id']);
 const csvIsSubnetSheet = (sheet) => !!sheet.hasHeadings && sheet.headers.some((h) => CSV_SUBNET_HEADINGS.has(csvNorm(h)));
+const csvIsGroupSheet = (sheet) => !!sheet.hasHeadings && !csvIsSubnetSheet(sheet) && sheet.headers.some((h) => CSV_GROUP_HEADINGS.has(csvNorm(h)));
+const csvSheetFamily = (sheet) => (csvIsSubnetSheet(sheet) ? 'network' : csvIsGroupSheet(sheet) ? 'grpdef' : null);
 // With no heading row: what a column's values look like (most of them).
 function csvGuessByValues(values) {
     const vals = values.map((v) => String(v).trim()).filter(Boolean);
@@ -566,7 +688,7 @@ function csvGuessByValues(values) {
 // say "Printer" is still data).
 function csvHasHeadingRow(rows) {
     const first = rows[0] || [];
-    if (!first.some((c) => csvGuessByHeading(c) || CSV_SUBNET_HEADINGS.has(csvNorm(c)))) return false;
+    if (!first.some((c) => csvGuessByHeading(c) || CSV_SUBNET_HEADINGS.has(csvNorm(c)) || CSV_GROUP_HEADINGS.has(csvNorm(c)))) return false;
     return !first.some((c) => parseValidCIDR(String(c).trim()) || parseIpText(String(c).trim()) || normMac(c).length === 12 && /[:\-.]/.test(c));
 }
 
@@ -574,9 +696,9 @@ function csvHasHeadingRow(rows) {
 // that names it wins.
 function csvAutoMap(sheet) {
     const used = new Set();
-    const subnets = csvIsSubnetSheet(sheet);
+    const family = csvSheetFamily(sheet);
     return sheet.headers.map((h, i) => {
-        const key = sheet.hasHeadings ? csvGuessByHeading(h, subnets) : csvGuessByValues(sheet.rows.map((r) => r[i] || ''));
+        const key = sheet.hasHeadings ? csvGuessByHeading(h, family) : csvGuessByValues(sheet.rows.map((r) => r[i] || ''));
         if (!key || used.has(key)) return '';
         used.add(key);
         return key;
@@ -602,6 +724,10 @@ function csvSheetKind(mapping) {
     // 'subnets' when a column is a subnet's field, and then every one must be.
     if (keys.some((k) => csvTarget(k).group === 'network')) {
         return keys.every((k) => csvTarget(k).group === 'network') ? 'subnets' : 'mixed-subnets';
+    }
+    // 'groups' likewise, when a column is a group's own field.
+    if (keys.some((k) => csvTarget(k).group === 'grpdef')) {
+        return keys.every((k) => csvTarget(k).group === 'grpdef') ? 'groups' : 'mixed-groups';
     }
     if (keys.some((k) => csvTarget(k).group === 'port')) {
         return keys.every((k) => csvTarget(k).group === 'port' || CSV_PORT_SHEET_KEYS.has(k)) ? 'ports' : 'mixed-ports';
@@ -676,6 +802,8 @@ function csvMatch(vals, matchers) {
 // Shown in the review as it would be on the map.
 function csvShow(key, v) {
     if (key === 'portScheme' || key === 'if:bond') return csvTarget(key).field.toText(v);
+    // Nothing stored is full depth, not a blank.
+    if (key === 'rackDepth') return t(v === 'half' ? 'half depth' : 'full depth');
     if (v === undefined || v === null) return '';
     if (key === 'type') return typeName(v);
     if (key === 'nat' || key === 'if:wireless') return v ? t('Yes') : t('No');
@@ -730,39 +858,63 @@ function csvIfaceByAddress(list, v) {
     return { iface: byMac || byIp || null };
 }
 
-function csvPlan(sheet, mapping) {
+// opts.createGroups: make the groups a device row names that the map lacks
+// (the review's tick). Off, those rows apply without their group, and the
+// plan lists the paths (missingGroups) for the review to offer.
+function csvPlan(sheet, mapping, opts = {}) {
     const kind = csvSheetKind(mapping);
     // observed: rows read out of an ARP table or a lease list (seenSheet),
     // whose names never rename a device on the map.
-    const empty = { kind, rows: [], ops: [], counts: { add: 0, change: 0, same: 0, conflict: 0 }, errors: [], newIds: [], touchedIds: [], observed: !!sheet.observed };
+    const empty = { kind, rows: [], ops: [], counts: { add: 0, change: 0, same: 0, conflict: 0 }, errors: [], newIds: [], touchedIds: [], observed: !!sheet.observed,
+        createGroups: !!opts.createGroups, newGroups: [], missingGroups: [] };
     if (kind === 'mixed') return Object.assign(empty, { errors: [t('Map either device columns or cable columns: a sheet is one or the other.')] });
     if (kind === 'mixed-ports') return Object.assign(empty, { errors: [t(CSV_MIXED_PORTS)] });
     if (kind === 'mixed-subnets') return Object.assign(empty, { errors: [t(CSV_MIXED_SUBNETS)] });
+    if (kind === 'mixed-groups') return Object.assign(empty, { errors: [t(CSV_MIXED_GROUPS)] });
     if (!mapping.some(Boolean)) return Object.assign(empty, { errors: [t('Pick what at least one column is.')] });
+    // A depth column whose heading asks "half depth?" answers the opposite
+    // question to rackDepth's parser, which reads a yes as full depth: its
+    // yes and no are turned round here, where the heading is still known.
+    const halfCols = new Set(mapping.map((key, col) => (key === 'rackDepth' && sheet.hasHeadings && csvIsHalfHeading(sheet.headers[col]) ? col : -1)).filter((c) => c >= 0));
     // Each row as { key: text } over its mapped, non-blank cells, and the
     // mapped columns it leaves blank (blanks), which only a new device reads.
     const rows = sheet.rows.map((cells, index) => {
         const vals = {}, blanks = [];
         mapping.forEach((key, col) => {
             if (!key) return;
-            const raw = cells[col] == null ? '' : String(cells[col]);
+            let raw = cells[col] == null ? '' : String(cells[col]);
+            if (key === 'rackDepth' && halfCols.has(col)) raw = csvHalfAnswer(raw);
             if (raw.trim()) vals[key] = raw; else blanks.push(key);
         });
         return { index, vals, blanks };
     });
     if (kind === 'ports') return csvPlanPorts(rows, empty);
     if (kind === 'subnets') return csvPlanSubnets(rows, empty);
+    if (kind === 'groups') return csvPlanGroups(rows, empty);
     return kind === 'cables' ? csvPlanCables(rows, empty) : csvPlanDevices(rows, empty);
 }
+// A heading that asks "half depth?" (or "shallow?"), in English or the
+// page's language. Its answers are a yes or no to that question.
+const csvIsHalfHeading = (heading) => {
+    const h = csvNorm(heading);
+    return ['half depth', 'half', 'shallow', 'shallow depth', csvNorm(t('half depth'))].includes(h);
+};
+// A yes to "half depth?" is half, a no is full; anything else (the words
+// "full" or "half" themselves) reads as it says.
+const csvHalfAnswer = (raw) => {
+    const v = csvLower(raw);
+    return YES_RE.test(v) ? 'half' : NO_RE.test(v) ? 'full' : raw;
+};
 const CSV_MIXED_PORTS = 'A sheet of ports maps the device, the port and its label or VLAN. Leave the other columns unmapped.';
 const CSV_MIXED_SUBNETS = 'A sheet of subnets maps only what a subnet has: its CIDR, name, VLAN, gateway and so on. Leave the other columns unmapped.';
+const CSV_MIXED_GROUPS = 'A sheet of groups maps only what a group has: its id, name, kind, parent and height. Leave the other columns unmapped.';
 
 // Counted per thing, not per row: the three interfaces.csv rows of one new
 // device are one device added.
 function csvFinish(plan, results) {
     plan.rows = results.sort((a, b) => a.index - b.index);
     const seen = { add: new Set(), change: new Set(), same: new Set(), conflict: new Set() };
-    plan.rows.forEach((r) => { seen[r.status].add(r.status === 'conflict' ? `row:${r.index}` : (r.newGroup || r.nodeId || r.linkId || (r.netId && `net:${r.netId}`) || `row:${r.index}`)); });
+    plan.rows.forEach((r) => { seen[r.status].add(r.status === 'conflict' ? `row:${r.index}` : (r.newGroup || r.nodeId || r.linkId || (r.netId && `net:${r.netId}`) || (r.grpId && `grp:${r.grpId}`) || `row:${r.index}`)); });
     Object.keys(seen).forEach((k) => { plan.counts[k] = seen[k].size; });
     return plan;
 }
@@ -844,7 +996,10 @@ function csvPlanDevices(rows, plan) {
     // ifaceAlias: `${nodeId}\u0000${sheet's interface id}` -> the id the
     // device has for that port (found by its name), so a bond naming its
     // members by the sheet's ids names the device's own.
-    const ctx = { ix, nodeSets, ifaceOps, fresh, links, portsTaken, late: [], observed: plan.observed, ifaceAlias: new Map() };
+    // groupMaker: paths resolved against the map's groups and the ones this
+    // plan makes (only with plan.createGroups); missing: the paths it lacks.
+    const ctx = { ix, nodeSets, ifaceOps, fresh, links, portsTaken, late: [], observed: plan.observed, ifaceAlias: new Map(),
+        groupMaker: groupPathMaker(state.groups), createGroups: plan.createGroups, missingGroups: new Set(), hosts: [] };
     while (pending.length) {
         let progress = true;
         while (pending.length && progress) {
@@ -878,8 +1033,22 @@ function csvPlanDevices(rows, plan) {
         csvCommitCable(ctx, cab);
         if (existing && (cab.link || (cab.fills || []).length)) out.status = 'change';
     });
+    // What the committed rows' VMs and containers run on, now that every
+    // device the sheet makes is made.
+    csvPlanHosts(ctx, anchorOf);
 
     // ---- The ops, from what was committed ----
+    // The groups to make: those a committed row ended up in, and the groups
+    // above them; one only a conflicting row named is not made.
+    const used = new Set();
+    const made = ctx.groupMaker.made;
+    const madeById = new Map(made.map((g) => [g.id, g]));
+    const want = (id) => { for (let g = madeById.get(id); g && !used.has(g.id); g = madeById.get(g.parent)) used.add(g.id); };
+    fresh.forEach((f) => want(f.record.group));
+    nodeSets.forEach((set) => want(set.group));
+    plan.newGroups = made.filter((g) => used.has(g.id));
+    plan.newGroups.forEach((g) => plan.ops.push({ grp: { create: g } }));
+    plan.missingGroups = [...ctx.missingGroups];
     const records = [...fresh.values()].map((f) => f.record);
     csvLayout(records, links, new Set([...fresh.values()].filter((f) => f.placed).map((f) => f.record.id)));
     records.forEach((rec) => plan.ops.push({ create: rec }));
@@ -1011,6 +1180,10 @@ function csvPlanDeviceRow(r, anchor, ctx) {
         // The id is what a row is matched on (or what a new device is
         // called inside), never something written over a device's own.
         if (tg.group !== 'device' || key === 'id') continue;
+        // Where it sits: below, once the rest of the row is read.
+        if (key === 'group' || RACK_KEYS.includes(key)) continue;
+        // What it runs on: once every row is read (csvPlanHosts).
+        if (key === 'host') continue;
         // Matched by its name: the name is the key, and a sheet that spells
         // it in another case is not asking for a rename.
         if (key === 'name' && existing && r.match.by.key === 'name') continue;
@@ -1031,6 +1204,10 @@ function csvPlanDeviceRow(r, anchor, ctx) {
         draftSets[key] = value;
         if (existing && !csvSame(key, existing[key], value)) out.changes.push({ field: csvTargetLabel(tg), before: csvShow(key, existing[key]), after: csvShow(key, value) });
     }
+
+    // ---- Where it sits ----
+    const placeWhy = csvPlanPlace(v, existing, record, said, draftSets, out, ctx);
+    if (placeWhy) return conflict(placeWhy);
 
     // ---- The interface the row is about ----
     const ifaceVals = CSV_IFACE_KEYS.filter((k) => Object.prototype.hasOwnProperty.call(v, k));
@@ -1178,13 +1355,123 @@ function csvPlanDeviceRow(r, anchor, ctx) {
         }
     }
     csvCommitCable(ctx, cab);
+    if (Object.prototype.hasOwnProperty.call(v, 'host')) {
+        ctx.hosts.push({ out, existing, record, group, text: v.host, type: draftSets.type || (existing ? (nodeSets.get(existing.id) || {}).type : group.said.type) || record.type });
+    }
     if (!existing) {
         // What the new device will be, in one line for the review.
         const bits = [typeName(record.type)];
         record.interfaces.forEach((i) => { if (i.ip) bits.push(i.ip); if (!isBlank(i.mac)) bits.push(fmtColonSafe(i.mac)); });
+        const inGroup = groupById(record.group, ctx.groupMaker.all());
+        if (inGroup) bits.push(groupPath(inGroup, ctx.groupMaker.all()));
         out.changes = [{ field: '', before: '', after: bits.join(' · ') }].concat(out.changes.filter((c) => c.field === t('Cable')));
     }
     return out;
+}
+
+// A row's group and its place in a rack, into the row's draft. The group is
+// a path: found on the map or among the groups this plan makes, or, missing
+// and not to be made (the review's tick is off), left out with a note while
+// the rest of the row applies. The rack fields apply in a rack only. A device
+// moved out of a rack by the row leaves its units there behind (rackKeysLost),
+// as it does in the device editor. -> the reason the row is a conflict, or ''.
+function csvPlanPlace(v, existing, record, said, draftSets, out, ctx) {
+    const label = (key) => csvTargetLabel(csvTarget(key));
+    const all = ctx.groupMaker.all;
+    let target;                     // the group it ends up in, when the row says
+    let missing = false;            // the row names a group that is not made
+    if (Object.prototype.hasOwnProperty.call(v, 'group')) {
+        const text = String(v.group).trim();
+        const r = ctx.groupMaker.resolve(text, ctx.createGroups);
+        if (r.ambiguous) return t('{path} names more than one group: write its whole path.', { path: text });
+        if (r.missing) {
+            missing = true;
+            ctx.missingGroups.add(r.missing);
+            out.notes.push(t('There is no group {path} on the map. Tick the box above the rows to make it.', { path: r.missing }));
+        } else if (r.group) {
+            target = r.group;
+            if (Object.prototype.hasOwnProperty.call(said, 'group') && said.group !== target.id) {
+                const was = groupById(said.group, all());
+                return t('Another row sets {field} to {value}.', { field: label('group'), value: was ? groupPath(was, all()) : '' });
+            }
+            draftSets.group = target.id;
+            const now = existing ? groupOfNode(existing) : null;
+            if (existing && (!now || now.id !== target.id)) out.changes.push({ field: label('group'), before: now ? groupPath(now) : '', after: groupPath(target, all()) });
+        }
+    }
+    const placeIn = target || (existing ? groupOfNode(existing) : groupById(record.group, all()));
+    const keys = RACK_KEYS.filter((k) => Object.prototype.hasOwnProperty.call(v, k));
+    // Units in a rack the sheet names but nobody made are that rack's, not
+    // the one the device is in now: they wait with the group.
+    if (missing) return '';
+    if (keys.length && !isRackGroup(placeIn)) out.notes.push(t('Only a device in a rack has a place in one: {fields} left out.', { fields: keys.map(label).join(', ') }));
+    else {
+        for (const k of keys) {
+            if (Object.prototype.hasOwnProperty.call(said, k) && !csvSame(k, said[k], v[k])) {
+                return t('Another row sets {field} to {value}.', { field: label(k), value: csvShow(k, said[k]) });
+            }
+            draftSets[k] = v[k];
+            if (existing && !csvSame(k, existing[k], v[k])) out.changes.push({ field: label(k), before: csvShow(k, existing[k]), after: csvShow(k, v[k]) });
+        }
+    }
+    // Out of a rack: its units stay behind, unless the row itself said them.
+    if (existing && target) {
+        rackKeysLost(existing, target).forEach((k) => {
+            if (Object.prototype.hasOwnProperty.call(draftSets, k)) return;
+            draftSets[k] = undefined;
+            out.changes.push({ field: label(k), before: csvShow(k, existing[k]), after: '' });
+        });
+    }
+    return '';
+}
+
+// What each committed row's device runs on (js/model.js "Hosts"), after
+// pass 2: the cell is a device's id or name, on the map or new in the sheet
+// (anchorOf, as the switch column is read). What stops one (no such device,
+// two of that name, a device this one may not run on, another row saying
+// otherwise) is a note on the row, and the rest of the row still applies,
+// as a missing group's does. A blank cell is not saying, as everywhere.
+function csvPlanHosts(ctx, anchorOf) {
+    const label = csvTargetLabel(csvTarget('host'));
+    const nameOf = (id) => { const n = getNode(id); if (n) return n.name || n.id; for (const f of ctx.fresh.values()) if (f.record.id === id) return f.record.name || id; return id || ''; };
+    ctx.hosts.forEach(({ out, existing, record, group, text, type }) => {
+        if (!isVirtualType(type)) { out.notes.push(t('Only a VM or a container runs on another device: {fields} left out.', { fields: label })); return; }
+        const a = anchorOf(text);
+        if (a.error) { out.notes.push(a.error); return; }
+        let host = null;
+        if (a.nodeId) {
+            const on = getNode(a.nodeId);
+            const set = ctx.nodeSets.get(a.nodeId) || {};
+            host = on ? { id: on.id, name: set.name || on.name, type: set.type || on.type } : null;
+        } else {
+            const f = ctx.fresh.get(a.group);
+            host = f ? { id: f.record.id, name: f.record.name, type: f.record.type } : null;
+        }
+        if (!host) { out.notes.push(t('No device called {name}.', { name: String(text).trim() })); return; }
+        const selfId = existing ? existing.id : record.id;
+        if (host.id === selfId) { out.notes.push(t('A device cannot run on itself.')); return; }
+        if (!canHost(type, host)) {
+            out.notes.push(t(type === 'vm' ? '{name} is a VM, which runs on a server, a workstation or a custom device: {host} is not one.'
+                : '{name} is a container, which runs on a server, a workstation, a custom device or a VM: {host} is none of those.', { name: out.name || record.name || selfId, host: host.name || host.id }));
+            return;
+        }
+        const said = existing ? (ctx.nodeSets.get(existing.id) || {}) : group.said;
+        if (Object.prototype.hasOwnProperty.call(said, 'host') && said.host !== host.id) {
+            out.notes.push(t('Another row sets {field} to {value}.', { field: label, value: nameOf(said.host) }));
+            return;
+        }
+        said.host = host.id;
+        if (existing) {
+            ctx.nodeSets.set(existing.id, said);
+            if (existing.host !== host.id) {
+                out.changes.push({ field: label, before: existing.host ? nameOf(existing.host) : '', after: host.name || host.id });
+                if (out.status === 'same') out.status = 'change';
+            }
+        } else {
+            record.host = host.id;
+            out.changes.push({ field: label, before: '', after: host.name || host.id });
+        }
+    });
 }
 
 // Where a row's device is cabled, planned and not yet committed. own is the
@@ -1683,6 +1970,137 @@ function csvPlanSubnets(rows, plan) {
     });
     return csvFinish(plan, results);
 }
+// ---- Groups ----
+// One row per group (groups.csv). Found by its id, then by its name inside
+// the parent the row gives (none: at the top); a row matching nothing makes a
+// group, under the sheet's id when no group here has it, so a second import
+// of the same sheet finds it again. Its parent is a group id (on the map or
+// further down the sheet) or a path on the map. A parent that would make a
+// group its own ancestor is a conflict, never a quiet cut. Blank cells leave
+// a field as it is. A rack the sheet turns into anything else leaves its
+// devices' units behind, as the Groups tab does after asking (the review is
+// the asking here, and says how many).
+function csvPlanGroups(rows, plan) {
+    const live = state.groups;
+    const liveIds = new Set(live.map((g) => g.id));
+    // The groups as this plan leaves them, for the parent and loop checks.
+    const work = new Map(live.map((g) => [g.id, { id: g.id, name: g.name, kind: g.kind, parent: g.parent || null }]));
+    const label = (key) => csvTargetLabel(csvTarget(`grp:${key}`));
+    const parsed = rows.filter((r) => Object.keys(r.vals).length).map(({ index, vals }) => {
+        const values = {}, errors = [];
+        Object.keys(vals).forEach((key) => {
+            const tg = csvTarget(key);
+            const res = tg.parse(vals[key]);
+            if (res.error) errors.push(t('{value} is not a valid {field}.', { value: String(vals[key]).trim() || '—', field: csvTargetLabel(tg) }));
+            else values[key.slice(4)] = res.value;
+        });
+        return { index, values, errors };
+    });
+    // The ids the sheet gives new groups, so a parent further down is found.
+    const sheetIds = new Set(parsed.map((p) => p.values.id).filter((id) => id && !liveIds.has(id)));
+    const claimed = new Set();     // group ids an earlier row was about
+    const results = [];
+    const show = (key, v) => (key === 'kind' ? groupKindName(v) : key === 'parent' ? (v ? (work.get(v) ? workPath(v) : v) : '')
+        : key === 'numbering' ? t(v === 'top' ? 'Top down' : 'Bottom up') : key === 'width' ? rackWidthLabel(v)
+        : (v === undefined || v === null ? '' : String(v)));
+    const workPath = (id) => {
+        const names = [], seen = new Set();
+        for (let g = work.get(id); g && !seen.has(g.id); g = work.get(g.parent)) { seen.add(g.id); names.unshift(g.name || groupKindName(g.kind)); }
+        return names.join(' / ');
+    };
+    const loops = (id, parent) => {
+        const seen = new Set();
+        for (let p = parent; p; p = (work.get(p) || {}).parent) { if (p === id) return true; if (seen.has(p)) return false; seen.add(p); }
+        return false;
+    };
+    parsed.forEach(({ index, values: v, errors }) => {
+        const out = { index, name: v.name || v.id || '', status: 'same', changes: [], notes: [], why: '' };
+        const conflict = (why) => { results.push(Object.assign(out, { status: 'conflict', why })); };
+        if (errors.length) { conflict(errors.join(' ')); return; }
+        // The parent, as an id this plan knows.
+        let parent;
+        if (Object.prototype.hasOwnProperty.call(v, 'parent')) {
+            if (work.has(v.parent) || sheetIds.has(v.parent)) parent = v.parent;
+            else {
+                const r = findGroupByPath(v.parent);
+                if (!r.group) { conflict(r.ambiguous ? t('{path} names more than one group: write its whole path.', { path: v.parent }) : t('No group {name}.', { name: v.parent })); return; }
+                parent = r.group.id;
+            }
+        }
+        let g = v.id ? work.get(v.id) || null : null;
+        if (!g && !v.id && v.name) {
+            const inside = parent === undefined ? null : parent;
+            const hits = [...work.values()].filter((x) => (x.parent || null) === inside && placeKey(x.name || groupKindName(x.kind)) === placeKey(v.name));
+            if (hits.length > 1) { conflict(t('{path} names more than one group: write its whole path.', { path: v.name })); return; }
+            g = hits[0] || null;
+        }
+        if (g && claimed.has(g.id)) { conflict(t('Another row is this group.')); return; }
+        if (!g) {
+            if (!v.name && !v.id) { conflict(t('A new group needs its name.')); return; }
+            const id = v.id && !work.has(v.id) ? v.id : nextId('g');
+            if (parent && (parent === id || loops(id, parent))) { conflict(t('{name} cannot be inside itself.', { name: v.name || id })); return; }
+            const kind = v.kind || guessGroupKind(v.name);
+            if (kind !== 'rack' && ['uHeight', 'width', 'depthMm', 'numbering'].some((k) => v[k] !== undefined)) out.notes.push(t('Only a rack has a height.'));
+            const rec = makeGroup({ id, name: v.name, kind, parent: parent || null, uHeight: v.uHeight, width: v.width, depthMm: v.depthMm, numbering: v.numbering });
+            work.set(id, { id, name: rec.name, kind: rec.kind, parent: rec.parent });
+            claimed.add(id);
+            plan.ops.push({ grp: { create: rec } });
+            out.changes.push({ field: label('name'), before: '', after: groupLabel(rec) });
+            out.changes.push({ field: label('kind'), before: '', after: groupKindName(rec.kind) });
+            if (rec.parent) out.changes.push({ field: label('parent'), before: '', after: workPath(rec.parent) });
+            if (isRackGroup(rec)) out.changes.push({ field: label('uHeight'), before: '', after: String(rec.uHeight) });
+            Object.assign(out, { status: 'add', grpId: id, name: workPath(id) });
+            results.push(out);
+            return;
+        }
+        claimed.add(g.id);
+        out.grpId = g.id;
+        out.name = workPath(g.id);
+        const liveG = groupById(g.id);
+        const set = {};
+        if (v.name !== undefined && v.name !== (liveG.name || '')) set.name = v.name;
+        if (v.kind !== undefined && v.kind !== liveG.kind) set.kind = v.kind;
+        if (parent !== undefined && parent !== (liveG.parent || null)) {
+            if (parent === g.id || loops(g.id, parent)) { conflict(t('{name} cannot be inside itself.', { name: out.name })); return; }
+            set.parent = parent;
+        }
+        const kind = set.kind || liveG.kind;
+        if (v.uHeight !== undefined) {
+            if (kind !== 'rack') out.notes.push(t('Only a rack has a height.'));
+            else if (v.uHeight !== liveG.uHeight) set.uHeight = v.uHeight;
+        }
+        if (v.width !== undefined && kind === 'rack' && v.width !== asRackWidth(liveG.width)) set.width = v.width;
+        // A blank depth cell changes nothing, as every blank cell does; a
+        // number replaces it. The numbering cell says bottom or top.
+        if (v.depthMm !== undefined && kind === 'rack' && v.depthMm !== liveG.depthMm) set.depthMm = v.depthMm;
+        if (v.numbering !== undefined && kind === 'rack' && v.numbering !== (rackTopDown(liveG) ? 'top' : 'bottom')) set.numbering = v.numbering;
+        // A rack made shorter: the devices in the units it loses lose their
+        // places (applyRackHeight, when it is written), and the review says
+        // how many, as the rail and the table ask first.
+        if (set.uHeight !== undefined && isRackGroup(liveG) && kind === 'rack') {
+            const numbering = set.numbering || (rackTopDown(liveG) ? 'top' : 'bottom');
+            const lost = rackResizePlan(Object.assign({}, liveG, { numbering: numbering === 'top' ? 'top' : undefined }), set.uHeight).lost.length;
+            if (lost) out.notes.push(t(lost === 1 ? 'One placed device is in the units it loses and loses its place.' : '{n} placed devices are in the units it loses and lose their places.', { n: lost }));
+        }
+        Object.keys(set).forEach((k) => out.changes.push({ field: label(k), before: show(k, liveG[k]), after: show(k, set[k]) }));
+        if (set.parent !== undefined) work.get(g.id).parent = set.parent;
+        if (set.name !== undefined) work.get(g.id).name = set.name;
+        if (set.kind !== undefined) work.get(g.id).kind = set.kind;
+        if (Object.keys(set).length) {
+            out.status = 'change';
+            plan.ops.push({ grp: { id: g.id, set } });
+            // A rack that stops being one: its devices' units go with it.
+            if (isRackGroup(liveG) && kind !== 'rack') {
+                const placed = groupMembers(g.id, false).filter(hasRackFields);
+                placed.forEach((n) => plan.ops.push({ nodeId: n.id, set: {}, drop: RACK_KEYS.slice() }));
+                if (placed.length) out.notes.push(t(placed.length === 1 ? 'Its one placed device loses its unit, height and face.' : 'Its {n} placed devices lose their units, heights and faces.', { n: placed.length }));
+            }
+        }
+        results.push(out);
+    });
+    return csvFinish(plan, results);
+}
+
 // A subnet's value as the review shows it, and equal as the field means it.
 function csvShowNet(key, v) {
     if (key === 'dhcp' || key === 'drawZone') return typeof v === 'boolean' ? t(v ? 'Yes' : 'No') : '';
@@ -1705,11 +2123,37 @@ function csvSameNet(key, a, b) {
 // the sheet gave no port for on the document being written, not the live one.
 // Every record touched or made is then read back through the normalizer.
 function csvWrite(plan, doc) {
-    const held = { nodes: state.nodes, links: state.links, networks: state.networks };
+    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups };
     if (!Array.isArray(doc.networks)) doc.networks = [];
-    state.nodes = doc.nodes; state.links = doc.links; state.networks = doc.networks;
+    if (!Array.isArray(doc.groups)) doc.groups = [];
+    state.nodes = doc.nodes; state.links = doc.links; state.networks = doc.networks; state.groups = doc.groups;
     const touched = new Set(), newLinks = new Set();
     try {
+        // Groups before anything names them, each read back through
+        // GROUP_FIELDS as a loaded document's are; the parents are made sound
+        // once they all exist (a sheet may name a parent further down).
+        const readGroup = (rec) => readFields(GROUP_FIELDS, writeFields(GROUP_FIELDS, rec));
+        plan.ops.forEach((op) => {
+            if (!op.grp) return;
+            if (op.grp.create) { doc.groups.push(readGroup(cloneData(op.grp.create))); return; }
+            const at = doc.groups.findIndex((g) => g.id === op.grp.id);
+            if (at > -1) {
+                const set = Object.assign({}, op.grp.set);
+                // 'bottom' is the default, which is stored as nothing.
+                if (set.numbering === 'bottom') set.numbering = undefined;
+                const next = Object.assign({}, doc.groups[at], set);
+                if (op.grp.set.kind === 'rack' && !Number.isInteger(next.uHeight)) next.uHeight = RACK_U_DEFAULT;
+                // A rack's new height moves its devices as the rail's does
+                // (applyRackHeight: each keeps the units printed beside it,
+                // and those in units it loses lose their places), worked out
+                // with the numbering the row leaves it with.
+                if (set.uHeight !== undefined && isRackGroup(doc.groups[at]) && next.kind === 'rack') {
+                    applyRackHeight(Object.assign(next, { uHeight: doc.groups[at].uHeight }), set.uHeight, doc.nodes);
+                }
+                doc.groups[at] = readGroup(next);
+            }
+        });
+        if (plan.ops.some((op) => op.grp)) repairGroupParents(doc.groups);
         // Subnets first, each read back through NETWORK_FIELDS as a loaded
         // document's are, so what a device row in the same apply finds is
         // already the network a reload would read.
@@ -1724,7 +2168,7 @@ function csvWrite(plan, doc) {
             if (op.create) { const rec = cloneData(op.create); doc.nodes.push(rec); touched.add(rec.id); }
         });
         plan.ops.forEach((op) => {
-            if (op.create || op.link || op.net) return;
+            if (op.create || op.link || op.net || op.grp) return;
             if (op.linkId) {
                 const link = doc.links.find((l) => l.id === op.linkId);
                 if (link) Object.assign(link, op.set);
@@ -1777,17 +2221,20 @@ function csvWrite(plan, doc) {
         }));
         // Through the normalizer: what a reload would read these records as.
         doc.nodes.forEach((n, i) => { if (touched.has(n.id)) doc.nodes[i] = normalizeLoadedNode(serializeNode(n)); });
+        // And the host rule over the whole list, as save() and a reload keep
+        // it: a VM the sheet put on a host goes where the host is.
+        repairHosts(doc.nodes);
         const setLinks = new Set(plan.ops.filter((op) => op.linkId).map((op) => op.linkId));
         doc.links.forEach((l, i) => { if (newLinks.has(l.id) || setLinks.has(l.id)) doc.links[i] = normalizeLoadedLink(serializeLink(l)); });
     } finally {
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups;
     }
 }
 
 // The findings the plan would leave, against the ones there now.
 function csvFindingsDelta(plan) {
     if (!plan.ops.length || plan.errors.length) return [];
-    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks });
+    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups });
     csvWrite(plan, scratch);
     return findingsDelta(topologyFindings(), diagnoseDoc(scratch).findings);
 }
@@ -1804,6 +2251,7 @@ function applyCsvPlan(plan) {
         save();
         renderCanvasOnly();
     });
+    renderGroupsPanel();   // a sheet may have made groups, or filled them
     const ids = plan.newIds.concat(plan.touchedIds).filter((id) => getNode(id));
     if (ids.length) {
         selectEntries(ids.map((id) => ({ type: 'node', id })));
@@ -2059,7 +2507,8 @@ const _csv = {
     timer: 0,
     seen: null,          // seenExtract() of the text: the addresses it shows
     mode: null,          // what the user picked to read it as, or null for the guess
-    autoMode: 'sheet'    // the guess: 'sheet' (spreadsheet rows) or 'seen'
+    autoMode: 'sheet',   // the guess: 'sheet' (spreadsheet rows) or 'seen'
+    createGroups: false  // the review's "make the groups the sheet names" tick
 };
 // What the text is read as: the user's pick, else the guess (csvReparse).
 const csvMode = () => (_csv.mode || _csv.autoMode);
@@ -2179,12 +2628,13 @@ function renderCsvImport() {
     csvEl('csvKind').textContent = kind === 'mixed' ? t('Map either device columns or cable columns: a sheet is one or the other.')
         : kind === 'mixed-ports' ? t(CSV_MIXED_PORTS)
         : kind === 'mixed-subnets' ? t(CSV_MIXED_SUBNETS)
+        : kind === 'mixed-groups' ? t(CSV_MIXED_GROUPS)
             : sheet.observed && kind === 'devices' ? seenLine()
-                : t(kind === 'cables' ? 'Rows of cables: {n}' : kind === 'ports' ? 'Rows of ports: {n}' : kind === 'subnets' ? 'Rows of subnets: {n}' : 'Rows of devices: {n}', { n: sheet.rows.length });
+                : t(kind === 'cables' ? 'Rows of cables: {n}' : kind === 'ports' ? 'Rows of ports: {n}' : kind === 'subnets' ? 'Rows of subnets: {n}' : kind === 'groups' ? 'Rows of groups: {n}' : 'Rows of devices: {n}', { n: sheet.rows.length });
     csvEl('csvKind').classList.toggle('csv-kind-bad', /^mixed/.test(kind));
     // 'Ports' stays English here, like 'Interface': the full editor's
     // technical vocabulary (see the header).
-    const groups = [['device', t('Device')], ['iface', 'Interface'], ['cabling', t('Cabling')], ['cable', t('Cables')], ['port', 'Ports'], ['network', 'Subnets']];
+    const groups = [['device', t('Device')], ['iface', 'Interface'], ['cabling', t('Cabling')], ['cable', t('Cables')], ['port', 'Ports'], ['network', 'Subnets'], ['grpdef', t('Groups')]];
     const options = (sel) => `<option value="">${escapeHtml(t('Ignore'))}</option>` + groups.map(([g, label]) =>
         `<optgroup label="${escapeHtml(label)}">${csvTargets().filter((tg) => tg.group === g).map((tg) =>
             `<option value="${escapeHtml(tg.key)}"${tg.key === sel ? ' selected' : ''}>${escapeHtml(csvTargetLabel(tg))}${tg.csv && csvNorm(tg.csv) !== csvNorm(csvTargetLabel(tg)) ? ` · ${escapeHtml(tg.csv)}` : ''}</option>`).join('')}</optgroup>`).join('');
@@ -2205,6 +2655,16 @@ function renderCsvReview() {
     const msgs = plan.errors.map((m) => `<div class="alert err">${escapeHtml(m)}</div>`);
     csvEl('csvMsgs').innerHTML = msgs.join('');
     csvEl('csvMsgs').classList.toggle('hidden', !msgs.length);
+    // Groups the sheet names that the map does not have: made only when
+    // ticked, and the tick says which (the ones it will make, once ticked).
+    const named = plan.createGroups ? plan.newGroups.map((g) => groupPath(g, state.groups.concat(plan.newGroups))) : plan.missingGroups;
+    const box = csvEl('csvGroupsBox');
+    box.classList.toggle('hidden', !named.length && !plan.createGroups);
+    csvEl('csvCreateGroups').checked = plan.createGroups;
+    const shownPaths = named.slice(0, 6).join(' · ') + (named.length > 6 ? ` ${t('…and {n} more.', { n: named.length - 6 })}` : '');
+    csvEl('csvGroupsText').textContent = named.length
+        ? t(named.length === 1 ? 'Make the group the sheet names that the map does not have: {paths}' : 'Make the {n} groups the sheet names that the map does not have: {paths}', { n: named.length, paths: shownPaths })
+        : t('Make the groups the sheet names that the map does not have.');
     const mark = { add: '+', change: '→', same: '=', conflict: '✕' };
     const cls = { add: 'change', change: 'change', same: 'same', conflict: 'bad' };
     const sheet = csvCurrentSheet();
@@ -2243,7 +2703,8 @@ function renderCsvFoot() {
 function csvToReview() {
     const sheet = csvCurrentSheet();
     if (!sheet || readOnlyRefuses()) return;
-    _csv.plan = csvPlan(sheet, _csv.mapping);
+    _csv.createGroups = false;   // asked afresh for every review
+    _csv.plan = csvPlan(sheet, _csv.mapping, { createGroups: _csv.createGroups });
     _csv.step = 'review';
     renderCsvDialog();
 }
@@ -2252,7 +2713,7 @@ function csvApplyDialog() {
     if (!sheet) return;
     // Re-planned from the same sheet and mapping: a stale plan is never
     // what is written.
-    const plan = csvPlan(sheet, _csv.mapping);
+    const plan = csvPlan(sheet, _csv.mapping, { createGroups: _csv.createGroups });
     if (!(plan.counts.add + plan.counts.change) || plan.errors.length) return;
     closeCsvDialog();
     applyCsvPlan(plan);
@@ -2320,4 +2781,12 @@ function csvLoadFile(file) {
     csvEl('csvReviewBtn').addEventListener('click', csvToReview);
     csvEl('csvBackBtn').addEventListener('click', () => { _csv.step = 'map'; renderCsvDialog(); });
     csvEl('csvApplyBtn').addEventListener('click', csvApplyDialog);
+    // The tick re-plans the review with or without the missing groups.
+    csvEl('csvCreateGroups').addEventListener('change', (e) => {
+        const sheet = csvCurrentSheet();
+        if (!sheet || _csv.step !== 'review') return;
+        _csv.createGroups = e.target.checked;
+        _csv.plan = csvPlan(sheet, _csv.mapping, { createGroups: _csv.createGroups });
+        renderCsvDialog();
+    });
 })();

@@ -77,6 +77,10 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('the map draws every device and every cable',
       document.querySelectorAll('#layer-nodes > g[id^="ui-node-"]').length === 300
       && document.querySelectorAll('#layer-links > path[id^="ui-link-"]').length === 305);
+    // Twenty groups (js/groupmap.js): a frame for each, nothing collapsed.
+    ok('it holds twenty groups, each drawn as a frame', state.groups.length === 20
+      && document.querySelectorAll('#layer-groups > .grp-frame').length === 20,
+      `${state.groups.length} / ${document.querySelectorAll('#layer-groups > .grp-frame').length}`);
 
     // ---- 2. Bounded work ----
     const mapScans = linkScans(() => renderCanvasOnly());
@@ -141,6 +145,34 @@ window.addEventListener('load', () => { setTimeout(async () => {
     within('the findings, from scratch,', median(() => diagnoseDoc(null)), 400);
     within('a map redraw after an edit', median(() => { diagnosisMemo = null; renderCanvasOnly(); }), 500);
     within('a map redraw with nothing changed', median(() => renderCanvasOnly()), 300);
+    // The six IDF rooms collapsed: 258 devices folded into six nodes.
+    const idfs = ['g-idf1', 'g-idf2', 'g-idf3', 'g-idf4', 'g-idf5', 'g-idf6'];
+    idfs.forEach((id) => setGroupCollapsed(id, true));
+    ok('six rooms collapsed: six nodes for their devices, one line per far end (the core, four APs, the ring)',
+      document.querySelectorAll('#layer-nodes > .grp-node').length === 6
+      && document.querySelectorAll('#layer-nodes > g[id^="ui-node-"]').length === 300 - 6 * 43
+      && document.querySelectorAll('#layer-links > .grp-edge').length === 11,
+      `${document.querySelectorAll('#layer-nodes > .grp-node').length} / ${document.querySelectorAll('#layer-nodes > g[id^="ui-node-"]').length} / ${document.querySelectorAll('#layer-links > .grp-edge').length}`);
+    const foldScans = linkScans(() => renderCanvasOnly());
+    ok('a redraw with groups collapsed still walks the cable list a bounded number of times', foldScans <= 22, String(foldScans));
+    within('a map redraw with six groups collapsed, after an edit', median(() => { diagnosisMemo = null; renderCanvasOnly(); }), 500);
+    within('a map redraw with six groups collapsed', median(() => renderCanvasOnly()), 300);
+    idfs.forEach((id) => setGroupCollapsed(id, false));
+    // Tidy with twenty groups: each a block, none on another (js/app.js,
+    // tidyPositionsGrouped), in the time a whole-site Tidy is given.
+    within('a whole-site Tidy with twenty groups', median(() => { tidyLayout(); undo(); }), 1500);
+    tidyLayout();
+    {
+      const fv = groupMapView(new Set());
+      const r = new Map(fv.frames.map((f) => [f.group.id, f.rect]));
+      const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y - 10 < b.y + b.h && b.y - 10 < a.y + a.h;
+      const clash = [];
+      fv.frames.forEach((a, i) => fv.frames.slice(i + 1).forEach((b) => {
+        if ((a.group.parent || null) === (b.group.parent || null) && hit(a.rect, b.rect)) clash.push(`${a.group.id}/${b.group.id}`);
+      }));
+      ok('tidied, no group\'s frame lands on another\'s', clash.length === 0 && r.size === 20, `${r.size} frames; ${clash.join(' ')}`);
+    }
+    undo();
     select('h5', 'node');
     setTraceMode(true);
     within('a map redraw tracing from a desk PC', median(() => renderCanvasOnly()), 500);

@@ -1010,6 +1010,49 @@ const asOmittedText = (v) => { const s = asText(v); return isBlank(s) ? undefine
 // as in service. A retired device is kept for the register (where it was, its
 // serial, its tag) but is no longer on the network: the canvas dims it and the
 // reachability walk neither reaches it nor goes through it (js/diagnostics.js).
+// The readers of a device's group and rack fields (NODE_FIELDS), here ahead of
+// the table that names them. The group itself is GROUP_FIELDS, further down.
+// A rack is at most RACK_U_MAX units: real ones stop near 58, so anything past
+// this is a typing slip, not a rack.
+const RACK_U_MAX = 99;
+const RACK_U_DEFAULT = 42;
+const RACK_FACES = ['front', 'rear'];
+// A whole number of units, or a string of digits (a hand-edited file, a
+// typed field); anything else is not one.
+const asUnits = (v) => {
+    const n = typeof v === 'string' && /^\s*\d+\s*$/.test(v) ? Number(v) : v;
+    return Number.isInteger(n) ? n : undefined;
+};
+const asGroupRef = (v) => { const s = asOptionalText(v); return s && s.trim() ? s.trim() : undefined; };
+// Kept rather than dropped or pulled into range: U 0 or U 120 in a typed field
+// or a hand-edited file is a slip somebody has to see, and the out-of-rack
+// finding says so once the rack is known (placeFindings, js/diagnostics.js).
+// Bounded only to +/-RACK_U_MAX, so a stray 1e9 cannot make a rack view or a
+// span text absurd. Unlike a count, a unit may be typed with a minus sign.
+const asRackU = (v) => {
+    const n = typeof v === 'string' && /^\s*-?\d+\s*$/.test(v) ? Number(v) : v;
+    return Number.isInteger(n) ? Math.min(RACK_U_MAX, Math.max(-RACK_U_MAX, n)) : undefined;
+};
+// One unit is the default and is not stored.
+const asRackHeight = (v) => { const n = asUnits(v); return n === undefined || n <= 1 ? undefined : Math.min(RACK_U_MAX, n); };
+const asRackFace = (v) => { const s = typeof v === 'string' ? v.trim().toLowerCase() : ''; return RACK_FACES.includes(s) ? s : undefined; };
+// How deep it is, front to back. A device in a rack fills its depth unless
+// it is set to one face: a long server, a UPS, a switch with its PSUs at the
+// back all take their units on both faces, so nothing can hang on the rear
+// behind them, and the owner wants that as the default (Review-Packs/
+// Topo-groups.md, "Round 2", item 3), so full is not stored. 'half' is a
+// device on one face only (a patch panel, a shallow switch, a PDU at the
+// back), which leaves the other face's units free. rackFace is the face its
+// front is on either way (the agreed scope). Before v8 the stored value was
+// the other way round ('full', shallow by default); that step drops it.
+// "half", "half depth", "shallow", "one face" and false are read as half;
+// anything else, "full" included, is the default.
+const asRackDepth = (v) => {
+    if (v === false) return 'half';
+    const s = typeof v === 'string' ? v.trim().toLowerCase().replace(/[\s_-]+/g, ' ') : '';
+    return ['half', 'half depth', 'shallow', 'one face', 'single face'].includes(s) ? 'half' : undefined;
+};
+
 const STATUS_VALUES = ['planned', 'active', 'retired'];
 const asStatus = (v) => { const s = typeof v === 'string' ? v.trim().toLowerCase() : ''; return STATUS_VALUES.includes(s) ? s : undefined; };
 const isRetired = (node) => !!node && node.status === 'retired';
@@ -1143,7 +1186,50 @@ const NODE_FIELDS = [
     { key: 'location', kind: 'text', omit: true, read: asOmittedText, label: 'Location', csv: 'location', bulk: true, table: 'edit',
       report: { key: 'location' } },
     { key: 'status', kind: 'raw', read: asStatus, write: asStatus, label: 'Status', csv: 'status', bulk: true, table: 'edit',
-      validate: (v) => isBlank(v) || asStatus(v) !== undefined, report: { key: 'status' } }
+      validate: (v) => isBlank(v) || asStatus(v) !== undefined, report: { key: 'status' } },
+    // ---- Groups and racks (document v7, "Groups" below) ----
+    // The group a device sits in, by id; its ancestors follow from the
+    // group's parent chain, so nothing else is stored. A reference to a group
+    // the document does not hold is dropped by normalizeGroupRefs() on load,
+    // which, unlike this reader, can see the whole document.
+    //
+    // In a spreadsheet (devices.csv) the group is its path, not its id: an id
+    // means nothing to the person filling in a sheet, and "Building A /
+    // Server room / Rack 3" is what they would type. Import resolves the
+    // path back to a group (findGroupByPath below), and makes the ones the
+    // map lacks only when the review says so (js/csv.js). The table and the
+    // bulk panel show the path too; neither reads this raw field as text.
+    { key: 'group', kind: 'raw', label: 'Group', read: asGroupRef, write: asGroupRef, csv: 'group',
+      toText: (v) => { const g = groupById(v); return g ? groupPath(g) : ''; } },
+    // Where in its rack: the lowest unit it occupies (1-based, counted from
+    // the bottom as the rails are numbered), how many units it takes (1 is
+    // the default and is not stored) and which face it is mounted on. Only
+    // meaningful while node.group is a rack; kept otherwise, so a finding can
+    // say so rather than the fields vanishing (placeFindings, js/diagnostics.js).
+    // rackU is counted from the bottom even in a rack numbered from the top
+    // (rack.numbering), and so is the spreadsheet's rack_u: the numbering
+    // is how the rails are printed, not where a device is ("How a rack's
+    // units are numbered", below), so a sheet means the same unit whichever
+    // way the rack is numbered when it comes back.
+    { key: 'rackU', kind: 'count', label: 'Rack U', read: asRackU, write: asRackU, csv: 'rack_u' },
+    { key: 'rackHeight', kind: 'count', label: 'Rack height', read: asRackHeight, write: asRackHeight, csv: 'rack_height' },
+    { key: 'rackFace', kind: 'raw', label: 'Rack face', read: asRackFace, write: asRackFace, csv: 'rack_face' },
+    // 'half' or nothing (full depth, the default): asRackDepth above.
+    { key: 'rackDepth', kind: 'raw', label: 'Rack depth', read: asRackDepth, write: asRackDepth, csv: 'rack_depth' },
+    // ---- The device a VM or a container runs on (document v10, "Hosts" below) ----
+    // Its host's id, read and written only on a virtual device (isVirtualType),
+    // as siteRef is only a cloud's: a server that "runs on" another server is
+    // not a thing this register can draw. Which hosts are allowed, and what
+    // follows from having one (no units of its own, its host's group), needs
+    // the whole document, so repairHosts() keeps it, on load and on every save.
+    //
+    // In a spreadsheet the host is its name (its id when two devices share the
+    // name), under `runs_on`, not `host`: "Host" heads the hostname column of
+    // half the inventories there are (CSV_ALIASES.name, js/csv.js).
+    { key: 'host', kind: 'raw', label: 'Runs on', csv: 'runs_on',
+      read: (v, src) => (isVirtualType(src.type) ? asGroupRef(v) : undefined),
+      write: (v, src) => (src && isVirtualType(src.type) ? asGroupRef(v) : undefined),
+      toText: (v) => hostRefText(v) }
 ];
 
 // A cable's own facts (link.cable, plan section 4): the label on both ends of
@@ -1782,6 +1868,674 @@ function planRenumber(netId, cidrText) {
 }
 
 // ============================================================================
+// Groups (Review-Packs/Topo-groups.md, document v7)
+// ============================================================================
+// Where devices physically or administratively sit: a building, a floor, a
+// room, a rack, or a group of the user's own. A group is a record of its own,
+// doc.groups, like a network, and a device names the one it is in
+// (node.group); a group names its parent, so "Building A / Server room /
+// Rack 3" is three records and one reference on the device. A device is in at
+// most one group, and is in every ancestor of it by the chain.
+//
+// The words are chosen around the ones already taken: a "zone" is the subnet
+// bubble on the map, a "block" a saved selection, a "network" the document.
+//
+// Collapsing a group on the map is a view, not data, and is not stored here.
+// One card per site: groups go from the building down inside one document,
+// and several sites stay the library's cards and the binder.
+//
+// A rack adds its size ("Round 2", item 4): its height in units (uHeight, 42
+// by default), its width (10", 19" or 23"; 19" by default), how deep it is in
+// millimetres (depthMm, optional: informative, printed in the rack view's
+// head and the report, never checked against anything, since no device
+// carries a depth to check) and which way its units are numbered (numbering
+// 'top' for top-down; bottom-up, the default, is not stored). A device in one
+// adds where it sits (rackU, rackHeight, rackFace, rackDepth in NODE_FIELDS).
+const GROUP_KINDS = ['building', 'floor', 'room', 'rack', 'custom'];
+const RACK_WIDTHS = ['10in', '19in', '23in'];
+const RACK_WIDTH_DEFAULT = '19in';
+// The heights racks are sold in, offered first; any other is a custom one.
+const RACK_U_PRESETS = [4, 6, 9, 12, 18, 24, 27, 42, 45, 47, 48];
+// A depth in mm: a wall box is about 300, a deep server rack 1200. Past this
+// it is a slip (a depth typed in cm twice over), not a rack.
+const RACK_DEPTH_MM_MAX = 3000;
+const GROUP_NAME_MAX = 80;
+const asGroupKind = (v) => { const s = typeof v === 'string' ? v.trim().toLowerCase() : ''; return GROUP_KINDS.includes(s) ? s : 'custom'; };
+const isRackGroup = (g) => !!g && g.kind === 'rack';
+// One line, as a path is printed on a report and a label.
+const groupName = (v) => portText(v).trim().slice(0, GROUP_NAME_MAX);
+// The rack fields are read off a rack and written only for one: a rack turned
+// into a room in this session keeps its height in memory (turning it back
+// gives it back), as a switch keeps its port labels.
+const rackOnly = (fn) => (v, src) => (src && asGroupKind(src.kind) === 'rack' ? fn(v) : undefined);
+const asRackSize = (v) => { const n = asUnits(v); return n === undefined ? RACK_U_DEFAULT : Math.min(RACK_U_MAX, Math.max(1, n)); };
+// '19in', or the way a sheet or a person writes it: 19, 19", 19 in, 19″,
+// 19 inch. Anything else is the default.
+const rackWidthKey = (v) => {
+    const s = String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, '').replace(/(["″”]|inch(es)?)$/, 'in');
+    const k = /^\d+$/.test(s) ? `${s}in` : s;
+    return RACK_WIDTHS.includes(k) ? k : undefined;
+};
+const asRackWidth = (v) => rackWidthKey(v) || RACK_WIDTH_DEFAULT;
+// A whole number of millimetres, or nothing: a blank, a zero or a word is
+// no depth given (it is optional), not a depth of zero.
+const asRackDepthMm = (v) => { const n = asUnits(v); return n === undefined || n < 1 ? undefined : Math.min(RACK_DEPTH_MM_MAX, n); };
+// Top-down is stored as 'top'; bottom-up, as the rails of most racks are
+// printed, is the default and is not. "top down", "top-down", "descending"
+// and the like are read as top; anything else is bottom-up.
+const asRackNumbering = (v) => {
+    const s = typeof v === 'string' ? v.trim().toLowerCase().replace(/[\s_-]+/g, ' ') : '';
+    return ['top', 'top down', 'from the top', 'descending', 'top to bottom'].includes(s) ? 'top' : undefined;
+};
+
+// Every field is `omit` in spirit: a group that is not a rack carries no
+// rack keys, and one at the top carries no parent.
+const GROUP_FIELDS = [
+    // Devices name a group by id, so a missing one is minted, as an
+    // interface's is.
+    { key: 'id', kind: 'raw', read: (v) => asGroupRef(v) || nextId('g'), label: 'ID', csv: 'group_id' },
+    // A blank name reads as the kind ("Rack"; groupLabel) and is not stored.
+    { key: 'name', kind: 'raw', read: groupName, write: (v) => groupName(v) || undefined, label: 'Name', csv: 'name' },
+    { key: 'kind', kind: 'raw', read: asGroupKind, write: asGroupKind, label: 'Kind', csv: 'kind',
+      validate: (v) => isBlank(v) || GROUP_KINDS.includes(String(v).trim().toLowerCase()) },
+    // Held as null at the top, written only when there is one (the way a
+    // cable's port is). normalizeGroups() drops one that names no group or
+    // closes a loop.
+    { key: 'parent', kind: 'raw', read: (v) => asGroupRef(v) || null, write: (v) => v || undefined, label: 'Parent', csv: 'parent' },
+    { key: 'uHeight', kind: 'count', read: rackOnly(asRackSize), write: rackOnly(asRackSize), label: 'Height (U)', csv: 'u_height' },
+    { key: 'width', kind: 'raw', read: rackOnly(asRackWidth), write: rackOnly(asRackWidth), label: 'Width', csv: 'width' },
+    { key: 'depthMm', kind: 'count', read: rackOnly(asRackDepthMm), write: rackOnly(asRackDepthMm), label: 'Depth (mm)', csv: 'depth_mm' },
+    { key: 'numbering', kind: 'raw', read: rackOnly(asRackNumbering), write: rackOnly(asRackNumbering), label: 'Numbering', csv: 'numbering' }
+];
+
+// Load: coerced through the table, one record per id (a repeated id is
+// reminted, as a network's is: the first keeps its devices), and the parent
+// chains made sound. A parent that is not a group is dropped, and a chain
+// that comes back to itself is cut where it closes, walking the list in
+// order so the same document always comes out the same. Mutates nothing
+// it is given.
+function normalizeGroups(list) {
+    const ids = new Set();
+    const out = (Array.isArray(list) ? list : [])
+        .filter((g) => g && typeof g === 'object' && !Array.isArray(g))
+        .map((g) => readFields(GROUP_FIELDS, g))
+        .map((g) => { if (ids.has(g.id)) g.id = nextId('g'); ids.add(g.id); return g; });
+    return repairGroupParents(out);
+}
+// The parent rule on its own, in place: no parent that is not in `groups`,
+// none that is the group itself, and no loop. Returns the list. Every edit
+// that re-parents asks groupParentOk() first, so in the editor this only
+// ever has work to do on a document that arrived broken.
+function repairGroupParents(groups) {
+    const byId = new Map(groups.map((g) => [g.id, g]));
+    groups.forEach((g) => { if (g.parent && (!byId.has(g.parent) || g.parent === g.id)) g.parent = null; });
+    groups.forEach((g) => {
+        const seen = new Set([g.id]);
+        let cur = g;
+        while (cur.parent) {
+            if (seen.has(cur.parent)) { cur.parent = null; break; }
+            seen.add(cur.parent);
+            cur = byId.get(cur.parent);
+        }
+    });
+    return groups;
+}
+// Each device's group must be one the document holds; a reference to one that
+// is gone is dropped (the device is ungrouped, its rack fields kept for the
+// finding to name). In place; `nodes` and `groups` as loaded.
+function normalizeGroupRefs(nodes, groups) {
+    const ids = new Set((groups || []).map((g) => g.id));
+    (nodes || []).forEach((n) => { if (n && n.group !== undefined && !ids.has(n.group)) delete n.group; });
+}
+// Save: left out altogether when there are none, so a document that never
+// made a group serializes as it did before groups existed.
+const serializeGroups = (list) => (list && list.length ? list.map((g) => writeFields(GROUP_FIELDS, g)) : undefined);
+const makeGroup = (fields) => readFields(GROUP_FIELDS, Object.assign({ id: nextId('g') }, fields));
+
+// ---- Reading the tree ----
+// `groups` defaults to the live list; the report and the binder pass their
+// own. Every walk is bounded by a seen set, so even a list that skipped the
+// normalizer (a scratch copy) cannot hang one.
+const groupById = (id, groups = state.groups) => (id ? (groups || []).find((g) => g.id === id) || null : null);
+// The group and its ancestors, outermost first.
+function groupChain(group, groups = state.groups) {
+    const out = [];
+    const seen = new Set();
+    for (let g = group; g && !seen.has(g.id); g = groupById(g.parent, groups)) { seen.add(g.id); out.unshift(g); }
+    return out;
+}
+// What a group is called on screen: its name, else its kind ("Rack").
+const GROUP_KIND_NAMES = { building: 'Building', floor: 'Floor', room: 'Room', rack: 'Rack', custom: 'Group' };
+const groupKindName = (kind) => t(GROUP_KIND_NAMES[asGroupKind(kind)]);
+const groupLabel = (g) => (g ? (g.name || groupKindName(g.kind)) : '');
+// "Building A / Server room / Rack 3".
+const groupPath = (group, groups = state.groups) => groupChain(group, groups).map(groupLabel).join(' / ');
+// Every group below this one (not itself), at any depth.
+function groupDescendantIds(id, groups = state.groups) {
+    const out = new Set();
+    let frontier = [id];
+    while (frontier.length) {
+        const next = [];
+        (groups || []).forEach((g) => { if (g.parent && frontier.includes(g.parent) && !out.has(g.id) && g.id !== id) { out.add(g.id); next.push(g.id); } });
+        frontier = next;
+    }
+    return out;
+}
+// Would `parentId` be a sound parent for group `id`? Not itself, not one of
+// its own descendants (that is the loop), and a group that exists. null (the
+// top) always is.
+function groupParentOk(id, parentId, groups = state.groups) {
+    if (!parentId) return true;
+    if (parentId === id || !groupById(parentId, groups)) return false;
+    return !groupDescendantIds(id, groups).has(parentId);
+}
+// The devices in a group: its own, and with `deep` those of every group below.
+function groupMembers(id, deep = true, nodes = state.nodes, groups = state.groups) {
+    const ids = deep ? groupDescendantIds(id, groups) : new Set();
+    ids.add(id);
+    return (nodes || []).filter((n) => n && n.group && ids.has(n.group));
+}
+// The tree in display order: each group followed by its children, by name,
+// with its depth. A group whose parent is missing shows at the top.
+function groupTree(groups = state.groups) {
+    const list = groups || [];
+    const ids = new Set(list.map((g) => g.id));
+    const kids = new Map();
+    list.forEach((g) => {
+        const p = g.parent && ids.has(g.parent) && g.parent !== g.id ? g.parent : '';
+        if (!kids.has(p)) kids.set(p, []);
+        kids.get(p).push(g);
+    });
+    const byName = (a, b) => groupLabel(a).localeCompare(groupLabel(b), undefined, { numeric: true, sensitivity: 'base' });
+    const out = [];
+    const seen = new Set();
+    const walk = (p, depth) => (kids.get(p) || []).slice().sort(byName).forEach((g) => {
+        if (seen.has(g.id)) return;
+        seen.add(g.id);
+        out.push({ group: g, depth });
+        walk(g.id, depth + 1);
+    });
+    walk('', 0);
+    // A loop nothing above reaches (only in an unrepaired scratch list) is
+    // still listed, at the top.
+    list.forEach((g) => { if (!seen.has(g.id)) { seen.add(g.id); out.push({ group: g, depth: 0 }); walk(g.id, 1); } });
+    return out;
+}
+
+// ---- A device's place ----
+// The group a device is in, or null.
+const groupOfNode = (node, groups = state.groups) => (node && node.group ? groupById(node.group, groups) : null);
+// Its rack, when the group it is in is one.
+const rackOfNode = (node, groups = state.groups) => { const g = groupOfNode(node, groups); return isRackGroup(g) ? g : null; };
+const rackHeightOf = (node) => (node && Number.isInteger(node.rackHeight) && node.rackHeight > 1 ? node.rackHeight : 1);
+const rackFaceOf = (node) => (node && node.rackFace === 'rear' ? 'rear' : 'front');
+const hasRackFields = (node) => !!node && (node.rackU !== undefined || node.rackHeight !== undefined || node.rackFace !== undefined || node.rackDepth !== undefined);
+// Full depth is the default; a device set to one face says 'half'.
+const rackFullDepth = (node) => !!node && node.rackDepth !== 'half';
+// ---- How a rack's units are numbered ----
+// Stored, a unit is always counted from the bottom: rackU is a device's
+// lowest unit, 1 the bottom one, and every check, every drag and the CSV's
+// rack_u read it so. Top-down numbering ("Round 2", item 4) is only how the
+// rack's rails are printed, so it changes what is shown (the numbers beside
+// the units, a device's "U12", the path text, the findings, the report) and
+// nothing that is stored: turning a rack's numbering round moves no device,
+// and a file or a sheet means the same unit whichever way the rack is
+// numbered when it is read back. The fields where a unit is typed (the
+// device editor's U, the place dialog's) take and show the printed number
+// and convert (rackStartNo, rackUnitFromNo).
+const rackTopDown = (rack) => !!rack && rack.numbering === 'top';
+// The number unit `u` (from the bottom) is printed with on this rack.
+const rackUnitNo = (rack, u) => (rackTopDown(rack) ? rackTop(rack) - u + 1 : u);
+// "U12–U13", "U7": a run of units lo..hi (from the bottom) as the rack's
+// rails print them, the smaller number first either way.
+function rackUnitsText(rack, lo, hi = lo) {
+    const a = rackUnitNo(rack, lo), b = rackUnitNo(rack, hi);
+    const x = Math.min(a, b), y = Math.max(a, b);
+    return y > x ? `U${x}–U${y}` : `U${x}`;
+}
+// Where a device of `height` units starts, as the fields that take a unit
+// say it: the smallest printed number it covers. That is its lowest unit on
+// a rack numbered from the bottom, and its top one on a rack numbered from
+// the top, where U1 is the top unit and a device "at U3" is the one whose
+// first unit, reading down, is U3.
+const rackStartNo = (rack, lo, height = 1) => (rackTopDown(rack) ? rackUnitNo(rack, lo + height - 1) : lo);
+// And back: the printed start of a device of `height` units -> its lowest
+// unit as stored. The inverse of rackStartNo.
+const rackUnitFromNo = (rack, no, height = 1) => (rackTopDown(rack) ? rackTop(rack) - no - height + 2 : no);
+const rackWidthInches = (rack) => Number(asRackWidth(rack && rack.width).replace('in', ''));
+const rackWidthLabel = (w) => `${asRackWidth(w).replace('in', '')}″`;
+// "42U · 19″ · 1000 mm": a rack's size on one line (the Groups tab's card,
+// the rack view's head, the report). The depth only when one was given.
+const rackSizeText = (rack) => [`${rackTop(rack)}U`, rackWidthLabel(rack && rack.width),
+    rack && Number.isInteger(rack.depthMm) ? `${rack.depthMm} mm` : ''].filter(Boolean).join(' · ');
+
+// "U12–U13 front", "U7 rear", "U1 rear, half depth": where in its rack, or ''
+// when it is not in one or has no unit yet. Full depth is what every device
+// is unless it says otherwise, so only the exception is spelled out. The
+// units as the rack prints them (rackUnitsText).
+// A VM or a container on a host has no units of its own: it is where its
+// host is (repairHosts), so it reads its outermost host's.
+function rackSpanText(node, groups = state.groups) {
+    node = hostRootOf(node) || node;
+    const rack = rackOfNode(node, groups);
+    if (!rack || !Number.isInteger(node.rackU)) return '';
+    const span = rackUnitsText(rack, node.rackU, node.rackU + rackHeightOf(node) - 1);
+    return `${span} ${t(rackFaceOf(node) === 'rear' ? 'rear' : 'front')}${rackFullDepth(node) ? '' : `, ${t('half depth')}`}`;
+}
+
+// ---- A rack's units (step C: the rack view, js/rackview.js) ----
+// Pure over their arguments, so the rack view's refusals and, later, the
+// overlap findings read the same answer. A unit range is lo..hi, both
+// counted from the bottom and inclusive, on one face. Front and rear are
+// separate columns of units: a half-depth switch at the back does not take
+// the units of a half-depth patch panel at the front. A device that fills the
+// whole depth (the default; rackDepth 'half' is the exception) is filed under
+// the face its front is on (the agreed scope) and takes its units on both: it
+// clashes with anything on either.
+// The units a placed device takes, or null while it has no unit.
+function rackSpanOf(node) {
+    if (!node || !Number.isInteger(node.rackU)) return null;
+    return { lo: node.rackU, hi: node.rackU + rackHeightOf(node) - 1, face: rackFaceOf(node) };
+}
+const rackTop = (rack) => (rack && Number.isInteger(rack.uHeight) ? rack.uHeight : RACK_U_DEFAULT);
+// Inside the rack: unit 1 at the bottom to its height at the top.
+const rackSpanInside = (rack, lo, hi) => Number.isInteger(lo) && Number.isInteger(hi) && lo >= 1 && lo <= hi && hi <= rackTop(rack);
+// The devices this rack holds itself (not those of a group inside it, which
+// a rack does not have in practice), placed or not.
+const rackMembers = (rack, nodes = state.nodes) => (rack ? (nodes || []).filter((n) => n && n.group === rack.id) : []);
+// Whether two placed spans are in each other's way: overlapping units on the
+// same face, or on either face when one of them is full depth.
+const rackSpansMeet = (a, fullA, b, fullB) => !!a && !!b && (a.face === b.face || fullA || fullB) && a.lo <= b.hi && b.lo <= a.hi;
+// The first device already in units lo..hi on `face` of the rack, or null.
+// exceptId is the device being moved, which is never in its own way. `full`
+// is whether the one being placed fills the depth; left out, it is what the
+// device named by exceptId says, and a new one fills it, as every device does
+// until it is set to one face.
+function rackClash(rack, face, lo, hi, exceptId, nodes = state.nodes, full) {
+    const me = exceptId ? (nodes || []).find((n) => n && n.id === exceptId) : null;
+    const self = full !== undefined ? !!full : !me || rackFullDepth(me);
+    const want = { lo, hi, face };
+    return rackMembers(rack, nodes).find((n) => n.id !== exceptId && rackSpansMeet(want, self, rackSpanOf(n), rackFullDepth(n))) || null;
+}
+// Whether `height` units from `lo` on `face` are free: inside the rack and
+// clear of every other device. -> { ok, clash, outside }.
+function rackSpanCheck(rack, face, lo, height, exceptId, nodes = state.nodes, full) {
+    const hi = lo + height - 1;
+    if (!rackSpanInside(rack, lo, hi)) return { ok: false, clash: null, outside: true };
+    const clash = rackClash(rack, face, lo, hi, exceptId, nodes, full);
+    return { ok: !clash, clash, outside: false };
+}
+// The lowest unit where `height` units are free on `face`, or null when no
+// run is that tall.
+function rackFirstFree(rack, face, height, exceptId, nodes = state.nodes, full) {
+    for (let lo = 1; lo + height - 1 <= rackTop(rack); lo++) {
+        if (rackSpanCheck(rack, face, lo, height, exceptId, nodes, full).ok) return lo;
+    }
+    return null;
+}
+// Every two placed devices of a rack in each other's way, once per pair,
+// lowest first. The rack view refuses to make one, but a spreadsheet, a
+// hand-edited file or the device editor's fields can say so, and the findings
+// (placeFindings, js/diagnostics.js) and the drawing name them.
+// -> [{ a, b, full, both }], full when they meet because one of them fills
+// the depth, which with full depth the default is most overlaps; false when
+// both are half depth on the same face. both: on opposite faces and both
+// full depth (a v7 front and rear pair after the v8 step), where making one
+// of them half depth is not enough: both have to be.
+function rackOverlaps(rack, nodes = state.nodes) {
+    const placed = rackMembers(rack, nodes).filter((n) => rackSpanOf(n))
+        .sort((x, y) => x.rackU - y.rackU || String(x.id).localeCompare(String(y.id)));
+    const out = [];
+    for (let i = 0; i < placed.length; i++) {
+        const a = placed[i], sa = rackSpanOf(a), fa = rackFullDepth(a);
+        for (let j = i + 1; j < placed.length; j++) {
+            const b = placed[j], sb = rackSpanOf(b);
+            if (sb.lo > sa.hi) break;   // sorted by lowest unit: nothing further up reaches a
+            const fb = rackFullDepth(b);
+            if (rackSpansMeet(sa, fa, sb, fb)) out.push({ a, b, full: fa || fb, both: fa && fb && sa.face !== sb.face });
+        }
+    }
+    return out;
+}
+
+// ---- A rack's cables (step C: the rack view and the report) ----
+// The cables that touch a rack's devices, as the rack view draws them (the
+// agreed scope: one line per device pair, never a port position): every pair
+// of this rack's devices with a cable between them, with the cables, and
+// every device of this rack with a cable to a device elsewhere, once per far
+// device, which the view draws as a stub at the rack's edge labelled with the
+// far end. A cable from a device to itself is not one. Pure over its
+// arguments. -> { pairs: [{ a, b, links }], stubs: [{ node, far, links }] },
+// a before b in the document's order, the cables in theirs.
+function rackCables(rack, links = state.links, nodes = state.nodes) {
+    if (!rack) return { pairs: [], stubs: [] };
+    const byId = new Map(), order = new Map();
+    (nodes || []).forEach((n, i) => { if (n) { byId.set(n.id, n); order.set(n.id, i); } });
+    const inRack = (n) => n.group === rack.id;
+    const pairs = new Map(), stubs = new Map();
+    (links || []).forEach((l) => {
+        if (!l || l.source === l.target) return;
+        const s = byId.get(l.source), d = byId.get(l.target);
+        if (!s || !d) return;
+        const si = inRack(s), di = inRack(d);
+        let map, key, make;
+        if (si && di) {
+            const [a, b] = order.get(s.id) <= order.get(d.id) ? [s, d] : [d, s];
+            map = pairs; key = `${a.id}\u0000${b.id}`; make = () => ({ a, b, links: [] });
+        } else if (si || di) {
+            const [node, far] = si ? [s, d] : [d, s];
+            map = stubs; key = `${node.id}\u0000${far.id}`; make = () => ({ node, far, links: [] });
+        } else return;
+        if (!map.has(key)) map.set(key, make());
+        map.get(key).links.push(l);
+    });
+    return { pairs: [...pairs.values()], stubs: [...stubs.values()] };
+}
+// One cable as the person at the rack reads it, from `from`'s end: its port
+// there, its port at the other end, and its label and colour when set.
+// -> { ports: 'eth0 ↔ Gi0/1', label: 'C-12', color: 'blue' }
+function rackCableText(link, from) {
+    const other = link.source === from.id ? link.target : link.source;
+    const far = getNode(other);
+    return { ports: `${ifaceLabel(from, ifaceIdOn(link, from.id))} ↔ ${far ? ifaceLabel(far, ifaceIdOn(link, other)) : '—'}`,
+        label: cableOf(link, 'label').trim(), color: cableOf(link, 'color').trim() };
+}
+// "Building A / Server room / Rack 3", or '' when it is in no group.
+const groupPathOf = (node, groups = state.groups) => { const g = groupOfNode(node, groups); return g ? groupPath(g, groups) : ''; };
+// Where a device is, as one line: its group's path (and its units, in a
+// rack), else the free-text location it was given. Every place that showed
+// node.location shows this instead, so the text a person typed before groups
+// existed stays readable on a device nobody has grouped yet.
+function nodePlaceText(node, groups = state.groups) {
+    const path = groupPathOf(node, groups);
+    if (!path) return node && typeof node.location === 'string' ? node.location.trim() : '';
+    const span = rackSpanText(node, groups);
+    return span ? `${path} · ${span}` : path;
+}
+
+// ---- Places typed as text ----
+// A place written on one line: the free-text location a register held before
+// groups ("Building A / Server room / Rack 3", "HQ > IT", "Floor 2, Room 4"),
+// a spreadsheet's group column, a pasted table cell. Split on " / ", ">" or
+// "," (the agreed scope): a slash needs its spaces, so "Rack A/B" is one name.
+const PLACE_SPLIT_RE = /\s+\/\s+|\s*>\s*|\s*,\s*/;
+const splitPlacePath = (text) => String(text == null ? '' : text).split(PLACE_SPLIT_RE).map(groupName).filter(Boolean);
+// Compared the way a person reads them: case aside, a run of spaces as one,
+// and " / " however it was spaced, so "server room/rack 3" finds the path.
+const placeKey = (s) => String(s == null ? '' : s).trim().replace(/\s+/g, ' ').replace(/ ?\/ ?/g, ' / ').toLowerCase();
+
+// A unit range at the end of a location ("U12", "U12-U13", "u 7–8"): where
+// in its rack a device sits, not a group of its own. -> { u, height } | null.
+const RACK_SPAN_RE = /^u\s?(\d{1,2})(?:\s*[-–]\s*u?\s?(\d{1,2}))?$/i;
+function parseRackSpan(text) {
+    const m = RACK_SPAN_RE.exec(String(text == null ? '' : text).trim());
+    if (!m) return null;
+    const u = Number(m[1]), top = m[2] === undefined ? u : Number(m[2]);
+    if (u < 1 || top < u) return null;
+    return { u, height: top - u + 1 };
+}
+
+// The kind a group named like this most likely is ("Rack 3" a rack, "2nd
+// floor" a floor), in the languages Topo speaks, else custom. Only a guess,
+// made where groups are made from text (Make groups from locations, a
+// spreadsheet's group column); the kind is one change away in the Groups
+// tab. Whole words, not substrings: "Storage" is no rack for holding "rack".
+const GROUP_KIND_WORDS = [
+    ['rack', /(?<![\p{L}\p{N}])(rack|cabinet|gabinete|bastidor|armário|armario|стойка|шкаф)(?!\p{L})|ラック/iu],
+    ['floor', /(?<![\p{L}\p{N}])(floor|level|storey|piso|planta|andar|nivel|этаж)(?!\p{L})|階|フロア/iu],
+    ['room', /(?<![\p{L}\p{N}])(room|sala|cuarto|closet|idf|mdf|office|oficina|escritório|escritorio|помещение|комната|серверная|кабинет)(?!\p{L})|室|部屋/iu],
+    // A site is filed as a building: Topo has no kind above one, and the
+    // top of a location path is the place somebody drives to.
+    ['building', /(?<![\p{L}\p{N}])(building|bldg|edificio|edifício|prédio|predio|torre|tower|hq|headquarters|site|campus|branch|sede|matriz|sucursal|filial|здание|корпус|кампус|филиал)(?!\p{L})|棟|ビル|本社|支社|支店|拠点/iu]
+];
+// `fallback` is the kind when no word matches: 'custom', except where the
+// caller knows more (the top of a typed path is nearly always a site).
+function guessGroupKind(name, fallback = 'custom') {
+    const hit = GROUP_KIND_WORDS.find(([, re]) => re.test(String(name || '')));
+    return hit ? hit[0] : fallback;
+}
+
+// A place typed as text, against the groups: the group it names, or why not.
+// Tried first as a whole path, as groupPath() prints it, so a name holding a
+// separator ("Smith, J.") still finds its group; then as a group id (what a
+// select hands over); then segment by segment. The first segment may be any
+// group of that name (one, or it is ambiguous), and each one after it a group
+// inside the one before. -> { group } | { ambiguous: n } | { missing:
+// [segments still to make], parent: the deepest group found, or null } |
+// { none: true } for blank.
+function findGroupByPath(text, groups = state.groups) {
+    const list = groups || [];
+    const whole = placeKey(text);
+    if (!whole) return { none: true };
+    const byPath = list.filter((g) => placeKey(groupPath(g, list)) === whole);
+    if (byPath.length === 1) return { group: byPath[0] };
+    if (byPath.length > 1) return { ambiguous: byPath.length };
+    const byId = groupById(String(text).trim(), list);
+    if (byId) return { group: byId };
+    const parts = splitPlacePath(text);
+    if (!parts.length) return { none: true };
+    const named = (seg, inside) => list.filter((g) => placeKey(groupLabel(g)) === placeKey(seg) && (inside === undefined || (g.parent || null) === inside));
+    const first = named(parts[0]);
+    if (first.length > 1) return { ambiguous: first.length };
+    if (!first.length) return { missing: parts, parent: null };
+    let cur = first[0];
+    for (let i = 1; i < parts.length; i++) {
+        const next = named(parts[i], cur.id);
+        if (next.length > 1) return { ambiguous: next.length };
+        if (!next.length) return { missing: parts.slice(i), parent: cur };
+        cur = next[0];
+    }
+    return { group: cur };
+}
+
+// Paths resolved against `groups` and the groups this maker has planned to
+// make, so a sheet naming "Building A / Rack 3" on ten rows makes each group
+// once. Pure: nothing is added to `groups`; `made` is the list to add, in
+// order, every parent ahead of its children. resolve(text, create) ->
+// { group, made: n } | { ambiguous: n } | { missing: path } | { none: true }.
+function groupPathMaker(groups = state.groups) {
+    const made = [];
+    const all = () => (groups || []).concat(made);
+    // The top of a path with more below it ("HQ / Floor 2 / Sales") is a
+    // site whatever it is called, so a name that says nothing is a building
+    // there. A lone name ("Sales") is not known to be one, until a later
+    // path puts something inside it: the order the paths come in does not
+    // decide the kind.
+    const loneTops = new Set();
+    const resolve = (text, create) => {
+        const r = findGroupByPath(text, all());
+        if (!r.missing) return Object.assign({ made: 0 }, r);
+        if (!create) return { missing: (r.parent ? [groupPath(r.parent, all())] : []).concat(r.missing).join(' / ') };
+        let parent = r.parent;
+        if (parent && loneTops.delete(parent.id) && parent.kind === 'custom') parent.kind = 'building';
+        r.missing.forEach((seg, i) => {
+            const said = guessGroupKind(seg, '');
+            const top = !parent;
+            const g = makeGroup({ name: seg, kind: said || (top && i < r.missing.length - 1 ? 'building' : 'custom'), parent: parent ? parent.id : null });
+            if (top && !said && i === r.missing.length - 1) loneTops.add(g.id);
+            made.push(g);
+            parent = g;
+        });
+        return { group: parent, made: r.missing.length };
+    };
+    return { made, resolve, all };
+}
+
+// A device moved into another group: what it keeps of its place in a rack.
+// Into a rack it keeps it all (moving a rack's contents to another keeps
+// their units and faces), anywhere else it loses the lot, as the device
+// editor's picker has it (setNodeGroup, js/groups.js). -> the keys to drop.
+const RACK_KEYS = ['rackU', 'rackHeight', 'rackFace', 'rackDepth'];
+const rackKeysLost = (node, toGroup) => (isRackGroup(toGroup) ? [] : RACK_KEYS.filter((k) => node && node[k] !== undefined));
+
+// ============================================================================
+// Hosts: the device a VM or a container runs on (Review-Packs/Topo-groups.md,
+// "Round 3", item 2; document v10)
+// ============================================================================
+// node.host names, by id, the device a virtual one (isVirtualType) runs on. A
+// VM runs on a computer (HOST_TYPES): a server (a hypervisor or a NAS is
+// drawn as one), a workstation running a desktop hypervisor, or a custom
+// device, the appliance Topo has no type for; a container runs on one of
+// those or on a VM. That is the whole nesting: a container in a VM, one
+// level, and no VM in a VM or anything in a container (the owner's rule).
+// Network gear, phones, printers, cameras and the rest are not hosts: the
+// rack view lights a host under a dragged VM and takes the drop, and a VM
+// let go over the core switch must not end up running on it. A cloud stands
+// for the internet or another site, not a box, so nothing runs on one.
+//
+// What follows from it, kept by repairHosts():
+//   - a guest takes no rack units of its own: in a rack it is where its host
+//     is (rackSpanText reads the host's units for it), so a VM never claims,
+//     or overlaps on, a unit of the rack;
+//   - its group is its host's (the outermost host's, for a container in a
+//     VM): a VM sits in the room its hypervisor sits in. Moving a host into
+//     another group takes its guests with it; a guest's own Group picker,
+//     its table cell and the bulk panel's Move to group leave it to its host.
+// Its map position and its cables are its own and stay as they are.
+//
+// The host types offered first by the pickers (the device editor's Runs on,
+// the table, the bulk panel); any other device that canHost() is still a
+// host, listed after them, since a PC can run containers too.
+const HOST_SUGGESTED = { vm: ['server'], container: ['server', 'vm'] };
+// May a device of guestType run on `host`? Types only: whether the host is
+// itself on something is the next level's question, and the two rules
+// together stop at one level.
+const HOST_TYPES = ['server', 'pc', 'custom'];
+function canHost(guestType, host) {
+    if (!host || !isVirtualType(guestType)) return false;
+    return HOST_TYPES.includes(host.type) || (guestType === 'container' && host.type === 'vm');
+}
+// How deep the chain may go: a container on a VM on a server. A walk stops
+// there whatever a scratch copy that skipped the repair says.
+const HOST_DEPTH_MAX = 2;
+// The device it runs on, or null. Read through getNode, so a borrowed
+// document (the report's binder sweep, a scratch copy) answers for itself.
+const hostOf = (node) => (node && node.host ? getNode(node.host) || null : null);
+// Its hosts, innermost first: [VM, server] for a container in a VM.
+function hostChainOf(node) {
+    const out = [];
+    const seen = new Set([node && node.id]);
+    for (let h = hostOf(node); h && !seen.has(h.id) && out.length < HOST_DEPTH_MAX; h = hostOf(h)) { seen.add(h.id); out.push(h); }
+    return out;
+}
+// The outermost host, the one that is somewhere: null when it runs on nothing.
+const hostRootOf = (node) => { const c = hostChainOf(node); return c.length ? c[c.length - 1] : null; };
+// What runs on `host` itself (not on its guests), in document order.
+const guestsOf = (host, nodes = state.nodes) => (host ? (nodes || []).filter((n) => n && n.host === host.id && n !== host) : []);
+// Everything that runs on `host`, a VM's containers straight after the VM:
+// what the rack view draws in its box and the report lists beside it.
+const guestTreeOf = (host, nodes = state.nodes) => guestsOf(host, nodes).flatMap((g) => [g, ...guestsOf(g, nodes).filter((c) => c !== host)]);
+// The devices `guest` may run on, suggested types first, then by name.
+function hostCandidates(guest, nodes = state.nodes) {
+    if (!guest || !isVirtualType(guest.type)) return [];
+    const first = HOST_SUGGESTED[guest.type] || [];
+    const rank = (n) => (first.includes(n.type) ? 0 : 1);
+    return (nodes || []).filter((n) => n && n !== guest && n.id !== guest.id && canHost(guest.type, n))
+        .sort((a, b) => rank(a) - rank(b) || String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true, sensitivity: 'base' }));
+}
+const isSuggestedHost = (guestType, host) => !!host && (HOST_SUGGESTED[guestType] || []).includes(host.type);
+// The host as a spreadsheet cell: its name, or its id when another device
+// has the same name (an import would find two and refuse the row).
+function hostRefText(id, nodes = state.nodes) {
+    const h = id ? (nodes || []).find((n) => n && n.id === id) : null;
+    if (!h) return '';
+    const name = String(h.name || '').trim();
+    const key = name.toLowerCase();
+    return name && (nodes || []).filter((n) => n && String(n.name || '').trim().toLowerCase() === key).length === 1 ? name : h.id;
+}
+
+// The host rule, in place, on a list of devices as loaded or as edited:
+//   1. a host that is not in the list, is the device itself or is not one
+//      this device may run on (canHost) is dropped, and so is the host of a
+//      device that is not virtual (the schema's reader drops that on load;
+//      a VM retyped to a server in this session still holds it);
+//   2. a chain that comes back round is cut where it closes (the type rule
+//      makes one impossible, but a walk must never depend on that);
+//   3. a virtual device keeps no rack units, host or not;
+//   4. a guest's group is its outermost host's, or none.
+// Runs on load (loadDocState), on every save() (so an edit anywhere, a
+// host moved into a room, a host deleted, a guest retyped to a server,
+// leaves the document sound without each path knowing the rule) and after
+// the spreadsheet and the bulk panel write a scratch copy. The first device
+// holding an id is the one a host reference means, as everywhere else.
+// Returns the list.
+function repairHosts(nodes) {
+    const list = Array.isArray(nodes) ? nodes : [];
+    const byId = new Map();
+    list.forEach((n) => { if (n && typeof n === 'object' && !byId.has(n.id)) byId.set(n.id, n); });
+    list.forEach((n) => {
+        if (!n || typeof n !== 'object' || n.host === undefined) return;
+        const h = isVirtualType(n.type) && typeof n.host === 'string' ? byId.get(n.host) : null;
+        if (!h || h === n || !canHost(n.type, h)) delete n.host;
+    });
+    list.forEach((n) => {
+        if (!n || !n.host) return;
+        const seen = new Set([n]);
+        for (let h = byId.get(n.host); h && h.host; h = byId.get(h.host)) {
+            if (seen.has(h) || seen.size > HOST_DEPTH_MAX) { delete n.host; break; }
+            seen.add(h);
+        }
+    });
+    list.forEach((n) => {
+        if (!n || !isVirtualType(n.type)) return;
+        RACK_KEYS.forEach((k) => { if (n[k] !== undefined) delete n[k]; });
+        if (!n.host) return;
+        let root = byId.get(n.host);
+        for (let i = 0; root && root.host && i < HOST_DEPTH_MAX; i++) root = byId.get(root.host) || root;
+        if (root && root.group) { if (n.group !== root.group) n.group = root.group; } else if (n.group !== undefined) delete n.group;
+    });
+    return list;
+}
+
+// ---- A rack's height changed ("Round 2", item 4) ----
+// A new height keeps every device on the units printed beside it. On a rack
+// numbered from the bottom the units come and go at the top and nothing
+// stored moves. On one numbered from the top they come and go at the bottom,
+// so every device's stored unit (counted from the bottom, see "How a rack's
+// units are numbered") moves by the change and "U3" is still U3: a rack
+// drawn at the default 42U and corrected to the 24U it really is keeps the
+// devices placed at its top where they were. A device that was inside the
+// rack and would not be any more loses its unit and face (it stays in the
+// rack, under Not placed yet, with its height and depth, as Clear its units
+// leaves it) rather than hang outside as a finding; every way of changing
+// the height asks first, naming them. One already outside is left outside,
+// still a finding. Pure: -> { shift, lost: [node] }.
+function rackResizePlan(rack, height, nodes = state.nodes) {
+    const shift = rackTopDown(rack) ? height - rackTop(rack) : 0;
+    const lost = rackMembers(rack, nodes).filter((n) => {
+        const s = rackSpanOf(n);
+        return s && rackSpanInside(rack, s.lo, s.hi) && !(s.lo + shift >= 1 && s.hi + shift <= height);
+    });
+    return { shift, lost };
+}
+// Writes it, in place, on `rack` and `nodes`: the caller's batch() makes it
+// one undo step. -> the plan it followed.
+function applyRackHeight(rack, height, nodes = state.nodes) {
+    const plan = rackResizePlan(rack, height, nodes);
+    const lost = new Set(plan.lost);
+    rackMembers(rack, nodes).forEach((n) => {
+        if (!Number.isInteger(n.rackU)) return;
+        if (lost.has(n)) { delete n.rackU; delete n.rackFace; return; }
+        if (plan.shift) n.rackU = asRackU(n.rackU + plan.shift);
+    });
+    rack.uHeight = height;
+    return plan;
+}
+// The question asked before: which devices lose their units, by name and
+// where they are now. '' when none does (a taller rack, or free units).
+const RACK_LOST_LIST_MAX = 12;
+function rackShrinkQuestion(rack, height, nodes = state.nodes, groups = state.groups) {
+    const { lost } = rackResizePlan(rack, height, nodes);
+    if (!lost.length) return '';
+    const lines = lost.slice(0, RACK_LOST_LIST_MAX).map((n) => `• ${n.name || n.id} (${rackSpanText(n, groups)})`);
+    if (lost.length > RACK_LOST_LIST_MAX) lines.push(t('…and {n} more.', { n: lost.length - RACK_LOST_LIST_MAX }));
+    return [t(lost.length === 1
+        ? '{rack} becomes {h}U. This device is in units it loses, so it loses its place and waits under Not placed yet:'
+        : '{rack} becomes {h}U. These {n} devices are in units it loses, so they lose their places and wait under Not placed yet:',
+    { rack: groupLabel(rack), h: height, n: lost.length }), ...lines].join('\n');
+}
+
+// ============================================================================
 // Document versions and migrations
 // ============================================================================
 // The document carries its own schema version, `v`. Before it did, every load,
@@ -1808,6 +2562,33 @@ function planRenumber(netId, cidrText) {
 //   v 6             port names and port facts on a switch or an AP
 //                   (node.portScheme, node.portAttrs). Nothing to convert; a
 //                   v5 build would drop every label and VLAN on its next save.
+//   v 7             groups (doc.groups, a tree of buildings, floors, rooms
+//                   and racks) and a device's place in one (node.group,
+//                   rackU, rackHeight, rackFace, rackDepth). Nothing to convert:
+//                   the free-text location stays as it was, and making groups
+//                   from it is a step the user confirms. A v6 build would
+//                   drop the whole tree on its next save.
+//   v 8             full depth is the default in a rack (Review-Packs/
+//                   Topo-groups.md, "Round 2", item 3): rackDepth is 'half'
+//                   for a device on one face and absent for one that fills
+//                   the depth. v7 stored it the other way round ('full', and
+//                   absent for shallow); the owner wants every existing rack
+//                   device full depth, so the step drops rackDepth from
+//                   every device, which makes them all full. A v7 build
+//                   would read 'half' as nothing and absent as shallow, so
+//                   it opens a v8 document read-only.
+//   v 9             a rack's size ("Round 2", item 4): widths of 10" and
+//                   23" beside 19", a depth in mm (rack.depthMm) and top-down
+//                   numbering (rack.numbering 'top'). Nothing to convert; a
+//                   v8 build would read 10" and 23" as 19" and drop the
+//                   depth and the numbering on its next save.
+//   v 10            the device a VM or a container runs on (node.host;
+//                   "Hosts" above, "Round 3", item 2). Nothing to convert:
+//                   no document before it said what runs where, and a
+//                   virtual device's rack units, which it no longer keeps,
+//                   are the normalizer's to drop (repairHosts), as a
+//                   loaded document's every other unsound reference is. A
+//                   v9 build would drop every host on its next save.
 //
 // A document with a higher `v` was written by a newer Topo. Its unknown fields
 // cannot be kept — the serializer is an allowlist, and that is a privacy rule,
@@ -1819,14 +2600,14 @@ function planRenumber(netId, cidrText) {
 // DOC_VERSION. A step takes a plain document and returns one, and never
 // mutates its input. Never edit a shipped step: documents in the wild were
 // read by it.
-const DOC_VERSION = 6;
+const DOC_VERSION = 10;
 
 // A document's outline: an object whose lists, where present, are lists. The
 // loader tolerates a missing list (a bare { nodes } file is a document), but a
 // list that is something else is a damaged document, and saying so beats
 // reading it as an empty, finding-free network.
 const isDocShape = (doc) => !!doc && typeof doc === 'object' && !Array.isArray(doc)
-    && ['nodes', 'links', 'networks', 'annotations'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
+    && ['nodes', 'links', 'networks', 'groups', 'annotations'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
 
 const docVersionOf = (doc) => (doc && Number.isInteger(doc.v) && doc.v >= 1 ? doc.v : 1);
 
@@ -1925,7 +2706,27 @@ const MIGRATIONS = [
     // Accepted findings are a new key, not a new shape.
     { from: 4, to: 5, run: (doc) => ({ ...doc, v: 5 }) },
     // Port names and port facts are new keys, not a new shape.
-    { from: 5, to: 6, run: (doc) => ({ ...doc, v: 6 }) }
+    { from: 5, to: 6, run: (doc) => ({ ...doc, v: 6 }) },
+    // Groups and the rack fields are new keys, not a new shape.
+    { from: 6, to: 7, run: (doc) => ({ ...doc, v: 7 }) },
+    // Full depth becomes the default: v7's 'full' and v7's absent (shallow)
+    // both become absent, full depth. Copies only the devices that carried
+    // the key, so the rest of the document is passed through untouched.
+    {
+        from: 7, to: 8,
+        run: (doc) => ({ ...doc, v: 8,
+            nodes: Array.isArray(doc.nodes) ? doc.nodes.map((n) => {
+                if (!n || typeof n !== 'object' || !Object.prototype.hasOwnProperty.call(n, 'rackDepth')) return n;
+                const out = { ...n };
+                delete out.rackDepth;
+                return out;
+            }) : doc.nodes })
+    },
+    // A rack's width, depth and numbering are new values and keys, not a
+    // new shape.
+    { from: 8, to: 9, run: (doc) => ({ ...doc, v: 9 }) },
+    // A virtual device's host is a new key, not a new shape.
+    { from: 9, to: 10, run: (doc) => ({ ...doc, v: 10 }) }
 ];
 
 // The v2 interface zone flags of `src`, put back on the same node as written.

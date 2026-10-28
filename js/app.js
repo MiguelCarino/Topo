@@ -245,7 +245,9 @@ function nextFreeHost(networkStr, prefix) {
 //   * devices with no cable at all go last, in one block.
 // With two or more devices selected, only those are arranged, by the same
 // rules among themselves, where they already were (the top-left of the
-// arrangement stays where the selection's was); nothing else moves.
+// arrangement stays where the selection's was); nothing else moves, but for
+// the groups inside a group whose devices are all selected
+// (tidyWithInnerGroups).
 // One batch: every node moves, and that is one step and one redraw.
 const TIDY_WRAP = 12;
 function tidyLayout() { batch(tidyLayoutNow); }
@@ -253,8 +255,8 @@ function tidyLayoutNow() {
     if (!state.nodes.length || readOnlyRefuses()) return;
     const picked = selectedOf('node').map(getNode).filter(Boolean);
     const only = picked.length >= 2;
-    const nodes = only ? picked : state.nodes;
-    const pos = tidyPositions(nodes, state.links);
+    const nodes = only ? tidyWithInnerGroups(picked) : state.nodes;
+    const pos = tidyPositionsGrouped(nodes, state.links);
     let dx = 0, dy = 0;
     if (only) {
         // Anchored: the arrangement starts where the selection started.
@@ -413,6 +415,153 @@ function tidyPositions(nodes, links) {
     return pos;
 }
 
+// ---- Tidy with groups (Review-Packs/Topo-groups.md, step B) ----
+// Tidy lays the map out by its cables. With groups, a building's devices
+// laid out by cables alone were scattered over the whole drawing, and their
+// frames (js/groupmap.js) were drawn round half the map and over each other.
+// So when the devices tidied sit in groups, each group is laid out as a
+// block of its own: its own devices by the rules above, among themselves
+// (what a Tidy of them selected does), and each group inside it as a block
+// in turn; the blocks are then set side by side in shelves, the way a
+// switch's devices are, far enough apart that no frame, tab included, lands
+// on another, and an inner frame stays inside the one round it. The devices
+// in no group are one more block among them.
+//
+// What goes first is what the cables say: the blocks are ordered by where
+// their devices would sit in a Tidy without groups, so the block with the
+// internet and the core comes first and the access closets after it.
+//
+// The reduced views draw no frames, so they tidy by cables alone, as before
+// groups existed; so does a set of devices in no group.
+//
+// A selection tidied with groups: a group whose own devices are all selected
+// is tidied whole, the groups inside it included. Its frame is drawn round
+// them too, so leaving them where they were (two rooms selected, not their
+// racks) kept a rack switch in place while its room's block was set
+// elsewhere, and the room's frame stretched back to it, over the room beside
+// it. A group only partly selected stays a selection's tidy: only what was
+// picked moves.
+function tidyWithInnerGroups(picked) {
+    const groups = state.groups || [];
+    if (!groups.length || isReduced()) return picked;
+    const ids = new Set(picked.map((n) => n.id));
+    const whole = groups.filter((g) => {
+        const mine = groupMembers(g.id, false);
+        return mine.length && mine.every((n) => ids.has(n.id));
+    });
+    const out = picked.slice();
+    whole.forEach((g) => groupMembers(g.id, true).forEach((n) => { if (!ids.has(n.id)) { ids.add(n.id); out.push(n); } }));
+    return out;
+}
+
+// nodes, links -> Map(id -> { x, y }), as tidyPositions. Pure.
+function tidyPositionsGrouped(nodes, links) {
+    const groups = state.groups || [];
+    const byId = new Map(groups.map((g) => [g.id, g]));
+    const keyOf = (n) => (n.group && byId.has(n.group) ? n.group : null);
+    if (!groups.length || isReduced() || !nodes.some(keyOf)) return tidyPositions(nodes, links);
+    const F = GROUP_FRAME, GAP = 60;
+    const order = tidyPositions(nodes, links);   // where cables alone would put them
+
+    // The tree of the groups holding these devices: each one's own devices,
+    // and the groups directly inside it. null is the top, and its own
+    // devices are the ones in no group.
+    const own = new Map([[null, []]]), kids = new Map([[null, new Set()]]);
+    const parentKey = (gid) => { const p = byId.get(gid).parent; return p && byId.has(p) ? p : null; };
+    nodes.forEach((n) => {
+        const k = keyOf(n);
+        if (!own.has(k)) own.set(k, []);
+        own.get(k).push(n);
+        // Up the chain to the top, guarded: the normalizer refuses a cycle,
+        // but a loop here would hang the page.
+        const seen = new Set();
+        for (let c = k; c !== null && !seen.has(c); c = parentKey(c)) {
+            seen.add(c);
+            const p = parentKey(c);
+            if (!kids.has(p)) kids.set(p, new Set());
+            kids.get(p).add(c);
+        }
+    });
+
+    // One block: its devices' places and the box it takes, frame and margin
+    // included, both relative to the block's own top-left. Each item in it
+    // (its own devices as one, each inner group as one) carries a rank for
+    // the order, and they are shelved left to right, wrapping at MAXW.
+    const rankOf = (list) => list.reduce((r, n) => {
+        const p = order.get(n.id) || n;
+        return p.y < r[0] || (p.y === r[0] && p.x < r[1]) ? [p.y, p.x] : r;
+    }, [Infinity, Infinity]);
+    const layout = (key, depth) => {
+        if (depth > groups.length + 1) return { pos: new Map(), box: { w: 0, h: 0 }, all: [] };
+        const items = [];
+        const mine = own.get(key) || [];
+        if (mine.length) {
+            const p = tidyPositions(mine, links);
+            let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+            p.forEach((v) => { x0 = Math.min(x0, v.x); y0 = Math.min(y0, v.y); x1 = Math.max(x1, v.x); y1 = Math.max(y1, v.y); });
+            // A device's share of a frame: as far round it as groupMapView pads it.
+            const pos = new Map([...p].map(([id, v]) => [id, { x: v.x - x0 + F.SIDE, y: v.y - y0 + F.TOP }]));
+            items.push({ pos, w: x1 - x0 + 2 * F.SIDE, h: y1 - y0 + F.TOP + F.BOTTOM, all: mine, rank: rankOf(mine) });
+        }
+        (kids.get(key) || new Set()).forEach((gid) => {
+            const sub = layout(gid, depth + 1);
+            if (!sub.all.length) return;
+            // An inner frame inside an outer one: the outer reaches this much
+            // further round it (groupMapView's NEST_*).
+            const pos = new Map([...sub.pos].map(([id, v]) => [id, { x: v.x + F.NEST_SIDE, y: v.y + F.NEST_TOP }]));
+            items.push({ pos, w: sub.box.w + 2 * F.NEST_SIDE, h: sub.box.h + F.NEST_TOP + F.NEST_SIDE, all: sub.all, rank: rankOf(sub.all) });
+        });
+        items.sort((a, b) => (a.rank[0] - b.rank[0]) || (a.rank[1] - b.rank[1]));
+        // Shelved, in order, wrapping at `wrap`: each shelf's place.
+        const shelve = (wrap) => {
+            const shelves = [];
+            let cur = null;
+            items.forEach((it) => {
+                if (!cur || (cur.w && cur.w + GAP + it.w > wrap)) { cur = { items: [], w: 0, h: 0 }; shelves.push(cur); }
+                cur.w += (cur.items.length ? GAP : 0) + it.w;
+                cur.h = Math.max(cur.h, it.h);
+                cur.items.push(it);
+            });
+            const w = Math.max(0, ...shelves.map((s) => s.w));
+            const h = shelves.reduce((sum, s) => sum + s.h, 0) + GAP * Math.max(0, shelves.length - 1);
+            return { shelves, w, h };
+        };
+        // The wrap that makes the block most like a screen, landscape: one
+        // fixed width put a site's floors one under another, a column too
+        // tall to read when the map is framed. Tried at every width a run of
+        // items in a row can take (a handful of items, so a handful of tries).
+        const ASPECT = 1.6;
+        let best = null;
+        const widths = new Set([Math.max(0, ...items.map((it) => it.w))]);
+        items.forEach((_, i) => { let s = 0; items.slice(i).forEach((it, k) => { s += (k ? GAP : 0) + it.w; widths.add(s); }); });
+        [...widths].sort((a, b) => a - b).forEach((wrap) => {
+            const p = shelve(wrap);
+            const score = Math.max(p.w / ASPECT, p.h);
+            if (!best || score < best.score - 0.5) best = Object.assign(p, { score });
+        });
+        // Each shelf centred under the widest: a rack's switch sits over the
+        // middle of the desks it serves, not at their left end.
+        const pos = new Map();
+        let y = 0;
+        best.shelves.forEach((s) => {
+            let x = Math.round((best.w - s.w) / 2);
+            s.items.forEach((it) => {
+                it.pos.forEach((v, id) => pos.set(id, { x: v.x + x, y: v.y + y }));
+                x += it.w + GAP;
+            });
+            y += s.h + GAP;
+        });
+        return { pos, box: { w: best.w, h: best.h }, all: items.flatMap((it) => it.all) };
+    };
+    const top = layout(null, 0);
+    // Where a Tidy without groups starts, so the map is framed as before.
+    let x0 = Infinity, y0 = Infinity;
+    top.pos.forEach((v) => { x0 = Math.min(x0, v.x); y0 = Math.min(y0, v.y); });
+    const out = new Map();
+    top.pos.forEach((v, id) => out.set(id, { x: v.x - x0 + 140, y: v.y - y0 + 120 }));
+    return out;
+}
+
 // Blocks (stamped pieces of a network) are saved selections now, inserted
 // re-addressed into the next free network: insertBlock in js/add.js.
 
@@ -436,8 +585,9 @@ function loadSettings() {
         if (resolveLocale(saved.lang)) state.settings.lang = resolveLocale(saved.lang);
         if (['nodes', 'templates', 'blocks'].includes(saved.libraryTab)) state.settings.libraryTab = saved.libraryTab;
         if (typeof saved.subnetZones === 'boolean') state.settings.subnetZones = saved.subnetZones;
-        // Map or Table, once chosen (js/table.js); until then the width decides.
-        if (saved.view === 'map' || saved.view === 'table') state.settings.view = saved.view;
+        // Map, Table or Rack, once chosen (js/table.js); until then the width
+        // decides. Rack stands only while the document has a rack.
+        if (saved.view === 'map' || saved.view === 'table' || saved.view === 'rack') state.settings.view = saved.view;
     } catch (e) { /* first run or blocked storage */ }
 }
 
@@ -494,6 +644,13 @@ function fitToView(nodes) {
         minX = Math.min(minX, n.x - NODE); minY = Math.min(minY, n.y - NODE);
         maxX = Math.max(maxX, n.x + NODE); maxY = Math.max(maxY, n.y + NODE + LABEL);
     });
+    // The whole map takes in the group frames, whose tabs sit above the
+    // devices (js/groupmap.js); a set of matches is framed by its devices.
+    const frames = Array.isArray(nodes) ? null : groupFrameBounds();
+    if (frames) {
+        minX = Math.min(minX, frames.minX); minY = Math.min(minY, frames.minY);
+        maxX = Math.max(maxX, frames.maxX); maxY = Math.max(maxY, frames.maxY);
+    }
     const PAD = 80;
     const w = (maxX - minX) || 1, h = (maxY - minY) || 1;
     const zoom = Math.min(1.4, Math.max(0.2, Math.min((rect.width - PAD * 2) / w, (rect.height - PAD * 2) / h)));
@@ -555,8 +712,9 @@ function serializeDoc() {
     // networks (R7) rides the same trick: a document that declares none
     // carries no key for them. So does `accepted` (the findings accepted with
     // a reason, js/diagnostics.js): allowlisted to its four fields, and the
-    // ids of devices and cables that are gone left out.
-    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), accepted: serializeAccepted(state.accepted), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report) };
+    // ids of devices and cables that are gone left out. And `groups` (v7):
+    // allowlisted through GROUP_FIELDS, no key when there are none.
+    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), accepted: serializeAccepted(state.accepted), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report) };
 }
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
@@ -950,6 +1108,14 @@ function save() {
         return;
     }
     try {
+        // The host rule (js/model.js "Hosts"), here because every edit ends
+        // here: a host moved into a room takes its VMs, a deleted host leaves
+        // its guests on nothing, a VM retyped to a server stops being a guest,
+        // without the dozen paths that move, delete and retype each knowing
+        // it. In place, before the snapshot, so the step undo files is the
+        // document as it now is.
+        repairHosts(state.nodes);
+        pruneHostFolds();   // a host whose last guest just went folds nothing (js/groupmap.js)
         const doc = serializeDoc();
         const json = JSON.stringify(doc);
         // A field still being typed into is part of this document already (the
@@ -1108,6 +1274,7 @@ function recordHistory(json) {
 function applyDoc(json) {
     state.linkSourceId = null;
     loadDocState(JSON.parse(json));
+    pruneHostFolds();   // the step took a host's last guest away: no fold left on it
     pruneSelection();
     // Queued like any edit: a held Ctrl+Z repeats thirty times a second.
     const now = JSON.stringify(serializeDoc());
@@ -1180,6 +1347,12 @@ function loadDocState(doc) {
     state.nodes = list(d.nodes).map(normalizeLoadedNode);
     state.links = list(d.links).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
     state.networks = normalizeNetworks(d.networks);
+    // Groups after the devices: a device's group must be one of them.
+    state.groups = normalizeGroups(d.groups);
+    normalizeGroupRefs(state.nodes, state.groups);
+    // And after both: a VM's host must be a device here it may run on, and
+    // its group is its host's (js/model.js "Hosts").
+    repairHosts(state.nodes);
     state.accepted = normalizeAccepted(d.accepted);
     state.annotations = list(d.annotations).filter((a) => a && typeof a === 'object').map(normalizeLoadedAnnotation);
     // Left exactly as stored. normalizeReportMeta() defaults the date to today,
@@ -1239,6 +1412,7 @@ function replaceDocument(doc, opts = {}) {
     if (!lib && opts.claim && !newer) lib = ident.id || mintLibraryId();
     state.libraryId = lib;
     state.docId = lib || opts.docId || ident.id || null;
+    groupViewDocChanged();   // its own collapsed groups: a view, kept per document (js/groupmap.js)
     const card = lib ? libraryEntry(lib) : null;
     state.docUpdated = card ? card.updated || 0 : (Number.isFinite(opts.docUpdated) ? opts.docUpdated : ident.updated);
     // Kept exactly as it arrived, so an export or a share of it loses nothing
@@ -1336,8 +1510,8 @@ function renderReadOnly() {
     const banner = document.getElementById('readOnlyBanner');
     if (banner) banner.classList.toggle('hidden', !on);
     // The Subnets tab's networks are document too; its "Subnet zones" switch
-    // is a view setting and stays usable.
-    ['tabPanel-nodes', 'tabPanel-blocks', 'cfgPanel-config', 'networkList', 'undeclaredBox', 'addNetworkBtn'].forEach((id) => {
+    // is a view setting and stays usable. The Groups tab's groups too.
+    ['tabPanel-nodes', 'tabPanel-blocks', 'cfgPanel-config', 'networkList', 'undeclaredBox', 'addNetworkBtn', 'groupList', 'addGroupBtn'].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.inert = on;
     });
@@ -1479,8 +1653,26 @@ function parseDocJson(json) {
 // selected device with every cable on it (selected or not — a cable cannot
 // outlive its end), every selected cable, and any note leader that pointed at
 // a deleted device. A note or a leader is only ever selected alone.
-function deleteSelected() {
+//
+// A set holding devices a collapsed group folds out of sight (js/groupmap.js)
+// is asked about first: what is about to go is not on the map to be seen.
+// The answer comes back here with `confirmed`, and the set is the one there
+// is then. So is one holding a VM or a container folded into its host: the
+// question then says folded, which covers both.
+function deleteSelected(opts = {}) {
     if (!state.selection.size || readOnlyRefuses()) return;
+    const hiddenCount = opts.confirmed ? 0 : selectedHiddenCount();
+    if (hiddenCount) {
+        const n = selectedOf('node').length;
+        const inHost = selectedFoldedGuestCount() > 0;
+        const text = n === 1 ? t(inHost ? 'Delete the selected device? It is folded into its host on the map.' : 'Delete the selected device? It is inside a collapsed group on the map.')
+            : inHost ? t(hiddenCount === 1 ? 'Delete the {n} selected devices? One of them is folded out of sight on the map.'
+                : 'Delete the {n} selected devices? {m} of them are folded out of sight on the map.', { n, m: hiddenCount })
+            : t(hiddenCount === 1 ? 'Delete the {n} selected devices? One of them is inside a collapsed group on the map.'
+                : 'Delete the {n} selected devices? {m} of them are inside a collapsed group on the map.', { n, m: hiddenCount });
+        askConfirm(text, { ok: t('Delete'), danger: true }).then((ok) => { if (ok) deleteSelected({ confirmed: true }); });
+        return;
+    }
     const one = soleSelected(state.selection);
     const dropTargets = (gone) => state.annotations.forEach((a) => { if (a.targets && a.targets.length) a.targets = a.targets.filter((t) => !gone.has(t)); });
     batch(() => {
@@ -1545,7 +1737,10 @@ window.addEventListener('mousedown', (event) => {
     }
 });
 
-window.addEventListener('mousemove', (event) => {
+// The drag's move and its release, named so a finger's drag on a device
+// (touchPressNode, below) goes through exactly what a mouse's does.
+window.addEventListener('mousemove', (event) => mapPointerMove(event));
+function mapPointerMove(event) {
     if (isDraggingCanvas && !isDraggingNode) {
         state.camera.x += event.clientX - lastMouse.x; state.camera.y += event.clientY - lastMouse.y;
         lastMouse = { x: event.clientX, y: event.clientY }; applyCamera();
@@ -1553,6 +1748,9 @@ window.addEventListener('mousemove', (event) => {
         const pt = getWorkspacePoint(event.clientX, event.clientY);
         _marquee.x1 = pt.x; _marquee.y1 = pt.y; drawMarquee();
     } else if (isDraggingNode && dragGroup.length) {
+        // A press on a collapsed group's node is a tap (it expands) until the
+        // pointer has travelled a few pixels (js/groupmap.js): nothing moves yet.
+        if (foldPressHolds(event)) return;
         const pt = getWorkspacePoint(event.clientX, event.clientY);
         // The pressed item snaps to the grid and every other item takes the
         // same step from where it started, so a set moves as one and keeps its
@@ -1584,6 +1782,13 @@ window.addEventListener('mousemove', (event) => {
             }
         }));
 
+        // So do the group frames, a collapsed group's node and the cables
+        // folded into it (js/groupmap.js): its members have no element of
+        // their own to move. A device's drag also lights the group it would
+        // be let go into (trackGroupDrop).
+        trackGroupDrop(event);
+        if (mapOverlayLive()) redrawGroupOverlay();
+
         // Note leaders follow drags just as fluidly — the dragged thing may be
         // the note itself or a node one of its red lines points at.
         state.annotations.forEach((a) => {
@@ -1599,22 +1804,105 @@ window.addEventListener('mousemove', (event) => {
             });
         });
     }
-});
+}
 
-window.addEventListener('mouseup', () => { 
-    isDraggingCanvas = false; 
+window.addEventListener('mouseup', (event) => mapPointerUp(event));
+function mapPointerUp(event) {
+    isDraggingCanvas = false;
     if (_marquee) { endMarquee(); return; }
+    // A press on a collapsed group's node that never became a drag was a tap
+    // on it: it expands the group, a view (js/groupmap.js). Nothing moved, so
+    // there is nothing to save and no undo step.
+    const tapped = takeFoldTap(event);
+    // Where a device's drag was let go: into a group, or out of one
+    // (js/groupmap.js). Taken before anything else so a drag never leaves it armed.
+    const drop = takeGroupDrop(event);
+    if (tapped) {
+        isDraggingNode = false; draggedNode = null; dragGroup = []; dragCollapse = null;
+        expandFoldTapped(tapped);
+        return;
+    }
     // A press on one device of a set that moved nothing was a click on it.
     const collapse = dragCollapse && dragGroup.every((g) => g.item.x === g.x0 && g.item.y === g.y0) ? dragCollapse : null;
     dragCollapse = null;
     if (isDraggingNode) {
-        // One save however many moved: a set dragged is one undo step.
-        isDraggingNode = false; draggedNode = null; dragGroup = []; save();
+        // One save however many moved: a set dragged is one undo step, and
+        // so is a drag that also put it in a group or took it out of one.
+        const moved = dragGroup.some((g) => g.item.x !== g.x0 || g.item.y !== g.y0);
+        isDraggingNode = false; draggedNode = null; dragGroup = [];
+        let said = '';
+        // Let go on another device: a new group of them is offered, and the
+        // move waits for the answer, so the move and the group are filed as
+        // one undo step, or the move alone on Cancel (js/groupmap.js).
+        if (moved && drop && drop.target && drop.target.pair) offerGroupFromPair(drop);
+        else if (moved && drop) batch(() => { said = applyGroupDrop(drop); save(); });
+        else save();
+        if (said) { refreshGroupViews(true); showToast(said, 'ok'); }
         if (collapse) { select(collapse, 'node'); return; }   // select() redraws
         renderCanvasOnly(); // Render zones/traces only ONCE when mouse is released
     } else if (collapse) select(collapse, 'node');
     dragGroup = [];
-});
+}
+
+// ---- A finger on a device ----
+// A touch screen sends no mouse events for a finger that moves: only a tap
+// becomes a mousedown, mouseup and click, after the finger lifts. So a press
+// on a device that travels past the tap margin is turned into the mouse's
+// drag here, through the same press (pressNode, js/ui.js), move and release
+// as a mouse's, and with the same drops: into a group, onto a host, onto
+// another device for a new group (js/groupmap.js). A finger that lifts
+// without travelling is left alone, and the browser's own mouse events
+// select the device as they always have. A device's card takes no pan or
+// pinch of its own (touch-action, css/app.css), so the browser hands every
+// move to the page and the drag can cancel them.
+//
+// The moves are heard on the element the finger came down on, not on the
+// window: the press selects the device, which redraws the map and takes that
+// element out of the page, and a touch keeps sending its events to where it
+// started, which then no longer reaches the window.
+let _touchPress = null;
+function touchPressNode(event, node) {
+    if (_touchPress || !event.touches || event.touches.length !== 1 || state.linkSourceId || state.readOnly) return;
+    const first = event.touches[0];
+    const el = event.target;
+    const p = { id: first.identifier, x: first.clientX, y: first.clientY, last: null, started: false };
+    _touchPress = p;
+    // What the mouse's handlers read off an event, from a touch point.
+    const as = (x, y) => ({ clientX: x, clientY: y, button: 0, buttons: 1, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false,
+        sourceCapabilities: { firesTouchEvents: true }, target: el, stopPropagation() {}, preventDefault() {} });
+    const mine = (e) => [...(e.changedTouches || [])].find((x) => x.identifier === p.id);
+    const move = (e) => {
+        const pt = mine(e);
+        if (!pt) return;
+        p.last = pt;
+        if (!p.started) {
+            if (Math.hypot(pt.clientX - p.x, pt.clientY - p.y) <= GM_TAP_SLOP.touch) return;
+            if (!getNode(node.id)) { done(); return; }
+            p.started = true;
+            pressNode(as(p.x, p.y), node);
+        }
+        if (e.cancelable) e.preventDefault();
+        mapPointerMove(as(pt.clientX, pt.clientY));
+    };
+    const end = (e) => {
+        const pt = mine(e) || p.last;
+        if (!pt && e.type !== 'touchcancel') return;
+        done();
+        if (!p.started) return;   // a tap: the browser's mouse events select
+        if (e.cancelable) e.preventDefault();   // and no click after the drag
+        const at = pt || { clientX: p.x, clientY: p.y };
+        mapPointerUp(as(at.clientX, at.clientY));
+    };
+    const done = () => {
+        _touchPress = null;
+        el.removeEventListener('touchmove', move);
+        el.removeEventListener('touchend', end);
+        el.removeEventListener('touchcancel', end);
+    };
+    el.addEventListener('touchmove', move, { passive: false });
+    el.addEventListener('touchend', end);
+    el.addEventListener('touchcancel', end);
+}
 
 document.getElementById('networkCanvas').addEventListener('wheel', (event) => {
     event.preventDefault(); const rect = document.getElementById('networkCanvas').getBoundingClientRect();
@@ -1689,7 +1977,9 @@ const SHORTCUTS = [
     // The table covers the map the same way: there Delete belongs to a cell
     // (it opens the cell empty), and with the focus elsewhere it would remove
     // devices that may be ticked out of sight, so it does nothing at all.
-    { keys: ['Del'], label: 'Delete the selection', test: (e) => (e.key === 'Delete' || e.key === 'Backspace') && !topoOverlayOpen() && !tableShown(),
+    // The rack view (js/rackview.js) shows one rack: the selection can hold
+    // devices that are not in it, so it does nothing there either.
+    { keys: ['Del'], label: 'Delete the selection', test: (e) => (e.key === 'Delete' || e.key === 'Backspace') && !topoOverlayOpen() && !tableShown() && !rackShown(),
       run: () => deleteSelected() },
     { keys: ['Ctrl', 'A'], label: 'Select every device and cable', mod: true, test: (e) => e.key.toLowerCase() === 'a' && !topoOverlayOpen(),
       run: () => selectAll() },
@@ -1792,6 +2082,7 @@ function showConfigTab(name) {
     document.querySelectorAll('.cfg-panel').forEach((p) => p.classList.toggle('hidden', p.id !== `cfgPanel-${name}`));
     // The Subnets tab is only kept up to date while it shows (js/networks.js).
     if (name === 'networks') renderNetworksPanel(true);
+    if (name === 'groups') renderGroupsPanel(true);   // and the Groups tab (js/groups.js)
 }
 document.querySelectorAll('.cfg-tab').forEach((t) => { t.onclick = () => showConfigTab(t.dataset.cfgtab); });
 
@@ -1900,6 +2191,7 @@ function applyLocale(lang) {
     const sel = state.selectedType === 'node' && getNode(state.selectedId);
     if (sel) { refreshInheritance(sel); document.getElementById('propOs').placeholder = fieldHints(sel).os; renderAssetFields(sel); }
     renderNetworksPanel(true);   // its counts and buttons are built, not marked up
+    renderGroupsPanel(true);     // so are the Groups tab's
     renderTableView(true);       // so are the table's headers and counts
     renderBulkPanel(true);       // and the bulk panel's field rows
 }
@@ -2024,6 +2316,9 @@ document.getElementById('redoBtn').onclick = redo;
 // Double-click on empty canvas: drop a text note right there, editor open.
 document.getElementById('networkCanvas').addEventListener('dblclick', (event) => {
     if (event.target.id !== 'networkCanvas') return;
+    // The first click opened a collapsed group and its node went: the second
+    // landed where it was, and is not a double-click on empty canvas.
+    if (groupTapJustExpanded()) return;
     spawnAnnotation({ at: getWorkspacePoint(event.clientX, event.clientY), text: '', edit: true });
 });
 
@@ -2329,7 +2624,10 @@ function canvasSvgMarkup(scale = 1) {
     const PADDING = 90, NODE_HALF_SIZE = 24, LABEL_EXTRA_BOTTOM = 42;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
-    state.nodes.forEach((node) => {
+    // Where each device is drawn: a device folded into a collapsed group is
+    // not drawn at its own x and y but at its group's node (mapPointsOf,
+    // js/groupmap.js), so a group spread wide does not leave empty margin.
+    mapPointsOf(state.nodes).forEach((node) => {
         minX = Math.min(minX, node.x - NODE_HALF_SIZE); minY = Math.min(minY, node.y - NODE_HALF_SIZE);
         maxX = Math.max(maxX, node.x + NODE_HALF_SIZE); maxY = Math.max(maxY, node.y + NODE_HALF_SIZE + LABEL_EXTRA_BOTTOM);
     });
@@ -2341,6 +2639,13 @@ function canvasSvgMarkup(scale = 1) {
         minX = Math.min(minX, a.x); minY = Math.min(minY, a.y);
         maxX = Math.max(maxX, a.x + bb.width); maxY = Math.max(maxY, a.y + bb.height);
     });
+    // So do the group frames (js/groupmap.js): nested ones reach well above
+    // the devices, and the padding alone cut off the outermost tab.
+    const frames = groupFrameBounds();
+    if (frames) {
+        minX = Math.min(minX, frames.minX); minY = Math.min(minY, frames.minY);
+        maxX = Math.max(maxX, frames.maxX); maxY = Math.max(maxY, frames.maxY);
+    }
 
     minX -= PADDING; minY -= PADDING; maxX += PADDING; maxY += PADDING;
     const exportWidth = Math.max(1, Math.ceil(maxX - minX)), exportHeight = Math.max(1, Math.ceil(maxY - minY));
@@ -2348,7 +2653,18 @@ function canvasSvgMarkup(scale = 1) {
     const svg = document.getElementById('networkCanvas').cloneNode(true);
     svg.querySelector('#workspace').setAttribute('transform', `translate(${-minX}, ${-minY}) scale(1)`);
     svg.setAttribute('width', exportWidth * scale); svg.setAttribute('height', exportHeight * scale); svg.setAttribute('viewBox', `0 0 ${exportWidth} ${exportHeight}`);
-    svg.querySelectorAll('.node-delete').forEach((el) => el.remove());
+    // A group's ▾ and a collapsed rack's Open rack (js/groupmap.js) are
+    // controls too; its frame and tab are drawing. So is a host badge's
+    // chevron and tap target; its count of guests is drawing.
+    svg.querySelectorAll('.node-delete, .grp-toggle, .grp-rack-open, .host-fold-chev, .host-badge > .grp-toggle-hit').forEach((el) => el.remove());
+    // With the ▾ gone, its seat at the tab's left end would be an empty gap.
+    svg.querySelectorAll('.grp-frame .grp-tab').forEach((tab) => {
+        const pill = tab.querySelector('.grp-tab-pill'), icon = tab.querySelector('.grp-tab-icon'), text = tab.querySelector('.grp-tab-text');
+        if (!pill || !icon || !text) return;
+        pill.setAttribute('width', String(Math.max(20, Number(pill.getAttribute('width')) - GM_TAB_TOGGLE_W)));
+        icon.setAttribute('transform', 'translate(8, -6)');
+        text.setAttribute('x', '24');
+    });
 
     let markup = new XMLSerializer().serializeToString(svg);
     if (!markup.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)) markup = markup.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');

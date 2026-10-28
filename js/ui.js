@@ -55,9 +55,34 @@ function startDrag(event, items, pressed) {
     const pt = getWorkspacePoint(event.clientX, event.clientY);
     dragOffset.x = pt.x - pressed.x; dragOffset.y = pt.y - pressed.y;
     dragGroup = state.readOnly ? [] : items.map((item) => ({ item, dx: pt.x - item.x, dy: pt.y - item.y, x0: item.x, y0: item.y }));
+    // A drop into a group is a device's press's to arm (js/groupmap.js), after this.
+    if (typeof clearGroupDrop === 'function') clearGroupDrop();
 }
 // Shift, Ctrl or Cmd held: the press adds to the selection or takes out of it.
 const addsToSelection = (event) => !!(event.shiftKey || event.ctrlKey || event.metaKey);
+
+// A press on a device's card: a mouse's, or a finger's once it has travelled
+// past a tap (touchPressNode, js/app.js), which hands over where it came down.
+function pressNode(event, node) {
+    event.stopPropagation();
+    if (state.linkSourceId) return;
+    // Shift/Ctrl/Cmd edits the set and arms no drag: the press was
+    // about what is selected, not about where it is.
+    if (addsToSelection(event)) { toggleSelected('node', node.id); return; }
+    // One of a set: the whole set moves (startDrag), and a release
+    // that moved nothing selects this one alone (dragCollapse).
+    const ofSet = state.selection.size > 1 && inSelection('node', node.id);
+    startDrag(event, ofSet ? selectedOf('node').map(getNode).filter(Boolean) : [node], node);
+    // Let go in a group's frame, it goes into that group; on a host, it runs
+    // on it; on another device, a new group is offered (js/groupmap.js).
+    armGroupDrop(dragGroup.map((g) => g.item));
+    dragCollapse = ofSet ? node.id : null;
+    // A folded host: a tap unfolds it, as one on a collapsed
+    // group's node expands the group, and selects nothing; a drag
+    // moves it (js/groupmap.js, "Hosts on the map").
+    if (!event.button && isHostFolded(node.id)) armHostFoldTap(event, node.id);
+    else if (!ofSet) select(node.id, 'node');
+}
 
 const paletteContainer = document.getElementById('nodePalette');
 paletteDefs.forEach((d) => {
@@ -436,24 +461,44 @@ function renderNoteLeaders() {
 // network set to draw is drawn regardless; that was asked for.
 // Read-only, so it runs in a lookup pass: the membership test parses every
 // address against every network, and the pass parses each once.
-function zonesToDraw() {
+//
+// A device folded into a collapsed group (js/groupmap.js) is not on the map:
+// the zone is drawn round the group's node instead, which stands for it, so a
+// zone never frames an empty patch of canvas where folded devices sit.
+// `gv` is the drawing's group view (groupMapNow()), passed in by drawCanvas.
+function zonesToDraw(gv = groupMapNow()) {
     if (state.settings.subnetZones === false) return [];
-    return withLookupPass(zonesNow);
+    return withLookupPass(() => zonesNow(gv));
 }
-function zonesNow() {
+function zonesNow(gv) {
     const zones = [];
+    // One stand-in per collapsed group, at its node, under an id no device has.
+    const stand = new Map();
+    const shown = (n) => {
+        const gid = gv && gv.hidden.get(n.id);
+        // A guest folded into its host is drawn as the host.
+        const hid = !gid && gv && gv.guestHidden.get(n.id);
+        if (hid) return getNode(hid) || n;
+        if (!gid) return n;
+        if (!stand.has(gid)) {
+            const b = gv.folds.find((x) => x.group.id === gid);
+            stand.set(gid, { id: `group:${gid}`, x: b ? b.x : n.x, y: b ? b.y : n.y });
+        }
+        return stand.get(gid);
+    };
+    const visible = (list) => (gv && (gv.hidden.size || gv.guestHidden.size) ? [...new Set(list.map(shown))] : list);
     state.networks.forEach((net) => {
         const p = parseValidCIDR(net.cidr);
         if (!p || net.drawZone === false) return;
         if (net.drawZone !== true && !p.isPrivate) return;
-        const nodes = networkMembers(net).map((m) => m.node).filter((n) => n.type !== 'cloud');
+        const nodes = visible(networkMembers(net).map((m) => m.node).filter((n) => n.type !== 'cloud'));
         if (nodes.length) zones.push({ net, nodes, auto: net.drawZone !== true });
     });
     // The undeclared ones: an auto zone each, private ranges only, under a
     // stand-in record with nothing but the address (the label says just that).
     undeclaredSubnets().forEach((u) => {
         if (!u.isPrivate) return;
-        const nodes = u.nodeIds.map(getNode).filter(Boolean);
+        const nodes = visible(u.nodeIds.map(getNode).filter(Boolean));
         if (nodes.length) zones.push({ net: { id: `undeclared:${u.cidr}`, cidr: u.cidr }, nodes, auto: true });
     });
     const count = new Map();
@@ -490,7 +535,9 @@ function renderCanvasOnly() {
     updateTraceStatus(reach);
     validateTopology(diag);
     renderNetworksPanel();   // js/networks.js: the Subnets tab's counts follow the drawing
+    renderGroupsPanel();     // js/groups.js: so do the Groups tab's
     renderTableView();       // js/table.js: so does the table view, while it shows
+    renderRackView();        // js/rackview.js: and the rack view, and the switch's Rack
     if (typeof updateQueryBar === 'function') updateQueryBar();   // js/query.js: the match count
 }
 
@@ -514,9 +561,13 @@ function drawCanvas() {
     renderNoteLeaders();
     document.getElementById('networkCanvas').className = `topo-svg${state.linkSourceId ? ' linking' : ''}`;
 
+    // Groups on the map (js/groupmap.js): which devices a collapsed group
+    // folds out of sight and which cables it stands for. Null with no groups.
+    const gv = groupMapNow();
+
     // 1. Zone bubbles, one per network drawn (zonesToDraw above).
     let labelOffsets = {};
-    zonesToDraw().forEach(({ net, nodes, box }) => {
+    zonesToDraw(gv).forEach(({ net, nodes, box }) => {
         const subnet = net.cidr;
         const { minX, minY, maxX, maxY } = box;
 
@@ -579,6 +630,7 @@ function drawCanvas() {
     state.links.forEach((link) => {
         const src = getNode(link.source), tgt = getNode(link.target);
         if (!src || !tgt) return;
+        if (gv && gv.covered.has(link.id)) return;   // drawn folded, or inside a collapsed group
 
         const geo = linkGeometry(link);
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -749,20 +801,30 @@ function drawCanvas() {
     });
 
     // 3. Render Nodes
+    // How many VMs and containers run on each host, for its badge (js/groupmap.js).
+    const guestCounts = hostFoldShown() ? hostGuestCounts() : null;
     state.nodes.forEach((node) => {
+        if (gv && gv.hidden.has(node.id)) return;   // folded into its collapsed group
+        if (gv && gv.guestHidden.has(node.id)) return;   // folded into its host
+        // The guests folded into this host: it stands for them on the map, as
+        // a collapsed group's node does for its devices, so a search match, a
+        // trace or a selection among them shows on it.
+        const inFold = (gv && gv.hostFolds.get(node.id)) || null;
         const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         g.setAttribute('id', `ui-node-${node.id}`);
         g.setAttribute('transform', `translate(${node.x}, ${node.y})`);
 
         const isSelected = inSelection('node', node.id);
         const isLinkSource = state.linkSourceId === node.id;
-        const isReachable = reach && reach.reachableNodes.has(node.id);
+        const isReachable = reach && (reach.reachableNodes.has(node.id) || (!!inFold && inFold.some((x) => reach.reachableNodes.has(x.id))));
+        const foldPicked = !isSelected && !!inFold && inFold.some((x) => inSelection('node', x.id));
+        const foldHit = !!qm && !!inFold && inFold.some((x) => qm.nodes.has(x.id));
         const isInactiveTraceNode = reach && !isReachable;
         const severity = nodeSeverity(node, diag);
 
         let classes = state.linkSourceId ? (isLinkSource ? 'linking-glow cursor-crosshair' : 'cursor-crosshair') : 'cursor-grab active:cursor-grabbing';
         if (isInactiveTraceNode) classes += ' fade-inactive';
-        if (qm && !qm.nodes.has(node.id)) classes += ' q-dim';
+        if (qm && !qm.nodes.has(node.id) && !foldHit) classes += ' q-dim';
         g.setAttribute('class', classes);
         // Retired (js/assets.js): still in the register, no longer on the
         // network. An attribute, not a class, because it is a fact about the
@@ -783,6 +845,8 @@ function drawCanvas() {
         else { rect.setAttribute('fill', '#ffffff'); rect.setAttribute('stroke', '#cbd5e1'); rect.setAttribute('stroke-width', '1.5'); }
 
         if (isVirtualType(node.type)) rect.setAttribute('stroke-dasharray', '4 3');
+        // Some of what is folded into it is selected (a table row, a finding).
+        if (foldPicked && !isLinkSource) { rect.setAttribute('stroke', '#eab308'); rect.setAttribute('stroke-width', '2'); rect.setAttribute('stroke-dasharray', '5 3'); }
         rect.style.transition = 'all 0.1s ease'; g.appendChild(rect);
 
         const iconG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -893,21 +957,14 @@ function drawCanvas() {
             });
         }
 
+        // Something runs on it: its badge, which folds them in (js/groupmap.js).
+        if (guestCounts && guestCounts.get(node.id)) drawHostBadge(g, node, guestCounts.get(node.id), isHostFolded(node.id));
+
         // Interactions
-        g.addEventListener('mousedown', (event) => {
-            event.stopPropagation();
-            if (!state.linkSourceId) {
-                // Shift/Ctrl/Cmd edits the set and arms no drag: the press was
-                // about what is selected, not about where it is.
-                if (addsToSelection(event)) { toggleSelected('node', node.id); return; }
-                // One of a set: the whole set moves (startDrag), and a release
-                // that moved nothing selects this one alone (dragCollapse).
-                const ofSet = state.selection.size > 1 && inSelection('node', node.id);
-                startDrag(event, ofSet ? selectedOf('node').map(getNode).filter(Boolean) : [node], node);
-                dragCollapse = ofSet ? node.id : null;
-                if (!ofSet) select(node.id, 'node');
-            }
-        });
+        g.addEventListener('mousedown', (event) => pressNode(event, node));
+        // A finger that drags it: the same press, once it has travelled
+        // (touchPressNode, js/app.js). Passive: a tap stays the browser's.
+        g.addEventListener('touchstart', (event) => touchPressNode(event, node), { passive: true });
 
         g.addEventListener('click', (event) => {
             event.stopPropagation();
@@ -954,6 +1011,9 @@ function drawCanvas() {
 
         lNodes.appendChild(g);
     });
+    // 4. Groups: frames on their own layer under the cables, the folded
+    // cables and the collapsed nodes over everything drawn above.
+    drawGroupMap(gv, { reach, qm, diag });
     return { reach, diag };
 }
 
@@ -1860,11 +1920,13 @@ function refreshInheritance(node) {
 // target: { type: 'node' | 'link', id }.
 function focusOnMap(target) {
     if (!target) return false;
+    // A device folded into a collapsed group is pointed at by the group's
+    // node (mapPointOf, js/groupmap.js), which shows it holds the selection.
     let at = null;
-    if (target.type === 'node') at = getNode(target.id);
+    if (target.type === 'node') at = mapPointOf(getNode(target.id));
     else if (target.type === 'link') {
         const link = getLink(target.id);
-        const a = link && getNode(link.source), b = link && getNode(link.target);
+        const a = link && mapPointOf(getNode(link.source)), b = link && mapPointOf(getNode(link.target));
         if (a && b) at = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     }
     if (!at) return false;
@@ -1944,6 +2006,7 @@ function pruneSelection() {
 // "Select members" lands here.
 function centreOnNodes(nodes) {
     if (!nodes.length) return;
+    nodes = mapPointsOf(nodes);   // folded ones: their collapsed group's node (js/groupmap.js)
     const rect = document.getElementById('networkCanvas').getBoundingClientRect();
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     nodes.forEach((n) => { minX = Math.min(minX, n.x); minY = Math.min(minY, n.y); maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y); });

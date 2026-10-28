@@ -178,6 +178,10 @@
                          library's tab of whole saved networks is already
                          "Networks". Technical vocabulary: English, no data-i18n. -->
                     <button id="netTabBtn" data-adv class="cfg-tab" data-cfgtab="networks" role="tab" aria-selected="false">Subnets</button>
+                    <!-- Where devices sit: buildings, floors, rooms, racks
+                         (doc.groups, js/groups.js). A plain word, so
+                         translated, unlike Subnets. -->
+                    <button id="groupTabBtn" data-adv class="cfg-tab" data-cfgtab="groups" role="tab" aria-selected="false" data-i18n>Groups</button>
                     <!-- The findings of the whole map (js/diagnostics.js, "The
                          Findings tab"), docked here instead of floating over
                          the canvas. A plain word, so translated; the count is
@@ -214,6 +218,8 @@
                             <button type="button" class="tabbtn" data-bulk="rename" role="tab" aria-selected="false" data-i18n>Rename</button>
                             <button type="button" class="tabbtn" data-bulk="move" role="tab" aria-selected="false" data-i18n>Move</button>
                             <button type="button" class="tabbtn" data-bulk="recable" role="tab" aria-selected="false" data-i18n>Re-cable</button>
+                            <button type="button" class="tabbtn" data-bulk="group" role="tab" aria-selected="false" data-i18n>Group</button>
+                            <button type="button" class="tabbtn" data-bulk="host" role="tab" aria-selected="false" data-i18n>Host</button>
                         </div>
                         <div id="bulkPane-set" class="bulk-pane">
                             <p class="rail-note" data-i18n>A field that says "mixed" differs between them. A field left blank, or as it is, is not changed.</p>
@@ -273,6 +279,26 @@
                                 </div>
                             </div>
                             <p class="rail-note" data-i18n>Each one's cable moves to the next free port there. The device keeps its address: Move gives it one on another subnet.</p>
+                        </div>
+                        <!-- Move to group (js/groups.js): where they sit, not
+                             their addressing. -->
+                        <div id="bulkPane-group" class="bulk-pane hidden">
+                            <div class="bulk-field">
+                                <label for="bulkGroup" class="prop-lbl" data-i18n>Move to group</label>
+                                <select id="bulkGroup" class="select bulk-in"></select>
+                            </div>
+                            <p id="bulkNoGroups" class="rail-note hidden" data-i18n>There are no groups yet. Add one on the Groups tab first.</p>
+                            <p class="rail-note" data-i18n>Moved anywhere but a rack, a device leaves its units in the rack behind.</p>
+                        </div>
+                        <!-- Move to host (js/model.js "Hosts"): what the VMs and
+                             containers of the set run on, and so where they are. -->
+                        <div id="bulkPane-host" class="bulk-pane hidden">
+                            <div class="bulk-field">
+                                <label for="bulkHost" class="prop-lbl" data-i18n>Move to host</label>
+                                <select id="bulkHost" class="select bulk-in"></select>
+                            </div>
+                            <p id="bulkNoVirtual" class="rail-note hidden" data-i18n>None of them is a VM or a container: only those run on another device.</p>
+                            <p class="rail-note" data-i18n>A VM or a container is where the device it runs on is, in its group and its rack.</p>
                         </div>
                         <button id="bulkPreviewBtn" type="button" class="btn btn-primary bulk-go" data-i18n>Preview</button>
                     </div>
@@ -414,6 +440,50 @@
                                     </select>
                                 </div>
                                 <p id="statusNote" class="rail-note span2 hidden" data-i18n>Retired: dimmed on the map, and off the network for the checks and the trace.</p>
+                                <!-- The group it sits in (doc.groups, js/groups.js),
+                                     and in a rack where: the lowest unit, how many,
+                                     and the face. The path under it is what the
+                                     table and the report print. -->
+                                <div class="span2">
+                                    <label class="prop-lbl" for="propGroup" data-i18n>Group</label>
+                                    <select id="propGroup" class="select"></select>
+                                    <p id="groupPathNote" class="rail-note grp-path hidden"></p>
+                                </div>
+                                <!-- What a VM or a container runs on (node.host,
+                                     js/hosts.js), and on a host what runs on it.
+                                     A guest is where its host is, so its Group
+                                     picker above follows the host. -->
+                                <div id="hostRow" class="span2 hidden">
+                                    <label class="prop-lbl" for="propHost" data-i18n>Runs on</label>
+                                    <select id="propHost" class="select"></select>
+                                </div>
+                                <div id="guestRow" class="span2 host-guests hidden">
+                                    <span id="guestHead" class="prop-lbl"></span>
+                                    <ul id="guestList" class="host-guest-list"></ul>
+                                </div>
+                                <div id="rackPlaceRow" class="span2 grp-rack hidden">
+                                    <div>
+                                        <label class="prop-lbl" for="propRackU" data-i18n-title title="The lowest unit it takes, counted from the bottom">U</label>
+                                        <input type="number" id="propRackU" class="input mono" min="1" step="1" inputmode="numeric" autocomplete="off" />
+                                    </div>
+                                    <div>
+                                        <label class="prop-lbl" for="propRackHeight" data-i18n>Height (U)</label>
+                                        <input type="number" id="propRackHeight" class="input mono" min="1" step="1" inputmode="numeric" placeholder="1" autocomplete="off" />
+                                    </div>
+                                    <div>
+                                        <label class="prop-lbl" for="propRackFace" data-i18n>Face</label>
+                                        <select id="propRackFace" class="select">
+                                            <option value="front" data-i18n>front</option>
+                                            <option value="rear" data-i18n>rear</option>
+                                        </select>
+                                    </div>
+                                    <!-- Ticked by default: a device takes its units on both
+                                         faces unless it is set to one (half depth). -->
+                                    <label class="prop-check grp-depth" data-i18n-title title="Ticked, it fills the rack front to back, so nothing can go in the same units on the other face. Untick it for a device on one face only (half depth).">
+                                        <input type="checkbox" id="propRackDepth">
+                                        <span class="prop-lbl" data-i18n>Full depth</span>
+                                    </label>
+                                </div>
                             </div>
                             <div id="notesRow" data-adv class="prop-notes">
                                 <label class="prop-lbl" for="propNotes" data-i18n>Notes</label>
@@ -510,6 +580,19 @@
                     <div id="undeclaredBox" class="net-undeclared hidden"></div>
                 </div>
 
+                <!-- The groups (doc.groups): one card each, in tree order and
+                     indented by depth, with its kind, how many devices are in
+                     it (and below it), Select members, Edit (name, kind,
+                     parent, and a rack's height), + Inside and Delete. Built
+                     by js/groups.js. -->
+                <div id="cfgPanel-groups" data-adv class="cfg-panel hidden">
+                    <div class="prop-headrow net-toolbar">
+                        <p id="groupIntro" class="rail-note grp-intro" data-i18n>Where devices sit: buildings, floors, rooms and racks.</p>
+                        <button id="addGroupBtn" type="button" class="link-btn" data-i18n>+ Group</button>
+                    </div>
+                    <div id="groupList" class="net-list grp-list"></div>
+                </div>
+
                 <!-- Grouped by check; a line selects and centres what it is
                      about (click again for the next one). Accept… keeps a
                      finding as known, with a reason, stored in the document:
@@ -568,6 +651,8 @@
             <svg id="networkCanvas" class="topo-svg" xmlns="http://www.w3.org/2000/svg">
                 <g id="workspace">
                     <g id="layer-zones" data-adv></g>
+                    <!-- Group frames (js/groupmap.js): under the cables, over the zones. -->
+                    <g id="layer-groups" data-adv></g>
                     <g id="layer-links"></g>
                     <g id="layer-nodes"></g>
                     <g id="layer-annotations"></g>
@@ -582,9 +667,11 @@
                  columns that name technical things (Interfaces, Subnets,
                  Gateway…) stay English, like the rest of the full editor. -->
             <div class="topo-topbar" data-adv>
-            <div id="viewSwitch" class="view-switch" role="group" data-adv data-i18n-aria-label aria-label="Map or table">
+            <div id="viewSwitch" class="view-switch" role="group" data-adv data-i18n-aria-label aria-label="Map, table or rack">
                 <button type="button" class="toggle-btn active" data-view="map" aria-pressed="true" data-i18n>Map</button>
                 <button type="button" class="toggle-btn" data-view="table" aria-pressed="false" data-i18n>Table</button>
+                <!-- Only while the network has a rack (js/rackview.js). -->
+                <button type="button" class="toggle-btn" data-view="rack" aria-pressed="false" hidden data-i18n>Rack</button>
             </div>
             <!-- The search box (plan 3.3, js/query.js), shared by the map and
                  the table, so it sits beside the switch rather than in either.
@@ -615,6 +702,7 @@
                         <button type="button" class="tabbtn" role="tab" data-tvtab="cables" data-i18n>Cables</button>
                         <button type="button" class="tabbtn" role="tab" data-tvtab="ports">Ports</button>
                         <button type="button" class="tabbtn" role="tab" data-tvtab="subnets">Subnets</button>
+                        <button type="button" class="tabbtn" role="tab" data-tvtab="groups" data-i18n>Groups</button>
                     </div>
                     <div class="tv-bar">
                         <span id="tvCount" class="tv-count"></span>
@@ -626,6 +714,27 @@
                     <table id="tvGrid" class="data tv-grid"></table>
                     <p id="tvEmpty" class="tv-empty hidden">Nothing here yet.</p>
                 </div>
+            </section>
+            <!-- Rack (step C, js/rackview.js): a rack group unit by unit,
+                 front and rear, over the map like the table. "U" stays as it
+                 is; Front, Rear and the sentences are translated. -->
+            <section id="rackView" class="topo-rack hidden" data-adv data-face="front" data-i18n-aria-label aria-label="Rack">
+                <div class="rk-head">
+                    <label class="rk-pick-lbl" for="rackPicker" data-i18n>Rack</label>
+                    <select id="rackPicker" class="select rk-picker"></select>
+                    <span id="rackCount" class="tv-count"></span>
+                    <!-- The rack's size (height, width, depth, numbering): the
+                         Groups tab's fields, opened here (js/rackview.js). -->
+                    <button type="button" id="rackSizeBtn" class="cs-btn rk-sizebtn" aria-expanded="false" aria-controls="rackSize" data-i18n>Size</button>
+                    <!-- A phone has room for one face: this picks it. -->
+                    <div id="rackFaceSwitch" class="view-switch rk-faceswitch" role="group" data-i18n-aria-label aria-label="Face">
+                        <button type="button" class="toggle-btn active" data-face="front" aria-pressed="true" data-i18n>Front</button>
+                        <button type="button" class="toggle-btn" data-face="rear" aria-pressed="false" data-i18n>Rear</button>
+                    </div>
+                </div>
+                <div id="rackSize" class="rk-size prop-grid" role="group" data-i18n-aria-label aria-label="Rack size" hidden></div>
+                <p class="tv-hint rk-hint"><span data-i18n>Drag over empty units, or tap one, to place a device there. Drag a device to move it, and the top edge of the selected one to resize it.</span> <span data-i18n>Drag from a device's dot to another device to cable them.</span> <span data-i18n>Drag a device from the lists onto the units to bring it in, or off the units to take it out.</span></p>
+                <div id="rackBody" class="rk-body"></div>
             </section>
             </main>
 
@@ -906,6 +1015,12 @@
                     <div class="modal-body">
                         <p id="topoAskMsg" class="ask-msg"></p>
                         <input id="topoAskInput" type="text" class="input" autocomplete="off" spellcheck="false" hidden>
+                        <!-- A prompt that also asks one choice from a list
+                             (askPromptPick): a new group's kind, under its name. -->
+                        <div id="topoAskPickRow" class="field ask-pick" hidden>
+                            <label id="topoAskPickLabel" for="topoAskPick"></label>
+                            <select id="topoAskPick" class="select"></select>
+                        </div>
                     </div>
                     <div id="topoAskFoot" class="modal-foot"></div>
                 </div>
@@ -941,6 +1056,59 @@
                     <div class="modal-foot">
                         <button type="button" class="btn" data-close data-i18n>Cancel</button>
                         <button type="button" id="pasteApplyBtn" class="btn btn-primary" data-i18n>Apply</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Place a device in a rack (js/rackview.js): the units dragged
+                 over, changeable here, and the device that goes in them, an
+                 existing one or a new one of a type. One undo step. -->
+            <div id="rackPlaceDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-rackplace" role="dialog" aria-modal="true" aria-labelledby="rackPlaceTitle">
+                    <div class="modal-head">
+                        <h2 id="rackPlaceTitle" class="modal-title"></h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="rkp-span">
+                            <div class="field">
+                                <label for="rackPlaceU" data-i18n>Lowest unit</label>
+                                <input id="rackPlaceU" type="number" class="input mono" min="1" step="1" inputmode="numeric" autocomplete="off">
+                            </div>
+                            <div class="field">
+                                <label for="rackPlaceHeight" data-i18n>Height (U)</label>
+                                <input id="rackPlaceHeight" type="number" class="input mono" min="1" step="1" inputmode="numeric" autocomplete="off">
+                            </div>
+                            <div class="field">
+                                <label for="rackPlaceFace" data-i18n>Face</label>
+                                <select id="rackPlaceFace" class="select">
+                                    <option value="front" data-i18n>Front</option>
+                                    <option value="rear" data-i18n>Rear</option>
+                                </select>
+                            </div>
+                        </div>
+                        <!-- Ticked unless only one face of the units is free: a new device's depth. A device already on the map keeps its own until the box is changed by hand (placeDepth, js/rackview.js). -->
+                        <label class="prop-check rkp-depth" data-i18n-title title="Ticked, it fills the rack front to back, so nothing can go in the same units on the other face. Untick it for a device on one face only (half depth).">
+                            <input type="checkbox" id="rackPlaceFull" checked>
+                            <span class="prop-lbl" data-i18n>Full depth</span>
+                        </label>
+                        <p id="rackPlaceMsg" class="rkp-msg" role="status" aria-live="polite"></p>
+                        <div class="field">
+                            <label for="rackPlaceFilter" data-i18n>A device on the map</label>
+                            <input id="rackPlaceFilter" type="search" class="input" autocomplete="off" spellcheck="false"
+                                data-i18n-placeholder placeholder="Filter by name, type or address">
+                        </div>
+                        <ul id="rackPlaceList" class="rkp-list"></ul>
+                        <div class="field rkp-new">
+                            <label for="rackPlaceType" data-i18n>Or a new device</label>
+                            <div class="rkp-newrow">
+                                <select id="rackPlaceType" class="select"></select>
+                                <button type="button" id="rackPlaceNewBtn" class="btn" data-i18n>Create here</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" class="btn" data-close data-i18n>Cancel</button>
                     </div>
                 </div>
             </div>
@@ -1012,6 +1180,9 @@
                             <div id="csvReview" class="hidden">
                                 <div id="csvCounts" class="paste-counts" role="status" aria-live="polite"></div>
                                 <div id="csvMsgs" class="bulk-msgs hidden"></div>
+                                <!-- Groups a device row names that the map lacks
+                                     (js/csv.js): made only once this is ticked. -->
+                                <label id="csvGroupsBox" class="check csv-groups hidden"><input type="checkbox" id="csvCreateGroups"> <span id="csvGroupsText"></span></label>
                                 <p id="csvDelta" class="paste-delta"></p>
                                 <div id="csvPreviewWrap" class="paste-preview csv-preview hidden">
                                     <table class="data"><tbody id="csvPreview"></tbody></table>
@@ -1053,7 +1224,11 @@
     <script src="js/changes.js"></script>
     <script src="js/share.js"></script>
     <script src="js/networks.js"></script>
+    <script src="js/groups.js"></script>
+    <script src="js/hosts.js"></script>
+    <script src="js/groupmap.js"></script>
     <script src="js/table.js"></script>
+    <script src="js/rackview.js"></script>
     <script src="js/query.js"></script>
     <script src="js/bulk.js"></script>
     <script src="js/add.js"></script>

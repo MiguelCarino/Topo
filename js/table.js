@@ -1,14 +1,15 @@
 // ---- Map | Table (plan 3.2) ----
 // The same document as the map, as rows: Devices (each one's interfaces fold
 // open beneath it), Interfaces, Cables, Ports (every faceplate port of every
-// switch and AP, with its label and access VLAN) and Subnets. It is the register's other
+// switch and AP, with its label and access VLAN), Subnets and Groups (where
+// devices sit: js/groups.js). It is the register's other
 // face. A site of sixty devices is read and corrected far faster down a column
 // than one device at a time in a 340px rail, which clipped a /24 CIDR out of
 // sight (js/ui.js, renderSidebarData).
 //
 // Where things come from, and where they go:
 //
-//   rows      reportDevices(), reportConnections(), reportPorts() and reportSubnets() in
+//   rows      reportDevices(), reportConnections(), reportPorts(), reportSubnets() and reportGroups() in
 //             js/report.js: the pure report model, so the table, the printed
 //             inventory and the cards cannot disagree. Those rows are derived
 //             and read-only (a decoded vendor, a gateway inherited from the
@@ -48,14 +49,15 @@
 // never under a cell being edited or a pointer still pressed on it: a rebuild
 // there would take the field, or the row about to be clicked, away.
 //
-// Load order: ... ui -> dialog -> report -> library -> share -> networks -> table -> query -> bulk -> app
+// Load order: ... ui -> dialog -> report -> library -> share -> networks -> table -> rackview -> query -> bulk -> app
 
 const TV_TABS = [
     { key: 'devices', label: 'Devices', plain: true },
     { key: 'interfaces', label: 'Interfaces' },
     { key: 'cables', label: 'Cables', plain: true },
     { key: 'ports', label: 'Ports' },
-    { key: 'subnets', label: 'Subnets' }
+    { key: 'subnets', label: 'Subnets' },
+    { key: 'groups', label: 'Groups', plain: true }
 ];
 
 const _tv = {
@@ -64,7 +66,7 @@ const _tv = {
     expanded: new Set(),            // device ids whose interfaces are open
     // Interfaces and subnets are not things the map can select, so their rows
     // are ticked here; devices and cables are ticked in state.selection.
-    checked: { interfaces: new Set(), ports: new Set(), subnets: new Set() },
+    checked: { interfaces: new Set(), ports: new Set(), subnets: new Set(), groups: new Set() },
     anchor: null,                   // the last row ticked, for shift-range
     cursor: { row: null, col: null },
     rows: [],                       // on screen, in display order (after the search)
@@ -85,21 +87,25 @@ const _tv = {
 const tvEl = () => document.getElementById('tableView');
 const tableShown = () => { const v = tvEl(); return !!v && !v.classList.contains('hidden'); };
 
-// ---- Map | Table ----
+// ---- Map | Table | Rack ----
 // The visitor's choice is remembered (state.settings.view, a per-browser
 // preference like the library tab). Until there is one, a phone opens on the
 // table and anything wider on the map. That is decided once, so turning a
 // phone sideways does not swap the view out from under a thumb.
+// Rack (js/rackview.js) is offered only while the document has a rack: a
+// visitor who left on it and opens a network without one gets the view the
+// width decides, and the rack view again on the next network that has one.
 const PHONE_MQ = '(max-width: 640px)';
 function effectiveView() {
     if (isReduced()) return 'map';
+    if (state.settings.view === 'rack' && rackViewOffered()) return 'rack';
     if (state.settings.view === 'map' || state.settings.view === 'table') return state.settings.view;
     if (_tv.defaultView === null) _tv.defaultView = window.matchMedia && window.matchMedia(PHONE_MQ).matches ? 'table' : 'map';
     return _tv.defaultView;
 }
 
 function setView(view) {
-    if (view !== 'map' && view !== 'table') return;
+    if (view !== 'map' && view !== 'table' && !(view === 'rack' && rackViewOffered())) return;
     state.settings.view = view;
     saveSettings();
     applyView();
@@ -108,12 +114,15 @@ function setView(view) {
 function applyView() {
     const view = tvEl();
     if (!view) return;
-    const table = effectiveView() === 'table';
+    const shown = effectiveView();
+    const table = shown === 'table';
     if (!table) cancelEdit();
     view.classList.toggle('hidden', !table);
     document.body.classList.toggle('table-view', table);
+    // The rack view lies over the map the same way (js/rackview.js).
+    showRackView(shown === 'rack');
     document.querySelectorAll('#viewSwitch [data-view]').forEach((b) => {
-        const on = b.dataset.view === (table ? 'table' : 'map');
+        const on = b.dataset.view === shown;
         b.classList.toggle('active', on);
         b.setAttribute('aria-pressed', String(on));
     });
@@ -236,6 +245,78 @@ function portColumn(key, opts) {
         show: (row) => shown(row.data[key] === null ? '' : row.data[key]) }, opts);
 }
 
+// ---- Groups (js/groups.js) ----
+// A device's group, typed or picked: a path ("Building A / Rack 3"), a name
+// one group has, or blank for none. A path the map does not have is refused,
+// not made: making groups is the Groups tab's (or the spreadsheet import's,
+// after its review), and a typing slip in a cell must not grow the tree.
+function tvGroupParse(text) {
+    const v = String(text == null ? '' : text).trim();
+    if (!v || v === '—') return { value: '' };
+    const r = findGroupByPath(v);
+    return r.group ? { value: r.group.id } : { error: true };
+}
+// Into a group: as the device editor's picker does (setNodeGroup), it leaves
+// a rack's units behind when it goes anywhere but a rack.
+function tvSetGroup(node, id, groups = state.groups) {
+    const g = groupById(id, groups);
+    rackKeysLost(node, g).forEach((k) => { delete node[k]; });
+    if (g) node.group = g.id; else delete node.group;
+}
+// ---- Runs on (js/model.js "Hosts") ----
+// A VM's or a container's host, picked or typed: a device's name or id, or
+// blank for none. Only a device it may run on (canHost) is taken; a name two
+// devices share is refused, as the spreadsheet refuses it.
+function tvHostParse(text, row) {
+    const v = String(text == null ? '' : text).trim();
+    if (!v || v === '—') return { value: '' };
+    const guest = row && getNode(row.ref.nodeId);
+    const low = v.toLowerCase();
+    const byId = state.nodes.find((n) => n.id === v);
+    const byName = byId ? [byId] : state.nodes.filter((n) => String(n.name || '').trim().toLowerCase() === low);
+    if (byName.length !== 1 || !guest || byName[0] === guest || !canHost(guest.type, byName[0])) return { error: true };
+    return { value: byName[0].id };
+}
+// Written as the device editor's picker writes it, then the host rule over
+// the document the cell is on (the live one, or a paste's scratch copy, so
+// its preview counts the group the VM follows its host into).
+function tvSetHost(node, id, doc) {
+    if (id) node.host = id; else delete node.host;
+    repairHosts(doc ? doc.nodes : state.nodes);
+}
+const tvHostOptions = (row) => {
+    const guest = row && getNode(row.ref.nodeId);
+    return [{ value: '', label: t('— None') }].concat(hostCandidates(guest).map((n) => ({ value: n.id, label: `${n.name || n.id} · ${typeName(n.type)}` })));
+};
+
+const tvGroupOptions = (exclude) => groupTree()
+    .filter((e) => !exclude || exclude(e.group))
+    .map((e) => ({ value: e.group.id, label: groupOptionIndent(e.depth) + groupLabel(e.group) }));
+
+// A group's own fields, on the Groups tab. Its record is the group itself
+// (findTarget 'group'), so an edit is one batch() like any other cell.
+function groupColumn(key, opts) {
+    return Object.assign({ key: `g:${key}`, rec: 'group', editor: 'text', sort: 'text', same,
+        get: (g) => g[key], set: (g, v) => { g[key] = v; }, show: (row) => shown(row.data[key]) }, opts);
+}
+// A rack turned into anything else takes its devices' places in it with it;
+// the rail asks first (changeGroupKind, js/groups.js), and so does a cell.
+function tvKindQuestion(g, kind) {
+    if (!isRackGroup(g) || kind === 'rack') return '';
+    const placed = groupMembers(g.id, false).filter(hasRackFields).length;
+    if (!placed) return '';
+    return t(placed === 1 ? '{name} stops being a rack. Its one placed device loses its unit, height and face.'
+        : '{name} stops being a rack. Its {n} placed devices lose their units, heights and faces.', { name: groupLabel(g), n: placed });
+}
+function tvSetKind(g, kind, nodes = state.nodes) {
+    if (isRackGroup(g) && kind !== 'rack') nodes.forEach((n) => { if (n.group === g.id) RACK_KEYS.forEach((k) => { delete n[k]; }); });
+    g.kind = kind;
+    if (kind === 'rack') {
+        if (!Number.isInteger(g.uHeight)) g.uHeight = RACK_U_DEFAULT;
+        if (!g.width) g.width = RACK_WIDTH_DEFAULT;
+    }
+}
+
 const TV_COLS = {
     devices: [
         schemaColumn(NODE_FIELDS, 'name', 'node', { plain: true, sort: 'text' }),
@@ -251,7 +332,34 @@ const TV_COLS = {
         schemaColumn(NODE_FIELDS, 'os', 'node', { sort: 'text' }),
         assetColumn('assetTag', { mono: true }),
         assetColumn('serial', { mono: true }),
-        assetColumn('location'),
+        // Where it is: its group's path (and units, in a rack), picked from
+        // the tree or typed as a path. Beside it the free-text location,
+        // which stays as typed and is greyed once a group says where the
+        // device is (Review-Packs/Topo-groups.md, "Location").
+        { key: 'group', label: 'Group', plain: true, rec: 'node', editor: 'select', sort: 'text', same,
+          parse: tvGroupParse,
+          options: () => [{ value: '', label: t('— None') }].concat(tvGroupOptions()),
+          get: (target) => (target.group && groupById(target.group) ? target.group : ''),
+          edit: (row) => row.data.groupId || '',
+          set: (target, value, doc) => tvSetGroup(target, value, doc ? doc.groups : undefined),
+          // A VM on a host is where its host is: its group is the host's,
+          // and changes with it, so its cell is not a place to set one.
+          can: (row) => state.groups.length > 0 && !(row && row.data.hostId),
+          show: (row) => (row.data.groupId ? shown(row.data.place, row.data.hostId ? { muted: true, title: t('Where {host} is: it runs on it.', { host: row.data.host }) } : {}) : shown('')) },
+        // What a VM or a container runs on; a dash on anything else, which
+        // runs on nothing.
+        { key: 'host', label: 'Runs on', plain: true, rec: 'node', editor: 'select', sort: 'text', same,
+          parse: tvHostParse,
+          options: tvHostOptions,
+          get: (target) => target.host || '',
+          edit: (row) => row.data.hostId || '',
+          set: (target, value, doc) => tvSetHost(target, value, doc),
+          can: (row) => { const n = getNode(row.ref.nodeId); return !!n && isVirtualType(n.type); },
+          show: (row) => { const n = getNode(row.ref.nodeId); return n && isVirtualType(n.type) ? shown(row.data.host) : shown('—', { muted: true }); } },
+        assetColumn('location', {
+            show: (row) => (row.data.groupId && row.data.location
+                ? shown(row.data.location, { muted: true, title: t('Kept as typed. Where it is now is its group: {path}', { path: row.data.place }) })
+                : shown(row.data.location)) }),
         assetColumn('status', { editor: 'select', parse: tvStatusParse,
             options: () => [{ value: '', label: '—' }].concat(STATUS_VALUES.map((k) => ({ value: k, label: statusName(k) }))),
             get: (target) => target.status || '',
@@ -333,6 +441,94 @@ const TV_COLS = {
         // An undeclared subnet is one Enter (or click) from being a network.
         { key: 'declare', label: '', rec: 'net', editor: null, action: true,
           show: (row) => (row.data.declared ? shown('') : shown(t('Declare'), { action: 'declare' })) }
+    ],
+    // The rail's Groups tab as rows (js/groups.js): plain words, translated,
+    // except U, the rack unit. In tree order until a column is sorted; the
+    // name is stepped in by depth so the tree still reads.
+    groups: [
+        groupColumn('name', { label: 'Name', plain: true,
+            parse: (text) => ({ value: groupName(text) }),
+            get: (g) => g.name || '',
+            set: (g, v) => { if (v) g.name = v; else delete g.name; },
+            show: (row) => shown(`${row.data.depth && !_tv.sort.groups ? '\u2002'.repeat(Math.min(row.data.depth, GROUP_INDENT_MAX)) + '\u2514\u00a0' : ''}${row.data.name}`, { title: row.data.path }) }),
+        groupColumn('kind', { label: 'Kind', plain: true, editor: 'select',
+            options: () => GROUP_KINDS.map((k) => ({ value: k, label: groupKindName(k) })),
+            parse: (text) => {
+                const v = String(text == null ? '' : text).trim().toLowerCase();
+                const k = GROUP_KINDS.find((x) => x === v || groupKindName(x).toLowerCase() === v);
+                return k ? { value: k } : { error: true };
+            },
+            edit: (row) => row.data.kind,
+            ask: (g, v) => tvKindQuestion(g, v),
+            loses: (g, v) => (isRackGroup(g) && v !== 'rack' ? groupMembers(g.id, false).filter(hasRackFields).length : 0),
+            set: (g, v, doc) => tvSetKind(g, v, doc ? doc.nodes : undefined),
+            show: (row) => shown(row.data.kindName) }),
+        groupColumn('parent', { label: 'Inside', plain: true, editor: 'select',
+            // Not itself and nothing below it: that would be a loop.
+            options: (row) => [{ value: '', label: t('— (top)') }].concat(tvGroupOptions((g) => groupParentOk(row.ref.groupId, g.id))),
+            // `work` is the paste's working tree: a pasted column is checked
+            // row by row against the moves above it in the same paste, or two
+            // rows could each be sound alone and make a loop together.
+            parse: (text, row, work = state.groups) => {
+                const v = String(text == null ? '' : text).trim();
+                if (!v || v === '—') return { value: null };
+                const r = findGroupByPath(v);
+                return r.group && groupParentOk(row.ref.groupId, r.group.id, work) ? { value: r.group.id } : { error: true };
+            },
+            chain: {
+                start: () => (state.groups || []).map((g) => ({ id: g.id, parent: g.parent })),
+                apply: (work, row, v) => { const g = work.find((x) => x.id === row.ref.groupId); if (g) g.parent = v || undefined; }
+            },
+            get: (g) => g.parent || null,
+            edit: (row) => row.data.parentId,
+            same: (a, b) => (a || null) === (b || null),
+            show: (row) => shown(row.data.parent) }),
+        // A rack's size ("Round 2", item 4), as the rail's fields have it.
+        // The height keeps every device on its printed units and asks first
+        // when some would lose theirs (applyRackHeight, js/model.js).
+        groupColumn('uHeight', { label: 'Height (U)', plain: true, mono: true, sort: 'num',
+            can: (row) => !!row.data.uHeight,
+            parse: (text) => { const n = asUnits(String(text == null ? '' : text).trim().replace(/\s*u$/i, '')); return n !== undefined && n >= 1 && n <= RACK_U_MAX ? { value: n } : { error: true }; },
+            ask: (g, v) => { const message = rackShrinkQuestion(g, v); return message ? { message, ok: t('Make it {h}U', { h: v }) } : ''; },
+            loses: (g, v) => rackResizePlan(g, v).lost.length,
+            set: (g, v, doc) => applyRackHeight(g, v, doc ? doc.nodes : state.nodes),
+            show: (row) => (row.data.uHeight ? shown(row.data.uHeight) : shown('—', { muted: true })) }),
+        groupColumn('width', { label: 'Width', plain: true, mono: true, editor: 'select',
+            can: (row) => !!row.data.width,
+            options: () => RACK_WIDTHS.map((w) => ({ value: w, label: rackWidthLabel(w) })),
+            parse: (text) => { const w = rackWidthKey(text); return w ? { value: w } : { error: true }; },
+            get: (g) => asRackWidth(g.width),
+            edit: (row) => row.data.width,
+            show: (row) => (row.data.width ? shown(rackWidthLabel(row.data.width)) : shown('—', { muted: true })) }),
+        // Optional: a blank cell takes it away.
+        groupColumn('depthMm', { label: 'Depth (mm)', plain: true, mono: true, sort: 'num',
+            can: (row) => !!row.data.width,
+            parse: (text) => {
+                const v = String(text == null ? '' : text).trim().replace(/\s*mm$/i, '');
+                if (!v) return { value: undefined };
+                const n = asRackDepthMm(v);
+                return n !== undefined && String(n) === String(Number(v)) ? { value: n } : { error: true };
+            },
+            get: (g) => g.depthMm,
+            set: (g, v) => { if (v === undefined) delete g.depthMm; else g.depthMm = v; },
+            show: (row) => (row.data.depthMm ? shown(row.data.depthMm) : shown('—', { muted: true })) }),
+        // Only the printed numbers turn round; no device moves.
+        groupColumn('numbering', { label: 'Numbering', plain: true, editor: 'select',
+            can: (row) => !!row.data.numbering,
+            options: () => [{ value: 'bottom', label: t('Bottom up') }, { value: 'top', label: t('Top down') }],
+            parse: (text) => {
+                const v = String(text == null ? '' : text).trim();
+                const low = v.toLowerCase();
+                if (low === 'bottom' || low === t('Bottom up').toLowerCase() || /^bottom[\s_-]*up$/i.test(v)) return { value: 'bottom' };
+                if (asRackNumbering(v) || low === t('Top down').toLowerCase()) return { value: 'top' };
+                return { error: true };
+            },
+            get: (g) => (rackTopDown(g) ? 'top' : 'bottom'),
+            set: (g, v) => { if (v === 'top') g.numbering = 'top'; else delete g.numbering; },
+            edit: (row) => row.data.numbering,
+            show: (row) => (row.data.numbering ? shown(t(row.data.numbering === 'top' ? 'Top down' : 'Bottom up')) : shown('—', { muted: true })) }),
+        { key: 'g:deep', label: 'Devices', plain: true, rec: 'group', editor: null, mono: true, sort: 'num',
+          show: (row) => shown(row.data.deep, row.data.own && row.data.own !== row.data.deep ? { title: t('{n} here', { n: row.data.own }) } : {}) }
     ]
 };
 // Only a declared network has a record to edit.
@@ -391,6 +587,7 @@ function findTarget(rec, ref, doc = state) {
         return node && hasPortGrid(node) ? { node, portId: ref.portId } : null;
     }
     if (rec === 'net') return ref.netId ? (doc.networks || []).find((n) => n.id === ref.netId) || null : null;
+    if (rec === 'group') return (doc.groups || []).find((g) => g.id === ref.groupId) || null;
     return null;
 }
 
@@ -403,6 +600,7 @@ function tvBuildRows(tab) {
     }
     if (tab === 'cables') return reportConnections().map((c) => ({ key: `l:${c.id}`, rec: 'link', ref: { linkId: c.id }, data: c }));
     if (tab === 'ports') return reportPorts().map((p) => ({ key: `p:${p.nodeId}:${p.portId}`, rec: 'port', ref: { nodeId: p.nodeId, portId: p.portId }, data: p }));
+    if (tab === 'groups') return reportGroups().map((g) => ({ key: `g:${g.id}`, rec: 'group', ref: { groupId: g.id }, data: g }));
     return reportSubnets().map((s) => ({ key: `s:${s.network}`, rec: 'net', ref: { netId: s.id }, data: s }));
 }
 
@@ -466,6 +664,7 @@ function rowName(row) {
     if (row.rec === 'iface') return `${row.device.name} / ${row.data.name}`;
     if (row.rec === 'link') return `${row.data.from} ↔ ${row.data.to}`;
     if (row.rec === 'port') return `${row.data.device} / ${row.data.port}`;
+    if (row.rec === 'group') return row.data.path;
     return row.data.network;
 }
 
@@ -702,7 +901,7 @@ function startEdit(td, seed) {
     const el = document.createElement(col.editor === 'select' ? 'select' : col.editor === 'textarea' ? 'textarea' : 'input');
     el.className = `tv-in${col.mono ? ' mono' : ''}`;
     if (col.editor === 'select') {
-        el.innerHTML = col.options().map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+        el.innerHTML = col.options(row).map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
     } else {
         el.setAttribute('autocomplete', 'off'); el.setAttribute('spellcheck', 'false');
         if (col.editor === 'textarea') el.rows = 1; else el.type = 'text';
@@ -780,6 +979,20 @@ function commitValue(row, col, value, keepFocus) {
     const target = findTarget(col.rec, row.ref);
     if (!target || col.same(col.get(target), value)) { if (keepFocus) { _tv.keepFocus = true; renderTableView(true); } return false; }
     if (keepFocus) _tv.keepFocus = true;
+    // A column whose value costs something else (a rack turned into a room
+    // loses its devices' units) asks first, as the rail does. No is no edit.
+    // A question is its text (the kind's, answered Change kind) or
+    // { message, ok } (a rack's height, answered Make it 24U).
+    const q = col.ask ? col.ask(target, value) : '';
+    const question = typeof q === 'string' ? q : q.message;
+    if (question) {
+        askConfirm(question, { ok: typeof q === 'string' ? t('Change kind') : q.ok, danger: true }).then((yes) => {
+            const again = findTarget(col.rec, row.ref);
+            if (yes && again && !readOnlyRefuses()) batch(() => { col.set(again, value); save(); afterTableEdit(); });
+            else { _tv.keepFocus = true; renderTableView(true); }
+        });
+        return true;
+    }
     batch(() => { col.set(target, value); save(); afterTableEdit(); });
     return true;
 }
@@ -793,6 +1006,7 @@ function afterTableEdit() {
     if (state.selection.size === 1) renderSelection();
     else refreshSelectedNodeDiagnostics();
     renderNetworksPanel();
+    renderGroupsPanel();
 }
 
 // ---- Selecting ----
@@ -804,6 +1018,7 @@ function focusRow(row) {
     if (row.rec === 'link') { focusOnMap({ type: 'link', id: row.ref.linkId }); return; }
     // A port: the cable in it, else its switch.
     if (row.rec === 'port') { focusOnMap(row.data.linkId ? { type: 'link', id: row.data.linkId } : { type: 'node', id: row.ref.nodeId }); return; }
+    if (row.rec === 'group') { selectGroupMembers(row.ref.groupId); return; }
     if (row.ref.netId) { selectNetworkMembers(row.ref.netId); return; }
     const nodes = row.data.nodeIds.map(getNode).filter(Boolean);
     selectEntries(nodes.map((n) => ({ type: 'node', id: n.id })));
@@ -888,19 +1103,34 @@ function planPaste(colKey, text, targets = pasteTargets(), tab = _tv.tab) {
     const lines = pasteLines(text);
     const cells = [];
     let extra = 0;
+    // A column whose rows depend on each other (a group's parent) carries a
+    // working copy that each accepted cell is written into before the next
+    // is read.
+    const work = col && col.chain ? col.chain.start() : undefined;
     lines.forEach((line, i) => {
         const row = targets.rows[i];
         if (!row) { extra++; return; }
         const target = col && findTarget(col.rec, row.ref);
         const now = col ? col.show(row).text : '';
         if (!col || !line.trim() || !canEdit(row, col) || !target) { cells.push({ row, status: 'skip', now, text: line }); return; }
-        const res = col.parse(line, row);
+        const res = col.parse(line, row, work);
         if (res.error) { cells.push({ row, status: 'bad', now, text: line, why: tvInvalid(col, line) }); return; }
-        cells.push({ row, status: col.same(col.get(target), res.value) ? 'same' : 'change', now, text: line, value: res.value });
+        if (work) col.chain.apply(work, row, res.value);
+        const cell = { row, status: col.same(col.get(target), res.value) ? 'same' : 'change', now, text: line, value: res.value };
+        // A cell whose column asks before an edit (a rack made shorter than
+        // its devices, a rack made a room) keeps its question, so a paste
+        // asks it too: the findings delta cannot say it, because a device
+        // that loses its units waits under Not placed yet with no finding.
+        if (cell.status === 'change' && col.ask) {
+            const q = col.ask(target, res.value);
+            if (q) { cell.ask = typeof q === 'string' ? q : q.message; cell.loses = col.loses ? col.loses(target, res.value) : 0; }
+        }
+        cells.push(cell);
     });
     const count = (s) => cells.filter((c) => c.status === s).length;
     return { tab, colKey, col, cells, extra, unfilled: targets.mode === 'selected' ? Math.max(0, targets.rows.length - lines.length) : 0,
-        counts: { change: count('change'), same: count('same'), bad: count('bad'), skip: count('skip') } };
+        counts: { change: count('change'), same: count('same'), bad: count('bad'), skip: count('skip') },
+        loses: cells.reduce((sum, c) => sum + (c.loses || 0), 0) };
 }
 
 // The findings the change would leave, against the ones there now: the pure
@@ -909,8 +1139,8 @@ function planPaste(colKey, text, targets = pasteTargets(), tab = _tv.tab) {
 function pasteFindingsDelta(plan) {
     const changes = plan.cells.filter((c) => c.status === 'change');
     if (!changes.length) return [];
-    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks });
-    changes.forEach((c) => { const target = findTarget(plan.col.rec, c.row.ref, scratch); if (target) plan.col.set(target, c.value); });
+    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups });
+    changes.forEach((c) => { const target = findTarget(plan.col.rec, c.row.ref, scratch); if (target) plan.col.set(target, c.value, scratch); });
     return findingsDelta(topologyFindings(), diagnoseDoc(scratch).findings);
 }
 // Open findings only: one accepted with a reason is not counted anywhere, so
@@ -941,7 +1171,20 @@ function findingsDeltaText(delta) {
     return `${t('Findings after this change:')} ${delta.map((e) => `${e.diff > 0 ? '+' : '−'}${Math.abs(e.diff)} ${e.check}`).join(' · ')}`;
 }
 
-// One transaction however many cells: one undo step, one redraw.
+// The one question a paste asks for every cell that asks one, in the order
+// the rows are: each in full while there are few, so every device that loses
+// its place is named; '' when none asks.
+const PASTE_ASK_MAX = 4;
+function pasteQuestion(plan) {
+    const asks = plan.cells.filter((c) => c.status === 'change' && c.ask).map((c) => c.ask);
+    if (asks.length <= 1) return asks[0] || '';
+    const shown = asks.slice(0, PASTE_ASK_MAX);
+    if (asks.length > PASTE_ASK_MAX) shown.push(t('…and {n} more.', { n: asks.length - PASTE_ASK_MAX }));
+    return [t('{n} of the rows this paste changes ask first:', { n: asks.length }), ...shown].join('\n\n');
+}
+
+// One transaction however many cells: one undo step, one redraw. It does not
+// ask: the dialog that calls it has (applyPasteDialog).
 function applyPastePlan(plan) {
     const changes = plan.cells.filter((c) => c.status === 'change');
     if (!changes.length || readOnlyRefuses()) return 0;
@@ -1003,19 +1246,30 @@ function refreshPastePreview(now) {
     pasteEl('pastePreviewWrap').classList.toggle('hidden', !plan.cells.length);
     pasteEl('pasteApplyBtn').disabled = !c.change;
     clearTimeout(_paste.timer);
+    // Devices that would lose their place are said here too (the findings
+    // never count them), and Apply asks before it takes them.
+    const loses = plan.loses ? ` <span class="paste-delta-up">${escapeHtml(t('Devices that lose their place in a rack: {n}. Apply asks first.', { n: plan.loses }))}</span>` : '';
     const delta = () => {
         if (!_paste || _paste.plan !== plan) return;
-        pasteEl('pasteDelta').innerHTML = findingsDeltaHtml(pasteFindingsDelta(plan), c.change > 0);
+        pasteEl('pasteDelta').innerHTML = findingsDeltaHtml(pasteFindingsDelta(plan), c.change > 0) + loses;
     };
     if (now) delta(); else _paste.timer = setTimeout(delta, 200);
 }
 
 function applyPasteDialog() {
     if (!_paste) return;
-    const plan = planPaste(pasteEl('pasteColumn').value, pasteEl('pasteText').value, _paste.targets);
+    const text = pasteEl('pasteText').value;
+    const plan = planPaste(pasteEl('pasteColumn').value, text, _paste.targets);
     if (!plan.counts.change) return;
     closePasteColumn();
-    applyPastePlan(plan);
+    // Rows that ask first are asked about together, as one cell would be
+    // (commitValue). No applies nothing and brings the paste back as it was.
+    const question = pasteQuestion(plan);
+    if (!question) { applyPastePlan(plan); return; }
+    askConfirm(question, { ok: t('Apply'), danger: true }).then((yes) => {
+        if (yes) applyPastePlan(plan);
+        else openPasteColumn({ col: plan.colKey, text });
+    });
 }
 
 // Ctrl+V on a cell. One line into one cell is an edit like any other; a

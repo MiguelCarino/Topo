@@ -140,6 +140,8 @@ function renderAssetFields(node) {
     assetEl('statusNote').classList.toggle('hidden', !isRetired(node));
     assetEl('assetSummary').textContent = assetSummaryText(node);
     renderNotesLint(node);
+    renderGroupPicker(node);   // the group it sits in, and its place in a rack (js/groups.js)
+    renderHostPicker(node);    // what a VM runs on, and what runs on a host (js/hosts.js)
 }
 // text: what the field holds now, which is ahead of node.notes while the
 // keystroke's other listener (js/app.js) has yet to run.
@@ -307,7 +309,9 @@ function labelsFor(entries) {
             const ip = (ifaces.find((i) => parseValidCIDR(i.ip)) || {}).ip || '';
             const macIf = ifaces.find((i) => !isBlank(i.mac));
             devices.push({ tag: n.assetTag.trim(), name: n.name || n.id, model: asText(n.os).trim(), serial: asText(n.serial).trim(),
-                location: asText(n.location).trim(), ip, mac: macIf ? fmtColonSafe(macIf.mac) : '' });
+                // Where it is, as the report prints it: its group's path (and
+                // units) when it is in one, else the free text it was given.
+                location: nodePlaceText(n), ip, mac: macIf ? fmtColonSafe(macIf.mac) : '' });
         } else if (e.type === 'link') {
             const l = getLink(e.id), a = l && getNode(l.source), b = l && getNode(l.target);
             if (!a || !b) return;

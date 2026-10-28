@@ -1012,17 +1012,21 @@ const runNodeCheck = (c, node, ctx) => (isRetired(node)
 // is the document on screen with a change applied (a bulk edit, a paste, a
 // CSV import), and the accepted list is a note about that document; read as
 // empty, every accepted finding would show up in the preview as a new one.
+// The groups are read the same way, for the same reason: a scratch copy's
+// devices name the document's groups, and read as having none, every device
+// placed in a rack would preview as a new "rack fields without a rack".
 function diagnoseDoc(doc) {
     if (!doc) return withLookupPass(runDiagnosis);
-    const held = { nodes: state.nodes, links: state.links, networks: state.networks, accepted: state.accepted };
+    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, accepted: state.accepted };
     try {
         state.nodes = Array.isArray(doc.nodes) ? doc.nodes : [];
         state.links = Array.isArray(doc.links) ? doc.links : [];
         state.networks = Array.isArray(doc.networks) ? doc.networks : [];
+        if (Array.isArray(doc.groups)) state.groups = doc.groups;
         if (Array.isArray(doc.accepted)) state.accepted = doc.accepted;
         return withLookupPass(runDiagnosis);
     } finally {
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.accepted = held.accepted;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.accepted = held.accepted;
     }
 }
 
@@ -1063,6 +1067,8 @@ function runDiagnosis() {
     cablingFindings().forEach(add);
     loopFindings().forEach(add);
     labelFindings().forEach(add);
+    placeFindings().forEach(add);
+    hostFindings().forEach(add);
 
     // Each finding says whether it was accepted, and why: { reason, index }
     // (the entry's place in state.accepted, which the Findings tab's Reopen
@@ -1133,7 +1139,7 @@ function serializeAccepted(list) {
 // The name a check goes by in the tab and the report, for an accepted entry
 // that matches nothing at the moment (there is no finding to borrow it from).
 const FINDING_CHECK_NAMES = { 'ip-conflict': 'IP Conflict', 'mac-conflict': 'MAC Conflict', cabling: 'Cabling', loop: 'L2 loop',
-    'cable-label': 'Cable label', 'asset-tag': 'Asset tag' };
+    'cable-label': 'Cable label', 'asset-tag': 'Asset tag', group: 'Groups', rack: 'Rack' };
 const findingCheckName = (key) => t(FINDING_CHECK_NAMES[key] || (NODE_CHECKS_BY_KEY[key] && NODE_CHECKS_BY_KEY[key].label) || key);
 
 // One undo step: the findings of one line of the tab (the same finding on
@@ -1288,6 +1294,121 @@ function labelFindings() {
     return out;
 }
 
+// ---- Groups and racks (js/model.js "Groups") ----
+// group: groups whose parent chain comes back round. The loader cuts every
+// such loop (repairGroupParents) and every re-parent asks groupParentOk()
+// first, so on a document opened here this does not fire; it is for a
+// scratch copy that did not come through the loader, so that a loop that got
+// through says so rather than leaving a tree nothing can draw.
+// rack: a device placed below the first unit or above the rack's last, one
+// whose lowest unit is in the rack but whose height takes it past the top,
+// and a device with a rack position whose group is not a rack (or that is in
+// no group), which is a position nobody can find. Then two devices in the
+// same units (step C): on the same face, or on either when one of them fills
+// the depth (rackOverlaps, js/model.js). The rack view refuses to make an
+// overlap; a spreadsheet, a file or the device editor's fields can still say
+// one, and it is critical: one of the two is not where the register says. A
+// retired device is not exempt: it is in the rack until somebody takes it out.
+function placeFindings() {
+    const out = [];
+    const groups = Array.isArray(state.groups) ? state.groups : [];
+    const byId = new Map(groups.map((g) => [g.id, g]));
+    const looped = new Set();
+    groups.forEach((g) => {
+        const seen = new Set([g.id]);
+        for (let p = byId.get(g.parent); p; p = byId.get(p.parent)) {
+            if (p.id === g.id) { looped.add(g.id); break; }
+            if (seen.has(p.id)) break;   // a loop further up, reported by its own members
+            seen.add(p.id);
+        }
+    });
+    if (looped.size) {
+        const names = groups.filter((g) => looped.has(g.id)).map(groupLabel).join(', ');
+        const detail = t('These groups are each other\'s parents, so none of them has a place in the tree: {names}.', { names });
+        out.push({ key: 'group', level: 'bad', check: t('Groups'), subject: names, detail, line: `${t('Groups')}: ${detail}`,
+            nodeIds: state.nodes.filter((n) => n.group && looped.has(n.group)).map((n) => n.id) });
+    }
+    state.nodes.forEach((node) => {
+        if (!hasRackFields(node)) return;
+        const g = node.group ? byId.get(node.group) : null;
+        const name = node.name || node.id;
+        const say = (level, detail) => out.push({ key: 'rack', level, check: t('Rack'), subject: name, detail, nodeIds: [node.id] });
+        if (!isRackGroup(g)) {
+            say('warn', g ? t('It has a rack position, but {group} is not a rack.', { group: groupLabel(g) })
+                : t('It has a rack position, but it is in no rack.'));
+            return;
+        }
+        // Checked on the stored units (from the bottom), worded in the
+        // numbers the rack's rails print (rackUnitNo): on a rack numbered
+        // from the top, its top is U1.
+        const top = Number.isInteger(g.uHeight) ? g.uHeight : RACK_U_DEFAULT;
+        // Outside: the unit as the editor's field took it (rackStartNo), so
+        // the number is the one somebody typed, not its mirror.
+        const h = rackHeightOf(node);
+        if (Number.isInteger(node.rackU) && (node.rackU < 1 || node.rackU > top)) {
+            say('bad', t('U{u} is outside {rack}, which has units 1 to {top}.', { u: rackStartNo(g, node.rackU, h), rack: groupLabel(g), top }));
+        } else if (Number.isInteger(node.rackU) && node.rackU + h - 1 > top) {
+            // Numbered from the top, "from U{u}" and "past U{top}" were both
+            // about U1 (the bottom unit of a device at the top is printed U1,
+            // and so is the top): the bottom unit and how far above the top
+            // it reaches say it plainly.
+            if (rackTopDown(g)) {
+                say('bad', t('It is {h}U tall with its bottom unit at U{u}, so it reaches {n}U above U1, the top of {rack}.',
+                    { h, u: rackUnitNo(g, node.rackU), n: node.rackU + h - 1 - top, rack: groupLabel(g) }));
+            } else {
+                say('bad', t('It is {h}U tall from U{u}, so it goes past U{top}, the top of {rack}.',
+                    { h, u: node.rackU, top, rack: groupLabel(g) }));
+            }
+        }
+    });
+    groups.filter(isRackGroup).forEach((rack) => rackOverlaps(rack).forEach(({ a, b, full, both }) => {
+        const names = `${a.name || a.id}, ${b.name || b.id}`;
+        const where = `${rackSpanText(a)}; ${rackSpanText(b)}`;
+        // Both full depth on opposite faces: one made half depth still meets
+        // the other's back, so the finding says both, not one.
+        const detail = both
+            ? t('{a} and {b} take the same units of {rack} ({where}), and both fill the rack front to back. To share them, set both to half depth.', { a: a.name || a.id, b: b.name || b.id, rack: groupLabel(rack), where })
+            : full
+            ? t('{a} and {b} take the same units of {rack} ({where}), and one of them fills the rack front to back.', { a: a.name || a.id, b: b.name || b.id, rack: groupLabel(rack), where })
+            : t('{a} and {b} take the same units of {rack} ({where}).', { a: a.name || a.id, b: b.name || b.id, rack: groupLabel(rack), where });
+        out.push({ key: 'rack', level: 'bad', check: t('Rack'), subject: names, detail, nodeIds: [a.id, b.id] });
+    }));
+    return out;
+}
+
+// ---- Hosts (js/model.js "Hosts") ----
+// A VM or a container whose host is retired: the host is off the network
+// (the reachability walk neither reaches it nor passes through it), so what
+// runs on it is either gone too and should say so, or has moved and the
+// register has not caught up. A retired guest on it is the first case,
+// already said, and raises nothing.
+// A guest in another group than its host: where a VM is follows where its
+// host is (repairHosts, run on load and on every save), so in the editor this
+// does not fire; it is for a scratch copy that skipped the repair, so a
+// document whose VMs say they are in another room than their hypervisor
+// says so rather than being drawn in two places at once.
+function hostFindings() {
+    const out = [];
+    const byId = new Map();
+    state.nodes.forEach((n) => { if (n && !byId.has(n.id)) byId.set(n.id, n); });
+    state.nodes.forEach((node) => {
+        if (!node || !node.host || !isVirtualType(node.type)) return;
+        const host = byId.get(node.host);
+        if (!host || host === node) return;
+        const name = node.name || node.id, hostName = host.name || host.id;
+        const say = (detail) => out.push({ key: 'host', level: 'warn', check: t('Runs on'), subject: name, detail, nodeIds: [node.id, host.id] });
+        if (isRetired(host) && !isRetired(node)) say(t('{name} runs on {host}, which is retired.', { name, host: hostName }));
+        // Against its own host: a container on a VM in the wrong room is the
+        // VM's finding, not the container's as well.
+        if ((node.group || null) !== (host.group || null)) {
+            const g = groupById(node.group), hg = groupById(host.group);
+            say(t('{name} runs on {host}, but it is in {group} and {host} is in {other}.',
+                { name, host: hostName, group: g ? groupPath(g) : t('no group'), other: hg ? groupPath(hg) : t('no group') }));
+        }
+    });
+    return out;
+}
+
 // The document on screen, diagnosed once per change. A render, a click that
 // only selects, or the node tab after an edit would otherwise rerun every
 // reachability walk on an unchanged network. The key is the document minus
@@ -1308,7 +1429,7 @@ function currentDiagnosis() {
 }
 function currentDiagnosisNow() {
     const lang = window.CarinoI18N ? window.CarinoI18N.current() : '';
-    const key = `${lang}\u0000${JSON.stringify(state.nodes, omitPosition)}\u0000${JSON.stringify(state.links)}\u0000${JSON.stringify(state.networks)}\u0000${JSON.stringify(state.accepted || [])}`;
+    const key = `${lang}\u0000${JSON.stringify(state.nodes, omitPosition)}\u0000${JSON.stringify(state.links)}\u0000${JSON.stringify(state.networks)}\u0000${JSON.stringify(state.groups || [])}\u0000${JSON.stringify(state.accepted || [])}`;
     if (diagnosisMemo && diagnosisMemo.key === key) {
         // Same network, but maybe not the same objects: undo, redo and
         // Back/Forward rebuild every node from the stored document, and a move

@@ -197,6 +197,40 @@ window.addEventListener('load', () => { setTimeout(() => {
   ok('every tooltip in the markup is translated (data-i18n-title)', bareTitles.length === 0,
      bareTitles.map((el) => `#${el.id || el.tagName.toLowerCase()}: ${el.getAttribute('title').slice(0, 40)}`).slice(0, 3).join(' | '));
 
+  // Groups and the rack view (js/groups.js, js/groupmap.js, js/rackview.js):
+  // their sentences, Front and Rear, the kinds and the rest are translated,
+  // and MESSAGES parity above only sees keys someone remembered to add. So
+  // every literal t('…') in those files is read off the source and asked
+  // for in each locale. A key built at run time (t(label)) is not seen here;
+  // the field labels are checked by name below, since the changes list and
+  // the report print them.
+  const grpKeys = new Map();
+  ['js/groups.js', 'js/groupmap.js', 'js/rackview.js'].forEach((file) => {
+    const req = new XMLHttpRequest(); req.open('GET', file, false); req.send();
+    const re = /\bt\(\s*(['"])((?:\\.|(?!\1).)*)\1/g; let m;
+    while ((m = re.exec(req.responseText))) grpKeys.set(m[2].replace(/\\(['"\\])/g, '$1'), file);
+  });
+  ['Group', 'Rack U', 'Rack height', 'Rack face', 'Rack depth'].forEach((k) => grpKeys.set(k, 'NODE_FIELDS'));
+  ok('the Groups files ask for a real number of strings', grpKeys.size > 60, `${grpKeys.size} keys`);
+  locales.forEach((loc) => {
+    const missing = [...grpKeys].filter(([k]) => !has(loc, k));
+    ok(`${loc} carries every string of the Groups tab, the map's frames and the rack view`, missing.length === 0,
+       missing.length ? `${missing.length} missing, first: ${JSON.stringify(missing[0][0].slice(0, 50))} (${missing[0][1]})` : '');
+  });
+  // The report's rack elevation names each device's type as the inventory
+  // above it does: in the reader's language, not the palette's English.
+  {
+    const keep = state.doc;
+    setLocale('ja');
+    replaceDocument({ v: DOC_VERSION, nodes: [{ id: 'f', type: 'firewall', name: 'FW1', x: 0, y: 0, interfaces: [], group: 'rk', rackU: 4 }], links: [],
+      groups: [{ id: 'rk', name: 'R1', kind: 'rack', uHeight: 6 }] }, { origin: 'file', docId: 'i18n-rack' });
+    const elev = new DOMParser().parseFromString(reportHtml(reportModel(), null), 'text/html').querySelector('table.elev');
+    const cell = elev ? elev.textContent : '';
+    ok('the rack elevation names the type in the report\'s language', /FW1/.test(cell) && cell.includes(t('Firewall')) && !/Firewall/.test(cell), cell.replace(/\s+/g, ' ').slice(0, 80));
+    setLocale('en');
+    if (keep) replaceDocument(keep, { origin: 'file', docId: 'i18n-back' });
+  }
+
   // Switching back has to actually switch back, or one language test poisons
   // every assertion after it.
   setLocale('en');

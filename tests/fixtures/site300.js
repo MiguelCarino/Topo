@@ -10,7 +10,9 @@
 // switched fabric every reachability walk crosses, inherited gateways and DNS,
 // named ports with labels and VLANs, cable labels, asset tags, a retired
 // device, a few faults (two duplicate addresses, one duplicate MAC, a gateway
-// outside its subnet) and one accepted finding.
+// outside its subnet) and one accepted finding. And twenty groups (a
+// building, floors, rooms and racks) holding nearly every device, for the map's
+// frames and collapsed groups (js/groupmap.js).
 //
 // Deterministic (no Math.random, no Date): the time budget in perf.js has to
 // measure the same document on every run.
@@ -120,7 +122,37 @@ window.topoSite300 = function topoSite300() {
   const ring1 = link('sw5', 'sw6', 'p45', 'p45', { cable: { label: 'LAB-LOOP' } });
   const ring2 = link('sw6', 'core', 'p46', 'p7');
 
-  const doc = { v: 6, nodes, links, networks,
+  // Where they sit (doc.groups, document v7): twenty groups, as Topo-groups.md
+  // asks of the perf test. One building; the MDF room with the core rack
+  // (firewall, router, core switch, DNS server); three floors, each with two
+  // IDF rooms, each room holding its access switch in a rack and the desks
+  // cabled to it; and the Wi-Fi as two groups of the user's own, an east and
+  // a west half, each with its access points and their laptops.
+  const groups = [
+    { id: 'g-hq', name: 'HQ', kind: 'building' },
+    { id: 'g-mdf', name: 'MDF', kind: 'room', parent: 'g-hq' },
+    { id: 'g-mdf-r1', name: 'MDF rack 1', kind: 'rack', parent: 'g-mdf', uHeight: 42, width: '19in' },
+    { id: 'g-wifi-w', name: 'Wi-Fi west', kind: 'custom', parent: 'g-hq' },
+    { id: 'g-wifi-e', name: 'Wi-Fi east', kind: 'custom', parent: 'g-hq' }
+  ];
+  const place = (id, group, extra) => Object.assign(nodes.find((x) => x.id === id), { group }, extra || {});
+  ['fw', 'rt', 'core'].forEach((id, i) => place(id, 'g-mdf-r1', { rackU: 40 - i * 2, rackFace: 'front' }));
+  place('dns', 'g-mdf');
+  for (let f = 1; f <= 3; f++) groups.push({ id: `g-fl${f}`, name: `Floor ${f}`, kind: 'floor', parent: 'g-hq' });
+  for (let s = 1; s <= ACCESS; s++) {
+    const floor = `g-fl${Math.ceil(s / 2)}`;
+    groups.push({ id: `g-idf${s}`, name: `IDF ${s}`, kind: 'room', parent: floor },
+      { id: `g-idf${s}-r`, name: `IDF ${s} rack`, kind: 'rack', parent: `g-idf${s}`, uHeight: 12, width: '19in' });
+    place(`sw${s}`, `g-idf${s}-r`, { rackU: 10, rackHeight: 1 });
+    links.filter((l) => l.source === `sw${s}` && /^h\d+$/.test(l.target)).forEach((l) => place(l.target, `g-idf${s}`));
+  }
+  for (let a = 1; a <= 4; a++) {
+    const half = a <= 2 ? 'g-wifi-w' : 'g-wifi-e';
+    place(`ap${a}`, half);
+    links.filter((l) => l.source === `ap${a}`).forEach((l) => place(l.target, half));
+  }
+
+  const doc = { v: 7, nodes, links, networks, groups,
     // The ring's two closing cables, each its own loop finding.
     accepted: [{ check: 'loop', nodeIds: ['sw5', 'sw6'], linkIds: [ring1], reason: 'Lab ring, STP on' },
       { check: 'loop', nodeIds: ['sw6', 'core'], linkIds: [ring2], reason: 'Lab ring, STP on' }],

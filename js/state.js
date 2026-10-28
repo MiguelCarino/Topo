@@ -23,6 +23,10 @@ const state = {
     // networks: the declared subnets (R7, js/model.js "Networks"). A device
     // belongs to one by address containment, never by a stored list, and takes
     // its gateway and DNS from it unless its own fields say otherwise.
+    // groups: where devices sit (buildings, floors, rooms, racks; js/model.js
+    // "Groups"). Document, like the networks: serialized, an undo step,
+    // carried by files and links. Which of them are collapsed on the map is
+    // a view, and is not kept here.
     // accepted: the findings accepted with a reason ({ check, nodeIds,
     // linkIds, reason }, js/diagnostics.js "Accepted findings"). Document, so
     // serialized, an undo step, and carried by files and links.
@@ -42,7 +46,7 @@ const state = {
     // query: what the search box over the map and the table holds (plan 3.3,
     // js/query.js). A view, like the trace: never serialized, never an undo
     // step, not kept between visits, and kept when another network is opened.
-    nodes: [], links: [], networks: [], accepted: [], annotations: [], report: null, libraryId: null, docId: null, docUpdated: 0, readOnly: null, linkSourceId: null,
+    nodes: [], links: [], networks: [], groups: [], accepted: [], annotations: [], report: null, libraryId: null, docId: null, docUpdated: 0, readOnly: null, linkSourceId: null,
     query: '',
     selection: new Set(),
     get selectedId() { const one = soleSelected(this.selection); return one ? one.id : null; },
@@ -59,9 +63,10 @@ const state = {
     // subnetZones: the canvas draws the declared networks' zones at all (the
     // Subnets tab's "Subnet zones"). A view preference, so it is persisted
     // with the other settings and never travels with a document.
-    // view: 'map' or 'table' once the visitor has chosen (js/table.js);
+    // view: 'map', 'table' or 'rack' once the visitor has chosen (js/table.js;
+    // 'rack' stands only while the document has a rack, js/rackview.js);
     // unset, a phone opens on the table and anything wider on the map.
-    // Persisted the same way.
+    // Persisted the same way. Which rack is on show is not: a view of this visit.
     settings: { traceMode: false, tracePort: '', tracePortOn: false, profile: 'simple', advanced: true, subnetZones: true },
     camera: { x: 0, y: 0, zoom: 1 }
 };

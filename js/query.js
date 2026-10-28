@@ -21,12 +21,22 @@
 //                with such a port, and the device cabled into it
 //   switch:      cabled straight into a switch of that name (and the switch)
 //   loc:/status: the Asset group's location and status (js/assets.js):
-//                status:retired, loc:"rack 2". A prefix whose field the
-//                schema does not have is not understood, and the box says so
-//                rather than matching nothing in silence.
+//                status:retired, loc:"rack 2". loc: reads where the device
+//                is as the table prints it: its group's path when it is in
+//                one, and the free text it was given either way. A prefix
+//                whose field the schema does not have is not understood, and
+//                the box says so rather than matching nothing in silence.
+//   group:       a group's name or a fragment of its path ("Rack 3",
+//                group:"server room/rack"): the devices in that group or in
+//                any group inside it, since a device in Rack 3 is in the
+//                server room too
+//   host:        what a VM or a container runs on, by the host's name or
+//                id (host:esx-01): the devices on it, and a container on a
+//                VM on it too, as group: takes the groups inside
 //   tag:         the asset tag
 //   has:         finding, critical, advisory, ip, mac, gateway, dns, os,
-//                notes, tag, cable
+//                notes, tag, cable, group, host (runs on a device), guests
+//                (something runs on it)
 //
 // A cable's own facts (link.cable: its label, length, colour, via) are plain
 // text of the cable, so "WS-3B" finds the run with that label. A port's
@@ -58,7 +68,7 @@
 // serialized, never an undo step and not kept between visits. A reduced view
 // has no box, so a query left from the full editor dims nothing there.
 //
-// Load order: ... networks -> table -> query -> bulk -> app
+// Load order: ... networks -> table -> rackview -> query -> bulk -> app
 
 // ---- Small readers that never throw ----
 // A loaded file's fields have been through the schema, but a value can still
@@ -80,7 +90,12 @@ const qInRange = (addr, p) => qSameKind(addr, p.ip) && addr.match(p.cidrObj);
 const qPeer = (link, nodeId) => getNode(link.source === nodeId ? link.target : link.source);
 
 // The schema's text fields, minus the ones that are bookkeeping, not data.
-const Q_SKIP = new Set(['id', 'x', 'y', 'interfaces', 'source', 'target']);
+// A device's group is an id and its rack fields are numbers and a face: read
+// as text, "12" would find every device in U12 and "front" every one on a
+// front face. Where a device sits is searched by its path instead (plain
+// text below, loc: and group:).
+// A host is an id too: "s_lq3" would find its VMs by a string nobody reads.
+const Q_SKIP = new Set(['id', 'x', 'y', 'interfaces', 'source', 'target', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'host']);
 const qFieldsHave = (fields, rec, v) => !!rec && fields.some((f) => !Q_SKIP.has(f.key) && qHas(rec[f.key], v));
 
 // A typed fragment that reads as part of a MAC (aa:bb, aa-bb-cc, or six or
@@ -91,7 +106,7 @@ const Q_MAC_FRAGMENT = /^(?:[0-9a-f]{2}[:-]){1,5}[0-9a-f]{0,2}$|^[0-9a-f]{6,12}$
 function qNodeFieldText(node, q) {
     if (qFieldsHave(NODE_FIELDS, node, q.v)) return true;
     const name = typeName(node.type);
-    return qHas(name, q.v) || qHas(t(name), q.v);
+    return qHas(name, q.v) || qHas(t(name), q.v) || qHas(groupPathOf(node), q.v);
 }
 // A device's port labels too: an object of objects, which the schema walk
 // reads as no text. Only while it has a faceplate: a switch retyped to a PC
@@ -162,9 +177,13 @@ const Q_HAS = {
     os: (n) => !isBlank(n.os),
     notes: (n) => !isBlank(n.notes),
     tag: (n) => !isBlank(n.assetTag),
-    cable: (n) => linksAtNode(n.id).length > 0
+    cable: (n) => linksAtNode(n.id).length > 0,
+    group: (n) => !!groupOfNode(n),
+    host: (n) => !!hostOf(n),
+    guests: (n) => guestsOf(n).length > 0
 };
-const Q_HAS_ALIAS = { findings: 'finding', problem: 'finding', warning: 'advisory', gw: 'gateway', address: 'ip', cables: 'cable', note: 'notes' };
+const Q_HAS_ALIAS = { findings: 'finding', problem: 'finding', warning: 'advisory', gw: 'gateway', address: 'ip', cables: 'cable', note: 'notes', groups: 'group',
+    guest: 'guests' };
 const Q_HAS_LINK = {
     finding: (l) => !!qLinkSeverity(l),
     critical: (l) => qLinkSeverity(l) === 'bad',
@@ -228,6 +247,16 @@ function qNodeVlan(n, vlan) {
 const Q_SWITCH_TYPES = ['switch', 'l3switch'];
 const qIsSwitch = (n, v) => !!n && Q_SWITCH_TYPES.includes(n.type) && qHas(n.name, v);
 
+// ---- group: and loc: ----
+// A group by its name, or by a fragment of its path however its slashes were
+// spaced (placeKey, js/model.js). Its own path holds every ancestor's name,
+// so a device matches through the group it is in and every group above it.
+const qGroupHas = (g, v) => !!g && (qHas(groupLabel(g), v) || placeKey(groupPath(g)).includes(placeKey(v)));
+const qNodeInGroup = (n, v) => qGroupHas(groupOfNode(n), v);
+// Where it is: the path the table and the report print (nodePlaceText), and
+// the free text, which a grouped device keeps and a search still finds.
+const qNodeLoc = (n, v) => qHas(n.location, v) || qHas(nodePlaceText(n), v);
+
 // The prefixes. A term defines what it can say about each kind of row; what
 // it does not define falls back (qTerm* below): a device by its interfaces,
 // an interface by its device, a cable by its two ends, a subnet by the
@@ -246,9 +275,11 @@ const Q_PREFIXES = {
     switch: { node: (n, q) => qIsSwitch(n, q.v) || linksAtNode(n.id).some((l) => qIsSwitch(qPeer(l, n.id), q.v)),
               iface: (n, i, q) => { if (qIsSwitch(n, q.v)) return true; const l = linkOnIface(n.id, i.id); return !!l && qIsSwitch(qPeer(l, n.id), q.v); },
               link: (l, q) => qIsSwitch(getNode(l.source), q.v) || qIsSwitch(getNode(l.target), q.v) },
-    loc: { field: 'location', node: (n, q) => qHas(n.location, q.v) },
+    loc: { field: 'location', node: (n, q) => qNodeLoc(n, q.v), grp: (g, q) => qHas(groupPath(g), q.v) },
+    group: { field: 'group', node: (n, q) => qNodeInGroup(n, q.v), grp: (g, q) => qGroupHas(g, q.v) },
     status: { field: 'status', node: (n, q) => qLower(n.status) === q.v || qHas(n.status, q.v) },
     tag: { field: 'assetTag', node: (n, q) => qHas(n.assetTag, q.v) },
+    host: { field: 'host', node: (n, q) => hostChainOf(n).some((h) => qHas(h.name, q.v) || qLower(h.id) === q.v) },
     has: { prep: (v) => { const k = Q_HAS_ALIAS[v] || v; return Q_HAS[k] ? { has: k } : { error: true }; },
            node: (n, q) => Q_HAS[q.has](n),
            iface: (n, i, q) => (Q_HAS_IFACE[q.has] ? Q_HAS_IFACE[q.has](n, i) : Q_HAS[q.has](n)),
@@ -258,7 +289,7 @@ const Q_PREFIXES = {
                return !!own || [l.source, l.target].some((id) => { const n = getNode(id); return !!n && Q_HAS[q.has](n); });
            } }
 };
-const Q_ALIAS = { location: 'loc' };
+const Q_ALIAS = { location: 'loc', grp: 'group' };
 const qKnown = (key) => {
     const k = Object.prototype.hasOwnProperty.call(Q_ALIAS, key) ? Q_ALIAS[key] : key;
     const def = k && Object.prototype.hasOwnProperty.call(Q_PREFIXES, k) ? Q_PREFIXES[k] : null;
@@ -311,11 +342,19 @@ const qTermNet = (term, s) => (term.def.net ? !!term.def.net(s, term.q) : s.node
 // A port by what it says itself, else by its switch or what is plugged in.
 const qTermPort = (term, p) => (term.def.port ? !!term.def.port(p, term.q)
     : qTermNode(term, p.node) || (!!p.peer && qTermNode(term, p.peer)));
-const Q_SCOPES = { node: qTermNode, iface: qTermIface, link: qTermLink, net: qTermNet, port: qTermPort };
+// A group (the table's Groups tab) by what it says itself (its name and
+// path, for plain text, loc: and group:), else by any device in it or below.
+const qTermGrp = (term, g) => {
+    if (term.def === Q_PLAIN && qHas(groupPath(g), term.q.v)) return true;
+    if (term.def.grp && term.def.grp(g, term.q)) return true;
+    return groupMembers(g.id, true).some((n) => qTermNode(term, n));
+};
+const Q_SCOPES = { node: qTermNode, iface: qTermIface, link: qTermLink, net: qTermNet, port: qTermPort, grp: qTermGrp };
 
 // kind: 'node' (n), 'iface' (n, iface), 'link' (l), 'net' ({ net, cidr,
-// nodes }), 'port' ({ node, portId, peer }). A query that was not understood matches nothing: showing
-// everything would read as "all of these match".
+// nodes }), 'port' ({ node, portId, peer }), 'grp' (g). A query that was not
+// understood matches nothing: showing everything would read as "all of these
+// match".
 function queryMatch(query, kind, ...args) {
     if (!args[0]) return false;
     if (query.errors.length) return false;
@@ -357,6 +396,7 @@ function queryKeepsRow(row, q = activeQuery()) {
         return !!iface && queryMatch(q, 'iface', n, iface);
     }
     if (row.rec === 'link') return queryMatch(q, 'link', getLink(row.ref.linkId));
+    if (row.rec === 'group') return queryMatch(q, 'grp', groupById(row.ref.groupId));
     if (row.rec === 'port') {
         const node = getNode(row.ref.nodeId);
         return !!node && queryMatch(q, 'port', { node, portId: row.ref.portId, peer: row.data.peerId ? getNode(row.data.peerId) : null });
@@ -393,9 +433,11 @@ function selectQueryMatches() {
     selectEntries(entries);
 }
 
+// A match folded into a collapsed group is framed by the group's node, which
+// the map lights for it (mapPointsOf, js/groupmap.js).
 function zoomToQueryMatches() {
     const nodes = queryMatchEntries().filter((e) => e.type === 'node').map((e) => getNode(e.id)).filter(Boolean);
-    if (nodes.length) fitToView(nodes);
+    if (nodes.length) fitToView(mapPointsOf(nodes));
 }
 
 // The count, the buttons and the "not understood" line. Called after every
@@ -434,7 +476,8 @@ function updateQueryBar() {
     const any = !!q && n > 0;
     qEl('querySelectBtn').disabled = !any;
     qEl('queryZoomBtn').disabled = !any;
-    qEl('queryZoomBtn').classList.toggle('hidden', table);
+    // Nothing to zoom over the table or the rack view (js/rackview.js).
+    qEl('queryZoomBtn').classList.toggle('hidden', table || rackShown());
     qEl('queryClearBtn').classList.toggle('hidden', !(state.query || '').length);
     syncTopbarHeight();
 }

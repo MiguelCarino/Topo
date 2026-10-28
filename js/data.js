@@ -840,14 +840,16 @@ const SNIPPETS = {
         { tid: 'cr',   type: 'dicom',   name: 'CR Unit',         dx: 80,   dy: 160, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.120.0.24/24' }], gw: '10.120.0.1', ports: '104' },
         { tid: 'dx',   type: 'dicom',   name: 'DX Unit',         dx: 160,  dy: 160, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.120.0.25/24' }], gw: '10.120.0.1', ports: '104' } ],
       links: [{ s: 'sw', t: 'pacs' }, { s: 'sw', t: 'prn' }, { s: 'sw', t: 'ws1' }, { s: 'sw', t: 'ws2' }, { s: 'sw', t: 'us' }, { s: 'sw', t: 'ct' }, { s: 'sw', t: 'mr' }, { s: 'sw', t: 'cr' }, { s: 'sw', t: 'dx' }] },
-    // Homelab: a hypervisor running VMs + a container, plus a NAS.
+    // Homelab: a hypervisor running VMs + a container, plus a NAS. The three
+    // run on it (host, js/model.js "Hosts"), so the block shows the host
+    // badge and its fold as it lands; insertBlockNow renames host to the copy.
     homelab: { nodes: [
         { tid: 'sw',  type: 'switch',    name: 'Lab Switch',        dx: 0,    dy: -70, portCount: 8, interfaces: [] },
         { tid: 'hv',  type: 'server',    name: 'Hypervisor (PVE)',  dx: -120, dy: 50,  interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.10/24' }], gw: '10.110.0.1', ports: '8006, 22' },
         { tid: 'nas', type: 'server',    name: 'NAS',               dx: 120,  dy: 50,  interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.20/24' }], gw: '10.110.0.1', ports: '2049, 445' },
-        { tid: 'vm1', type: 'vm',        name: 'VM: Web',           dx: -60,  dy: 160, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.21/24' }], gw: '10.110.0.1', ports: '80, 443' },
-        { tid: 'vm2', type: 'vm',        name: 'VM: DB',            dx: 40,   dy: 160, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.22/24' }], gw: '10.110.0.1', ports: '5432' },
-        { tid: 'ct1', type: 'container', name: 'Container: App',    dx: 140,  dy: 160, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.31/24' }], gw: '10.110.0.1', ports: '8080' } ],
+        { tid: 'vm1', type: 'vm',        name: 'VM: Web',           dx: -60,  dy: 160, host: 'hv', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.21/24' }], gw: '10.110.0.1', ports: '80, 443' },
+        { tid: 'vm2', type: 'vm',        name: 'VM: DB',            dx: 40,   dy: 160, host: 'hv', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.22/24' }], gw: '10.110.0.1', ports: '5432' },
+        { tid: 'ct1', type: 'container', name: 'Container: App',    dx: 140,  dy: 160, host: 'hv', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.31/24' }], gw: '10.110.0.1', ports: '8080' } ],
       links: [{ s: 'sw', t: 'hv' }, { s: 'sw', t: 'nas' }, { s: 'hv', t: 'vm1', attachment: 'bridged' }, { s: 'hv', t: 'vm2', attachment: 'bridged' }, { s: 'hv', t: 'ct1', attachment: 'bridged' }] },
     // A complete small branch office behind its own NAT router.
     branch: { nodes: [

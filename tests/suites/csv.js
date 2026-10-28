@@ -501,8 +501,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     el('csvMenuBtn').click();
     const dlgOpen = () => !el('csvDialog').hidden;
     ok('the Export menu opens it', dlgOpen() && CarinoUI.modal.isOpen(el('csvDialog')));
-    // Devices, interfaces, cables, ports (p3-ports: tests/suites/ports.js), subnets and findings.
-    ok('six sheets, each a CSV button and Copy as TSV', el('csvExportRows').querySelectorAll('[data-csv-download]').length === 6 && el('csvExportRows').querySelectorAll('[data-csv-copy]').length === 6
+    // Devices, interfaces, cables, ports (p3-ports: tests/suites/ports.js), subnets, groups
+    // (tests/suites/groupsheets.js) and findings.
+    ok('seven sheets, each a CSV button and Copy as TSV', el('csvExportRows').querySelectorAll('[data-csv-download]').length === 7 && el('csvExportRows').querySelectorAll('[data-csv-copy]').length === 7
        && !el('csvExportRows').querySelector('.sm'));
     el('csvTabs').querySelector('[data-csvtab="import"]').click();
     ok('Import is a tab', !el('csvPane-import').classList.contains('hidden') && el('csvPane-export').classList.contains('hidden'));

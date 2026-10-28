@@ -593,7 +593,18 @@ function insertBlockNow(block, opts) {
     (doc.nodes || []).forEach((n) => {
         if (!n || typeof n !== 'object') return;
         const nid = nextId('s'); idMap[n.id] = nid; newIds.push(nid);
-        state.nodes.push(normalizeLoadedNode({ ...n, id: nid, x: snap(c.x + (Number(n.x) || 0)), y: snap(c.y + (Number(n.y) || 0)) }));
+        const node = normalizeLoadedNode({ ...n, id: nid, x: snap(c.x + (Number(n.x) || 0)), y: snap(c.y + (Number(n.y) || 0)) });
+        dropBlockPlace(node);   // a block from a file or card that still carries one
+        state.nodes.push(node);
+    });
+    // A VM's host is a device id like a cable's end, so it is renamed the same
+    // way: onto the copy of its host when the block brought one, else dropped.
+    // Kept as it was, a block saved from this map would put the copy on the
+    // original's host, or on whatever device of another map has that id.
+    newIds.forEach((id) => {
+        const node = getNode(id);
+        if (!node || node.host === undefined) return;
+        if (idMap[node.host]) node.host = idMap[node.host]; else delete node.host;
     });
     // Its networks come with it, under ids of their own; a name already on
     // the map gets a number, so two "Voice" networks can be told apart.
@@ -639,9 +650,20 @@ function insertBlockFromMenu(block) {
     if (done.moves.length) showToast(t('Moved to free addresses: {list}', { list: done.moves.map((m) => `${m.from} → ${m.to}`).join(', ') }), 'ok');
 }
 
+// A block carries no place (document v7 groups): it is a stamp to put down
+// anywhere, as a template is, while a group belongs to one site. Its group id
+// means nothing in another document (and would dangle there: the loader's
+// normalizeGroupRefs() never sees an insert), and put back into the same
+// document its rack units would claim a place the original still holds. So the
+// copies come in ungrouped, and the Group picker puts them where they go.
+// Carrying the groups along would need the naming and merging rules networks
+// have above, for little: a rack place has to be chosen anew anyway.
+function dropBlockPlace(n) { delete n.group; RACK_KEYS.forEach((k) => { delete n[k]; }); return n; }
+
 // The selected devices as a block: their records as the serializer writes
-// them (the allowlist, as for any card), placed around their middle; the
-// cables with both ends inside; the networks they are on or inherit from.
+// them (the allowlist, as for any card) less their place (dropBlockPlace),
+// placed around their middle; the cables with both ends inside; the networks
+// they are on or inherit from.
 function blockFromSelection() {
     const nodes = selectedOf('node').map((id) => getNode(id)).filter(Boolean);
     if (!nodes.length) return null;
@@ -656,7 +678,7 @@ function blockFromSelection() {
     });
     return {
         v: DOC_VERSION,
-        nodes: nodes.map((n) => ({ ...serializeNode(n), x: n.x - cx, y: n.y - cy })),
+        nodes: nodes.map((n) => dropBlockPlace({ ...serializeNode(n), x: n.x - cx, y: n.y - cy })),
         links: state.links.filter((l) => ids.has(l.source) && ids.has(l.target)).map(serializeLink),
         networks: serializeNetworks(state.networks.filter((n) => nets.has(n)))
     };
