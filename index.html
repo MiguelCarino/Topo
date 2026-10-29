@@ -43,9 +43,52 @@
     <script src="vendor/ipaddr-2.1.0.min.js"></script>
     <!-- QR codes for Print labels (js/assets.js), drawn here, never fetched. -->
     <script src="vendor/qrcode-generator-1.4.4.min.js"></script>
+    <!-- Theme before first paint, so neither theme flashes the other:
+         ?theme=gold|color (review links; not stored) > carino-theme cookie
+         (shared across *.carino.systems) > localStorage > Gold & Black.
+         A file rather than inline, because of the CSP above. -->
+    <meta name="theme-color" content="#050505" id="carinoThemeColor">
+    <script src="js/theme-boot.js"></script>
     <link rel="stylesheet" href="carino-ui.css">
     <link rel="stylesheet" href="fonts/carino-fonts.css">
     <link rel="stylesheet" href="css/app.css">
+    <!-- Colourful theme + the switch; nothing applies until data-carino-theme="color". -->
+    <link rel="stylesheet" href="carino-theme.css">
+    <style>
+        /* the landing mark in both colourings; the theme picks one */
+        .landing-mark img.mk-color, :root[data-carino-theme="color"] .landing-mark img.mk-gold { display: none; }
+        :root[data-carino-theme="color"] .landing-mark img.mk-color { display: block; }
+        /* Colourful: carino-theme.css remaps the tokens, so everything that reads
+           one follows; these are the values in css/app.css written for black.
+           The map itself is a light document in both themes already. */
+        :root[data-carino-theme="color"] { --topo-float-shadow: var(--ct-shadow-3); }
+        :root[data-carino-theme="color"] .handy-bar { background: var(--ct-glass); box-shadow: var(--ct-shadow-3); }
+        :root[data-carino-theme="color"] #landing { background: var(--stage-grad), var(--bg); }
+        :root[data-carino-theme="color"] .netline .pulse { filter: drop-shadow(0 0 5px var(--accent-dim)); }
+        :root[data-carino-theme="color"] .landing-drop { background: var(--bg-card); box-shadow: var(--ct-shadow-1); }
+        :root[data-carino-theme="color"] .landing-drop-btn, :root[data-carino-theme="color"] .landing-chip { background: var(--bg-card); }
+        :root[data-carino-theme="color"] .landing-drop-btn:hover, :root[data-carino-theme="color"] .landing-drop-btn:focus-visible,
+        :root[data-carino-theme="color"] .landing-chip:hover, :root[data-carino-theme="color"] .landing-chip:focus-visible,
+        :root[data-carino-theme="color"] .landing-drop-btn.primary, :root[data-carino-theme="color"] .landing-chip.accent { background: var(--accent-faint); }
+        :root[data-carino-theme="color"] .landing-drop-btn.primary:hover, :root[data-carino-theme="color"] .landing-drop-btn.primary:focus-visible { background: var(--accent); color: var(--ct-on-accent); }
+        :root[data-carino-theme="color"] .landing-badge.bad { color: var(--ct-err-fg); border-color: var(--ct-err-line); background: var(--ct-err-bg); }
+        :root[data-carino-theme="color"] .landing-badge.warn { color: var(--ct-warn-fg); border-color: var(--ct-warn-line); background: var(--ct-warn-bg); }
+        :root[data-carino-theme="color"] .landing-badge.good { color: var(--ct-ok-fg); border-color: var(--ct-ok-line); background: var(--ct-ok-bg); }
+        /* Sys. Status (carino-diag.js injects hard-coded black-page colours) */
+        :root[data-carino-theme="color"] #cnDiagBtn { border-color: var(--border); color: var(--text-muted); }
+        :root[data-carino-theme="color"] #cnDiagBtn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); }
+        :root[data-carino-theme="color"] #cnDiagBtn .cn-pulse { background: var(--accent); box-shadow: 0 0 6px var(--accent-dim); }
+        :root[data-carino-theme="color"] #cnDiagBox { background: var(--bg-card); border-color: var(--border); box-shadow: var(--ct-shadow-3); color: var(--text); }
+        :root[data-carino-theme="color"] #cnDiagBox .d-lbl, :root[data-carino-theme="color"] #cnDiagBox .d-sec, :root[data-carino-theme="color"] #cnDiagBox .d-btn { color: var(--text-muted); }
+        :root[data-carino-theme="color"] #cnDiagBox .d-val { color: var(--text); }
+        :root[data-carino-theme="color"] #cnDiagLast { color: var(--accent) !important; }
+        :root[data-carino-theme="color"] #cnDiagBox .d-sec, :root[data-carino-theme="color"] #cnDiagBox .d-head, :root[data-carino-theme="color"] #cnDiagBox .d-btn { border-color: var(--border); }
+        :root[data-carino-theme="color"] #cnDiagBox .d-btn:hover { border-color: var(--accent); color: var(--accent); }
+        :root[data-carino-theme="color"] #cnDiagBox .dot { background: var(--ct-scroll); }
+        :root[data-carino-theme="color"] #cnDiagBox .dot.ok { background: var(--ok); box-shadow: none; }
+        :root[data-carino-theme="color"] #cnDiagBox .dot.bad { background: var(--err); box-shadow: none; }
+        :root[data-carino-theme="color"] #cnDiagBox .dot.scan { background: var(--text-muted); }
+    </style>
 </head>
 <!-- chrome-pending: the editor's own controls and its work area start hidden and
      are revealed by the boot in js/app.js, once load() has decided whether this
@@ -864,7 +907,8 @@
                              cannot appear here — it is a black silhouette on a black
                              page — which is why this is the SVG and not that. -->
                         <div class="landing-mark" aria-hidden="true">
-                            <img src="logo.svg" alt="" width="58" height="58" decoding="async">
+                            <img class="mk-gold" src="logo.svg" alt="" width="58" height="58" decoding="async">
+                            <img class="mk-color" src="logo-color.svg" alt="" width="58" height="58" decoding="async">
                             <!-- The app's own trace-flow animation, at mark size: an
                                  orthogonally routed link with a packet running down it.
                                  One polyline so the packet travels the whole path, and
@@ -1335,6 +1379,7 @@
     <script src="js/assets.js"></script>
     <script src="js/app.js"></script>
 <script src="carino-navbar.js" data-app="Topo" data-repo="Topo" defer></script>
+<script src="carino-theme.js" data-mark="logo.svg" data-mark-color="logo-color.svg" defer></script>
 <script src="carino-ui.js" defer></script>
 <script src="carino-lang.js" defer></script>
 <script src="js/mobile.js" defer></script>
