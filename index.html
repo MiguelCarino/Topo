@@ -66,6 +66,9 @@
         :root[data-carino-theme="color"] .handy-bar { background: var(--ct-glass); box-shadow: var(--ct-shadow-3); }
         :root[data-carino-theme="color"] #landing { background: var(--stage-grad), var(--bg); }
         :root[data-carino-theme="color"] .netline .pulse { filter: drop-shadow(0 0 5px var(--accent-dim)); }
+        /* landing motif: same token rebind as the shared .lh-motif rule (.netline is not an .lh-motif) */
+        :root[data-carino-theme="color"] .netline { --accent: var(--ct-teal); }
+        :root[data-carino-theme="color"] .netline .pulse { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ct-teal) 32%, transparent)); }
         :root[data-carino-theme="color"] .landing-drop { background: var(--bg-card); box-shadow: var(--ct-shadow-1); }
         :root[data-carino-theme="color"] .landing-drop-btn, :root[data-carino-theme="color"] .landing-chip { background: var(--bg-card); }
         :root[data-carino-theme="color"] .landing-drop-btn:hover, :root[data-carino-theme="color"] .landing-drop-btn:focus-visible,
