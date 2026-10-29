@@ -4,16 +4,19 @@
 //   1. depth, pure: full depth is the default and is not stored, half depth
 //      is 'half'; a full-depth device takes its units on both faces, so it
 //      clashes with what is behind it, and the overlaps a rack holds;
-//   2. the cables, pure: one entry per pair of this rack's devices, the cables
-//      in it, and one stub per far device for a cable out of the rack; a
-//      cable's text, its ports both ends and its label or colour;
+//   2. the cables, pure: the patch schedule (Round 5 replaced one entry per
+//      pair of this rack's devices and a stub per far device), a row per
+//      cable read from the higher end, where a cable out of the rack goes;
+//      a cable's text, its ports both ends and its label or colour;
 //   3. the findings: two devices in the same units (the same face, or either
 //      when one fills the depth), a device going past the top, rack fields
 //      with no rack; each names both devices;
-//   4. the lane: one line per pair, ×N on a bundle, the ports and the label
-//      or colour on it, a colour swatch, a stub per far device labelled with
-//      it, the selected device's lines lit, the search dimming the rest; a
-//      label selects its cables and the rail shows the port picker;
+//   4. the cables (port to port since Round 5, which replaced one line per
+//      pair): a line per cable at its own ports, a cable out of the rack (or
+//      to a device here with no units) ending at the rack's edge named on its
+//      tag, the colour, the selected device's cables lit and tagged, the
+//      search dimming the rest; a tag selects its cable and the rail shows
+//      the port picker;
 //   5. drawing a cable: from a device's plug to another device (one undo
 //      step, bindLink's ports, selected, the port picker shown), dropped on
 //      nothing is nothing; Cable to… and a tap on the other end, Escape or
@@ -23,8 +26,8 @@
 //      it and otherwise one undo step; the device editor's box, ticked by
 //      default; CSV (full or half);
 //   7. the report: a Racks section, front and rear per rack, a unit a row,
-//      a device over its units, a clash marked, the back of a full-depth
-//      one, the cables; none without racks;
+//      a device over its units with its ports, a clash marked, the back of a
+//      full-depth one, the patch schedule; none without racks;
 //   8. read-only: no plug and no Cable to…; Spanish.
 window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
@@ -70,9 +73,6 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const view = () => el('rackView');
   const dev = (id) => view().querySelector(`.rk-dev:not(.rk-back)[data-node="${id}"]`);
   const back = (id) => view().querySelector(`.rk-dev.rk-back[data-node="${id}"]`);
-  const lbl = (links) => view().querySelector(`.rk-lbl[data-links="${links}"]`);
-  const lbls = () => [...view().querySelectorAll('.rk-lbl')];
-  const wires = () => [...view().querySelectorAll('.rk-wire')];
   const toast = () => el('topoToast').textContent;
   const clearToast = () => { el('topoToast').textContent = ''; };
   const undoDepth = () => _undoStack.length;
@@ -100,13 +100,18 @@ window.addEventListener('load', () => { setTimeout(async () => {
        && nodePlaceText(getNode('pdu')) === 'Server room / Rack 3 · U36 rear, half depth');
 
     // ---- 2: the cables, pure ----
-    const rc = rackCables(rk);
-    const pairOf = (a, b) => rc.pairs.find((p) => (p.a.id === a && p.b.id === b) || (p.a.id === b && p.b.id === a));
-    ok('one entry per pair of the rack\'s devices', rc.pairs.length === 4 && rc.pairs.map((p) => `${p.a.id}-${p.b.id}`).join() === 'fw-sw,sw-srv,sw-db,sw-nas', rc.pairs.map((p) => `${p.a.id}-${p.b.id}`).join());
-    ok('two cables between the same two are one pair, both in it', pairOf('sw', 'srv').links.map((l) => l.id).join() === 'l2,l3');
-    ok('a device with no unit still has its pair', !!pairOf('sw', 'nas'));
-    ok('one stub per far device', rc.stubs.map((s) => `${s.node.id}>${s.far.id}`).join() === 'sw>pc,sw>cam');
-    ok('a rack with nothing cabled has none', json(rackCables(groupById('rk2'))) === json({ pairs: [], stubs: [] }));
+    // Round 5 replaced one entry per device pair (and a stub per far device)
+    // with the patch schedule: a row per cable, read from the rack's end.
+    const sch = rackSchedule(rk);
+    const rowOf = (id) => sch.find((r) => r.link.id === id);
+    ok('a row per cable that touches the rack, in the rack\'s order', sch.map((r) => r.link.id).join() === 'l1,l2,l3,l4,l5,l6,l7', sch.map((r) => r.link.id).join());
+    ok('a cable between two devices here is read from the higher one', rackScheduleEnd(rowOf('l1')) === 'FW · eth0' && rackScheduleEnd(rowOf('l1'), true) === 'SW · 24'
+       && rackScheduleEnd(rowOf('l3')) === 'SW · 2' && rackScheduleEnd(rowOf('l3'), true) === 'SRV · eth1', `${rackScheduleEnd(rowOf('l3'))} / ${rackScheduleEnd(rowOf('l3'), true)}`);
+    ok('two cables between the same two are two rows', rowOf('l2') && rowOf('l3') && rowOf('l2') !== rowOf('l3'));
+    ok('its tag and colour', rowOf('l1').tag === 'C-UP' && rowOf('l1').color === 'blue' && rowOf('l2').tag === '');
+    ok('a device with no unit still has its rows', rowOf('l7').farIn && rackScheduleEnd(rowOf('l7'), true) === 'NAS · eth0');
+    ok('a cable out of the rack says where it goes', !rowOf('l5').farIn && rowOf('l5').where === 'Office' && rackScheduleEnd(rowOf('l6'), true) === 'CAM · eth0');
+    ok('a rack with nothing cabled has none', json(rackSchedule(groupById('rk2'))) === '[]');
     const txt = rackCableText(getLink('l1'), getNode('sw'));
     ok('a cable\'s text reads from the end asked', txt.ports === '24 ↔ eth0' && txt.label === 'C-UP' && txt.color === 'blue', json(txt));
     ok('and the other way round', rackCableText(getLink('l1'), getNode('fw')).ports === 'eth0 ↔ 24');
@@ -135,40 +140,41 @@ window.addEventListener('load', () => { setTimeout(async () => {
     undo();
     ok('undone, none again', rackFindings().length === 0);
 
-    // ---- 4: the lane ----
+    // ---- 4: the cables, port to port ----
+    // (Round 5 replaced one line per device pair: each cable is its own line,
+    // port to port. tests/suites/rackwires.js holds the drawing in detail.)
     setView('rack');
     openRackView('rk');
     select(null);
     renderRackView(true);
-    ok('one line per pair of placed devices and per stub', wires().length === 5 && lbls().length === 5, `${wires().length} ${lbls().length}`);
-    ok('a device with no unit has no line yet', !lbl('l7'));
-    const bundle = lbl('l2 l3');
-    ok('a bundle is one line, counted, with each cable\'s ports', !!bundle && bundle.textContent.trim() === '×2 eth0 ↔ 1, eth1 ↔ 2', bundle && bundle.textContent.trim());
-    ok('at its quieter end: the server\'s ports first', /^×2 eth0/.test(bundle.textContent.trim()));
-    const up = lbl('l1');
-    ok('a cable\'s label is on its line, with a swatch of its colour', up.textContent.trim() === 'eth0 ↔ 24 · C-UP' && !!up.querySelector('.rk-swatch'), up.textContent.trim());
-    ok('and the line is drawn in it', wires().some((w) => /stroke:\s*blue/.test(w.getAttribute('style') || '')));
-    const odd = lbl('l4');
-    ok('a colour the browser does not know is written, not drawn', odd.textContent.trim() === 'eth0 ↔ 3 · not a colour' && !odd.querySelector('.rk-swatch'), odd.textContent.trim());
-    const stub = lbl('l5');
-    ok('a stub per far device, labelled with it', stub.textContent.trim() === '→ PC' && stub.classList.contains('rk-lbl-stub')
-       && /SW → PC \(Office\)/.test(stub.title) && lbl('l6').textContent.trim() === '→ CAM', stub.title);
-    ok('a bundle is drawn thicker', Number(wires().find((w) => w.classList.contains('rk-wire') && !w.classList.contains('rk-stub') && w.getAttribute('stroke-width') !== '1.5')?.getAttribute('stroke-width')) > 1.5);
-    // Round 2: labels are placed in pixels over the faces (rvDrawCables).
-    const ys = lbls().map((b) => parseFloat(b.style.top)).sort((a, b) => a - b);
-    ok('no two labels at one height', ys.every((y, i) => !i || y - ys[i - 1] >= RV_LBL_PX - 0.001), json(ys));
+    const cableG = (id) => view().querySelector(`.rk-cable[data-key="${id}"]`);
+    const flagOf = (id, node) => [...view().querySelectorAll(`.rk-flag[data-key="${id}"]`)].find((b) => b.dataset.node === node);
+    const shown = (b) => !!b && getComputedStyle(b).display !== 'none';
+    ok('one line per cable, never per pair', view().querySelectorAll('.rk-cable').length === 7 && !!cableG('l2') && !!cableG('l3'), view().querySelectorAll('.rk-cable').length);
+    ok('the two cables between the switch and the server each at its own ports', flagOf('l2', 'sw').dataset.port === 'p1' && flagOf('l3', 'sw').dataset.port === 'p2'
+       && flagOf('l2', 'srv').dataset.port === 'i1' && flagOf('l3', 'srv').dataset.port === 'i2');
+    ok('a device with no unit yet is out of the drawing: its cable ends at the rack\'s edge', cableG('l7').classList.contains('rk-out') && !!cableG('l7').querySelector('.rk-ring')
+       && flagOf('l7', 'sw').textContent.trim() === '→ NAS · eth0');
+    ok('so does a cable to a device elsewhere, named on its tag', flagOf('l5', 'sw').textContent.trim() === '→ PC · eth0' && flagOf('l6', 'sw').textContent.trim() === '→ CAM · eth0');
+    ok('a line in its cable\'s colour', /stroke:\s*blue/.test(cableG('l1').querySelector('.rk-wire').getAttribute('style') || ''));
+    ok('a colour the browser does not know is not drawn', !cableG('l4').querySelector('.rk-wire').getAttribute('style'));
+    ok('nothing selected: the tags wait', ![...view().querySelectorAll('.rk-flag')].some(shown));
     selectEntries([{ type: 'node', id: 'srv' }]);
     renderRackView(true);
-    ok('the selected device\'s lines are lit, only those', lbl('l2 l3').classList.contains('rk-wsel') && !lbl('l1').classList.contains('rk-wsel'));
+    ok('the selected device\'s cables are lit and tagged with their ports, only those', cableG('l2').classList.contains('rk-wsel') && cableG('l3').classList.contains('rk-wsel')
+       && !cableG('l1').classList.contains('rk-wsel') && shown(flagOf('l2', 'srv')) && flagOf('l2', 'srv').textContent.trim() === 'eth0 ↔ 1'
+       && flagOf('l3', 'sw').textContent.trim() === '2 ↔ eth1' && !shown(flagOf('l1', 'sw')));
+    selectEntries([{ type: 'node', id: 'fw' }]);
+    renderRackView(true);
+    ok('a cable\'s label is its tag, edged in its colour', flagOf('l1', 'fw').textContent.trim() === 'C-UP' && /blue/.test(flagOf('l1', 'fw').getAttribute('style')));
     setQuery('name:fw');
     renderRackView(true);
-    ok('the search dims the lines it does not match', lbl('l2 l3').classList.contains('q-dim'));
+    ok('the search dims the lines it does not match', cableG('l2').classList.contains('q-dim') && !cableG('l1').classList.contains('q-dim'));
     setQuery('');
-    lbl('l1').click();
-    ok('a label selects its cable', state.selectedType === 'link' && state.selectedId === 'l1');
+    renderRackView(true);
+    flagOf('l1', 'sw').click();
+    ok('a tag selects its cable', state.selectedType === 'link' && state.selectedId === 'l1');
     ok('and the rail shows its port picker', !el('linkPortProps').classList.contains('hidden') && el('linkPortBody').querySelectorAll('.port-chip').length > 0);
-    lbl('l2 l3').click();
-    ok('a bundle\'s label selects both', selectedOf('link').sort().join() === 'l2,l3');
     ok('the faces and the lane line up unit for unit', (() => {
       const a = view().querySelector('.rk-slots[data-face="front"]').getBoundingClientRect(), b = view().querySelector('.rk-lane-in').getBoundingClientRect();
       return Math.abs(a.top - b.top) < 1 && Math.abs(a.height - b.height) < 1;
@@ -193,7 +199,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('on free ports bindLink picked', !!made.sourceIface && !!made.targetIface && made.sourceIface !== 'i1' && made.sourceIface !== 'i2', json(made));
     ok('one undo step', undoDepth() === depth + 1);
     ok('selected, with the rail on its port picker', state.selectedType === 'link' && state.selectedId === made.id && !el('linkPortProps').classList.contains('hidden'));
-    ok('and drawn in the lane', !!lbl(made.id));
+    ok('and drawn, port to port', !!view().querySelector(`.rk-cable[data-key="${made.id}"]`));
     undo();
     ok('undone: gone', state.links.length === before && !getLink(made.id));
     renderRackView(true);
@@ -306,7 +312,17 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a device is one cell over its units', front.rows.some((r) => r.span === 2 && r.u === 31 && r.items[0].name === 'SRV') && html.includes('rowspan="2"'));
     ok('the back of a full-depth device on the rear', rear.rows.some((r) => r.u === 3 && r.span === 3 && r.items[0].back && r.items[0].name === 'UPS'));
     ok('not placed yet, under it', html.includes('<b>Not placed yet:</b> NAS'));
-    ok('its cables, a pair a line, the stubs by the far device', html.includes('SW ↔ SRV <span class="muted">×2</span>') && html.includes('SW → PC <span class="muted">(Office)</span>'));
+    // Round 5 (R5b): the per-pair cable table became the patch schedule, and
+    // the elevation draws each device's ports.
+    const patch = new DOMParser().parseFromString(html, 'text/html').querySelector('table.patch');
+    const prow = patch ? [...patch.querySelectorAll('tbody tr')].map((tr) => [...tr.cells].map((c) => c.textContent.trim())) : [];
+    ok('its patch schedule, a row per cable, in the rack\'s order', prow.length === 7 && prow[0][0] === 'FW · eth0' && prow[0][1] === 'C-UP' && prow[0][2] === 'SW · 24' && prow[0][3] === 'blue'
+       && prow[1][0] === 'SW · 1' && prow[1][1] === 'no tag', json(prow.slice(0, 2)));
+    ok('a cable out of the rack names where it goes', prow.some((r) => r[0] === 'SW · 10' && r[2] === 'PC · eth0 (Office)'));
+    const swCell = [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('table.elev td.rs')].find((td) => td.querySelector('b') && td.querySelector('b').textContent === 'SW');
+    const marks = swCell ? swCell.querySelectorAll('.pstrip .pm') : [];
+    ok('the elevation draws its ports: one mark a port, the cabled filled, in the cable\'s colour', marks.length === 24 && swCell.querySelectorAll('.pm.on').length === 7
+       && /blue/.test(marks[23].getAttribute('style') || '') && !marks[2].getAttribute('style'), `${marks.length} ${swCell && swCell.querySelectorAll('.pm.on').length}`);
     batch(() => { getNode('db').rackU = 31; save(); });
     const clash = reportModel().racks[0].faces[0].rows.find((r) => r.clash);
     html = reportHtml(reportModel(), null);
@@ -321,7 +337,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     selectEntries([{ type: 'node', id: 'srv' }]);
     renderRackView(true);
     ok('read-only: no plug and Cable to… disabled', !view().querySelector('.rk-plug') && view().querySelector('.rk-selbar [data-rk="cable"]').disabled);
-    ok('the lines are still drawn', lbls().length === 5);
+    ok('the lines are still drawn', view().querySelectorAll('.rk-cable').length === 7);
     ok('nor is one made', createRackCable('srv', 'db') === null && state.links.length === 7);
     open();
     openRackView('rk');

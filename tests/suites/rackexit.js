@@ -18,7 +18,7 @@
 //      field, every cable, every group, the same findings);
 //   5. print the report: the Racks section with the rack's front and rear
 //      elevations, the switch, the servers and the UPS (and its back) in
-//      them, and its cables.
+//      them, and its patch schedule, a row per cable (Round 5).
 window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
@@ -120,15 +120,17 @@ window.addEventListener('load', () => { setTimeout(async () => {
     batch(() => { setCableField(state.links[0], 'label', 'C-10'); setCableField(state.links[0], 'color', 'green'); save(); });
     select(null);
     renderRackView(true);
-    const labels = [...view().querySelectorAll('.rk-lbl')];
-    ok('the rack view: ten lines, one per server, and a stub per PC', labels.filter((b) => !b.classList.contains('rk-lbl-stub')).length === 10
-       && labels.filter((b) => b.classList.contains('rk-lbl-stub')).map((b) => b.textContent.trim()).sort().join() === '→ PC-1,→ PC-2');
-    ok('each line labelled with its ports at the server', servers.every((s) => {
+    // Round 5: a line per cable, port to port, a tag at each end.
+    const lines = [...view().querySelectorAll('.rk-cable')];
+    const tag = (l, at) => [...view().querySelectorAll(`.rk-flag[data-key="${l.id}"]`)].find((b) => b.dataset.node === at);
+    ok('the rack view: ten lines, one per server, and one out of the rack per PC', lines.filter((g) => !g.classList.contains('rk-out')).length === 10
+       && pcs.every((pc) => tag(state.links.find((x) => x.target === pc.id), sw.id).textContent.trim().startsWith(`→ ${pc.name} · `)));
+    ok('each tagged with its ports at the server (its label, the one that has one)', servers.every((s) => {
       const l = state.links.find((x) => x.target === s.id);
-      const b = view().querySelector(`.rk-lbl[data-links="${l.id}"]`);
-      return b && b.textContent.trim().startsWith(`${ifaceLabel(s, l.targetIface)} ↔ ${ifaceLabel(sw, l.sourceIface)}`);
+      const b = tag(l, s.id);
+      return b && b.textContent.trim() === (cableOf(l, 'label') || `${ifaceLabel(s, l.targetIface)} ↔ ${ifaceLabel(sw, l.sourceIface)}`);
     }));
-    ok('and the label or colour when set', /· C-10$/.test(view().querySelector(`.rk-lbl[data-links="${state.links[0].id}"]`).textContent.trim()));
+    ok('and with its label when set', tag(state.links[0], sw.id).textContent.trim() === 'C-10');
 
     // ---- 3: fold it on the map ----
     setView('map');
@@ -184,7 +186,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
        `${conflicts.slice(0, 2).join(' | ')} ${lost.map((k) => { const a = want[k].split('\n'), b = got[k].split('\n'); const i = a.findIndex((x, j) => x !== b[j]); return `${k}: ${a[i]} ≠ ${b[i]}`; }).join(' ; ').slice(0, 600)}`);
     const back = groupById(rack.id);
     ok('the rack again, its devices in their units', isRackGroup(back) && rackMembers(back).length === 12 && rackFullDepth(byName('UPS-1')) && !('rackDepth' in byName('UPS-1'))
-       && byName('SRV-10').rackU === 31 && rackCables(back).pairs.length === 10 && rackCables(back).stubs.length === 2);
+       && byName('SRV-10').rackU === 31 && rackSchedule(back).length === 12 && rackSchedule(back).filter((r) => !r.farIn).length === 2);
 
     // ---- 5: print the report ----
     openRackView(rack.id);
@@ -199,7 +201,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('the switch and every server on the front, each over its units', elevs[0].includes('<b>SW-CORE</b>')
        && servers.every((s) => elevs[0].includes(`<b>${s.name}</b>`)) && (elevs[0].match(/rowspan="2"/g) || []).length === 10);
     ok('the UPS at the bottom of the front, and its back on the rear', /rowspan="3"><b>UPS-1<\/b>/.test(elevs[0]) && /class="rs back" rowspan="3"><b>UPS-1<\/b>/.test(elevs[1]));
-    ok('and the rack\'s cables under them', (racks.split('class="rackcab"')[1] || '').split('</table>')[0].split('SW-CORE ↔ SRV-').length === 11);
+    // Round 5 (R5b): its patch schedule, a row per cable (it was a line per
+    // device pair), each read from the switch at the top.
+    ok('and the rack\'s patch schedule under them', (racks.split('class="patch"')[1] || '').split('</table>')[0].split('<tr><td class="mono">SW-CORE · ').length === 13);
   } catch (e) {
     ok('the suite ran to the end', false, e && (e.stack || e.message));
   } finally {

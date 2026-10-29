@@ -232,11 +232,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
     // ---- 5: cables ----
     renderRackView(true);
-    const lbls = () => [...view().querySelectorAll('.rk-lbl')].map((b) => b.textContent.trim());
+    // Round 5: each cable is drawn port to port, its tags at its ends; a
+    // guest's end is its chip in its host's box, its tag naming it.
+    const lbls = () => [...view().querySelectorAll('.rk-flag')].map((b) => b.textContent.trim());
     ok('the cable to VM1 is drawn to HV\'s box, labelled with VM1', lbls().some((x) => /^VM1: /.test(x)), json(lbls()));
     ok('its ends are the boxes', [...view().querySelectorAll('.rk-cable')].some((g) => g.dataset.key === 'l1' && g.dataset.ends.split(' ').includes('hv') && g.dataset.ends.split(' ').includes('sw')));
     ok('the cable between VM1 and its own host is not drawn', ![...view().querySelectorAll('.rk-cable')].some((g) => g.dataset.key.split(' ').includes('l2')));
-    ok('the container\'s cable out of the rack is a stub from HV that names it', lbls().includes('CT1 → PC'), json(lbls()));
+    ok('the container\'s cable out of the rack runs from HV\'s box to the rack\'s edge, named for it', lbls().includes('CT1: → PC · no port')
+       && [...view().querySelectorAll('.rk-cable')].some((g) => g.dataset.key === 'l3' && g.classList.contains('rk-out') && g.dataset.ends.split(' ').includes('hv')), json(lbls()));
 
     // ---- 6: the report ----
     const racks = reportRacks();

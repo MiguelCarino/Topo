@@ -254,8 +254,9 @@ function evaluatePorts(node) {
     // A switch port or a host NIC is a physical socket that takes one cable. A
     // router's L3 interface is a subnet gateway, and diagrams routinely hang
     // several hosts off one — the switch is simply not drawn. Only complain
-    // about the former.
-    const isSocket = (ifaceId) => hasPortGrid(node) ? /^p\d+$/.test(ifaceId) : !isRoutingDevice(node.type);
+    // about the former (isSocketPort, js/model.js: the rack view's and the
+    // report's port rings ask the same).
+    const isSocket = (ifaceId) => isSocketPort(node, ifaceId);
     const usage = new Map();
     adjacent.forEach((link) => {
         if (!isExclusiveLink(link)) return; // radios, tunnels and bridges share
@@ -1109,6 +1110,10 @@ function acceptedEntryFor(accepted, key, nodeIds, linkIds) {
         && (linkIds || []).every((id) => a.linkIds.includes(id))) || null;
 }
 const isOpenFinding = (f) => !f.accepted;
+// What the counts count: an open finding that says something is wrong. An
+// info one (a rack's untagged cables) is listed in the Findings tab and the
+// spreadsheet, but it is no fault: it raises no pill, no badge, no total.
+const isCountedFinding = (f) => isOpenFinding(f) && f.level !== 'info';
 
 // Read from a document: only the four fields, ids as strings, a reason that
 // is text and not empty. Anything else is dropped, as the serializer's
@@ -1139,7 +1144,7 @@ function serializeAccepted(list) {
 // The name a check goes by in the tab and the report, for an accepted entry
 // that matches nothing at the moment (there is no finding to borrow it from).
 const FINDING_CHECK_NAMES = { 'ip-conflict': 'IP Conflict', 'mac-conflict': 'MAC Conflict', cabling: 'Cabling', loop: 'L2 loop',
-    'cable-label': 'Cable label', 'asset-tag': 'Asset tag', group: 'Groups', rack: 'Rack' };
+    'cable-label': 'Cable label', 'asset-tag': 'Asset tag', group: 'Groups', rack: 'Rack', 'rack-tag': 'Cable tags' };
 const findingCheckName = (key) => t(FINDING_CHECK_NAMES[key] || (NODE_CHECKS_BY_KEY[key] && NODE_CHECKS_BY_KEY[key].label) || key);
 
 // One undo step: the findings of one line of the tab (the same finding on
@@ -1373,6 +1378,19 @@ function placeFindings() {
             : t('{a} and {b} take the same units of {rack} ({where}).', { a: a.name || a.id, b: b.name || b.id, rack: groupLabel(rack), where });
         out.push({ key: 'rack', level: 'bad', check: t('Rack'), subject: names, detail, nodeIds: [a.id, b.id] });
     }));
+    // A rack's cables with no tag ("Round 5", R5a): the person at the rack
+    // reads a cable by the tag on it, so an untagged one is traced by hand.
+    // Info, not advisory: nothing is wrong on the network, it is the register
+    // that is thin, so it is listed (once per rack, naming the cables) but
+    // never counted where the open findings are (the pill, the tab's count,
+    // a card, the report; see isCountedFinding).
+    groups.filter(isRackGroup).forEach((rack) => {
+        const bare = rackCableLinks(rack).filter((l) => !cableOf(l, 'label').trim());
+        if (!bare.length) return;
+        const detail = bare.length === 1 ? t('One cable in {rack} has no tag.', { rack: groupLabel(rack) })
+            : t('{n} cables in {rack} have no tag.', { n: bare.length, rack: groupLabel(rack) });
+        out.push({ key: 'rack-tag', level: 'info', check: t('Cable tags'), subject: groupLabel(rack), detail, linkIds: bare.map((l) => l.id) });
+    });
     return out;
 }
 
@@ -1616,13 +1634,15 @@ function validateTopology(diag) {
     }).join('');
 
     document.getElementById('findingsEmpty').classList.toggle('hidden', findings.length > 0);
-    const worst = findings.some((f) => f.level === 'bad') ? 'bad' : findings.length ? 'warn' : '';
+    // Counted: what is wrong. An info finding is in the list, not the count.
+    const counted = findings.filter(isCountedFinding);
+    const worst = counted.some((f) => f.level === 'bad') ? 'bad' : counted.length ? 'warn' : '';
     const count = document.getElementById('findTabCount');
-    count.textContent = findings.length ? String(findings.length) : '';
-    count.className = `cfg-count ${worst}${findings.length ? '' : ' hidden'}`;
-    document.getElementById('conflictPillCount').textContent = String(findings.length);
+    count.textContent = counted.length ? String(counted.length) : '';
+    count.className = `cfg-count ${worst}${counted.length ? '' : ' hidden'}`;
+    document.getElementById('conflictPillCount').textContent = String(counted.length);
     const pill = document.getElementById('conflictPill');
-    pill.classList.toggle('hidden', !findings.length);
+    pill.classList.toggle('hidden', !counted.length);
     pill.classList.toggle('bad', worst === 'bad');
 }
 

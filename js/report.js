@@ -92,7 +92,7 @@ const typeName = (type) => NODE_TYPE_NAMES[type] || type || 'Unknown';
 const MEDIUM_NAMES = { utp: 'UTP copper', fiber: 'Fibre optic', wireless: 'Wireless', powerline: 'Powerline', vpn: 'VPN tunnel' };
 const mediumName = (m) => MEDIUM_NAMES[m] || m || 'Unspecified';
 
-const SEVERITY_NAMES = { bad: 'Critical', warn: 'Advisory' };
+const SEVERITY_NAMES = { bad: 'Critical', warn: 'Advisory', info: 'Info' };
 
 // A finding's detail is written to follow its panel prefix ("L2 loop: the link
 // between …"), so on its own in a table cell it starts mid-sentence. Only the
@@ -299,14 +299,38 @@ function reportPorts() {
 // Each rack as it would be drawn on the door (Review-Packs/Topo-groups.md,
 // step C): its units from the top down, front and rear, each run of units
 // one device or empty, then the devices in it with no unit yet, and its
-// cables as the rack view has them (rackCables, js/model.js): one line per
-// pair of its devices, and each cable out of it by the device it goes to.
+// patch schedule (Review-Packs/Topo-groups.md, "Round 5", R5b): a row per
+// cable that touches the rack, as rackSchedule (js/model.js) reads it and the
+// rack view's Schedule panel lists it, in the rack's order. It replaced the
+// first build's cables by device pair, gone from the rack view with the
+// per-pair lines: the person at the rack patches ports, not pairs.
+// Each device's cell carries its ports as the rack view draws them, on the
+// face they are on (rackPortsFace): a small strip in its corner, a mark per
+// port in order, hollow when free, filled when cabled (in the cable's colour
+// when it is one a browser knows), ringed red on a port with a problem (past
+// the faceplate, two cables on a socket (isSocketPort, as the cabling check
+// reads it), or a cable a finding names: `bad`, the
+// open findings' cables, from reportModel).
 // A unit two devices claim (a sheet can say so; the rack view cannot) is a
 // row of its own naming both, marked, as the finding names them. A device
 // whose units are outside the rack is listed under the rack, not drawn in it.
 // Racks in the Groups tab's order; a rack nobody put anything in is left out
 // (an empty frame is a page of nothing).
-function reportRacks() {
+const REPORT_PORTS_ROW = 24;   // ports in a row of a cell's strip, as on the rack view's boxes
+function reportRackPorts(n, units, bad) {
+    const ports = rackPortsOf(n);
+    if (!ports.length) return null;
+    // A 1U cell has room for two rows of marks beside the name: a bigger
+    // switch's rows are made longer rather than taller.
+    const perRow = Math.max(REPORT_PORTS_ROW, Math.ceil(ports.length / Math.max(2, units * 2)));
+    const okColour = (c) => !!c && typeof CSS !== 'undefined' && !!CSS.supports && CSS.supports('color', c);
+    return { perRow, marks: ports.map((p) => ({
+        cabled: p.links.length > 0,
+        color: p.links.map((l) => cableOf(l, 'color').trim()).find(okColour) || '',
+        bad: p.past || p.doubled || p.links.some((l) => !!bad && bad.has(l.id))
+    })) };
+}
+function reportRacks(bad = null) {
     return groupTree().map((e) => e.group).filter(isRackGroup).map((rack) => {
         const top = rackTop(rack);
         const members = rackMembers(rack);
@@ -340,7 +364,9 @@ function reportRacks() {
                         units: (() => { const x = rackSpanOf(n); return rackUnitsText(rack, x.lo, x.hi); })(),
                         back, full: rackFullDepth(n), status: n.status === 'planned' || n.status === 'retired' ? n.status : '',
                         // What runs on it, on the face it is mounted on (its back is its units only).
-                        guests: back ? [] : guestTreeOf(n).map(name) })) });
+                        guests: back ? [] : guestTreeOf(n).map(name),
+                        // Its ports, on the face they are on; not in a unit two devices claim.
+                        ports: here.length === 1 && rackPortsFace(n) === face ? reportRackPorts(n, span, bad) : null })) });
                 u -= span;
             }
             return { face, rows };
@@ -348,8 +374,6 @@ function reportRacks() {
         const outside = placed.filter((n) => !rackSpanInside(rack, rackSpanOf(n).lo, rackSpanOf(n).hi)).map((n) => `${name(n)} (${rackSpanText(n)})`);
         // A VM or a container on a host is listed in its host's units, not here.
         const unplaced = members.filter((n) => !rackSpanOf(n) && !hostOf(n)).map(name);
-        const { pairs, stubs } = rackCables(rack);
-        const cableText = (links, from) => links.map((l) => { const x = rackCableText(l, from); return [x.ports, x.label, x.color].filter(Boolean).join(' · '); }).join('; ');
         return {
             // Its size as one line, and which way its units are numbered:
             // the rows stay counted from the bottom (u), and the printed
@@ -358,8 +382,9 @@ function reportRacks() {
             // Each placed host and what runs on it, in full: a 1U box's cell
             // has room for a few names at most, and cuts the rest.
             hosts: placed.map((n) => ({ name: name(n), guests: guestTreeOf(n).map(name) })).filter((h) => h.guests.length),
-            pairs: pairs.map((pr) => ({ a: name(pr.a), b: name(pr.b), count: pr.links.length, text: cableText(pr.links, pr.a) })),
-            stubs: stubs.map((st) => ({ node: name(st.node), far: name(st.far), where: nodePlaceText(st.far), count: st.links.length, text: cableText(st.links, st.node) }))
+            // The patch schedule, as words (rackScheduleEnd: "SW-1 · 24").
+            schedule: rackSchedule(rack).map((r) => ({ id: r.link.id, from: rackScheduleEnd(r), to: rackScheduleEnd(r, true), where: r.where,
+                tag: r.tag, color: r.color, length: r.length, via: r.via }))
         };
     }).filter(Boolean);
 }
@@ -438,7 +463,9 @@ function reportModelNow() {
     // A finding accepted with a reason (js/diagnostics.js) is printed in a
     // section of its own, "Known / accepted", with the reason, and is not
     // counted: the totals are what is still open.
-    const all = topologyFindings()
+    // An info finding (a rack's untagged cables) is a note for the editor,
+    // not a fault for the reader: the report leaves it out (isCountedFinding).
+    const all = topologyFindings().filter((f) => f.level !== 'info')
         .map((f, seq) => ({ ...f, seq }))
         .sort((a, b) => (a.level === b.level ? a.seq - b.seq : (a.level === 'bad' ? -1 : 1)));
     const findings = all.filter((f) => !f.accepted);
@@ -448,7 +475,9 @@ function reportModelNow() {
     const connections = reportConnections();
     const subnets = reportSubnets();
     const groups = reportGroups();
-    const racks = reportRacks();
+    // The ports the open findings' cables are on are ringed on the
+    // elevations, as on the rack view's boxes.
+    const racks = reportRacks(new Set(findings.filter((f) => f.level === 'bad' || f.level === 'warn').flatMap((f) => f.linkIds || [])));
 
     return {
         meta: siteReportMeta(state.report),
@@ -730,8 +759,11 @@ function reportStyles() {
     .appendix { page-break-before: always; break-before: page; }
     /* The rack elevations: front and rear side by side, a unit a row, so a
        42U rack is a third of a page and never splits. */
-    .rack { page-break-inside: avoid; break-inside: avoid; margin-bottom: 14px; }
-    .elevs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .rack { margin-bottom: 14px; }
+    /* The elevations never split; the patch schedule under them may run on
+       to the next page (a rack of 48-port switches is pages of cables), its
+       head repeated there. */
+    .elevs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; page-break-inside: avoid; break-inside: avoid; }
     .elev { table-layout: fixed; border: 1.5px solid #64748b; }
     .elev th { text-align: center; }
     .elev td { padding: 0 6px; height: 13px; line-height: 12px; font-size: 9px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
@@ -743,7 +775,19 @@ function reportStyles() {
     .elev td.retired { color: #94a3b8; }
     .elev td.clash { background: #fef2f2; border-color: #b91c1c; color: #991b1b; }
     .elev .guests { color: #475569; font-style: italic; }
-    .rackcab td:first-child { width: 42%; }
+    /* A device's ports, a mark each, in the corner of its cell: a small
+       faceplate over the end of its words. Hollow free, filled cabled (its
+       cable's colour inline), ringed red with a problem. */
+    .elev td.rs { position: relative; }
+    .pstrip { position: absolute; right: 3px; bottom: 2px; display: grid; gap: 1px; padding: 1px 2px; background: #fff; border: 1px solid #cbd5e1; border-radius: 2px; }
+    .pm { display: block; width: 3px; height: 3px; border: 0.5px solid #64748b; box-sizing: border-box; }
+    .pm.on { background: #334155; border-color: #334155; }
+    .pm.bad { outline: 1px solid #b91c1c; }
+    .patch { margin-top: 8px; }
+    .patch caption { caption-side: top; text-align: left; font-weight: 700; font-size: 10.5px; padding: 0 0 3px; }
+    .patch thead { display: table-header-group; }
+    .patch tr { page-break-inside: avoid; break-inside: avoid; }
+    .patch td:nth-child(1), .patch td:nth-child(3) { width: 28%; }
 
     .note { font-size: 10.5px; color: #475569; background: #f8fafc; border-left: 3px solid #cbd5e1;
             padding: 9px 12px; margin: 8px 0; white-space: pre-wrap; }
@@ -811,8 +855,13 @@ function acceptedSection(accepted) {
 // VLAN columns are there only on a switch whose ports carry them, so a
 // report of a site nobody labelled reads as it always did.
 // The racks: per rack, its path and height, front and rear side by side as
-// two columns of units, then what is not drawn in them and its cables.
+// two columns of units with each device's ports, then what is not drawn in
+// them, then its patch schedule.
 function racksSection(racks) {
+    // A device's ports in the corner of its cell (reportRackPorts): a small
+    // faceplate, so the words it sits over are covered, not crossed.
+    const portStrip = (p) => `<span class="pstrip" style="grid-template-columns:repeat(${Math.min(p.perRow, p.marks.length)},3px)">${p.marks.map((m) =>
+        `<i class="${['pm', m.cabled ? 'on' : '', m.bad ? 'bad' : ''].filter(Boolean).join(' ')}"${m.color ? ` style="background:${escapeHtml(m.color)}"` : ''}></i>`).join('')}</span>`;
     const face = (f, rack) => {
         // The number printed beside unit u: from the top on a rack set so.
         const no = (u) => (rack.topDown ? rack.top - u + 1 : u);
@@ -821,7 +870,8 @@ function racksSection(racks) {
             if (r.empty) return `<tr><td class="ru">${no(r.u)}</td><td class="rs empty"></td></tr>`;
             const cell = r.items.map((it) => `<b>${escapeHtml(it.name)}</b>`
                 + ` <span class="muted">${escapeHtml([t(it.typeName), it.units, it.back ? t('back') : it.full ? '' : t('half depth'), it.status ? statusName(it.status) : ''].filter(Boolean).join(' · '))}</span>`
-                + (it.guests && it.guests.length ? ` <span class="guests">${escapeHtml(t('Runs here: {names}', { names: it.guests.join(', ') }))}</span>` : '')).join(' / ');
+                + (it.guests && it.guests.length ? ` <span class="guests">${escapeHtml(t('Runs here: {names}', { names: it.guests.join(', ') }))}</span>` : '')
+                + (it.ports ? portStrip(it.ports) : '')).join(' / ');
             const cls = ['rs', r.clash ? 'clash' : '', r.items.every((it) => it.back) ? 'back' : '',
                 r.items.some((it) => it.status === 'retired') ? 'retired' : ''].filter(Boolean).join(' ');
             return unit.map((u, k) => `<tr><td class="ru">${no(u)}</td>${k === 0 ? `<td class="${cls}" rowspan="${r.span}">${cell}</td>` : ''}</tr>`).join('');
@@ -837,13 +887,20 @@ function racksSection(racks) {
             rack.unplaced.length ? `<p class="free"><b>${escapeHtml(t('Not placed yet'))}:</b> ${escapeHtml(rack.unplaced.join(', '))}</p>` : '',
             ...(rack.hosts || []).map((h) => `<p class="free"><b>${escapeHtml(t('Runs on {host}', { host: h.name }))}:</b> ${escapeHtml(h.guests.join(', '))}</p>`)
         ].join('');
-        const cables = rack.pairs.map((c) => `<tr><td>${escapeHtml(c.a)} ↔ ${escapeHtml(c.b)}${c.count > 1 ? ` <span class="muted">×${c.count}</span>` : ''}</td><td class="mono">${escapeHtml(c.text)}</td></tr>`)
-            .concat(rack.stubs.map((c) => `<tr><td>${escapeHtml(c.node)} → ${escapeHtml(c.far)}${c.where ? ` <span class="muted">(${escapeHtml(c.where)})</span>` : ''}${c.count > 1 ? ` <span class="muted">×${c.count}</span>` : ''}</td><td class="mono">${escapeHtml(c.text)}</td></tr>`)).join('');
+        // The patch schedule, a row per cable, in the rack's order. An
+        // untagged cable says so in its Tag cell: the editor's finding about
+        // it is an info note the report leaves out, and the gap is still
+        // what the person at the rack needs to see.
+        const sched = (rack.schedule || []).map((r) => `<tr><td class="mono">${escapeHtml(r.from)}</td>`
+            + `<td class="mono">${r.tag ? escapeHtml(r.tag) : `<span class="muted">${escapeHtml(t('no tag'))}</span>`}</td>`
+            + `<td class="mono">${escapeHtml(r.to)}${r.where ? ` <span class="muted">(${escapeHtml(r.where)})</span>` : ''}</td>`
+            + `<td>${escapeHtml(r.color)}</td><td>${escapeHtml(r.length)}</td><td>${escapeHtml(r.via)}</td></tr>`).join('');
         return `<div class="rack">
         <h3>${escapeHtml(rack.path)} <span class="muted">${escapeHtml(rack.size || `${rack.top}U`)}${rack.topDown ? ` · ${escapeHtml(t('numbered from the top'))}` : ''}</span></h3>
         <div class="elevs">${rack.faces.map((f) => face(f, rack)).join('')}</div>
         ${notes}
-        ${cables ? `<table class="rackcab"><thead><tr><th>${escapeHtml(t('Cable'))}</th><th>${escapeHtml(t('Ports'))}</th></tr></thead><tbody>${cables}</tbody></table>` : ''}
+        ${sched ? `<table class="patch"><caption>${escapeHtml(t('Patch schedule'))}</caption><thead><tr><th>${escapeHtml(t('Device · port'))}</th><th>${escapeHtml(t('Tag'))}</th><th>${escapeHtml(t('Far end'))}</th>`
+            + `<th>${escapeHtml(t('Colour'))}</th><th>${escapeHtml(t('Length'))}</th><th>${escapeHtml(t('Via'))}</th></tr></thead><tbody>${sched}</tbody></table>` : ''}
     </div>`;
     }).join('');
 }

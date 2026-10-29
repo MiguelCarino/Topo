@@ -16,7 +16,7 @@ window.addEventListener('load', async () => {
     const N = (id, extra) => Object.assign({ id, type: 'server', name: id.toUpperCase(), x: 0, y: 0, gw: '', dns: '', os: '', ports: '', notes: '', nat: false,
       interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] }, extra);
     replaceDocument({ v: DOC_VERSION, nodes: [
-        N('a', { group: 'rk', rackU: 10, rackHeight: 2, rackFace: 'rear', rackDepth: 'half' }),
+        N('a', { group: 'rk', rackU: 10, rackHeight: 2, rackFace: 'rear', rackDepth: 'half', portsFace: 'front' }),
         N('d', { group: 'rk', rackU: 12, rackHeight: 2 }),
         N('b', { group: 'room', location: 'Shelf 2' }),
         N('c', { location: 'Basement' })

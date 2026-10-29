@@ -561,6 +561,30 @@ function renderGroupPicker(node) {
     if (focused !== h) h.value = Number.isInteger(node.rackHeight) ? String(node.rackHeight) : '';
     if (focused !== face) face.value = rackFaceOf(node);
     grpEl('propRackDepth').checked = rackFullDepth(node);
+    const ports = grpEl('propPortsFace');
+    if (ports && focused !== ports) ports.value = portsFaceOf(node);
+    // Greyed on a half-depth device, whose ports are on its one face whatever
+    // this says (rackPortsFace): changing it there would draw nothing new.
+    // Its value stays, for when the device is made full depth again.
+    if (ports) {
+        const half = !rackFullDepth(node);
+        ports.disabled = half || !!state.readOnly;
+        ports.title = half ? t('A half-depth device shows its ports on its own face.') : '';
+    }
+}
+
+// The side of the device its ports are on ("Round 5"): set to its type's own,
+// the key goes (the type says it), so a device keeps following its type
+// until it is told otherwise. One undo step. -> true when written.
+function setPortsFace(node, face) {
+    if (!node || readOnlyRefuses() || isVirtualType(node.type)) return false;
+    const f = asRackFace(face);
+    if (!f || f === portsFaceOf(node)) return false;
+    batch(() => {
+        if (f === defaultPortsFace(node.type)) delete node.portsFace; else node.portsFace = f;
+        save(); renderCanvasOnly();
+    });
+    return true;
 }
 
 // A device moved out of a rack leaves its place in it behind: a U position
@@ -627,6 +651,12 @@ function setNodeGroup(node, groupId) {
         if (!node || !rackOfNode(node)) return;
         node.rackFace = asRackFace(e.target.value) || 'front';
         save();
+        after(node);
+    });
+    grpEl('propPortsFace').addEventListener('change', (e) => {
+        const node = selectedGroupNode();
+        if (!node || !rackOfNode(node)) return;
+        setPortsFace(node, e.target.value);
         after(node);
     });
     // Ticked (the default) it fills the depth; unticked it is on one face,

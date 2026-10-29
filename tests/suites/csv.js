@@ -399,7 +399,10 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('an attachment is read from cables.csv, and two rows that disagree conflict', statuses(plan) === 'change,conflict', statuses(plan));
 
     // Every template, both ways round: the same devices, cables, ports and findings.
-    const fkeys = () => topologyFindings().map((f) => `${f.check}|${f.subject}|${f.detail}`).sort().join('\n');
+    // The faults: a rack's untagged cables (info, Round 5) needs the groups,
+    // which these three sheets do not carry; the round trip with groups.csv
+    // below holds them.
+    const fkeys = () => topologyFindings().filter(isCountedFinding).map((f) => `${f.check}|${f.subject}|${f.detail}`).sort().join('\n');
     const orders = ['DIC', 'IDC', 'DCI', 'ICD'];
     const bad = Object.fromEntries(orders.map((o) => [o, []]));
     Object.keys(templatesData).forEach((key) => {
@@ -411,7 +414,10 @@ window.addEventListener('load', () => { setTimeout(async () => {
         const conflicts = importAll([...order].map((k) => sheets[k]));
         const got = { nodes: state.nodes.map((n) => `${n.id}:${n.type}`).sort().join(), cables: cableSig(), findings: fkeys() };
         const diff = ['nodes', 'cables', 'findings'].filter((k) => got[k] !== want[k]);
-        if (conflicts.length || diff.length) bad[order].push(`${key}: ${diff.join('+')} ${conflicts.slice(0, 2).join(' | ')}`);
+        // The findings that differ, said, so a failure names them.
+        const only = (a, b) => a.split('\n').filter((x) => x && !b.split('\n').includes(x)).slice(0, 2).join(' / ');
+        const fdiff = diff.includes('findings') ? `[lost: ${only(want.findings, got.findings)}; new: ${only(got.findings, want.findings)}]` : '';
+        if (conflicts.length || diff.length) bad[order].push(`${key}: ${diff.join('+')} ${fdiff} ${conflicts.slice(0, 2).join(' | ')}`);
       });
     });
     const orderName = { DIC: 'devices, interfaces, cables', IDC: 'interfaces, devices, cables', DCI: 'devices, cables, interfaces', ICD: 'interfaces, cables, devices' };

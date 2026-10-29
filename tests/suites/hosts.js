@@ -119,14 +119,16 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a container\'s: servers and VMs first', json(hostCandidates(node('ct')).map((n) => n.id)) === '["db","hv","lone","nas","web","pc"]', json(hostCandidates(node('ct')).map((n) => n.id)));
 
     // ---- 3: the document ----
-    ok('the document is v10', DOC_VERSION === 10 && serializeDoc().v === 10);
+    // v10 brought the host; v11 (Round 5) a device's ports face, so this
+    // holds v10 or later and the step from v9 to the current version.
+    ok('the document is v10 or later', DOC_VERSION >= 10 && serializeDoc().v === DOC_VERSION);
     const m = migrateDoc({ v: 9, nodes: [N('s', 'server'), N('v', 'vm', { host: 's' })], links: [] });
-    ok('a v9 document is brought to v10, nothing converted', m.doc.v === 10 && m.from === 9 && !m.newer && m.doc.nodes[1].host === 's');
+    ok('a v9 document is brought to the current version, nothing converted', m.doc.v === DOC_VERSION && m.from === 9 && !m.newer && m.doc.nodes[1].host === 's');
     const m9 = migrateDoc({ v: 9, nodes: [N('v', 'vm', { group: 'r', rackU: 4 })], links: [], groups: [{ id: 'r', kind: 'rack' }] });
     replaceDocument(m9.doc, { origin: 'template' });
     ok('a v9 VM with rack units opens without them, still in its rack', node('v').group === 'r' && !hasRackFields(node('v')));
-    replaceDocument({ v: 10 + 1, nodes: [N('s', 'server'), N('v', 'vm', { host: 's' })], links: [] }, { origin: 'file' });
-    ok('a v11 document opens read-only', !!state.readOnly);
+    replaceDocument({ v: DOC_VERSION + 1, nodes: [N('s', 'server'), N('v', 'vm', { host: 's' })], links: [] }, { origin: 'file' });
+    ok('a document newer than this build opens read-only', !!state.readOnly);
 
     replaceDocument(site(), { origin: 'file', claim: true });
     initHistory();
@@ -318,7 +320,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const dev = csvDevicesSheet();
     const colOf = (h) => dev.headers.indexOf(h);
     const cellOf = (id, h) => dev.rows.find((r) => r[0] === id)[colOf(h)];
-    ok('devices.csv has runs_on after the rack columns', colOf('runs_on') === colOf('rack_depth') + 1);
+    // ports_face (Round 5) sits between the rack columns and runs_on.
+    ok('devices.csv has runs_on after the rack columns', colOf('runs_on') === colOf('ports_face') + 1 && colOf('ports_face') === colOf('rack_depth') + 1);
     ok('the host by its name; blank on the rest', cellOf('web', 'runs_on') === 'HV-1' && cellOf('app', 'runs_on') === 'Web' && cellOf('hv', 'runs_on') === '' && cellOf('lone', 'runs_on') === '');
     batch(() => { node('pc').name = 'NAS'; save(); });
     ok('by its id when another device has the name', csvDevicesSheet().rows.find((r) => r[0] === 'ct')[colOf('runs_on')] === 'nas');

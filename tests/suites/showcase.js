@@ -40,7 +40,8 @@ window.addEventListener('load', () => { setTimeout(() => {
   const missing = paletteDefs.map(p => p.type).filter(t => !types.has(t));
   ok('still covers every node type', missing.length === 0, missing.join(',') || 'all present');
 
-  const alerts = [...document.querySelectorAll('#conflictMsgList .ca-line')].map(li => li.textContent);
+  // Faults only: the racks' untagged cables are listed as info (Round 5).
+  const alerts = [...document.querySelectorAll('#conflictMsgList .ca-item:not(.info) .ca-line')].map(li => li.textContent);
   ok('the showcase itself is clean', alerts.length === 0, alerts.slice(0,3).join(' | '));
   ok('no node is badged', state.nodes.filter(n => nodeSeverity(n)).length === 0,
      state.nodes.filter(n => nodeSeverity(n)).map(n => n.name + ':' + nodeSeverity(n)).join(', '));

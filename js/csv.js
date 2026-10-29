@@ -231,6 +231,12 @@ function csvValue(field, v) {
 // full (the default, not stored) or half for a device in a rack, and half
 // for one that kept the field out of a rack (a finding); blank elsewhere.
 const csvRackDepth = (node) => (node.rackDepth === 'half' ? 'half' : rackOfNode(node) ? 'full' : '');
+// ports_face likewise: the face it is, its own or its type's, for a device
+// with a box in a rack, and its own (a face that differs from its type's) for
+// one elsewhere; blank for a device that has said nothing out of a rack and
+// for a VM or a container, which has no ports of its own. Read back, a face
+// that is the type's own is not stored (asPortsFace, js/model.js).
+const csvPortsFace = (node) => (isVirtualType(node.type) ? '' : node.portsFace ? node.portsFace : rackOfNode(node) ? portsFaceOf(node) : '');
 // The device columns: every NODE_FIELDS row with a csv name, in table order.
 // interfaces is a list, not a cell; it is the interfaces sheet.
 const csvNodeFields = () => NODE_FIELDS.filter((f) => f.csv && f.key !== 'interfaces');
@@ -241,12 +247,21 @@ const csvIfaceField = (key) => IFACE_FIELDS.find((f) => f.key === key);
 // own is the device's end of that cable (an interface id), so a sheet can say
 // which of its NICs the cable is on: a router's LAN cable is on eth1, and a
 // row that left that to the binder put it on whatever NIC was free (the WAN).
-function csvUplink(node) {
+// forSheet: the devices sheet's own uplink, which passes over a cable with no
+// port picked at the switch (the rack view's "no port" spot, "Round 5"). Its
+// port cell was "—", which the import refused as a port the switch does not
+// have, so the device's whole row was lost; written blank, the import's
+// binder would pick a port nobody patched. The cables sheet carries that
+// cable whole, its blank port read back as no port, so the patch schedule
+// round-trips (tests/suites/rackschedule.js). A radio's association has no
+// port at the AP by nature and stays an uplink.
+function csvUplink(node, forSheet = false) {
     let best = null;
     linksAtNode(node.id).forEach((l) => {
         const peerId = l.source === node.id ? l.target : l.source;
         const peer = getNode(peerId);
         if (!hasPortGrid(peer)) return;
+        if (forSheet && !ifaceIdOn(l, peerId) && effectiveMedium(l, getNode(l.source), getNode(l.target)) !== 'wireless') return;
         const m = /^p(\d+)$/.exec(ifaceIdOn(l, peerId) || '');
         const at = { peer, link: l, port: m ? Number(m[1]) : Infinity };
         if (!best || naturalCompare(peer.name, best.peer.name) < 0 || (peer.name === best.peer.name && at.port < best.port)) best = at;
@@ -258,7 +273,7 @@ function csvDevicesSheet() {
     const fields = csvNodeFields();
     const headers = fields.map((f) => f.csv).concat(['interface_id', 'interface', 'ip', 'mac', 'switch', 'port', 'local_port']);
     const rows = state.nodes.map((node) => {
-        const up = csvUplink(node);
+        const up = csvUplink(node, true);
         // The NIC the uplink is on, else the first: one row is one NIC and
         // where it is plugged in. A switch's own end is a faceplate port, not
         // a NIC, so its row keeps its first interface (a management VLAN).
@@ -271,7 +286,7 @@ function csvDevicesSheet() {
         // it out (the schema's write), and a sheet that kept it would not
         // read back ("Only a switch or an access point has numbered ports").
         const cells = fields.map((f) => ((f.key === 'nat' && !isRoutingDevice(node.type)) || (f.key === 'portScheme' && !hasPortGrid(node)) ? ''
-            : f.key === 'rackDepth' ? csvRackDepth(node) : csvValue(f, node[f.key])));
+            : f.key === 'rackDepth' ? csvRackDepth(node) : f.key === 'portsFace' ? csvPortsFace(node) : csvValue(f, node[f.key])));
         return cells.concat([nic ? nic.id : '', nic ? nic.name || '' : '', nic ? nic.ip || '' : '', nic && !isBlank(nic.mac) ? fmtColonSafe(nic.mac) : '',
             up ? up.peer.name || up.peer.id : '', up ? up.port : '', up && up.own ? ifaceLabel(node, up.own) : '']);
     });
@@ -442,6 +457,9 @@ const CSV_ALIASES = {
     rackHeight: ['rack height', 'height u', 'units', 'u height'],
     rackFace: ['rack face', 'face', 'rack side', 'mounted on'],
     rackDepth: ['rack depth', 'depth', 'full depth', 'half depth', 'mount depth'],
+    // Which side of the device its ports are on. Not a bare "ports": that
+    // is the allowed ports (above).
+    portsFace: ['ports face', 'port face', 'ports side', 'port side', 'ports on'],
     // What a VM or a container runs on (js/model.js "Hosts"). Not a bare
     // "host": that is the hostname (name, above).
     host: ['runs on', 'host device', 'vm host', 'hypervisor', 'hosted on', 'running on'],
@@ -560,6 +578,13 @@ const CSV_PARSERS = {
         const f = asRackFace(v) || RACK_FACES.find((x) => t(x).toLowerCase() === v);
         return f ? { value: f } : { error: true };
     },
+    // front / rear, as rack_face; whether that is the type's own (and so
+    // not stored) is the plan's to say, which knows the device's type.
+    portsFace: (text) => {
+        const v = csvLower(text);
+        const f = asRackFace(v) || RACK_FACES.find((x) => t(x).toLowerCase() === v);
+        return f ? { value: f } : { error: true };
+    },
     // full (or "full depth", a yes, the words in the page's language), the
     // default, which clears it, or half (half depth, shallow, one face, a no,
     // the words in the page's language), stored as 'half'.
@@ -626,7 +651,7 @@ function csvBuildTargets() {
         names: new Set([field && field.csv, field && field.label, label, ...(CSV_ALIASES[key] || [])].filter(Boolean).map(csvNorm)
             .filter((n) => !(CSV_NOT_NAMES[key] || []).includes(n)))
     });
-    const PLAIN = new Set(['name', 'type', 'notes', 'serial', 'assetTag', 'location', 'status', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'host']);
+    const PLAIN = new Set(['name', 'type', 'notes', 'serial', 'assetTag', 'location', 'status', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'portsFace', 'host']);
     csvNodeFields().forEach((f) => add(f.key, 'device', f, null, PLAIN.has(f.key)));
     ['id', 'name', 'ip', 'mac', 'wireless', 'bond'].forEach((k) => add(`if:${k}`, 'iface', csvIfaceField(k)));
     add('cab:switch', 'cabling', null, 'Switch');
@@ -1201,6 +1226,16 @@ function csvPlanDeviceRow(r, anchor, ctx) {
         const type = draftSets.type || said.type || record.type;
         if (key === 'nat' && !isRoutingDevice(type)) { out.notes.push(t('Only a routing device does NAT.')); continue; }
         if (key === 'portScheme' && !hasPortGrid({ type })) { if (value) out.notes.push(t('Only a switch or an access point has numbered ports.')); continue; }
+        // The face the device's type already has is not stored (asPortsFace):
+        // a sheet this page wrote says every rack device's face, and reading
+        // it back must not list each one as a change.
+        if (key === 'portsFace') {
+            if (isVirtualType(type)) continue;
+            const own = asPortsFace(value, { type });
+            draftSets[key] = own;
+            if (existing && !csvSame(key, existing[key], own)) out.changes.push({ field: csvTargetLabel(tg), before: csvShow(key, portsFaceOf(existing)), after: csvShow(key, value) });
+            continue;
+        }
         draftSets[key] = value;
         if (existing && !csvSame(key, existing[key], value)) out.changes.push({ field: csvTargetLabel(tg), before: csvShow(key, existing[key]), after: csvShow(key, value) });
     }
@@ -1654,7 +1689,7 @@ function csvPlanCables(rows, plan) {
         if (hits.length > 1) return { error: t('{name} names more than one device.', { name: v }) };
         return hits.length ? { node: getNode(hits[0]) } : { error: t('No device called {name}.', { name: v }) };
     };
-    rows.forEach(({ index, vals }) => {
+    rows.forEach(({ index, vals, blanks }) => {
         if (!Object.keys(vals).length) return;
         const out = { index, name: '', status: 'same', changes: [], notes: [], why: '' };
         const conflict = (why) => { results.push(Object.assign(out, { status: 'conflict', why })); };
@@ -1802,7 +1837,17 @@ function csvPlanCables(rows, plan) {
         });
         if (sp.id) portsTaken.add(`${a.id}\u0000${sp.id}`);
         if (tp.id) portsTaken.add(`${b.id}\u0000${tp.id}`);
-        plan.ops.push({ link: l });
+        // A faceplate's port column the sheet has, left blank on this row:
+        // the cable is plugged into none of its ports the sheet knows, and is
+        // made so, with no port at that end (the rack view's "no port" spot,
+        // to Pick a port), rather than into one of 24 the binder picks and
+        // nobody patched. That is how the cables sheet writes such a cable,
+        // so it reads back as one ("Round 5", R5b: the patch schedule
+        // round-trips). A device's own NIC is still bound (a PC's one NIC is
+        // where its cable is), and so is a sheet with no port column at all.
+        const noPort = [['lk:sourceIface', 'sourceIface', a], ['lk:targetIface', 'targetIface', b]]
+            .filter(([k, side, node]) => !l[side] && hasPortGrid(node) && (blanks || []).includes(k)).map(([, side]) => side);
+        plan.ops.push(noPort.length ? { link: l, noPort } : { link: l });
         out.status = 'add';
         out.changes.unshift({ field: t('Cable'), before: '', after: [sp.id ? `${nameOf(a)} ${portText(a, sp)}` : nameOf(a), tp.id ? `${nameOf(b)} ${portText(b, tp)}` : nameOf(b)].join(' ↔ ') + (l.medium ? ` · ${csvShow('lk:medium', l.medium)}` : '') });
         results.push(out);
@@ -2231,6 +2276,8 @@ function csvWrite(plan, doc) {
             if (!op.link) return;
             if (!getNode(op.link.source) || !getNode(op.link.target)) return;
             const link = bindLink(cloneData(op.link));
+            // An end the sheet left blank in its port column stays with no port.
+            (op.noPort || []).forEach((side) => { link[side] = null; });
             doc.links.push(link);
             lookupPassAddLink(link);
             newLinks.add(link.id);

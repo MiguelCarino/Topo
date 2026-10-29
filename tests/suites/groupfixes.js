@@ -11,8 +11,9 @@
 //      removed, renamed, re-kinded, moved inside another, a rack's height;
 //   5. the top of a typed location path is a building, whatever it is
 //      called, and HQ, site, campus and sede say so too;
-//   6. a rack device cabled to many outside devices gathers its stubs by the
-//      far group, and past that a "+N more";
+//   6. a rack device cabled to many outside devices: each cable out on its
+//      own, from its port to the rack's edge, tagged with where it goes
+//      (Round 5 replaced the stubs gathered by far group);
 //   7. a second cable between two devices in the rack view is said;
 //   8. the exports: a frame tab without its ▾ closes up, and a collapsed
 //      group spread wide does not widen the picture.
@@ -132,8 +133,12 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a lone name stays custom', kindOf('Reception') === 'custom');
     ok('and becomes a building once a later path puts something in it', kindOf('Annex') === 'building' && kindOf('Room 4') === 'room');
 
-    // ---- 6: stubs gathered by the far group ----
-    const many = { v: DOC_VERSION, nodes: [N('sw', 'switch', { group: 'rk', rackU: 10, portCount: 48, interfaces: [] })], links: [],
+    // ---- 6: cables out of the rack, one by one ----
+    // (Round 5: each cable is drawn from its port, so one out to each of many
+    // outside devices is its own, from its own port, ending at the rack's
+    // edge; the old stubs gathered by far group are gone with the per-pair
+    // lines.)
+    const many = { v: DOC_VERSION, nodes: [N('sw', 'switch', { group: 'rk', rackU: 10, portCount: 48, interfaces: [], rackDepth: 'half' })], links: [],
       groups: [{ id: 'rk', name: 'Rack A', kind: 'rack', uHeight: 12 }, { id: 'off', name: 'Office', kind: 'room' }] };
     for (let i = 1; i <= 6; i++) {
       many.nodes.push(N(`pc${i}`, 'pc', { group: 'off', x: i * 50, y: 300 }));
@@ -144,23 +149,16 @@ window.addEventListener('load', () => { setTimeout(async () => {
     replaceDocument(many, { origin: 'file', docId: 'gfix-stubs' });
     setView('rack');
     openRackView('rk');
-    select(null);
+    selectEntries([{ type: 'node', id: 'sw' }]);
     renderRackView(true);
-    const stubText = [...el('rackView').querySelectorAll('.rk-lbl-stub')].map((b) => b.textContent.trim());
-    ok('seven far devices: one stub per far group', json(stubText) === json(['→ Office · 6 devices', '→ Not in a group · 1 device']), json(stubText));
-    const offStub = [...el('rackView').querySelectorAll('.rk-lbl-stub')].find((b) => /Office/.test(b.textContent));
-    ok('it stands for all their cables, named in its tooltip', offStub.dataset.links.split(' ').length === 6 && /PC1, PC2/.test(offStub.title), offStub.title);
-    offStub.click();
-    ok('and selects them all', state.selection.size === 6 && [...state.selection].every((e) => e.type === 'link'));
-    const few = rvStubsShown(rackCables(groupById('rk')).stubs.slice(0, 3));
-    ok('few far devices: still one stub each', few.length === 3 && few.every((s) => s.far));
-    for (let g = 1; g <= 5; g++) many.groups.push({ id: `r${g}`, name: `Room ${g}`, kind: 'room' });
-    many.nodes.forEach((n, i) => { if (/^pc/.test(n.id)) n.group = `r${Math.min(i, 5)}`; });
-    replaceDocument(many, { origin: 'file', docId: 'gfix-stubs2' });
-    openRackView('rk');
-    renderRackView(true);
-    const capped = [...el('rackView').querySelectorAll('.rk-lbl-stub')].map((b) => b.textContent.trim());
-    ok('many far groups: the biggest, then "+N more"', capped.length === RV_STUB_MAX && /^→ \+\d+ more$/.test(capped[capped.length - 1]), json(capped));
+    const outs = [...el('rackView').querySelectorAll('.rk-cable.rk-out')];
+    ok('seven far devices: seven cables out, each from its own port to a ring at the rack\'s edge', outs.length === 7 && outs.every((g) => g.querySelector('.rk-ring')), outs.length);
+    const outTags = [...el('rackView').querySelectorAll('.rk-flag.rk-on')].map((b) => b.textContent.trim()).sort();
+    ok('each tagged with where it goes, the far device and its port', json(outTags) === json(['→ AP · eth0', '→ PC1 · eth0', '→ PC2 · eth0', '→ PC3 · eth0', '→ PC4 · eth0', '→ PC5 · eth0', '→ PC6 · eth0']), json(outTags));
+    const tagRects = [...el('rackView').querySelectorAll('.rk-flag.rk-on')].map((b) => b.getBoundingClientRect());
+    ok('and no tag over another', tagRects.every((a, i) => tagRects.every((b, j) => j <= i || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5 || a.right <= b.left + 0.5 || b.right <= a.left + 0.5)));
+    [...el('rackView').querySelectorAll('.rk-flag.rk-on')].find((b) => /PC3/.test(b.textContent)).click();
+    ok('a tag selects its one cable', state.selection.size === 1 && state.selectedType === 'link' && state.selectedId === 'l3');
 
     // ---- 7: a second cable is said ----
     replaceDocument({ v: DOC_VERSION, nodes: [N('a', 'server', { group: 'rk', rackU: 1, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }, { id: 'i2', name: 'eth1', ip: '' }] }),

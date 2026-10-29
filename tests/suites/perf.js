@@ -71,7 +71,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('the fixture is 300 devices and 305 cables', state.nodes.length === 300 && state.links.length === 305,
       `${state.nodes.length} / ${state.links.length}`);
     const found = topologyFindings();
-    const keys = found.map((f) => f.key + (f.accepted ? '+' : '')).sort().join(',');
+    // Its faults: the racks' untagged cables are an info note (Round 5).
+    const keys = found.filter((f) => f.level !== 'info').map((f) => f.key + (f.accepted ? '+' : '')).sort().join(',');
     ok('it raises exactly the faults it carries', keys === 'dns,gateway,ip-conflict,ip-conflict,loop+,loop+,mac-conflict', keys);
     ok('the replacement of the retired PC is not a conflict', !found.some((f) => f.key === 'ip-conflict' && f.nodeIds.includes('h201')));
     ok('the map draws every device and every cable',

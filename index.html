@@ -483,6 +483,15 @@
                                         <input type="checkbox" id="propRackDepth">
                                         <span class="prop-lbl" data-i18n>Full depth</span>
                                     </label>
+                                    <!-- The side of the device its ports are on (the rack
+                                         view draws them there): its type's by default. -->
+                                    <div>
+                                        <label class="prop-lbl" for="propPortsFace" data-i18n data-i18n-title title="The side of the device its ports are on. The rack view draws them there.">Ports face</label>
+                                        <select id="propPortsFace" class="select">
+                                            <option value="front" data-i18n>front</option>
+                                            <option value="rear" data-i18n>rear</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                             <div id="notesRow" data-adv class="prop-notes">
@@ -731,9 +740,27 @@
                         <button type="button" class="toggle-btn active" data-face="front" aria-pressed="true" data-i18n>Front</button>
                         <button type="button" class="toggle-btn" data-face="rear" aria-pressed="false" data-i18n>Rear</button>
                     </div>
+                    <!-- The units' height, 1x to 3x: a view kept in this
+                         browser, so the ports and the cables can be read. -->
+                    <div id="rackZoom" class="view-switch rk-zoom" role="group" data-i18n-aria-label aria-label="Zoom">
+                        <button type="button" class="toggle-btn active" data-zoom="1" aria-pressed="true">1×</button>
+                        <button type="button" class="toggle-btn" data-zoom="2" aria-pressed="false">2×</button>
+                        <button type="button" class="toggle-btn" data-zoom="3" aria-pressed="false">3×</button>
+                    </div>
+                    <!-- Which cables are drawn bold and tagged: every one, the
+                         selected devices' (the default), or one traced end
+                         to end. A view kept in this browser (js/rackview.js). -->
+                    <div class="rk-cablectl">
+                        <span class="rk-pick-lbl" id="rackCablesLbl" data-i18n>Cables</span>
+                        <div id="rackCables" class="view-switch rk-cablesw" role="group" aria-labelledby="rackCablesLbl">
+                            <button type="button" class="toggle-btn" data-cables="all" aria-pressed="false" data-i18n>All</button>
+                            <button type="button" class="toggle-btn active" data-cables="sel" aria-pressed="true" data-i18n>Selected</button>
+                            <button type="button" class="toggle-btn" data-cables="one" aria-pressed="false" data-i18n>One cable</button>
+                        </div>
+                    </div>
                 </div>
                 <div id="rackSize" class="rk-size prop-grid" role="group" data-i18n-aria-label aria-label="Rack size" hidden></div>
-                <p class="tv-hint rk-hint"><span data-i18n>Drag over empty units, or tap one, to place a device there. Drag a device to move it, and the top edge of the selected one to resize it.</span> <span data-i18n>Drag from a device's dot to another device to cable them.</span> <span data-i18n>Drag a device from the lists onto the units to bring it in, or off the units to take it out.</span></p>
+                <p class="tv-hint rk-hint"><span data-i18n>Drag over empty units, or tap one, to place a device there. Drag a device to move it, and the top edge of the selected one to resize it.</span> <span data-i18n>Drag from a free port to another device's free port to cable them.</span> <span data-i18n>Drag a device from the lists onto the units to bring it in, or off the units to take it out.</span> <span data-i18n>Point at or tap a port to read its cable.</span></p>
                 <div id="rackBody" class="rk-body"></div>
             </section>
             </main>

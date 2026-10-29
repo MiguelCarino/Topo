@@ -39,6 +39,14 @@ const isRoutingDevice = (type) => ['router', 'firewall', 'cloud', 'loadbalancer'
 // an explicit one and made every count silently elastic.
 const DEFAULT_PORT_COUNT = { switch: 8, ap: 1 };
 const hasPortGrid = (node) => !!node && (node.type === 'switch' || node.type === 'ap');
+// Whether an interface is a physical socket that takes one cable: a switch or
+// AP faceplate port, or a NIC on a device that does not route. A router's L3
+// interface is a subnet gateway, and diagrams routinely hang several hosts off
+// one (the switch is simply not drawn, as autoPickIface reads it), so two
+// cables there are shorthand, not a fault. The cabling check (js/diagnostics.js)
+// and the rack view's and the report's port rings (rackPortsOf's `doubled`)
+// ask this one question, so a port is never ringed red where Findings is clean.
+const isSocketPort = (node, ifaceId) => hasPortGrid(node) ? /^p\d+$/.test(ifaceId) : !isRoutingDevice(node && node.type);
 const hasExplicitPortCount = (node) => Number.isFinite(node?.portCount);
 const portCountOf = (node) => hasExplicitPortCount(node) ? node.portCount
     : Math.max(DEFAULT_PORT_COUNT[node?.type] ?? 0, hasPortGrid(node) ? highestPortInUse(node) : 0);
@@ -1052,6 +1060,23 @@ const asRackDepth = (v) => {
     const s = typeof v === 'string' ? v.trim().toLowerCase().replace(/[\s_-]+/g, ' ') : '';
     return ['half', 'half depth', 'shallow', 'one face', 'single face'].includes(s) ? 'half' : undefined;
 };
+// Which side of the box its ports are on (Review-Packs/Topo-groups.md,
+// "Round 5"; document v11): 'front' or 'rear' of the DEVICE, not of the
+// rack, so a server keeps its ports on its back whichever face it is
+// mounted on, and the rack view finds the rack face from that (rackPortsFace
+// below). Network gear has its ports on its front and everything else on its
+// back: that is the default, by type, and is not stored, so only a device
+// that differs from its type carries the key (a server with front ports, a
+// switch mounted ports-to-the-back). Read through the type, the value the
+// type already says is dropped, so a sheet or a file that spells every
+// device's face out comes back as the same document as one that says none.
+// A VM or a container has no box and no ports of its own: never kept.
+const PORTS_FRONT_TYPES = ['switch', 'l3switch', 'router', 'edge', 'firewall', 'vpn', 'ap', 'loadbalancer'];
+const defaultPortsFace = (type) => (PORTS_FRONT_TYPES.includes(type) ? 'front' : 'rear');
+const asPortsFace = (v, src) => {
+    const f = asRackFace(v);
+    return !f || !src || isVirtualType(src.type) || f === defaultPortsFace(src.type) ? undefined : f;
+};
 
 const STATUS_VALUES = ['planned', 'active', 'retired'];
 const asStatus = (v) => { const s = typeof v === 'string' ? v.trim().toLowerCase() : ''; return STATUS_VALUES.includes(s) ? s : undefined; };
@@ -1216,6 +1241,12 @@ const NODE_FIELDS = [
     { key: 'rackFace', kind: 'raw', label: 'Rack face', read: asRackFace, write: asRackFace, csv: 'rack_face' },
     // 'half' or nothing (full depth, the default): asRackDepth above.
     { key: 'rackDepth', kind: 'raw', label: 'Rack depth', read: asRackDepth, write: asRackDepth, csv: 'rack_depth' },
+    // The side of the device its ports are on, when it is not its type's
+    // (asPortsFace above; document v11). The box's own fact, not its place,
+    // so it is not one of RACK_KEYS: a switch taken out of a rack and put in
+    // another still has its ports where they were. ports_face in a sheet
+    // says the face whatever it is (csvPortsFace, js/csv.js).
+    { key: 'portsFace', kind: 'raw', label: 'Ports face', read: asPortsFace, write: asPortsFace, csv: 'ports_face' },
     // ---- The device a VM or a container runs on (document v10, "Hosts" below) ----
     // Its host's id, read and written only on a virtual device (isVirtualType),
     // as siteRef is only a cloud's: a server that "runs on" another server is
@@ -2072,6 +2103,76 @@ const rackFaceOf = (node) => (node && node.rackFace === 'rear' ? 'rear' : 'front
 const hasRackFields = (node) => !!node && (node.rackU !== undefined || node.rackHeight !== undefined || node.rackFace !== undefined || node.rackDepth !== undefined);
 // Full depth is the default; a device set to one face says 'half'.
 const rackFullDepth = (node) => !!node && node.rackDepth !== 'half';
+
+// ---- A device's ports in the rack (Review-Packs/Topo-groups.md, "Round 5") ----
+// The side of the device its ports are on: its own, or its type's.
+const portsFaceOf = (node) => (node && asRackFace(node.portsFace)) || defaultPortsFace(node && node.type);
+// The rack face they are drawn on. A device that fills the depth has a box on
+// both faces, its front on rackFace and its back on the other: its ports are
+// on whichever its ports face says. A half-depth one has the one face only,
+// so its ports are there whatever the field says (a half-depth server mounted
+// at the back shows them on the rear).
+function rackPortsFace(node) {
+    const face = rackFaceOf(node);
+    if (!rackFullDepth(node) || portsFaceOf(node) === 'front') return face;
+    return face === 'rear' ? 'front' : 'rear';
+}
+// What the rack view draws as the device's ports, in order (the agreed
+// scope: evenly spaced, in order, never at a faceplate position; there is no
+// device-model library to know one):
+//   a switch or an AP   its faceplate, port 1 up (faceplatePortIds: past the
+//                       count too, where a cable or a label sits), named by
+//                       its scheme and carrying its label and access VLAN
+//                       (portNameOf, portAttrOf), as the map and the port
+//                       picker name them;
+//   anything else       its interfaces, in their order, but radios (a Wi-Fi
+//                       association is not a socket in the rack) and bonds
+//                       (a bond has no socket: its members are where the
+//                       cables go). A bond's members are drawn together where
+//                       the first of them is, marked with the bond, so the
+//                       pair reads as one.
+// Each: { id, name, label, vlan, links (the cables on it: isExclusiveLink,
+// so not a radio's association, a VPN riding a cable, nor a VM's bridge onto
+// its host's NIC), past (a faceplate port beyond the count), bond: { id,
+// name } | null }. Pure but for the document it reads.
+function rackPortsOf(node) {
+    if (!node || isVirtualType(node.type)) return [];
+    const at = new Map();
+    linksAtNode(node.id).forEach((l) => {
+        if (!isExclusiveLink(l)) return;
+        const id = ifaceIdOn(l, node.id);
+        if (!id) return;
+        if (!at.has(id)) at.set(id, []);
+        at.get(id).push(l);
+    });
+    const cables = (id) => at.get(id) || [];
+    // Two cables on a socket (isSocketPort): the cabling check's own rule.
+    const doubled = (id) => cables(id).length > 1 && isSocketPort(node, id);
+    if (hasPortGrid(node)) {
+        const total = portCountOf(node);
+        return faceplatePortIds(node).map((id) => {
+            const n = Number(id.slice(1));
+            const a = portAttrOf(node, id);
+            return { id, name: ifaceLabel(node, id), label: a.label, vlan: a.vlan, links: cables(id), past: n > total, doubled: doubled(id), bond: null };
+        });
+    }
+    const list = getInterfaces(node).filter((i) => !ifaceIsWireless(i));
+    const out = [];
+    const done = new Set();
+    const one = (i, bond) => {
+        if (done.has(i.id)) return;
+        done.add(i.id);
+        out.push({ id: i.id, name: i.name || i.id, label: '', vlan: null, links: cables(i.id), past: false, doubled: doubled(i.id), bond });
+    };
+    list.forEach((i) => {
+        if (isBond(i)) return;
+        const bond = bondOf(node, i.id);
+        if (!bond) { one(i, null); return; }
+        const tag = { id: bond.id, name: bond.name || bond.id };
+        bondMembers(node, bond).filter((m) => !ifaceIsWireless(m)).forEach((m) => one(m, tag));
+    });
+    return out;
+}
 // ---- How a rack's units are numbered ----
 // Stored, a unit is always counted from the bottom: rackU is a device's
 // lowest unit, 1 the bottom one, and every check, every drag and the CSV's
@@ -2198,39 +2299,13 @@ function rackOverlaps(rack, nodes = state.nodes) {
     return out;
 }
 
-// ---- A rack's cables (step C: the rack view and the report) ----
-// The cables that touch a rack's devices, as the rack view draws them (the
-// agreed scope: one line per device pair, never a port position): every pair
-// of this rack's devices with a cable between them, with the cables, and
-// every device of this rack with a cable to a device elsewhere, once per far
-// device, which the view draws as a stub at the rack's edge labelled with the
-// far end. A cable from a device to itself is not one. Pure over its
-// arguments. -> { pairs: [{ a, b, links }], stubs: [{ node, far, links }] },
-// a before b in the document's order, the cables in theirs.
-function rackCables(rack, links = state.links, nodes = state.nodes) {
-    if (!rack) return { pairs: [], stubs: [] };
-    const byId = new Map(), order = new Map();
-    (nodes || []).forEach((n, i) => { if (n) { byId.set(n.id, n); order.set(n.id, i); } });
-    const inRack = (n) => n.group === rack.id;
-    const pairs = new Map(), stubs = new Map();
-    (links || []).forEach((l) => {
-        if (!l || l.source === l.target) return;
-        const s = byId.get(l.source), d = byId.get(l.target);
-        if (!s || !d) return;
-        const si = inRack(s), di = inRack(d);
-        let map, key, make;
-        if (si && di) {
-            const [a, b] = order.get(s.id) <= order.get(d.id) ? [s, d] : [d, s];
-            map = pairs; key = `${a.id}\u0000${b.id}`; make = () => ({ a, b, links: [] });
-        } else if (si || di) {
-            const [node, far] = si ? [s, d] : [d, s];
-            map = stubs; key = `${node.id}\u0000${far.id}`; make = () => ({ node, far, links: [] });
-        } else return;
-        if (!map.has(key)) map.set(key, make());
-        map.get(key).links.push(l);
-    });
-    return { pairs: [...pairs.values()], stubs: [...stubs.values()] };
-}
+// ---- A rack's cables (step C; port to port since "Round 5") ----
+// The first build drew one line per device pair and gathered the cables out
+// of the rack into stubs by far device (rackCables, gone with that drawing on
+// the owner's call). A rack's cables are now listed one by one: rackCableLinks
+// below, which the rack view draws and the finding counts, and rackSchedule,
+// the patch schedule the rack view's panel and the report print.
+
 // One cable as the person at the rack reads it, from `from`'s end: its port
 // there, its port at the other end, and its label and colour when set.
 // -> { ports: 'eth0 ↔ Gi0/1', label: 'C-12', color: 'blue' }
@@ -2239,6 +2314,88 @@ function rackCableText(link, from) {
     const far = getNode(other);
     return { ports: `${ifaceLabel(from, ifaceIdOn(link, from.id))} ↔ ${far ? ifaceLabel(far, ifaceIdOn(link, other)) : '—'}`,
         label: cableOf(link, 'label').trim(), color: cableOf(link, 'color').trim() };
+}
+// The cables of a rack one by one, as the rack view draws them port to port
+// ("Round 5", R5a) and as the untagged-cables finding counts them: every
+// cable with an end on one of the rack's devices (a VM or a container is in
+// its host's group, so its cables count where its host stands). Not a radio's
+// association nor a VPN (neither is a cable in a rack), and not a guest's
+// bridge onto its own host: that runs inside the host's box, with nothing to
+// draw or tag. In the document's order. Pure over its arguments but for the
+// lookups the medium and the hosts read.
+function rackCableLinks(rack, links = state.links, nodes = state.nodes) {
+    if (!rack) return [];
+    const byId = new Map();
+    (nodes || []).forEach((n) => { if (n) byId.set(n.id, n); });
+    const inRack = (n) => n.group === rack.id;
+    const onOwnHost = (a, b) => hostChainOf(a).includes(b) || hostChainOf(b).includes(a);
+    return (links || []).filter((l) => {
+        if (!l || l.source === l.target) return false;
+        const s = byId.get(l.source), d = byId.get(l.target);
+        if (!s || !d || !(inRack(s) || inRack(d))) return false;
+        const medium = effectiveMedium(l, s, d);
+        return medium !== 'wireless' && medium !== 'vpn' && !onOwnHost(s, d);
+    });
+}
+
+// ---- A rack's patch schedule (Review-Packs/Topo-groups.md, "Round 5", R5b) ----
+// The list a person patching the rack works from: one row per cable that
+// touches it (rackCableLinks, so the same cables the rack view draws and the
+// untagged-cables finding counts), read from the rack's end: the device here
+// and its port, the cable's tag, the far device and its port (and where it
+// is, when that is not this rack), the colour, the length and the via. A
+// cable between two devices of this rack is read from the one higher up, so
+// the rows run down the rack as it is read; a VM's or a container's cable is
+// at its host's place and names it "guest on host", as the rack view's tags
+// do. In the rack's order: the device's top unit, highest first (a member
+// with no units yet after every placed one), then the device's order in the
+// document (two devices beside each other, front and rear), then the port's
+// place on its faceplate or among its interfaces, then the cables' order.
+// The rack view's Schedule panel sorts it again by any column; the report
+// prints it in this order after the rack's elevation. Every field of it is a
+// column of the cables sheet (from and to name and port, label, colour,
+// length, via: js/csv.js), which tests/suites/rackschedule.js holds by a
+// round trip through a blank map. Pure but for the lookups the ports read.
+// -> [{ link, node, box, port, far, farBox, farPort, farIn, where, tag,
+//       color, length, via }]: node and far are the cable's devices, box and
+//    farBox the device each is drawn in (its host's for a guest, else itself);
+//    port and farPort the ports' names, '' where none was picked; farIn
+//    whether the far device is in this rack; where, the far device's place
+//    when it is not.
+function rackSchedule(rack, links = state.links, nodes = state.nodes) {
+    if (!rack) return [];
+    const byId = new Map(), at = new Map();
+    (nodes || []).forEach((n, i) => { if (n && !byId.has(n.id)) { byId.set(n.id, n); at.set(n.id, i); } });
+    const inRack = (n) => !!n && n.group === rack.id;
+    const boxOf = (n) => hostRootOf(n) || n;
+    // The top unit of the box a device is drawn in; -1 with no units here.
+    const level = (n) => { const b = boxOf(n); return inRack(b) && Number.isInteger(b.rackU) ? rackSpanOf(b).hi : -1; };
+    const portOrder = new Map();
+    const portAt = (n, id) => {
+        if (!portOrder.has(n.id)) portOrder.set(n.id, new Map(rackPortsOf(n).map((p, k) => [p.id, k])));
+        const k = id ? portOrder.get(n.id).get(id) : undefined;
+        return k === undefined ? Number.MAX_SAFE_INTEGER : k;
+    };
+    const rows = rackCableLinks(rack, links, nodes).map((link, i) => {
+        const s = byId.get(link.source), d = byId.get(link.target);
+        const [a, b] = inRack(s) && inRack(d) ? (level(d) > level(s) ? [d, s] : [s, d]) : inRack(s) ? [s, d] : [d, s];
+        const pa = ifaceIdOn(link, a.id), pb = ifaceIdOn(link, b.id);
+        return { link, node: a, box: boxOf(a), port: pa ? ifaceLabel(a, pa) : '',
+            far: b, farBox: boxOf(b), farPort: pb ? ifaceLabel(b, pb) : '', farIn: inRack(b), where: inRack(b) ? '' : nodePlaceText(b),
+            tag: cableOf(link, 'label').trim(), color: cableOf(link, 'color').trim(), length: cableOf(link, 'length').trim(), via: cableOf(link, 'via').trim(),
+            key: [-level(a), at.get(boxOf(a).id) ?? 0, at.get(a.id) ?? 0, portAt(a, pa), i] };
+    });
+    rows.sort((x, y) => { for (let k = 0; k < x.key.length; k++) if (x.key[k] !== y.key[k]) return x.key[k] - y.key[k]; return 0; });
+    rows.forEach((r) => { delete r.key; });
+    return rows;
+}
+// A schedule row's end as a person reads it: "SW-1 · 24", "Web 1 on HV-1 ·
+// eth0", "PC-12 · no port". far: the far end, else the rack's.
+function rackScheduleEnd(row, far = false) {
+    const n = far ? row.far : row.node, box = far ? row.farBox : row.box;
+    const name = (x) => (x.name && String(x.name).trim()) || x.id;
+    const who = box && box !== n ? t('{guest} on {host}', { guest: name(n), host: name(box) }) : name(n);
+    return `${who} · ${(far ? row.farPort : row.port) || t('no port')}`;
 }
 // "Building A / Server room / Rack 3", or '' when it is in no group.
 const groupPathOf = (node, groups = state.groups) => { const g = groupOfNode(node, groups); return g ? groupPath(g, groups) : ''; };
@@ -2589,6 +2746,10 @@ function rackShrinkQuestion(rack, height, nodes = state.nodes, groups = state.gr
 //                   are the normalizer's to drop (repairHosts), as a
 //                   loaded document's every other unsound reference is. A
 //                   v9 build would drop every host on its next save.
+//   v 11            the side of a device its ports are on (node.portsFace,
+//                   "Round 5": the rack view draws ports). Nothing to
+//                   convert: absent is the type's side, which is what every
+//                   device before it had. A v10 build would drop it.
 //
 // A document with a higher `v` was written by a newer Topo. Its unknown fields
 // cannot be kept — the serializer is an allowlist, and that is a privacy rule,
@@ -2600,7 +2761,7 @@ function rackShrinkQuestion(rack, height, nodes = state.nodes, groups = state.gr
 // DOC_VERSION. A step takes a plain document and returns one, and never
 // mutates its input. Never edit a shipped step: documents in the wild were
 // read by it.
-const DOC_VERSION = 10;
+const DOC_VERSION = 11;
 
 // A document's outline: an object whose lists, where present, are lists. The
 // loader tolerates a missing list (a bare { nodes } file is a document), but a
@@ -2726,7 +2887,9 @@ const MIGRATIONS = [
     // new shape.
     { from: 8, to: 9, run: (doc) => ({ ...doc, v: 9 }) },
     // A virtual device's host is a new key, not a new shape.
-    { from: 9, to: 10, run: (doc) => ({ ...doc, v: 10 }) }
+    { from: 9, to: 10, run: (doc) => ({ ...doc, v: 10 }) },
+    // A device's ports face is a new key, not a new shape.
+    { from: 10, to: 11, run: (doc) => ({ ...doc, v: 11 }) }
 ];
 
 // The v2 interface zone flags of `src`, put back on the same node as written.

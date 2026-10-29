@@ -210,7 +210,7 @@ window.addEventListener('load', () => { setTimeout(() => {
     const re = /\bt\(\s*(['"])((?:\\.|(?!\1).)*)\1/g; let m;
     while ((m = re.exec(req.responseText))) grpKeys.set(m[2].replace(/\\(['"\\])/g, '$1'), file);
   });
-  ['Group', 'Rack U', 'Rack height', 'Rack face', 'Rack depth'].forEach((k) => grpKeys.set(k, 'NODE_FIELDS'));
+  ['Group', 'Rack U', 'Rack height', 'Rack face', 'Rack depth', 'Ports face'].forEach((k) => grpKeys.set(k, 'NODE_FIELDS'));
   ok('the Groups files ask for a real number of strings', grpKeys.size > 60, `${grpKeys.size} keys`);
   locales.forEach((loc) => {
     const missing = [...grpKeys].filter(([k]) => !has(loc, k));

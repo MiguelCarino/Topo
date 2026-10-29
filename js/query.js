@@ -95,7 +95,7 @@ const qPeer = (link, nodeId) => getNode(link.source === nodeId ? link.target : l
 // front face. Where a device sits is searched by its path instead (plain
 // text below, loc: and group:).
 // A host is an id too: "s_lq3" would find its VMs by a string nobody reads.
-const Q_SKIP = new Set(['id', 'x', 'y', 'interfaces', 'source', 'target', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'host']);
+const Q_SKIP = new Set(['id', 'x', 'y', 'interfaces', 'source', 'target', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'portsFace', 'host']);
 const qFieldsHave = (fields, rec, v) => !!rec && fields.some((f) => !Q_SKIP.has(f.key) && qHas(rec[f.key], v));
 
 // A typed fragment that reads as part of a MAC (aa:bb, aa-bb-cc, or six or
@@ -152,8 +152,9 @@ function qLevels() {
     const worse = (m, id, level) => { if (m.get(id) !== 'bad') m.set(id, level === 'bad' ? 'bad' : 'warn'); };
     // Open findings only: has:finding is what still needs looking at, and a
     // finding accepted with a reason does not (the device's own verdict,
-    // its badge, leaves accepted issues out the same way).
-    diag.findings.filter(isOpenFinding).forEach((f) => {
+    // its badge, leaves accepted issues out the same way). Nor an info
+    // one, a rack's untagged cables: a note on the register, no fault.
+    diag.findings.filter(isCountedFinding).forEach((f) => {
         (f.nodeIds || []).forEach((id) => worse(nodes, id, f.level));
         (f.linkIds || []).forEach((id) => worse(links, id, f.level));
     });

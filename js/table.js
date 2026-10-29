@@ -1144,9 +1144,9 @@ function pasteFindingsDelta(plan) {
     return findingsDelta(topologyFindings(), diagnoseDoc(scratch).findings);
 }
 // Open findings only: one accepted with a reason is not counted anywhere, so
-// it is not a change either way.
+// it is not a change either way; nor is an info one (isCountedFinding).
 function findingsDelta(before, after) {
-    const tally = (list, sign, into) => list.filter(isOpenFinding).forEach((f) => {
+    const tally = (list, sign, into) => list.filter(isCountedFinding).forEach((f) => {
         const e = into.get(f.key) || { key: f.key, check: f.check, diff: 0 };
         e.diff += sign; into.set(f.key, e);
     });

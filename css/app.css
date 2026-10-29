@@ -485,6 +485,8 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
     font: inherit; font-weight: 700; color: var(--accent); text-align: left;
 }
 .ca-group.bad > .ca-group-head { color: var(--err); }
+/* An info finding (a rack's untagged cables): listed, not counted. */
+.ca-group.info > .ca-group-head { color: var(--info); }
 .ca-caret { width: 10px; flex: none; }
 .ca-check { flex: 1; min-width: 0; }
 .ca-count { flex: none; padding: 0 6px; border-radius: 999px; background: var(--bg-elev); color: var(--text-sec); font-size: var(--fs-micro); }
@@ -697,7 +699,9 @@ textarea.tv-in { min-width: 16rem; resize: vertical; line-height: 1.4; }
 .topo-rack {
     position: absolute; inset: 0; z-index: 15; display: flex; flex-direction: column; min-width: 0;
     padding: max(16px, calc(var(--topbar-h, 48px) + 8px)) 16px 64px; background: var(--bg); color: var(--text-sec);
-    --rk-u: 22px;
+    /* --rk-u0 is a unit at 1x; the zoom (--rk-z, set by js/rackview.js) makes
+       the units 2x or 3x as tall. Words keep --rk-u0, so they do not grow. */
+    --rk-u0: 22px; --rk-u: calc(var(--rk-u0) * var(--rk-z, 1));
 }
 body.rack-view #conflictPill { display: none !important; }
 .rk-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
@@ -769,7 +773,7 @@ body.rack-view #conflictPill { display: none !important; }
 .rk-dev {
     display: flex; align-items: flex-start; gap: 6px; min-width: 0; padding: 2px 6px; overflow: hidden;
     background: var(--bg-elev); border: 1px solid var(--text-muted); border-radius: 4px;
-    color: var(--text); font: inherit; font-size: var(--fs-sm); line-height: calc(var(--rk-u) - 6px); text-align: left;
+    color: var(--text); font: inherit; font-size: var(--fs-sm); line-height: calc(var(--rk-u0) - 6px); text-align: left;
     cursor: grab; touch-action: pan-y; z-index: 1;
 }
 .rk-dev, .rk-guest { transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s, opacity 0.15s; }
@@ -837,6 +841,121 @@ body.rack-view #conflictPill { display: none !important; }
 .rk-dev.rk-armed { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
 .rk-dev.rk-target { border-color: var(--accent); background: var(--accent-faint); box-shadow: 0 0 0 2px var(--accent); }
 .topo-rack.rk-arming .rk-dev:not(.rk-armed) { cursor: copy; }
+/* Ports (js/rackview.js, "Ports on the boxes"): a strip along the foot of the
+   box, --rk-pc to a row and --rk-pr rows, evenly spaced in order. A port is as
+   big as the box has room for under its name (--rk-ps, 3px to 12px): a 1U
+   box at 1x has none, and gets a hairline (.rk-pthin, below), so the
+   selected device's box grows over
+   its neighbours, centred on its units and kept inside the rack, until its
+   ports are a size to read and tap. Free is hollow, cabled is filled (in the
+   cable's colour when it has one, --pcol), a finding rings it, an access
+   VLAN tints its cell, and a bar under a bond's members ties them. */
+.rk-dev.rk-hasports {
+    --rk-H: calc(var(--h) * var(--rk-u) - 2px);
+    --rk-ps: clamp(3px, calc((var(--rk-H) - var(--rk-u0) - 2px) / var(--rk-pr) - 3px), 12px);
+}
+.rk-dev.rk-sel.rk-hasports {
+    --rk-G: max(var(--rk-H), calc(var(--rk-u0) + 6px + var(--rk-pr) * 15px));
+    --rk-ps: clamp(3px, calc((var(--rk-G) - var(--rk-u0) - 2px) / var(--rk-pr) - 3px), 12px);
+    --rk-B: clamp(1px, calc((var(--u) - 1) * var(--rk-u) + 1px - (var(--rk-G) - var(--rk-H)) / 2), calc(var(--rk-n) * var(--rk-u) - var(--rk-G) - 1px));
+    height: var(--rk-G); z-index: 4; bottom: var(--rk-B);
+    background: var(--bg-elev);
+}
+/* Its own units inside the grown box, tinted as a selected box is, with the
+   accent along their edges: what lies past them is the box drawn over its
+   neighbours. Under the name and the ports. */
+.rk-own {
+    position: absolute; left: 0; right: 0; z-index: -1; pointer-events: none;
+    bottom: calc((var(--u) - 1) * var(--rk-u) + 1px - var(--rk-B) - 1px); height: var(--rk-H);
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
+    box-shadow: inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
+}
+/* Grown past its units (js/rackview.js rk-grown), it clears the outer rail
+   as a box beside a back's strip does (.rk-beside): the devices under it keep
+   their edge and icon in sight there, and a tap on it selects them. */
+.rk-face[data-face="front"] .rk-dev.rk-grown { left: 17px; }
+.rk-face[data-face="rear"] .rk-dev.rk-grown { right: 17px; }
+/* No room for the ports under the name (a 1U box at 1x, js/rackview.js
+   rvPortsFit): one row of 2px dashes along the foot instead, the box's top
+   padding given to them so they sit below the name's letters, not on them. */
+.rk-dev.rk-pthin { padding-top: 0; }
+.rk-ports.rk-pthin { bottom: 0; grid-auto-rows: 2px; column-gap: 1px; }
+.rk-pthin .rk-port::before { width: 100%; height: 2px; border: 0; border-radius: 0; background: color-mix(in srgb, var(--text-muted) 40%, transparent); }
+.rk-pthin .rk-port.rk-pcab::before { background: var(--pcol, var(--text-sec)); }
+.rk-pthin .rk-port.rk-pbad::before { background: var(--err); box-shadow: none; }
+.rk-pthin .rk-port.rk-pvlan { background: none; }
+.rk-pthin .rk-port.rk-pb::after { display: none; }
+.rk-ports {
+    position: absolute; left: 6px; right: 20px; bottom: 1px;
+    display: grid; grid-template-columns: repeat(var(--rk-pc), minmax(0, 1fr)); grid-auto-rows: calc(var(--rk-ps) * 1.25 + 0.5px);
+    align-items: stretch; pointer-events: none;
+}
+.rk-face[data-face="rear"] .rk-ports { left: 20px; right: 6px; }
+.rk-port { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; pointer-events: auto; cursor: help; }
+.rk-port::before {
+    content: ""; flex: none; box-sizing: border-box; width: min(var(--rk-ps), calc(100% - 1px)); height: var(--rk-ps);
+    border: 1px solid var(--text-muted); border-radius: 2px; background: transparent;
+}
+.rk-port.rk-pcab::before { background: var(--pcol, var(--text-sec)); border-color: var(--pcol, var(--text-sec)); }
+.rk-port.rk-pbad::before { box-shadow: 0 0 0 1.5px var(--err); }
+.rk-port.rk-pvlan { background: color-mix(in srgb, var(--info) 24%, transparent); border-radius: 2px; }
+.rk-port.rk-pb::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; border-radius: 1px; background: var(--accent); }
+.rk-port.rk-pb-s::after { left: 15%; }
+.rk-port.rk-pb-e::after { right: 15%; }
+.rk-port.rk-ptipped::before { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* A free port is where a cable is drawn from (js/rackview.js, a drag from a
+   free port to another's): a mouse's anywhere, a finger's on the selected
+   box, whose free ports take the touch so the drag is not a scroll. The
+   port it starts from and the one it would land on are ringed. */
+.rk-port:not(.rk-pcab) { cursor: crosshair; }
+.rk-pthin .rk-port { cursor: inherit; }
+.rk-dev.rk-sel .rk-port:not(.rk-pcab) { touch-action: none; }
+.rk-port.rk-pfrom::before, .rk-port.rk-ptarget::before { outline: 2px solid var(--accent); outline-offset: 1px; background: var(--accent-faint); }
+.rk-cabling.rk-refused line { stroke: var(--err); }
+/* The no-port spot: where a cable with no port drawn on this box meets it,
+   a dashed ring at the inner end of the strip (the strip and the name give
+   it room). Bigger on the selected box, a finger's tap. */
+.rk-noport {
+    position: absolute; bottom: 2px; width: 9px; height: 9px; box-sizing: border-box; z-index: 1;
+    border: 1.5px dashed var(--warn); border-radius: 50%; cursor: pointer; pointer-events: auto;
+}
+.rk-face[data-face="front"] .rk-noport { right: 21px; }
+.rk-face[data-face="rear"] .rk-noport { left: 21px; }
+.rk-face[data-face="front"] .rk-dev.rk-hasspot { padding-right: 32px; }
+.rk-face[data-face="rear"] .rk-dev.rk-hasspot { padding-left: 32px; }
+.rk-face[data-face="front"] .rk-dev.rk-hasspot .rk-ports { right: 33px; }
+.rk-face[data-face="rear"] .rk-dev.rk-hasspot .rk-ports { left: 33px; }
+.rk-dev.rk-sel .rk-noport { width: 14px; height: 14px; }
+.rk-noport.rk-ptipped { border-style: solid; border-color: var(--accent); }
+/* A spot's tip has Pick a port in it: that tip takes the pointer. */
+.rk-ptip.rk-ptip-act { pointer-events: auto; }
+.rk-ptrow { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.rk-ptrow > span { min-width: 0; overflow-wrap: anywhere; }
+.rk-ptip .rk-pick { flex: none; min-height: 28px; padding: 2px 8px; font-size: var(--fs-micro); }
+.rk-ptnote { color: var(--text-muted); }
+/* A host's chips keep clear of its ports. */
+.rk-dev.rk-hasports.rk-tall .rk-guests { max-height: calc((var(--h) - 1) * var(--rk-u) - 2px - var(--rk-pr) * (var(--rk-ps) * 1.25 + 0.5px)); }
+/* A port's tip: over the view, above the port, taking no pointer. */
+.rk-ptip {
+    position: absolute; z-index: 30; pointer-events: none; display: flex; flex-direction: column; gap: 2px;
+    max-width: min(18rem, calc(100% - 16px)); padding: 6px 9px; box-sizing: border-box;
+    background: var(--bg-elev); border: 1px solid var(--accent); border-radius: 6px; color: var(--text-sec);
+    font-size: var(--fs-micro); line-height: 1.35; box-shadow: 0 4px 14px color-mix(in srgb, var(--bg) 60%, transparent);
+}
+.rk-ptip[hidden] { display: none; }
+.rk-ptip strong { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: var(--fs-sm); font-weight: 600; overflow-wrap: anywhere; }
+.rk-ptip span { overflow-wrap: anywhere; }
+.rk-ptip.rk-ptip-bad { border-color: var(--err); }
+/* The selected device's ports side, on its name's line: a row of buttons
+   more would push the rack down on a tablet, so it takes no more height
+   than the name does (its margins give back what it adds). */
+.rk-selname { flex-wrap: wrap; row-gap: 8px; }
+.rk-selname .rk-name { min-width: 5em; }
+.rk-selname .rk-portsbtn { flex: none; min-height: 26px; margin: -5px 0; padding: 2px 8px; font-size: var(--fs-micro); }
+.rk-zoom, .rk-cablesw { box-shadow: none; }
+/* The cable filter and its word wrap together, never apart. */
+.rk-cablectl { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.rk-zoom .toggle-btn { min-width: 2.4rem; }
 /* The cable being drawn, over everything while the pointer is down. */
 .rk-cabling { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 40; overflow: visible; }
 .rk-cabling line { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; }
@@ -858,62 +977,58 @@ body.rack-view #conflictPill { display: none !important; }
 }
 .rk-lane-empty { display: flex; align-items: flex-start; justify-content: center; }
 .rk-lane-empty p { margin: 8px 6px 0; font-size: var(--fs-micro); color: var(--text-muted); text-align: center; }
-/* Over the faces and the manager, taking no pointer but on a line's hit
-   stroke and the labels. Above the boxes (their plugs are where the lines
-   end, in a dot of the cable's colour). */
-.rk-wiring { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+/* The cables, port to port (js/rackview.js, "The cables, port to port"):
+   one SVG over the faces and the manager, above the boxes (a selected box
+   grown over its neighbours is z-index 4, and its cables run into its
+   ports). It takes no pointer but on a line's hit stroke, which is its run
+   in the manager only, and the flags. */
+.rk-wiring { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
 .rk-wires { position: absolute; left: 0; top: 0; overflow: visible; }
-.rk-cable, .rk-lbl { transition: opacity 0.15s; }
-.rk-wire { fill: none; stroke: var(--text-muted); stroke-linejoin: round; stroke-linecap: round; }
-.rk-wire.rk-stub { stroke-dasharray: 3 3; }
-/* From a line to its label where the label sits away from it (past the other
-   tracks, or moved up or down out of another's way): thin and dotted, so it
-   is not read as one more cable. */
+.rk-cable, .rk-flag { transition: opacity 0.15s; }
+.rk-wire { fill: none; stroke: var(--text-muted); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+/* Out of the rack (or, on a phone, round to the face not shown): dashed, in
+   a track of its own to an open ring at the rack's top or bottom edge (at
+   the far box's level for the face not shown). */
+.rk-cable.rk-out .rk-wire { stroke-dasharray: 3 2; }
+.rk-ring { fill: var(--bg-card); stroke: var(--text-muted); stroke-width: 1.5; }
+.rk-cable.rk-out .rk-ring[style] { fill: var(--bg-card); }
+/* An end at a no-port spot or a guest's chip (a port is its own mark). */
+.rk-end { fill: var(--text-muted); stroke: var(--bg-elev); stroke-width: 1; }
+/* A flag's leader, from its port to it: thin and dotted, so it is not read
+   as one more cable. */
 .rk-lead { fill: none; stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 1 2; }
 .rk-lead[d=""] { display: none; }
-.rk-cable.rk-hot .rk-lead, .rk-cable.rk-wsel .rk-lead { stroke: var(--text); stroke-width: 1.5; }
-.rk-end { fill: var(--text-muted); stroke: var(--bg-elev); stroke-width: 1.5; }
 /* A line's hit stroke: wider than the line, a finger's width on a phone. */
 .rk-hit { fill: none; stroke: transparent; stroke-width: 8; pointer-events: stroke; cursor: pointer; }
-/* Lit (pointed at, selected, or the selected device's): the line in the
-   text colour, or its own colour with a glow of the accent, and the rest
-   stepping back. */
-.rk-cable.rk-hot .rk-wire, .rk-cable.rk-wsel .rk-wire { stroke: var(--text); filter: drop-shadow(0 0 1.5px var(--accent)); }
-.rk-cable.rk-hot .rk-wire[style], .rk-cable.rk-wsel .rk-wire[style] { stroke-width: 3; }
-.rk-cable.rk-hot .rk-end, .rk-cable.rk-wsel .rk-end { fill: var(--accent); }
-.rk-wiring.rk-lit .rk-cable:not(.rk-wsel):not(.rk-hot), .rk-wiring.rk-hotting .rk-cable:not(.rk-hot) { opacity: 0.3; }
-.rk-wiring.rk-lit .rk-lbl:not(.rk-wsel):not(.rk-hot), .rk-wiring.rk-hotting .rk-lbl:not(.rk-hot) { opacity: 0.45; }
+/* Faint: the filter's rest (Selected, One cable). Still there to point at
+   and tap. */
+.rk-cable.rk-faint { opacity: 0.35; }
+.rk-cable.rk-faint .rk-wire { stroke-width: 1; }
+/* Bold: selected (or a selected device's), or pointed at. In its own colour
+   when it has one, else the text colour; a pointed-at one glows. */
+.rk-cable.rk-wsel, .rk-cable.rk-hot { opacity: 1; }
+.rk-cable.rk-wsel .rk-wire, .rk-cable.rk-hot .rk-wire { stroke-width: 2.5; }
+.rk-cable.rk-wsel .rk-wire:not([style]), .rk-cable.rk-hot .rk-wire:not([style]) { stroke: var(--text); }
+.rk-cable.rk-hot .rk-wire { filter: drop-shadow(0 0 1.5px var(--accent)); }
+.rk-cable.rk-wsel .rk-lead, .rk-cable.rk-hot .rk-lead { stroke: var(--text-sec); }
+.rk-cable.rk-hot .rk-end { fill: var(--accent); }
+.rk-wiring.rk-hotting .rk-cable:not(.rk-hot) { opacity: 0.2; }
 .rk-faces.rk-moving .rk-wiring { opacity: 0.15; }
-.rk-cable.q-dim, .rk-lbl.q-dim { opacity: 0.25; }
-/* A label: beside its line in the manager, past its side's tracks, as wide
-   as its words up to the manager's far edge (js/rackview.js places it). */
-.rk-lbl {
-    position: absolute; transform: translateY(-50%); pointer-events: auto;
-    display: flex; align-items: center; gap: 4px; min-width: 0; height: 17px; padding: 0 4px; box-sizing: border-box;
-    background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px;
-    color: var(--text-sec); font: inherit; font-family: var(--mono); font-size: var(--fs-micro); line-height: 15px; cursor: pointer; z-index: 1;
+.rk-cable.q-dim, .rk-flag.q-dim { opacity: 0.25; }
+/* A flag: a cable's tag, hung under its port (js/rackview.js places it, clear
+   of every other flag), edged in the cable's colour (--fcol). A button: a tap
+   selects its cable and shows the port's tip. */
+.rk-flag {
+    position: absolute; display: none; align-items: center; min-width: 0; height: 15px; padding: 0 4px 0 3px; box-sizing: border-box;
+    background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--fcol, var(--text-muted)); border-radius: 3px;
+    color: var(--text); font: inherit; font-family: var(--mono); font-size: var(--fs-micro); line-height: 13px; text-align: left;
+    cursor: pointer; pointer-events: auto; box-shadow: 0 1px 4px color-mix(in srgb, var(--bg) 50%, transparent);
 }
-.rk-lbl span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rk-lbl-r { flex-direction: row-reverse; }
-.rk-lbl-r span { text-align: right; }
-.rk-lbl-stub { border-style: dashed; }
-/* Words wider than the manager wrap to two or three lines (js/rackview.js
-   counts them and leaves that much room); a quiet bundle's count is still
-   one line until it is lit. */
-.rk-lbl.rk-l2 { height: 32px; }
-.rk-lbl.rk-l3 { height: 47px; }
-.rk-lbl.rk-l2 span, .rk-lbl.rk-l3 span { display: -webkit-box; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; }
-.rk-lbl.rk-l2 span { -webkit-line-clamp: 2; }
-.rk-lbl.rk-l3 span { -webkit-line-clamp: 3; }
-.rk-lbl:hover, .rk-lbl:focus-visible { border-color: var(--accent); color: var(--text); outline: none; }
-.rk-lbl.rk-wsel { border-color: var(--accent); color: var(--text); background: var(--accent-faint); }
-/* Quiet (many lines on show): a bundle shows its count only, a single cable
-   nothing, until it is lit; then the whole label, over the rest. */
-.rk-lbl.rk-quiet:not(.rk-hot):not([data-count]) { display: none; }
-.rk-lbl.rk-quiet[data-count]:not(.rk-hot) > span { display: none; }
-.rk-lbl.rk-quiet[data-count]:not(.rk-hot) { height: 17px; }
-.rk-lbl.rk-quiet[data-count]:not(.rk-hot)::before { content: attr(data-count); }
-.rk-lbl.rk-hot { z-index: 3; border-color: var(--accent); color: var(--text); box-shadow: 0 2px 8px color-mix(in srgb, var(--bg) 60%, transparent); }
+.rk-flag.rk-on { display: flex; }
+.rk-flag span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk-flag-out { border-top-style: dashed; border-right-style: dashed; border-bottom-style: dashed; }
+.rk-flag:hover, .rk-flag:focus-visible, .rk-flag.rk-hot, .rk-flag.rk-wsel { border-top-color: var(--accent); border-right-color: var(--accent); border-bottom-color: var(--accent); outline: none; }
+.rk-flag:hover, .rk-flag:focus-visible, .rk-flag.rk-hot { z-index: 1; }
 .rk-swatch { flex: none; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 1px var(--border); }
 /* The two ends of a lit cable. */
 .rk-dev.rk-hot, .rk-dev.rk-cabled { border-color: var(--accent); }
@@ -921,10 +1036,61 @@ body.rack-view #conflictPill { display: none !important; }
 .rk-guestnote { margin: -4px 0 8px; }
 .rk-selacts .cs-btn.active { border-color: var(--accent); color: var(--accent); }
 .rk-side {
-    flex: 1 1 14rem; min-width: 12rem; max-width: 22rem; max-height: 100%; overflow: auto; align-self: flex-start;
+    /* Up to 30rem (it was 22rem): the patch schedule in it reads a far end
+       such as "Web Node 1 on App Server 1 · eth0" on one line where the
+       window has the room. */
+    flex: 1 1 16rem; min-width: 12rem; max-width: 30rem; max-height: 100%; overflow: auto; align-self: flex-start;
     display: flex; flex-direction: column; gap: 12px;
 }
-.rk-selbar, .rk-unplaced { padding: 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; }
+.rk-selbar, .rk-unplaced, .rk-sched { padding: 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; }
+/* The patch schedule (js/rackview.js): a row per cable, each stacked to fit
+   the column beside the rack, a phone's width or a wide window's alike: the
+   device and its port with the cable's tag on the right, the far end under
+   them, then the colour, the length and the via. Six columns side by side
+   cut every far end to a few letters in the ~18rem a laptop leaves beside
+   the rack. The heads are a row of sort buttons over the list. Beside the
+   rack the list scrolls on its own, so Not placed yet under it stays in
+   reach. A <table> still, so a screen reader reads its heads. */
+.rk-sched { flex: none; }
+.rk-sched .rk-sub { margin-bottom: 4px; }
+.rk-shint { margin: 0 0 6px; }
+.rk-sscroll { max-height: min(30rem, 56vh); overflow: auto; overscroll-behavior: contain; }
+.rk-stable, .rk-stable thead, .rk-stable tbody { display: block; }
+.rk-stable { width: 100%; font-size: var(--fs-sm); color: var(--text-sec); }
+.rk-stable thead { position: sticky; top: 0; z-index: 1; background: var(--bg-card); }
+.rk-stable thead tr { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 6px; }
+.rk-stable th { display: block; padding: 0; }
+.rk-sort {
+    display: flex; align-items: center; gap: 3px; min-height: 28px; padding: 3px 8px; background: none; border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+    font-family: var(--mono); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); text-align: left;
+}
+.rk-sort:hover, .rk-sort:focus-visible { color: var(--text); border-color: var(--accent-dim); outline: none; }
+.rk-sort.active { color: var(--accent); border-color: var(--accent); }
+.rk-sortmark { font-size: 0.8em; }
+.rk-srow {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 6px 6px 6px 8px; border-top: 1px solid var(--border);
+    cursor: pointer; box-sizing: border-box;
+}
+.rk-stable td { display: block; padding: 0; min-width: 0; overflow-wrap: anywhere; }
+.rk-srow:hover { background: var(--accent-faint); }
+.rk-srow.rk-ssel { background: var(--accent-faint); box-shadow: inset 3px 0 var(--accent); }
+.rk-srow.rk-smine { box-shadow: inset 3px 0 var(--accent-dim); }
+.rk-sdev { flex: 1 1 55%; }
+.rk-slink {
+    display: inline; padding: 0; background: none; border: 0; cursor: pointer; text-align: left;
+    font: inherit; font-family: var(--mono); color: var(--text);
+}
+.rk-slink:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.rk-srow.rk-ssel .rk-slink { color: var(--accent); }
+.rk-stag { flex: 0 1 auto; max-width: 45%; margin-left: auto; font-family: var(--mono); font-size: var(--fs-label); }
+.rk-stagw { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+.rk-snotag { font-style: italic; color: var(--text-muted); }
+.rk-sfar { flex: 1 1 100%; font-family: var(--mono); color: var(--text); }
+.rk-sfar::before { content: '→ '; color: var(--text-muted); }
+.rk-sfar .rk-meta { font-family: inherit; }
+.rk-scol, .rk-slen, .rk-svia { flex: none; font-size: var(--fs-label); color: var(--text-muted); }
+.rk-scol:empty, .rk-slen:empty, .rk-svia:empty { display: none; }
+.rk-scol .rk-swatch { display: inline-block; margin-right: 4px; vertical-align: -1px; }
 .rk-selbar { border-color: var(--accent-dim); }
 .rk-selname { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 8px; color: var(--text); font-size: var(--fs-sm); }
 .rk-selacts { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1002,7 +1168,7 @@ body.rack-view #conflictPill { display: none !important; }
 }
 .rk-guest {
     display: inline-flex; align-items: center; gap: 3px; flex: none; max-width: 9em; box-sizing: border-box;
-    height: calc(var(--rk-u) - 8px); padding: 0 5px; border: 1px solid var(--border-hv); border-radius: 3px;
+    height: calc(var(--rk-u0) - 8px); padding: 0 5px; border: 1px solid var(--border-hv); border-radius: 3px;
     background: var(--bg-card); color: var(--text-sec); font-size: var(--fs-micro); line-height: 1;
     cursor: grab; touch-action: none;
 }
@@ -1016,7 +1182,7 @@ body.rack-view #conflictPill { display: none !important; }
 .rk-guest:hover { border-color: var(--accent); color: var(--text); }
 .rk-guest.rk-sel { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 24%, var(--bg-card)); }
 .rk-guest.rk-leaving { opacity: 0.4; border-style: dashed; }
-.rk-guest-more { flex: none; padding: 0 2px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--text-muted); line-height: calc(var(--rk-u) - 8px); }
+.rk-guest-more { flex: none; padding: 0 2px; font-family: var(--mono); font-size: var(--fs-micro); color: var(--text-muted); line-height: calc(var(--rk-u0) - 8px); }
 .rk-guest[hidden], .rk-guest-more[hidden] { display: none; }
 /* The device a VM or a container would run on, while one is dragged: the
    info colour, not the accent a cable's or a move's target has. */
@@ -1056,6 +1222,16 @@ body.rack-view #conflictPill { display: none !important; }
    devices not placed yet below it, each kept in sight, the rack scrolling
    between them. */
 @media (max-width: 900px) {
+    /* The head on one line where it can be: the picker gives way to the zoom
+       rather than pushing it onto a second line over the units. */
+    .rk-picker { flex: 1 1 9rem; }
+    /* The cable filter keeps to that line too where it can (a tablet): its
+       word goes (the switch is labelled by it all the same) and the picker
+       asks for less, or the head took a row more from the units. */
+    .rk-picker { flex-basis: 8rem; }
+    #rackCount { flex: 0 1 8rem; min-width: 0; white-space: normal; line-height: 1.35; }
+    .rk-cablectl > .rk-pick-lbl { display: none; }
+    .rk-cablesw .toggle-btn, .rk-zoom .toggle-btn { padding-left: 8px; padding-right: 8px; }
     .rk-body { flex-direction: column; gap: 10px; }
     .rk-side { display: contents; }
     .rk-selbar { order: -1; flex: none; padding: 8px 10px; }
@@ -1079,11 +1255,15 @@ body.rack-view #conflictPill { display: none !important; }
     }
     .rk-unplaced { flex: none; }
     .rk-others-list { max-height: none; }
+    /* The schedule under the rack, as long as it is: the column scrolls,
+       under the units stuck to its top. */
+    .rk-sscroll { max-height: none; overflow: visible; }
+    .rk-stable thead { position: static; }
 }
 /* A phone: one face at a time, as wide as the pane, with bigger units for a
    finger, and the switch that picks the face. */
 @media (max-width: 640px) {
-    .topo-rack { --rk-u: 28px; padding-left: 12px; padding-right: 12px; }
+    .topo-rack { --rk-u0: 28px; padding-left: 12px; padding-right: 12px; }
     .rk-faceswitch { display: flex; }
     .rk-picker { flex: 1 1 10rem; }
     /* The selected device's buttons in one row that scrolls sideways: three
@@ -1109,11 +1289,22 @@ body.rack-view #conflictPill { display: none !important; }
     .rk-size { grid-template-columns: repeat(2, minmax(0, 1fr)); width: auto; align-self: stretch; }
     .topo-rack[data-face="front"] .rk-face[data-face="rear"],
     .topo-rack[data-face="rear"] .rk-face[data-face="front"] { display: none; }
-    /* The face not on show draws no lines (js/rackview.js reads which is);
+    /* The face not on show draws no lines (js/rackview.js reads which is;
+       a cable to a port there ends in a ring at the manager's far edge);
        a line is a finger wide to tap. */
     .rk-hit { stroke-width: 14; }
     .rk-cap { display: none; }
     .rkp-span { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /* The schedule is the phone's main view, under the elevation that
+       sticks above it: each row a finger's tap tall, and the sort buttons
+       too. */
+    .rk-srow { min-height: 44px; padding-top: 8px; padding-bottom: 8px; }
+    .rk-sort { min-height: 32px; }
+    /* The units keep a little over a quarter of the screen (about eight of
+       them), so the schedule under them has room for rows: at a third, with
+       the head above and the network's bar below, it showed two. The pane
+       still scrolls, and the rows it lights are kept in its sight. */
+    .rk-main { min-height: max(5rem, min(28dvh, 100% - 6rem)); }
 }
 
 /* Paste a column: the fleet's .modal, wide enough for a preview of rows. */

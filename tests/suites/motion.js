@@ -94,7 +94,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const quiet = {};
     ['house', 'imaging', 'callcenter', 'datacenter', 'showcase'].forEach((k) => {
       open(k);
-      quiet[k] = topologyFindings().filter((f) => /rack|group|host/i.test(`${f.check} ${f.detail}`)).map((f) => f.detail);
+      // Faults only: a rack's untagged cables are an info note (Round 5),
+      // and the samples' cables carry no tags.
+      quiet[k] = topologyFindings().filter(isCountedFinding).filter((f) => /rack|group|host/i.test(`${f.check} ${f.detail}`)).map((f) => f.detail);
     });
     ok('no sample raises a group, rack or host finding', Object.values(quiet).every((l) => !l.length), JSON.stringify(quiet));
     open('imaging');
