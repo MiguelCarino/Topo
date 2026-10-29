@@ -291,7 +291,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a cable set\'s Delete still deletes at once, as before', !dialogOpen() && state.links.length === linksBefore - 2);
     undo();
     pick(['p1', 'p2']);
-    ok('back to devices: all three tabs again', [...el('bulkTabs').querySelectorAll('[data-bulk]')].every((b) => !b.classList.contains('hidden')) && !!el('bulkF-os'));
+    // Every device tab again, but Wi-Fi: it is offered only to a set with a
+    // device on Wi-Fi in it (Review-Packs/Topo-wifi.md), and these are wired.
+    ok('back to devices: all three tabs again', [...el('bulkTabs').querySelectorAll('[data-bulk]')].every((b) => b.classList.contains('hidden') === (b.dataset.bulk === 'wifi')) && !!el('bulkF-os'));
 
     // ---- 8: words ----
     el('bulkF-os').focus();   // a field with the focus is redrawn too: its words change with the language

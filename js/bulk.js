@@ -26,6 +26,13 @@
 //               none (js/model.js "Hosts"): what each runs on, so where it
 //               is. A device of the set that is not virtual, or a host it
 //               may not run on (a VM on a VM), is refused on its row.
+//   Wi-Fi       the SSID and the band of every device in the set that is on
+//               Wi-Fi (Review-Packs/Topo-wifi.md, "Set Wi-Fi"): what its
+//               association says (link.wifi), or Auto, which takes it back
+//               to what Topo works out (js/model.js "Wi-Fi"). Offered only
+//               while the set holds a device on Wi-Fi; a device that is not
+//               is left as it is, and a band its two ends do not share is
+//               refused on its row.
 //   Re-cable    onto another switch or access point (phase 3): each device's
 //               patch cable moves to the next free port there, from a port
 //               given or the first, counted in the order chosen (by switch
@@ -80,12 +87,15 @@ const bulkDraft = () => _bulk.draft || (_bulk.draft = {
     move: { net: '' },
     recable: { target: '', from: '', order: 'port' },
     group: { target: '' },      // a group id, BULK_NO_GROUP for out of every one, '' for not picked
-    host: { target: '' }        // a device id, BULK_NO_HOST for on none, '' for not picked
+    host: { target: '' },       // a device id, BULK_NO_HOST for on none, '' for not picked
+    wifi: { ssid: '', band: '' } // an SSID id or a band, BULK_WIFI_AUTO for automatic, '' for as it is
 });
 // Out of every group: a value no group id can be (ids are minted as g_…).
 const BULK_NO_GROUP = '-';
 // On no host: likewise no device id (ids are minted as n_…, s_…).
 const BULK_NO_HOST = '-';
+// Back to automatic: no SSID id (minted as wf_…) and no band.
+const BULK_WIFI_AUTO = '-';
 function resetBulkDraft() { _bulk.draft = null; }
 
 // The panel applies to a set of two or more devices and no cables, or two or
@@ -632,6 +642,64 @@ function bulkPlanHost(ids, target) {
     return bulkFinish('host', rows, ops, { host, none, notes });
 }
 
+// ---- Set Wi-Fi ----
+// The associations of a device it is the client of (an AP's own links to
+// its clients are theirs to change, not its).
+const bulkWifiLinks = (node) => linksAtNode(node.id).filter((l) => { const e = wifiLinkEnds(l); return !!e && !!e.client && e.client.node === node; });
+const bulkOnWifi = (nodes) => withLookupPass(() => nodes.some((n) => bulkWifiLinks(n).length > 0));
+// What a link's SSID or band reads as in the preview: its own, else "Auto"
+// and what that works out to.
+function bulkWifiText(link, key) {
+    const own = linkWifiOf(link, key);
+    const name = (v) => (key === 'ssid' ? wifiLabel(wifiById(v)) : wifiBandName(v));
+    if (own) return name(own);
+    const auto = key === 'ssid' ? linkWifiSsid(link) : linkWifiBand(link);
+    return auto ? `${t('Auto')} · ${name(auto)}` : t('Auto');
+}
+// req: { ssid, band }, each an id or a band, BULK_WIFI_AUTO, or '' (as it is).
+function bulkPlanWifi(ids, req) {
+    const ssid = req && req.ssid, band = req && req.band;
+    if (ssid && ssid !== BULK_WIFI_AUTO && !wifiById(ssid)) return bulkFinish('wifi', [], [], { errors: [t('Pick a Wi-Fi network.')] });
+    const rows = [], ops = [];
+    withLookupPass(() => bulkOrder(bulkSet(ids), 'name').forEach((node) => {
+        const links = bulkWifiLinks(node);
+        if (!links.length) { rows.push({ nodeId: node.id, name: node.name, field: '', before: '', after: '', status: 'skip', why: t('Not on Wi-Fi.') }); return; }
+        links.forEach((link) => {
+            const next = Object.assign({}, link.wifi || {});
+            if (ssid) next.ssid = ssid === BULK_WIFI_AUTO ? undefined : ssid;
+            if (band) next.band = band === BULK_WIFI_AUTO ? undefined : band;
+            const after = Object.assign({}, link, { wifi: readLinkWifi(next) });
+            const fields = [ssid && ['ssid', 'SSID'], band && ['band', 'Band']].filter(Boolean);
+            let changed = false;
+            fields.forEach(([key, label]) => {
+                const row = { nodeId: node.id, name: node.name, field: label, before: bulkWifiText(link, key), after: bulkWifiText(after, key) };
+                // A band picked must be one both ends have (unknown is no
+                // objection), and an SSID one the client's AP broadcasts: the
+                // same test the SSID check makes (js/diagnostics.js), so a
+                // set the preview calls a change never lands as a warning.
+                // Between two radio-serving devices (a backhaul) no SSID is
+                // joined, and none is refused.
+                const both = linkWifiChoices(link);
+                if (key === 'band' && band !== BULK_WIFI_AUTO && both && !both.bands.includes(band)) {
+                    rows.push(Object.assign(row, { status: 'bad', why: t('{band} is not a band both ends have.', { band: wifiBandName(band) }) }));
+                    return;
+                }
+                const ap = both && both.e.ap;
+                if (key === 'ssid' && ssid !== BULK_WIFI_AUTO && ap && !radioServes(both.e.client.node)
+                    && !apSsids(radioOf(ap.iface)).includes(ssid)) {
+                    rows.push(Object.assign(row, { status: 'bad', why: t('{ap} does not broadcast {ssid}.',
+                        { ap: ap.node.name || ap.node.id, ssid: wifiLabel(wifiById(ssid)) }) }));
+                    return;
+                }
+                if (linkWifiOf(link, key) === linkWifiOf(after, key)) rows.push(Object.assign(row, { status: 'same' }));
+                else { rows.push(Object.assign(row, { status: 'change' })); changed = true; }
+            });
+            if (changed && !rows.some((r) => r.nodeId === node.id && r.status === 'bad')) ops.push({ linkId: link.id, set: { wifi: after.wifi } });
+        });
+    }));
+    return bulkFinish('wifi', rows, ops, { ssid: wifiById(ssid), auto: ssid === BULK_WIFI_AUTO });
+}
+
 // ---- Delete ----
 function bulkPlanDelete(ids) {
     const nodes = bulkSet(ids);
@@ -659,6 +727,7 @@ function bulkWrite(plan, doc) {
             const link = doc.links.find((l) => l.id === op.linkId);
             if (link) Object.assign(link, op.set || {});
             if (link && link.cable === null) delete link.cable;   // every fact cleared
+            if (link && 'wifi' in link && !link.wifi) delete link.wifi;   // back to automatic
             return;
         }
         const node = doc.nodes.find((n) => n.id === op.nodeId);
@@ -689,7 +758,7 @@ function bulkWrite(plan, doc) {
 // The findings the plan would leave, against the ones there now.
 function bulkFindingsDelta(plan) {
     if (!plan.ops.length || plan.errors.length) return [];
-    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups });
+    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi });
     bulkWrite(plan, scratch);
     return findingsDelta(topologyFindings(), diagnoseDoc(scratch).findings);
 }
@@ -701,6 +770,7 @@ function bulkPlan(req) {
     if (req.action === 'recable') return bulkPlanRecable(req.ids, req.recable);
     if (req.action === 'group') return bulkPlanGroup(req.ids, req.group);
     if (req.action === 'host') return bulkPlanHost(req.ids, req.host);
+    if (req.action === 'wifi') return bulkPlanWifi(req.ids, req.wifi);
     return bulkPlanDelete(req.ids);
 }
 
@@ -724,8 +794,21 @@ function applyBulkPlan(plan) {
     renderSelection();
     renderBulkPanel(true);  // even with the focus in a field: see renderBulkFields
     if (plan.action === 'group' || plan.action === 'host') renderGroupsPanel();   // its counts
+    if (plan.action === 'wifi') renderWifiPanel();   // its clients
     showToast(plan.kind === 'link' ? t('Cables changed: {n}', { n }) : t('Devices changed: {n}', { n }), 'ok');
     return n;
+}
+
+// The tab the user is looking at. _bulk.tab is the tab they chose and is
+// kept, but the visible one can differ: cables have Set fields only, and
+// Wi-Fi exists only for a set with a device on Wi-Fi in it. Rendering,
+// Preview and Enter all read this one answer, so Preview never acts on a
+// pane the user can no longer see; the chosen tab comes back with the set.
+function bulkTab(kind = bulkKind(), onWifi) {
+    if (kind === 'link') return 'set';
+    if (_bulk.tab !== 'wifi') return _bulk.tab;
+    if (onWifi === undefined) onWifi = kind === 'node' && bulkOnWifi(bulkSet());
+    return onWifi ? 'wifi' : 'set';
 }
 
 // ---- The rail ----
@@ -740,17 +823,17 @@ function renderBulkPanel(force) {
     // A set that turned from devices into cables ("Select only cables") is
     // another set: what was typed for the devices does not carry over.
     if (_bulk.kind !== kind) { resetBulkDraft(); _bulk.kind = kind; }
-    // Cables have Set fields only; the tab chosen for devices comes back with them.
-    const tab = kind === 'link' ? 'set' : _bulk.tab;
     const recs = kind === 'link' ? bulkLinks() : bulkSet();
+    const onWifi = kind === 'node' && bulkOnWifi(recs);
+    const tab = bulkTab(kind, onWifi);
     const draft = bulkDraft();
     document.querySelectorAll('#bulkTabs [data-bulk]').forEach((b) => {
         const active = b.dataset.bulk === tab;
         b.classList.toggle('active', active);
-        b.classList.toggle('hidden', kind === 'link' && b.dataset.bulk !== 'set');
+        b.classList.toggle('hidden', (kind === 'link' && b.dataset.bulk !== 'set') || (b.dataset.bulk === 'wifi' && !onWifi));
         b.setAttribute('aria-selected', active ? 'true' : 'false');
     });
-    ['set', 'rename', 'move', 'recable', 'group', 'host'].forEach((k) => bulkEl(`bulkPane-${k}`).classList.toggle('hidden', k !== tab));
+    ['set', 'rename', 'move', 'recable', 'group', 'host', 'wifi'].forEach((k) => bulkEl(`bulkPane-${k}`).classList.toggle('hidden', k !== tab));
     renderBulkFields(recs, draft, force, kind);
     // Rename and Move keep what was typed; only the network list is rebuilt.
     bulkEl('bulkFind').value = draft.rename.find;
@@ -791,7 +874,20 @@ function renderBulkPanel(force) {
     gPick.classList.toggle('hidden', !tree.length);
     bulkEl('bulkNoGroups').classList.toggle('hidden', !!tree.length);
     renderBulkHostPick(recs, draft);
+    if (onWifi) renderBulkWifiPick(draft);
     updateBulkGo();
+}
+
+// Set Wi-Fi: every Wi-Fi network, and every band; "as it is" first, and
+// Auto, which takes the links back to what Topo works out, last.
+function renderBulkWifiPick(draft) {
+    const opt = (value, label) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+    const ssid = bulkEl('bulkWifiSsid'), band = bulkEl('bulkWifiBand');
+    ssid.innerHTML = opt('', t('Leave as is')) + (state.wifi || []).map((w) => opt(w.id, wifiLabel(w))).join('') + opt(BULK_WIFI_AUTO, t('Auto'));
+    band.innerHTML = opt('', t('Leave as is')) + WIFI_BANDS.map((b) => opt(b, wifiBandName(b))).join('') + opt(BULK_WIFI_AUTO, t('Auto'));
+    if (draft.wifi.ssid !== BULK_WIFI_AUTO && !wifiById(draft.wifi.ssid)) draft.wifi.ssid = '';
+    ssid.value = draft.wifi.ssid;
+    band.value = draft.wifi.band;
 }
 
 // Host: every device a container could run on (the widest rule; a VM's row
@@ -921,7 +1017,7 @@ function readBulkEdits(kind = bulkKind() || 'node') {
     return edits;
 }
 
-function bulkRequest(action = _bulk.tab) {
+function bulkRequest(action = bulkTab()) {
     const draft = bulkDraft();
     if (bulkKind() === 'link') {
         // Cables: Set fields is all there is (a cable's Delete never asks).
@@ -934,6 +1030,7 @@ function bulkRequest(action = _bulk.tab) {
     if (action === 'recable') return { action, ids, recable: Object.assign({}, draft.recable) };
     if (action === 'group') return { action, ids, group: draft.group.target };
     if (action === 'host') return { action, ids, host: draft.host.target };
+    if (action === 'wifi') return { action, ids, wifi: Object.assign({}, draft.wifi) };
     return { action: 'delete', ids };
 }
 // Preview is offered once the form asks for something.
@@ -945,6 +1042,7 @@ function bulkAsksSomething(req) {
     if (req.action === 'recable') return !!req.recable.target;
     if (req.action === 'group') return !!req.group;
     if (req.action === 'host') return !!req.host;
+    if (req.action === 'wifi') return !!(req.wifi.ssid || req.wifi.band);
     return req.ids.length > 0;
 }
 function updateBulkGo() {
@@ -953,8 +1051,8 @@ function updateBulkGo() {
 }
 
 // ---- The preview ----
-const BULK_TITLES = { set: 'Set fields', rename: 'Rename', move: 'Move', recable: 'Re-cable', group: 'Move to group', host: 'Move to host', delete: 'Delete' };
-function openBulkPreview(action = _bulk.tab) {
+const BULK_TITLES = { set: 'Set fields', rename: 'Rename', move: 'Move', recable: 'Re-cable', group: 'Move to group', host: 'Move to host', wifi: 'Set Wi-Fi', delete: 'Delete' };
+function openBulkPreview(action = bulkTab()) {
     if (!bulkApplies() || readOnlyRefuses()) return;
     const req = bulkRequest(bulkKind() === 'link' ? 'set' : action);
     if (!bulkAsksSomething(req)) return;
@@ -987,6 +1085,7 @@ function renderBulkPreview(plan) {
         recable: t('Each cable moves to the next free port there, in the order shown. The cable keeps its label, length and colour, and each device keeps its address.'),
         group: plan.none ? t('They stay on the map, in no group.') : t('Each one moves into the group; its addressing and cables stay as they are.'),
         host: plan.none ? t('They run on nothing in the register, and stay where they are.') : t('Each one runs on it and is where it is; its addressing, cables and place on the map stay as they are.'),
+        wifi: t('Each device on Wi-Fi joins it; its address and its access point stay as they are.'),
         delete: t('Every cable on these devices goes with them.')
     }[action];
     bulkEl('bulkBlurb').textContent = blurb;
@@ -1068,6 +1167,8 @@ function deleteSelectionAsked() {
     bulkEl('bulkRecableOrder').addEventListener('change', (e) => { bulkDraft().recable.order = e.target.value; updateBulkGo(); });
     bulkEl('bulkGroup').addEventListener('change', (e) => { bulkDraft().group.target = e.target.value; updateBulkGo(); });
     bulkEl('bulkHost').addEventListener('change', (e) => { bulkDraft().host.target = e.target.value; updateBulkGo(); });
+    bulkEl('bulkWifiSsid').addEventListener('change', (e) => { bulkDraft().wifi.ssid = e.target.value; updateBulkGo(); });
+    bulkEl('bulkWifiBand').addEventListener('change', (e) => { bulkDraft().wifi.band = e.target.value; updateBulkGo(); });
     // Enter in any field of the panel is Preview.
     panel.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' || !e.target.matches('input')) return;

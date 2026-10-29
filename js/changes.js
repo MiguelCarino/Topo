@@ -217,7 +217,7 @@ function dropSnapshot(id) {
 //
 // -> { devices: { added, removed, changed, moved }, cables: { added, removed, changed },
 //      subnets: { added, removed, changed }, groups: { added, removed, changed },
-//      notes: { added, removed, changed },
+//      wifi: { added, removed, changed }, notes: { added, removed, changed },
 //      accepted: { added, reopened }, header: [labels], total }
 // Every list holds { id, name, ... }; `changed` adds what changed, as field
 // labels from the schema (js/model.js), the one list every other view reads.
@@ -278,6 +278,18 @@ function docChanges(baseDoc, curDoc) {
     });
     subnets.changed = subnets.changed.filter((c) => c.fields.length);
 
+    // Wi-Fi networks by their SSID, as a subnet is by its CIDR: adding a
+    // guest network or opening one up is a change to the register like any
+    // other (the radios and links that name it are counted on their own).
+    const wifi = pair(base.wifi, cur.wifi, (w) => ({ id: w.id, name: w.ssid || w.id }));
+    const wifiNow = byId(cur.wifi);
+    wifi.changed.forEach((c) => {
+        const old = c.old;
+        delete c.old;
+        c.fields = changedLabels(WIFI_FIELDS, old, wifiNow.get(c.id));
+    });
+    wifi.changed = wifi.changed.filter((c) => c.fields.length);
+
     // Groups by their path as it is (or was): a restructure in the Groups tab
     // is a change to the register even when no device field moved. A rename
     // is said as one, like a device's; a new parent reads as "Inside", the
@@ -296,7 +308,7 @@ function docChanges(baseDoc, curDoc) {
     const notes = pair(base.annotations, cur.annotations, (a) => ({ id: a.id }));
 
     // An accepted finding is the check and what it was accepted on.
-    const acceptKey = (a) => JSON.stringify([a.check, [...(a.nodeIds || [])].sort(), [...(a.linkIds || [])].sort(), a.reason]);
+    const acceptKey = (a) => JSON.stringify([a.check, a.scope || '', [...(a.nodeIds || [])].sort(), [...(a.linkIds || [])].sort(), a.reason]);
     const accWas = new Set((base.accepted || []).map(acceptKey)), accNow = new Set((cur.accepted || []).map(acceptKey));
     const accepted = { added: [...accNow].filter((k) => !accWas.has(k)).length, reopened: [...accWas].filter((k) => !accNow.has(k)).length };
 
@@ -311,9 +323,9 @@ function docChanges(baseDoc, curDoc) {
     const header = REPORT_FIELDS.filter(({ key }) => key !== 'date' && (hWas[key] || '') !== (hNow[key] || '')).map(({ label }) => label);
 
     const count = (g) => g.added.length + g.removed.length + g.changed.length;
-    const total = count(devices) + devices.moved.length + count(cables) + count(subnets) + count(groups) + count(notes)
+    const total = count(devices) + devices.moved.length + count(cables) + count(subnets) + count(wifi) + count(groups) + count(notes)
         + accepted.added + accepted.reopened + (header.length ? 1 : 0);
-    return { devices, cables, subnets, groups, notes, accepted, header, total };
+    return { devices, cables, subnets, wifi, groups, notes, accepted, header, total };
 }
 
 // A device's interfaces, matched by id: added, removed, or what changed on one.
@@ -365,7 +377,11 @@ function changeRows(ch) {
     ch.subnets.added.forEach((s) => rows.push({ op: t('Added'), what: t('Subnet'), name: s.name, detail: '' }));
     ch.subnets.removed.forEach((s) => rows.push({ op: t('Removed'), what: t('Subnet'), name: s.name, detail: '' }));
     ch.subnets.changed.forEach((s) => rows.push({ op: t('Changed'), what: t('Subnet'), name: s.name, detail: labels(s.fields) }));
-    // Older callers' change sets (a test's, a cached one) have no groups.
+    // Older callers' change sets (a test's, a cached one) have no groups or Wi-Fi.
+    const wf = ch.wifi || { added: [], removed: [], changed: [] };
+    wf.added.forEach((w) => rows.push({ op: t('Added'), what: t('Wi-Fi network'), name: w.name, detail: '' }));
+    wf.removed.forEach((w) => rows.push({ op: t('Removed'), what: t('Wi-Fi network'), name: w.name, detail: '' }));
+    wf.changed.forEach((w) => rows.push({ op: t('Changed'), what: t('Wi-Fi network'), name: w.name, detail: labels(w.fields) }));
     const grp = ch.groups || { added: [], removed: [], changed: [] };
     grp.added.forEach((g) => rows.push({ op: t('Added'), what: t('Group'), name: g.name, detail: '' }));
     grp.removed.forEach((g) => rows.push({ op: t('Removed'), what: t('Group'), name: g.name, detail: '' }));

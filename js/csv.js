@@ -23,10 +23,16 @@
 //                has an i1), so the interface id alone names nothing. With
 //                the device's type, and a row with blank interface cells for
 //                a device with none (a switch that is all faceplate), so the
-//                sheet names every device on the map.
+//                sheet names every device on the map. A wireless one's radio
+//                follows (RADIO_CSV_PARTS, js/model.js): standard, bands,
+//                and per band ch_2g/ch_5g/ch_6g, width_*, power_* and
+//                ssids_* (the SSIDs it broadcasts there, by name; "none"
+//                for none, blank for the default, every SSID on the band).
 //   cables       one row per cable: both ends by id and by name, the port on
-//                each as the map labels it ("3", "eth0"), the medium, and the
-//                cable's own facts (CABLE_FIELDS: label, length, colour, via).
+//                each as the map labels it ("3", "eth0"), the medium, an
+//                association's ssid, band and signal (link.wifi; blank on a
+//                cable), and the cable's own facts (CABLE_FIELDS: label,
+//                length, colour, via).
 //   ports        one row per faceplate port of every switch and access
 //                point: the device, the port as the box names it
 //                (node.portScheme: "Gi1/0/12"), its label and access VLAN
@@ -39,6 +45,10 @@
 //                inherits them; without this sheet a site came back from a
 //                spreadsheet with every network gone and every inheriting
 //                device with no gateway or DNS at all.
+//   wifi         one row per Wi-Fi network (doc.wifi): its id, SSID,
+//                security, bands, subnet (by CIDR) and whether it is
+//                hidden. Listed only once the document has one. Never a
+//                passphrase: Topo keeps none (js/model.js "Wi-Fi").
 //   groups       one row per group (doc.groups, the Groups tab), in tree
 //                order: its id, name, kind, parent (by id) and, for a rack,
 //                its height and width. devices.csv names a group by its path,
@@ -130,6 +140,16 @@
 // and so every inherited gateway and DNS (tests/suites/csv.js runs it over
 // every template). cables.csv joins devices already on the map, so it comes
 // after one of the other two.
+//
+// A sheet is Wi-Fi networks (wifi.csv) when a heading names a wifi_id
+// column, or an SSID column beside a security one (a controller's export).
+// A row is found by its id, then by its SSID; an unknown one is a new
+// network. Its subnet is a CIDR the map has declared. interfaces.csv and
+// cables.csv name networks by SSID (or id), which must be on the map when
+// they are read, so the order is subnets.csv, wifi.csv, then the rest
+// (tests/suites/wificsv.js). An SSID, band or signal column is a cable
+// sheet's only beside a cable's own columns: an inventory's SSID column
+// leaves it a sheet of devices.
 //
 // The same box also takes an ARP table or a DHCP lease list pasted as it was
 // printed, read by one tolerant extractor into rows of address, MAC and name
@@ -297,34 +317,73 @@ function csvDevicesSheet() {
 // a row too, with the interface cells blank: interfaces.csv alone then names
 // every device, and its type, so cables.csv after it has both ends of every
 // cable and a switch is a switch (with a port grid), not a custom box.
+// A radio is RADIO_CSV_PARTS (js/model.js) after the interface's own
+// columns: standard, bands, then per band its channel, width, power and the
+// SSIDs it broadcasts, blank where the radio says nothing (and on a wired
+// interface, which has none).
 function csvInterfacesSheet() {
     const keys = ['id', 'name', 'ip', 'mac', 'wireless', 'bond'];
-    const headers = ['device_id', 'device', 'type'].concat(keys.map((k) => csvIfaceField(k).csv));
+    const headers = ['device_id', 'device', 'type'].concat(keys.map((k) => csvIfaceField(k).csv), RADIO_CSV_PARTS.map((p) => p.csv));
     const rows = [];
     state.nodes.forEach((node) => {
         const head = [node.id, node.name || '', node.type || ''];
         const list = node.interfaces || [];
-        if (!list.length) { rows.push(head.concat(keys.map(() => ''))); return; }
+        if (!list.length) { rows.push(head.concat(keys.map(() => ''), RADIO_CSV_PARTS.map(() => ''))); return; }
         list.forEach((iface) => {
+            const radio = ifaceIsWireless(iface) ? radioOf(iface) : null;
             rows.push(head.concat(keys.map((k) => {
                 if (k === 'mac') return isBlank(iface.mac) ? '' : fmtColonSafe(iface.mac);
                 return csvValue(csvIfaceField(k), iface[k]);
-            })));
+            }), RADIO_CSV_PARTS.map((p) => csvRadioCell(radioPartValue(radio, p.part), p))));
         });
     });
     return { name: 'interfaces', headers, rows };
+}
+// A Wi-Fi network as a cell: its SSID, or its id when the SSID would read
+// back as something else (the import reads either), so the cell always
+// names this one network. The id when another network shares the SSID,
+// when the SSID is another network's id (ids are matched first), when it
+// holds the list separator ';' or is the "none" token of an SSID list
+// (CSV_SSID_NONE), or has spaces at either end (cells are trimmed).
+const CSV_SSID_NONE = /^\s*(none|-|—)\s*$/i;
+function csvWifiRef(id) {
+    const w = wifiById(id);
+    if (!w) return '';
+    const s = w.ssid;
+    const plain = s && s === s.trim() && !s.includes(';') && !CSV_SSID_NONE.test(s)
+        && state.wifi.filter((x) => x.ssid === s).length === 1 && !state.wifi.some((x) => x.id === s && x !== w);
+    return plain ? s : w.id;
+}
+// One radio part as a cell. A band's SSID list is names, "none" for a band
+// that broadcasts none; the rest are their values.
+function csvRadioCell(v, p) {
+    if (v === undefined || v === null) return '';
+    if (p.attr === 'ssids') return v.length ? v.map(csvWifiRef).filter(Boolean).join('; ') : 'none';
+    return String(v);
 }
 
 function csvCablesSheet() {
     const name = (id) => { const n = getNode(id); return n ? n.name || n.id : ''; };
     const port = (id, ifaceId) => { const n = getNode(id); return n && ifaceId ? ifaceLabel(n, ifaceId) : ''; };
+    // An association's SSID, band and signal (link.wifi) come before the
+    // cable's own facts: what the link is, then what is written on the cable.
+    // As stored, not as inferred: a band nobody picked is blank, and comes
+    // back as the default it was.
     const headers = ['cable_id', 'from_device', 'from_name', 'from_port', 'to_device', 'to_name', 'to_port', 'medium', 'attachment']
-        .concat(CABLE_FIELDS.map((f) => f.csv));
+        .concat(CSV_LINK_WIFI.map((w) => w.csv), CABLE_FIELDS.map((f) => f.csv));
     const rows = state.links.filter((l) => getNode(l.source) && getNode(l.target)).map((l) => [
         l.id, l.source, name(l.source), port(l.source, l.sourceIface), l.target, name(l.target), port(l.target, l.targetIface),
-        l.medium || '', l.attachment || ''].concat(CABLE_FIELDS.map((f) => cableOf(l, f.key))));
+        l.medium || '', l.attachment || ''].concat(
+        CSV_LINK_WIFI.map((w) => { const v = linkWifiOf(l, w.key); return v === undefined ? '' : w.key === 'ssid' ? csvWifiRef(v) : String(v); }),
+        CABLE_FIELDS.map((f) => cableOf(l, f.key))));
     return { name: 'cables', headers, rows };
 }
+// The three facts of link.wifi, under the names cables.csv gives them.
+const CSV_LINK_WIFI = [
+    { key: 'ssid', csv: 'ssid', label: 'SSID' },
+    { key: 'band', csv: 'band', label: 'Band' },
+    { key: 'signal', csv: 'signal', label: 'Signal (dBm)' }
+];
 
 // In the order the report lists them: critical first, then as the checks ran;
 // the open ones, then those accepted with a reason, which the last column
@@ -380,12 +439,27 @@ function csvGroupsSheet() {
         })) };
 }
 
+// The Wi-Fi networks, in the document's order: every WIFI_FIELDS column,
+// under its csv name. The subnet is its CIDR (an id means nothing in a
+// sheet), the bands every band it is on, its own or the default.
+function csvWifiSheet() {
+    return { name: 'wifi', headers: WIFI_FIELDS.map((f) => f.csv),
+        rows: (state.wifi || []).map((w) => WIFI_FIELDS.map((f) => {
+            if (f.key === 'bands') return wifiBandsOf(w).join(' ');
+            if (f.key === 'network') { const net = networkById(w.network); return net ? net.cidr : ''; }
+            return csvValue(f, w[f.key]);
+        })) };
+}
+
+// shown: whether the export lists the sheet at all. The Wi-Fi sheet only
+// once there is Wi-Fi to put in it, so a wired site's list stays as it was.
 const CSV_SHEETS = [
     { key: 'devices', label: 'Devices', plain: true, build: csvDevicesSheet },
     { key: 'interfaces', label: 'Interfaces', build: csvInterfacesSheet },
     { key: 'cables', label: 'Cables', plain: true, build: csvCablesSheet },
     { key: 'ports', label: 'Ports', build: csvPortsSheet },
     { key: 'subnets', label: 'Subnets', build: csvSubnetsSheet },
+    { key: 'wifi', label: 'Wi-Fi', build: csvWifiSheet, shown: () => (state.wifi || []).length > 0 },
     { key: 'groups', label: 'Groups', plain: true, build: csvGroupsSheet },
     { key: 'findings', label: 'Findings', plain: true, build: csvFindingsSheet }
 ];
@@ -494,7 +568,27 @@ const CSV_ALIASES = {
     'net:vlan': ['vlan id'],
     'net:gateway': ['gw', 'default gateway', 'router', 'puerta de enlace'],
     'net:dns': ['dns server', 'dns servers', 'nameserver', 'resolver'],
-    'net:drawZone': ['zone', 'draw zone']
+    'net:drawZone': ['zone', 'draw zone'],
+    // A radio's (interfaces.csv). Not a bare "channel": an inventory's
+    // Channel column is as often a sales channel as a radio's.
+    'if:radio.standard': ['wifi standard', 'wi fi standard', 'wireless standard', '802 11', 'phy mode'],
+    'if:radio.bands': ['radio bands', 'wifi bands', 'wi fi bands'],
+    'if:radio.ch_2g': ['channel 2 4', 'channel 2 4 ghz', '2 4 ghz channel', 'ch 2 4'],
+    'if:radio.ch_5g': ['channel 5', 'channel 5 ghz', '5 ghz channel', 'ch 5'],
+    'if:radio.ch_6g': ['channel 6', 'channel 6 ghz', '6 ghz channel', 'ch 6'],
+    // An association's (cables.csv). Guessed only beside a cable's own
+    // columns (csvAutoMap): an inventory's SSID column must not turn it
+    // into a sheet of cables.
+    'lk:wifi.ssid': ['wifi', 'wi fi', 'network name', 'wlan'],
+    'lk:wifi.band': ['wifi band', 'frequency band', 'radio band'],
+    'lk:wifi.signal': ['rssi', 'signal dbm', 'signal strength', 'dbm'],
+    // A Wi-Fi network's own (wifi.csv). Guessed only in a sheet of them.
+    'wf:id': ['wifi id', 'wi fi id', 'ssid id'],
+    'wf:ssid': ['network name', 'name', 'wifi', 'wi fi', 'nombre', 'nome', 'имя', '名前'],
+    'wf:security': ['encryption', 'auth', 'authentication', 'security mode', 'seguridad', 'segurança', 'безопасность', 'セキュリティ'],
+    'wf:bands': ['band', 'radio bands', 'frequency'],
+    'wf:network': ['network', 'vlan subnet', 'subred', 'sub rede', 'подсеть', 'サブネット'],
+    'wf:hidden': ['hidden ssid', 'broadcast hidden', 'red oculta', 'rede oculta', 'oculta', 'oculto', 'скрытая сеть', 'скрытая', '非公開ネットワーク', '非公開']
 };
 
 const csvTextParse = (field) => (text) => {
@@ -634,8 +728,59 @@ const CSV_PARSERS = {
     'net:id': (text) => ({ value: String(text).trim() }),
     'net:vlan': (text) => { const n = asVlan(String(text).trim()); return n === undefined ? { error: true } : { value: n }; },
     'net:dhcp': (text) => tvBoolParse(text),
-    'net:drawZone': (text) => tvBoolParse(text)
+    'net:drawZone': (text) => tvBoolParse(text),
+    // An association: its SSID by name or id (a network the map has), its
+    // band (2.4, "5 GHz", 6g) and its signal in dBm.
+    'lk:wifi.ssid': (text) => { const id = csvWifiFind(text); return id ? { value: id } : { error: true }; },
+    'lk:wifi.band': (text) => { const b = wifiBandKey(text); return b ? { value: b } : { error: true }; },
+    'lk:wifi.signal': (text) => { const n = asWifiSignal(String(text).trim()); return n === undefined ? { error: true } : { value: n }; },
+    // A Wi-Fi network's own (wifi.csv).
+    'wf:id': (text) => ({ value: String(text).trim() }),
+    'wf:ssid': (text) => { const v = wifiSsidText(text); return v ? { value: v } : { error: true }; },
+    'wf:security': (text) => { const k = wifiSecurityKey(text); return k ? { value: k } : { error: true }; },
+    'wf:bands': (text) => { const l = wifiBandList(text); return l && l.length ? { value: l.join(' ') } : { error: true }; },
+    // A declared subnet by its CIDR (any address in it written as the
+    // subnet's, as subnets.csv holds them) or its id.
+    'wf:network': (text) => {
+        const v = String(text).trim();
+        const cidr = canonicalCidr(v);
+        const net = state.networks.find((n) => n.id === v || (cidr && n.cidr === cidr));
+        return net ? { value: net.id } : { error: true };
+    },
+    'wf:hidden': (text) => tvBoolParse(text)
 };
+// A radio's parts (RADIO_CSV_PARTS, js/model.js), each read as the record
+// holds it: the standard's key, the bands as "2.4 5", a band's numbers, and
+// its SSIDs as ids ("none" for a band that broadcasts none).
+RADIO_CSV_PARTS.forEach((p) => {
+    const num = (read) => (text) => { const n = read(String(text).trim()); return n === undefined ? { error: true } : { value: n }; };
+    CSV_PARSERS[`if:radio.${p.part}`] = p.part === 'standard' ? (text) => { const k = wifiStandardKey(text); return k ? { value: k } : { error: true }; }
+        : p.part === 'bands' ? CSV_PARSERS['wf:bands']
+        : p.attr === 'channel' ? num(asWifiChannel) : p.attr === 'width' ? num(asWifiWidth) : p.attr === 'power' ? num(asWifiPower)
+        : (text) => {
+            if (CSV_SSID_NONE.test(String(text))) return { value: [] };
+            // A whole cell that names one network is that one, before the
+            // ';' split: another tool's single SSID may hold a ';'.
+            const whole = csvWifiFind(text);
+            if (whole) return { value: [whole] };
+            const ids = String(text).split(/\s*;\s*/).map((s) => s.trim()).filter(Boolean).map(csvWifiFind);
+            return ids.length && ids.every(Boolean) ? { value: [...new Set(ids)] } : { error: true };
+        };
+});
+// A Wi-Fi network on the map by what a cell calls it: its id, else its SSID
+// as written, else its SSID in any case when only one network has it. ->
+// its id, or '' (none, or two that cannot be told apart).
+function csvWifiFind(text) {
+    const v = String(text == null ? '' : text).trim();
+    if (!v) return '';
+    const list = state.wifi || [];
+    const byId = list.find((w) => w.id === v);
+    if (byId) return byId.id;
+    const exact = list.filter((w) => w.ssid === v);
+    if (exact.length) return exact.length === 1 ? exact[0].id : '';
+    const loose = list.filter((w) => csvLower(w.ssid) === csvLower(v));
+    return loose.length === 1 ? loose[0].id : '';
+}
 
 // Labels that are not a heading for their field: port count's label is
 // "Ports", and a sheet's "Ports" column is the services list far more often.
@@ -654,12 +799,19 @@ function csvBuildTargets() {
     const PLAIN = new Set(['name', 'type', 'notes', 'serial', 'assetTag', 'location', 'status', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'portsFace', 'host']);
     csvNodeFields().forEach((f) => add(f.key, 'device', f, null, PLAIN.has(f.key)));
     ['id', 'name', 'ip', 'mac', 'wireless', 'bond'].forEach((k) => add(`if:${k}`, 'iface', csvIfaceField(k)));
+    // A radio's parts (iface.radio, js/model.js "Wi-Fi").
+    RADIO_CSV_PARTS.forEach((p) => add(`if:radio.${p.part}`, 'iface', p));
     add('cab:switch', 'cabling', null, 'Switch');
     add('cab:port', 'cabling', null, 'Switch port', true);
     add('cab:local', 'cabling', null, 'Port on the device', true);
     ['id', 'source', 'target', 'sourceIface', 'targetIface', 'medium', 'attachment'].forEach((k) => add(`lk:${k}`, 'cable', LINK_FIELDS.find((f) => f.key === k), null, k === 'source' || k === 'target'));
     // A cable's own facts, kept in link.cable (CABLE_FIELDS, js/model.js).
     CABLE_FIELDS.forEach((f) => add(`lk:cable.${f.key}`, 'cable', f, null, true));
+    // An association's facts, kept in link.wifi (js/model.js "Wi-Fi").
+    CSV_LINK_WIFI.forEach((w) => add(`lk:wifi.${w.key}`, 'cable', w));
+    // A Wi-Fi network's own fields (WIFI_FIELDS): wifi.csv. The trade's
+    // words, English, but for the hidden flag.
+    WIFI_FIELDS.forEach((f) => add(`wf:${f.key}`, 'wifidef', f, f.key === 'id' ? 'Wi-Fi ID' : null, f.key === 'hidden'));
     // A port's own facts, kept in node.portAttrs (js/model.js).
     add('pt:label', 'port', null, 'Port label', true);
     add('pt:vlan', 'port', null, 'Access VLAN');
@@ -682,7 +834,7 @@ const csvTargetLabel = (tg) => (tg.plain ? t(tg.label) : tg.label);
 // A sheet of groups likewise, and there only a group's fields are guessed:
 // its "name", "kind" and "parent" are the group's, not a device's.
 // family: 'network' (true, as it was), 'grpdef', or none for a device sheet.
-const CSV_OWN_FAMILIES = ['network', 'grpdef'];
+const CSV_OWN_FAMILIES = ['network', 'grpdef', 'wifidef'];
 function csvGuessByHeading(heading, family) {
     const h = csvNorm(heading);
     if (!h) return '';
@@ -697,7 +849,13 @@ const CSV_SUBNET_HEADINGS = new Set(['network id', 'cidr']);
 const CSV_GROUP_HEADINGS = new Set(['group id']);
 const csvIsSubnetSheet = (sheet) => !!sheet.hasHeadings && sheet.headers.some((h) => CSV_SUBNET_HEADINGS.has(csvNorm(h)));
 const csvIsGroupSheet = (sheet) => !!sheet.hasHeadings && !csvIsSubnetSheet(sheet) && sheet.headers.some((h) => CSV_GROUP_HEADINGS.has(csvNorm(h)));
-const csvSheetFamily = (sheet) => (csvIsSubnetSheet(sheet) ? 'network' : csvIsGroupSheet(sheet) ? 'grpdef' : null);
+// A sheet of Wi-Fi networks by its wifi_id column (wifi.csv), or by an SSID
+// column beside a security one, which is how a controller exports its list.
+const CSV_WIFI_HEADINGS = new Set(['wifi id', 'wi fi id']);
+const csvIsWifiSheet = (sheet) => !!sheet.hasHeadings && !csvIsSubnetSheet(sheet) && !csvIsGroupSheet(sheet)
+    && (sheet.headers.some((h) => CSV_WIFI_HEADINGS.has(csvNorm(h)))
+        || (sheet.headers.some((h) => csvNorm(h) === 'ssid') && sheet.headers.some((h) => ['security', 'encryption', 'authentication'].includes(csvNorm(h)))));
+const csvSheetFamily = (sheet) => (csvIsSubnetSheet(sheet) ? 'network' : csvIsGroupSheet(sheet) ? 'grpdef' : csvIsWifiSheet(sheet) ? 'wifidef' : null);
 // With no heading row: what a column's values look like (most of them).
 function csvGuessByValues(values) {
     const vals = values.map((v) => String(v).trim()).filter(Boolean);
@@ -713,7 +871,7 @@ function csvGuessByValues(values) {
 // say "Printer" is still data).
 function csvHasHeadingRow(rows) {
     const first = rows[0] || [];
-    if (!first.some((c) => csvGuessByHeading(c) || CSV_SUBNET_HEADINGS.has(csvNorm(c)) || CSV_GROUP_HEADINGS.has(csvNorm(c)))) return false;
+    if (!first.some((c) => csvGuessByHeading(c) || CSV_SUBNET_HEADINGS.has(csvNorm(c)) || CSV_GROUP_HEADINGS.has(csvNorm(c)) || CSV_WIFI_HEADINGS.has(csvNorm(c)))) return false;
     return !first.some((c) => parseValidCIDR(String(c).trim()) || parseIpText(String(c).trim()) || normMac(c).length === 12 && /[:\-.]/.test(c));
 }
 
@@ -722,12 +880,17 @@ function csvHasHeadingRow(rows) {
 function csvAutoMap(sheet) {
     const used = new Set();
     const family = csvSheetFamily(sheet);
-    return sheet.headers.map((h, i) => {
+    const keys = sheet.headers.map((h, i) => {
         const key = sheet.hasHeadings ? csvGuessByHeading(h, family) : csvGuessByValues(sheet.rows.map((r) => r[i] || ''));
         if (!key || used.has(key)) return '';
         used.add(key);
         return key;
     });
+    // An association's SSID, band and signal are a cable sheet's only beside
+    // a cable's own columns: an inventory with an SSID or a Band column (which
+    // network a laptop is on) is still a sheet of devices, not a mixed one.
+    const cableOwn = keys.some((k) => k && !/^lk:wifi\./.test(k) && csvTarget(k).group === 'cable');
+    return cableOwn ? keys : keys.map((k) => (/^lk:wifi\./.test(k) ? '' : k));
 }
 
 // { headers, rows, hasHeadings } from parsed rows.
@@ -753,6 +916,10 @@ function csvSheetKind(mapping) {
     // 'groups' likewise, when a column is a group's own field.
     if (keys.some((k) => csvTarget(k).group === 'grpdef')) {
         return keys.every((k) => csvTarget(k).group === 'grpdef') ? 'groups' : 'mixed-groups';
+    }
+    // 'wifi' likewise, when a column is a Wi-Fi network's own field.
+    if (keys.some((k) => csvTarget(k).group === 'wifidef')) {
+        return keys.every((k) => csvTarget(k).group === 'wifidef') ? 'wifi' : 'mixed-wifi';
     }
     if (keys.some((k) => csvTarget(k).group === 'port')) {
         return keys.every((k) => csvTarget(k).group === 'port' || CSV_PORT_SHEET_KEYS.has(k)) ? 'ports' : 'mixed-ports';
@@ -833,6 +1000,12 @@ function csvShow(key, v) {
     if (key === 'type') return typeName(v);
     if (key === 'nat' || key === 'if:wireless') return v ? t('Yes') : t('No');
     if (key === 'lk:medium') return MEDIUM_NAMES[v] || String(v);
+    // A network by its SSID, a band's list by theirs, a radio by its names.
+    if (key === 'lk:wifi.ssid') return wifiLabel(wifiById(v)) || String(v);
+    if (/^if:radio\.ssids_/.test(key)) return v.length ? v.map((id) => wifiLabel(wifiById(id)) || id).join(', ') : 'none';
+    if (key === 'if:radio.standard') return wifiStandardName(v);
+    if (key === 'lk:wifi.band') return wifiBandName(v);
+    if (key === 'lk:wifi.signal') return `${v} dBm`;
     return String(v);
 }
 // Equal as the field means it: two spellings of one MAC or one address are
@@ -846,6 +1019,8 @@ function csvSame(key, a, b) {
     }
     if (key === 'nat' || key === 'if:wireless') return !!a === !!b;
     if (key === 'notes') return String(a || '') === String(b || '');
+    // A band's SSID list: none ([]) is not the default (no list).
+    if (/^if:radio\.ssids_/.test(key)) return JSON.stringify(a == null ? null : a) === JSON.stringify(b == null ? null : b);
     return String(a == null ? '' : a).trim() === String(b == null ? '' : b).trim();
 }
 
@@ -896,6 +1071,7 @@ function csvPlan(sheet, mapping, opts = {}) {
     if (kind === 'mixed-ports') return Object.assign(empty, { errors: [t(CSV_MIXED_PORTS)] });
     if (kind === 'mixed-subnets') return Object.assign(empty, { errors: [t(CSV_MIXED_SUBNETS)] });
     if (kind === 'mixed-groups') return Object.assign(empty, { errors: [t(CSV_MIXED_GROUPS)] });
+    if (kind === 'mixed-wifi') return Object.assign(empty, { errors: [t(CSV_MIXED_WIFI)] });
     if (!mapping.some(Boolean)) return Object.assign(empty, { errors: [t('Pick what at least one column is.')] });
     // A depth column whose heading asks "half depth?" answers the opposite
     // question to rackDepth's parser, which reads a yes as full depth: its
@@ -916,6 +1092,7 @@ function csvPlan(sheet, mapping, opts = {}) {
     if (kind === 'ports') return csvPlanPorts(rows, empty);
     if (kind === 'subnets') return csvPlanSubnets(rows, empty);
     if (kind === 'groups') return csvPlanGroups(rows, empty);
+    if (kind === 'wifi') return csvPlanWifi(rows, empty);
     return kind === 'cables' ? csvPlanCables(rows, empty) : csvPlanDevices(rows, empty);
 }
 // A heading that asks "half depth?" (or "shallow?"), in English or the
@@ -933,19 +1110,36 @@ const csvHalfAnswer = (raw) => {
 const CSV_MIXED_PORTS = 'A sheet of ports maps the device, the port and its label or VLAN. Leave the other columns unmapped.';
 const CSV_MIXED_SUBNETS = 'A sheet of subnets maps only what a subnet has: its CIDR, name, VLAN, gateway and so on. Leave the other columns unmapped.';
 const CSV_MIXED_GROUPS = 'A sheet of groups maps only what a group has: its id, name, kind, parent and height. Leave the other columns unmapped.';
+const CSV_MIXED_WIFI = 'A sheet of Wi-Fi networks maps only what a Wi-Fi network has: its SSID, security, bands, subnet and whether it is hidden. Leave the other columns unmapped.';
 
 // Counted per thing, not per row: the three interfaces.csv rows of one new
 // device are one device added.
 function csvFinish(plan, results) {
     plan.rows = results.sort((a, b) => a.index - b.index);
     const seen = { add: new Set(), change: new Set(), same: new Set(), conflict: new Set() };
-    plan.rows.forEach((r) => { seen[r.status].add(r.status === 'conflict' ? `row:${r.index}` : (r.newGroup || r.nodeId || r.linkId || (r.netId && `net:${r.netId}`) || (r.grpId && `grp:${r.grpId}`) || `row:${r.index}`)); });
+    plan.rows.forEach((r) => { seen[r.status].add(r.status === 'conflict' ? `row:${r.index}` : (r.newGroup || r.nodeId || r.linkId || (r.netId && `net:${r.netId}`) || (r.grpId && `grp:${r.grpId}`) || (r.wifiId && `wf:${r.wifiId}`) || `row:${r.index}`)); });
     Object.keys(seen).forEach((k) => { plan.counts[k] = seen[k].size; });
     return plan;
 }
 
 // ---- Devices ----
-const CSV_IFACE_KEYS = ['if:id', 'if:name', 'if:ip', 'if:mac', 'if:wireless', 'if:bond'];
+const CSV_IFACE_KEYS = ['if:id', 'if:name', 'if:ip', 'if:mac', 'if:wireless', 'if:bond'].concat(RADIO_CSV_PARTS.map((p) => 'if:radio.' + p.part));
+// An interface's value of a column: its own field, or a part of its radio
+// (field 'radio.ch_5g').
+const csvIfaceValue = (iface, field) => (!iface ? undefined
+    : field.startsWith('radio.') ? radioPartValue(radioOf(iface), field.slice(6)) : iface[field]);
+// What a row sets on an interface, written onto it: its own fields as they
+// are, its radio's parts laid over the radio it has (applyRadioParts). In
+// place; the record is read back through the normalizer afterwards.
+function csvSetIface(iface, set) {
+    const parts = {};
+    Object.keys(set).forEach((k) => { if (k.startsWith('radio.')) parts[k.slice(6)] = set[k]; else iface[k] = set[k]; });
+    if (Object.keys(parts).length) {
+        const radio = applyRadioParts(iface.radio, parts);
+        if (radio) iface.radio = radio; else delete iface.radio;
+    }
+    return iface;
+}
 
 function csvPlanDevices(rows, plan) {
     const ix = csvIndex();
@@ -1177,8 +1371,10 @@ function csvPlanDeviceRow(r, anchor, ctx) {
             const rec = newNodeRecord(type, 0, 0);
             // Only what the sheet says: the type's seed addresses were nobody's
             // answer (Add devices' rule), and its interfaces stay only when the
-            // sheet does not list the device's own.
-            rec.interfaces.forEach((f) => { f.ip = ''; });
+            // sheet does not list the device's own. A new AP's default radio
+            // likewise (js/model.js "Wi-Fi"): a sheet that leaves the radio
+            // columns blank, or has none, said nothing about it.
+            rec.interfaces.forEach((f) => { f.ip = ''; delete f.radio; });
             // And a column the sheet has but leaves blank is its answer too:
             // blank, not the type's seed. A camera exported with no allowed
             // ports came back allowing only 554 (p2-report's round trip).
@@ -1299,7 +1495,7 @@ function csvPlanDeviceRow(r, anchor, ctx) {
             }
             if (field === 'name' && iface && iface.name === value) continue;
             if (field === 'name' && !iface) continue;   // it names the interface being made
-            const before = iface ? iface[field] : undefined;
+            const before = csvIfaceValue(iface, field);
             // A new device's interface was filled in by an earlier row of
             // the same device: saying otherwise now is the same conflict.
             if (!existing && iface && before !== undefined && !isBlank(String(before)) && !csvSame(k, before, value)) {
@@ -1385,7 +1581,7 @@ function csvPlanDeviceRow(r, anchor, ctx) {
             if (ifaceDraft.ownList && !group.ownIfaces) { record.interfaces = []; group.ownIfaces = true; }
             let iface = record.interfaces.find((i) => i.id === ifaceDraft.id);
             if (!iface) { iface = { id: ifaceDraft.id, name: ifaceDraft.name, ip: '' }; record.interfaces.push(iface); }
-            Object.assign(iface, ifaceDraft.set);
+            csvSetIface(iface, ifaceDraft.set);
             ctx.ifaceOps.set(ifaceDraft.key, { nodeId: record.id, id: iface.id, name: iface.name, create: false, set: {}, fresh: true });
         }
     }
@@ -1681,6 +1877,7 @@ function csvPlanCables(rows, plan) {
     const portsTaken = new Set();
     const said = new Map();   // linkId -> { key: value }
     const cableSaid = new Map();   // linkId -> { label, length, color, via }: what the rows set of link.cable
+    const wifiSaid = new Map();    // linkId -> { ssid, band, signal }: what the rows set of link.wifi
     const madeIfaces = new Map();   // node id + NIC name -> the op that makes it
     const deviceOf = (text) => {
         const v = String(text).trim();
@@ -1774,6 +1971,21 @@ function csvPlanCables(rows, plan) {
                 }
             }
             if (Object.keys(cableDraft).length) cableSaid.set(link.id, Object.assign(heldCable, cableDraft));
+            // An association's SSID, band and signal, the same way.
+            const heldWifi = wifiSaid.get(link.id) || {};
+            const wifiDraft = {};
+            for (const w of CSV_LINK_WIFI) {
+                const k = `lk:wifi.${w.key}`;
+                if (values[k] === undefined) continue;
+                const label = csvTargetLabel(csvTarget(k));
+                if (heldWifi[w.key] !== undefined && !csvSame(k, heldWifi[w.key], values[k])) return conflict(t('Another row sets {field} to {value}.', { field: label, value: csvShow(k, heldWifi[w.key]) }));
+                const now = linkWifiOf(link, w.key);
+                if (!csvSame(k, now, values[k])) {
+                    out.changes.push({ field: label, before: csvShow(k, now), after: csvShow(k, values[k]) });
+                    wifiDraft[w.key] = values[k];
+                }
+            }
+            if (Object.keys(wifiDraft).length) wifiSaid.set(link.id, Object.assign(heldWifi, wifiDraft));
             // Its ports are where it is plugged in; a sheet that says otherwise
             // is noted, not obeyed (moving a cable is done on the map).
             ['lk:sourceIface', 'lk:targetIface'].forEach((k) => {
@@ -1827,6 +2039,9 @@ function csvPlanCables(rows, plan) {
         const facts = {};
         CABLE_FIELDS.forEach((f) => { if (values[`lk:cable.${f.key}`] !== undefined) facts[f.key] = values[`lk:cable.${f.key}`]; });
         if (readCable(facts)) l.cable = readCable(facts);
+        const assoc = {};
+        CSV_LINK_WIFI.forEach((w) => { if (values[`lk:wifi.${w.key}`] !== undefined) assoc[w.key] = values[`lk:wifi.${w.key}`]; });
+        if (readLinkWifi(assoc)) l.wifi = readLinkWifi(assoc);
         const portText = (node, p) => (p.make ? p.make.name : ifaceLabel(node, p.id));
         [[a, sp], [b, tp]].forEach(([node, p]) => {
             if (!p.make || madeIfaces.has(p.make.key)) return;
@@ -1857,6 +2072,13 @@ function csvPlanCables(rows, plan) {
         const link = getLink(linkId);
         const set = said.get(linkId) || {};
         set.cable = readCable(Object.assign({}, (link && link.cable) || {}, facts)) || null;
+        said.set(linkId, set);
+    });
+    // link.wifi likewise.
+    wifiSaid.forEach((facts, linkId) => {
+        const link = getLink(linkId);
+        const set = said.get(linkId) || {};
+        set.wifi = readLinkWifi(Object.assign({}, (link && link.wifi) || {}, facts)) || null;
         said.set(linkId, set);
     });
     said.forEach((set, linkId) => plan.ops.push({ linkId, set }));
@@ -2163,6 +2385,76 @@ function csvPlanGroups(rows, plan) {
     return csvFinish(plan, results);
 }
 
+// ---- Wi-Fi networks ----
+// One row per network (wifi.csv). Found by its id, then by its SSID as
+// written; an SSID two networks share is a conflict until the row gives the
+// id. A row matching nothing is a new network, under the sheet's id when no
+// network here has it, and needs its SSID. Blank cells leave a field as it
+// is, as everywhere here. The subnet is a declared one, by its CIDR: a sheet
+// naming one the map lacks is a conflict, so subnets.csv comes first.
+function csvPlanWifi(rows, plan) {
+    const results = [];
+    const claimed = new Set();     // network ids (or a new one's SSID) a row was about
+    const label = (key) => csvTargetLabel(csvTarget(`wf:${key}`));
+    const bandsText = (w) => wifiBandsOf(w).join(' ');
+    const show = (key, v) => (key === 'security' ? wifiSecurityName(v)
+        : key === 'bands' ? String(v || '').split(' ').filter(Boolean).map(wifiBandName).join(', ')
+        : key === 'network' ? (networkById(v) ? networkById(v).cidr : '')
+        : key === 'hidden' ? t(v ? 'Yes' : 'No')
+        : (v === undefined || v === null ? '' : String(v)));
+    const now = (w, key) => (key === 'bands' ? bandsText(w) : key === 'hidden' ? !!w.hidden : w[key]);
+    const same = (key, a, b) => (key === 'hidden' ? !!a === !!b : String(a == null ? '' : a) === String(b == null ? '' : b));
+    rows.forEach(({ index, vals }) => {
+        if (!Object.keys(vals).length) return;
+        const out = { index, name: '', status: 'same', changes: [], notes: [], why: '' };
+        const conflict = (why) => { results.push(Object.assign(out, { status: 'conflict', why })); };
+        const values = {}, errors = [];
+        Object.keys(vals).forEach((key) => {
+            const tg = csvTarget(key);
+            const res = tg.parse(vals[key]);
+            if (res.error) errors.push(t('{value} is not a valid {field}.', { value: String(vals[key]).trim() || '—', field: csvTargetLabel(tg) }));
+            else values[key.slice(3)] = res.value;
+        });
+        out.name = values.ssid || values.id || '';
+        if (errors.length) { conflict(errors.join(' ')); return; }
+        let w = values.id ? wifiById(values.id) : null;
+        if (!w && values.ssid) {
+            const hits = state.wifi.filter((x) => x.ssid === values.ssid);
+            if (hits.length > 1) { conflict(t('{name} is the SSID of more than one Wi-Fi network: add its wifi_id to say which.', { name: values.ssid })); return; }
+            w = hits[0] || null;
+        }
+        const fields = WIFI_FIELDS.map((f) => f.key).filter((k) => k !== 'id' && values[k] !== undefined);
+        if (!w) {
+            if (!values.ssid) { conflict(t('A new Wi-Fi network needs its SSID.')); return; }
+            if (claimed.has(`new:${values.ssid}`)) { conflict(t('Another row is this Wi-Fi network.')); return; }
+            claimed.add(`new:${values.ssid}`);
+            const rec = makeWifi({ id: values.id && !wifiById(values.id) ? values.id : undefined, ssid: values.ssid, security: values.security,
+                bands: values.bands, network: values.network, hidden: values.hidden });
+            plan.ops.push({ wifi: { create: rec } });
+            fields.forEach((k) => out.changes.push({ field: label(k), before: '', after: show(k, values[k]) }));
+            Object.assign(out, { status: 'add', wifiId: rec.id, name: rec.ssid });
+            results.push(out);
+            return;
+        }
+        if (claimed.has(w.id)) { conflict(t('Another row is this Wi-Fi network.')); return; }
+        claimed.add(w.id);
+        out.wifiId = w.id;
+        out.name = wifiLabel(w);
+        const set = {};
+        fields.forEach((k) => {
+            if (same(k, now(w, k), values[k])) return;
+            set[k] = values[k];
+            out.changes.push({ field: label(k), before: show(k, now(w, k)), after: show(k, values[k]) });
+        });
+        if (Object.keys(set).length) {
+            out.status = 'change';
+            plan.ops.push({ wifi: { id: w.id, set } });
+        }
+        results.push(out);
+    });
+    return csvFinish(plan, results);
+}
+
 // A subnet's value as the review shows it, and equal as the field means it.
 function csvShowNet(key, v) {
     if (key === 'dhcp' || key === 'drawZone') return typeof v === 'boolean' ? t(v ? 'Yes' : 'No') : '';
@@ -2185,10 +2477,11 @@ function csvSameNet(key, a, b) {
 // the sheet gave no port for on the document being written, not the live one.
 // Every record touched or made is then read back through the normalizer.
 function csvWrite(plan, doc) {
-    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups };
+    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi };
     if (!Array.isArray(doc.networks)) doc.networks = [];
     if (!Array.isArray(doc.groups)) doc.groups = [];
-    state.nodes = doc.nodes; state.links = doc.links; state.networks = doc.networks; state.groups = doc.groups;
+    if (!Array.isArray(doc.wifi)) doc.wifi = [];
+    state.nodes = doc.nodes; state.links = doc.links; state.networks = doc.networks; state.groups = doc.groups; state.wifi = doc.wifi;
     const touched = new Set(), newLinks = new Set();
     try {
         // Groups before anything names them, each read back through
@@ -2226,15 +2519,25 @@ function csvWrite(plan, doc) {
             const at = doc.networks.findIndex((n) => n.id === op.net.id);
             if (at > -1) doc.networks[at] = read(Object.assign({}, doc.networks[at], op.net.set));
         });
+        // The Wi-Fi networks likewise, through WIFI_FIELDS. A row names a
+        // subnet the map already has (csvPlanWifi), so they can come after.
+        plan.ops.forEach((op) => {
+            if (!op.wifi) return;
+            const read = (rec) => readFields(WIFI_FIELDS, writeFields(WIFI_FIELDS, rec));
+            if (op.wifi.create) { doc.wifi.push(read(cloneData(op.wifi.create))); return; }
+            const at = doc.wifi.findIndex((w) => w.id === op.wifi.id);
+            if (at > -1) doc.wifi[at] = read(Object.assign({}, doc.wifi[at], op.wifi.set));
+        });
         plan.ops.forEach((op) => {
             if (op.create) { const rec = cloneData(op.create); doc.nodes.push(rec); touched.add(rec.id); }
         });
         plan.ops.forEach((op) => {
-            if (op.create || op.link || op.net || op.grp) return;
+            if (op.create || op.link || op.net || op.grp || op.wifi) return;
             if (op.linkId) {
                 const link = doc.links.find((l) => l.id === op.linkId);
                 if (link) Object.assign(link, op.set);
                 if (link && link.cable === null) delete link.cable;   // every fact cleared
+                if (link && link.wifi === null) delete link.wifi;
                 return;
             }
             if (op.order) {
@@ -2258,7 +2561,7 @@ function csvWrite(plan, doc) {
                 node.interfaces = node.interfaces || [];
                 let iface = node.interfaces.find((i) => i.id === op.iface.id);
                 if (!iface && op.iface.create) { iface = { id: op.iface.id, name: op.iface.name, ip: '' }; node.interfaces.push(iface); }
-                if (iface) Object.assign(iface, op.iface.set);
+                if (iface) csvSetIface(iface, op.iface.set);
                 touched.add(node.id);
                 return;
             }
@@ -2291,14 +2594,14 @@ function csvWrite(plan, doc) {
         const setLinks = new Set(plan.ops.filter((op) => op.linkId).map((op) => op.linkId));
         doc.links.forEach((l, i) => { if (newLinks.has(l.id) || setLinks.has(l.id)) doc.links[i] = normalizeLoadedLink(serializeLink(l)); });
     } finally {
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi;
     }
 }
 
 // The findings the plan would leave, against the ones there now.
 function csvFindingsDelta(plan) {
     if (!plan.ops.length || plan.errors.length) return [];
-    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups });
+    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi });
     csvWrite(plan, scratch);
     return findingsDelta(topologyFindings(), diagnoseDoc(scratch).findings);
 }
@@ -2604,7 +2907,7 @@ function renderCsvDialog() {
 }
 
 function renderCsvExport() {
-    csvEl('csvExportRows').innerHTML = CSV_SHEETS.map((s) => {
+    csvEl('csvExportRows').innerHTML = CSV_SHEETS.filter((s) => !s.shown || s.shown()).map((s) => {
         const count = s.build().rows.length;
         return `<div class="csv-sheet" data-sheet="${s.key}">
             <div class="csv-sheet-name"><b>${escapeHtml(csvSheetLabel(s))}</b> <span class="mono csv-sheet-file">${escapeHtml(s.key)}.csv</span>
@@ -2693,12 +2996,13 @@ function renderCsvImport() {
         : kind === 'mixed-ports' ? t(CSV_MIXED_PORTS)
         : kind === 'mixed-subnets' ? t(CSV_MIXED_SUBNETS)
         : kind === 'mixed-groups' ? t(CSV_MIXED_GROUPS)
+        : kind === 'mixed-wifi' ? t(CSV_MIXED_WIFI)
             : sheet.observed && kind === 'devices' ? seenLine()
-                : t(kind === 'cables' ? 'Rows of cables: {n}' : kind === 'ports' ? 'Rows of ports: {n}' : kind === 'subnets' ? 'Rows of subnets: {n}' : kind === 'groups' ? 'Rows of groups: {n}' : 'Rows of devices: {n}', { n: sheet.rows.length });
+                : t(kind === 'cables' ? 'Rows of cables: {n}' : kind === 'ports' ? 'Rows of ports: {n}' : kind === 'subnets' ? 'Rows of subnets: {n}' : kind === 'groups' ? 'Rows of groups: {n}' : kind === 'wifi' ? 'Rows of Wi-Fi networks: {n}' : 'Rows of devices: {n}', { n: sheet.rows.length });
     csvEl('csvKind').classList.toggle('csv-kind-bad', /^mixed/.test(kind));
     // 'Ports' stays English here, like 'Interface': the full editor's
     // technical vocabulary (see the header).
-    const groups = [['device', t('Device')], ['iface', 'Interface'], ['cabling', t('Cabling')], ['cable', t('Cables')], ['port', 'Ports'], ['network', 'Subnets'], ['grpdef', t('Groups')]];
+    const groups = [['device', t('Device')], ['iface', 'Interface'], ['cabling', t('Cabling')], ['cable', t('Cables')], ['port', 'Ports'], ['network', 'Subnets'], ['wifidef', 'Wi-Fi'], ['grpdef', t('Groups')]];
     const options = (sel) => `<option value="">${escapeHtml(t('Ignore'))}</option>` + groups.map(([g, label]) =>
         `<optgroup label="${escapeHtml(label)}">${csvTargets().filter((tg) => tg.group === g).map((tg) =>
             `<option value="${escapeHtml(tg.key)}"${tg.key === sel ? ' selected' : ''}>${escapeHtml(csvTargetLabel(tg))}${tg.csv && csvNorm(tg.csv) !== csvNorm(csvTargetLabel(tg)) ? ` · ${escapeHtml(tg.csv)}` : ''}</option>`).join('')}</optgroup>`).join('');

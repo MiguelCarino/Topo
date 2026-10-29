@@ -19,7 +19,14 @@
 //                   its next free ports in order (freePorts, js/model.js) and
 //                   the next free addresses of its network (freeAddresses):
 //                   the network's gateway and DNS then reach them by
-//                   inheritance, nothing is copied onto each device. A seed
+//                   inheritance, nothing is copied onto each device. Onto
+//                   an access point the devices that join it by radio join
+//                   one of its Wi-Fi networks: its only one, else the one
+//                   picked (by default the first that is not a guest
+//                   network; the pick is shown only when there is a choice),
+//                   and take their addresses from that network's subnet
+//                   when it has one, so the Guest SSID's phones land on the
+//                   guest subnet. A seed
 //                   address nobody gave is not kept (spawnNode's rule for
 //                   gateway, DNS and OS): a device with nowhere to take an
 //                   address from has none.
@@ -152,14 +159,34 @@ function addContext(target) {
     return null;
 }
 
+// ---- Joining an access point's Wi-Fi ----
+// The SSIDs a target broadcasts, in the document's order (none for a device
+// with no radio, or a network with no Wi-Fi networks yet).
+function addTargetSsids(target) {
+    if (!target || !radioServes(target)) return [];
+    const on = new Set();
+    (target.interfaces || []).forEach((i) => { if (ifaceIsWireless(i)) apSsids(radioOf(i)).forEach((id) => on.add(id)); });
+    return (state.wifi || []).filter((w) => on.has(w.id)).map((w) => w.id);
+}
+// The one new devices join unless somebody picks: the only one, else the
+// first that is not a guest network (a guest network is chosen, never
+// fallen into), else the first.
+function addDefaultSsid(target) {
+    const ids = addTargetSsids(target);
+    return ids.find((id) => !wifiIsGuest(wifiById(id))) || ids[0] || null;
+}
+
 // ---- The plan (pure: reads the map, writes nothing) ----
-// req: { items: [{ type, count }], pattern, targetId, targetIface, taken }
+// req: { items: [{ type, count }], pattern, targetId, targetIface, taken, ssid }
+//   ssid         the Wi-Fi network the devices joining by radio join (an id
+//                the target broadcasts); left out, addDefaultSsid's
 //   targetIface  the target's interface every cable lands on, when the
 //                target has no faceplate (the new network's router: its LAN)
 //   taken        the names already used, when they are not the map's (the
 //                new network's summary, before the map is replaced)
 // -> { target, devices: [{ type, name, port, ip, wireless }], total, cidr,
-//      prefix, network, portsPast, noAddress, sameNames, sharedRun }
+//      prefix, network, portsPast, noAddress, sameNames, sharedRun, ssid,
+//      wifiCidr, wifiNetwork }
 function planAddDevices(req) {
     const target = req.targetId ? getNode(req.targetId) : null;
     const items = (req.items || []).map((i) => ({ type: i.type, count: clampCount(i.count) })).filter((i) => i.count > 0);
@@ -176,7 +203,8 @@ function planAddDevices(req) {
     // one run ('PC-{n:02}' with three switches and twenty PCs: PC-01…03 are
     // the switches). Sometimes meant, so not refused; said in the summary.
     const sharedRun = items.length > 1 && !!pattern && !pattern.includes('{type}') && usesCount(pattern);
-    const plan = { target, devices, total: devices.length, cidr: null, prefix: null, network: null, portsPast: 0, noAddress: 0, sameNames, sharedRun };
+    const plan = { target, devices, total: devices.length, cidr: null, prefix: null, network: null, portsPast: 0, noAddress: 0, sameNames, sharedRun,
+        ssid: null, wifiCidr: null, wifiNetwork: null };
     if (!target || !devices.length) return plan;
 
     // By radio onto an AP, by cable onto anything else (apMediumGuess: an AP
@@ -189,13 +217,31 @@ function planAddDevices(req) {
         plan.portsPast = ports.past;
     }
 
+    // The Wi-Fi network the radio ones join, and the subnet it puts them on.
+    const ssids = devices.some((d) => d.wireless) ? addTargetSsids(target) : [];
+    if (ssids.length) {
+        plan.ssid = ssids.includes(req.ssid) ? req.ssid : addDefaultSsid(target);
+        const w = wifiById(plan.ssid);
+        const wnet = w && w.network ? networkById(w.network) : null;
+        const wp = wnet ? parseValidCIDR(wnet.cidr) : null;
+        if (wp && wp.kind === 'ipv4' && wp.prefix < 31) Object.assign(plan, { wifiCidr: wp.networkStr, wifiPrefix: wp.prefix, wifiNetwork: wnet });
+    }
+
     const ctx = addContext(target);
+    const wants = (d) => !staysL2(d.type) && (initialDataDefaults[d.type]?.interfaces || [{}]).length;
+    const onWifiNet = (d) => d.wireless && !!plan.wifiCidr;
     if (ctx && ctx.prefix < 31) {
-        const want = devices.filter((d) => !staysL2(d.type) && (initialDataDefaults[d.type]?.interfaces || [{}]).length);
+        const want = devices.filter((d) => wants(d) && !onWifiNet(d));
         const ips = freeAddresses(ctx.networkStr, want.length);
         want.forEach((d, i) => { if (ips[i]) d.ip = `${ips[i]}/${ctx.prefix}`; });
         plan.noAddress = want.length - ips.length;
         Object.assign(plan, { cidr: ctx.networkStr, prefix: ctx.prefix, network: ctx.network || networkOfIp(ctx.networkStr.split('/')[0]) });
+    }
+    if (plan.wifiCidr) {
+        const want = devices.filter((d) => wants(d) && onWifiNet(d));
+        const ips = freeAddresses(plan.wifiCidr, want.length);
+        want.forEach((d, i) => { if (ips[i]) d.ip = `${ips[i]}/${plan.wifiPrefix}`; });
+        plan.noAddress += want.length - ips.length;
     }
     return plan;
 }
@@ -251,8 +297,12 @@ function addDevicesNow(req) {
             const bridged = isVirtualType(target.type) || isVirtualType(d.type);
             // A cloud is the router's uplink, never on its LAN interface.
             const onIface = req.targetIface && d.type !== 'cloud' ? req.targetIface : null;
-            state.links.push(bindLink({ id: nextId('l'), source: target.id, target: node.id, attachment: bridged ? 'bridged' : null,
-                sourceIface: d.port || onIface, targetIface: null }));
+            const link = bindLink({ id: nextId('l'), source: target.id, target: node.id, attachment: bridged ? 'bridged' : null,
+                sourceIface: d.port || onIface, targetIface: null });
+            // Its Wi-Fi network said only when there was a choice: the only
+            // one is what Topo works out anyway (linkWifiSsid).
+            if (d.wireless && plan.ssid && addTargetSsids(target).length > 1) setLinkWifi(link, 'ssid', plan.ssid);
+            state.links.push(link);
         }
         added.push(node);
     });
@@ -392,7 +442,8 @@ function addDevicesRequest() {
         simpleAfter: _add.simpleAfter,
         items: [...document.querySelectorAll('#addRows .add-count')].map((el) => ({ type: el.dataset.type, count: clampCount(el.value) })),
         pattern: addEl('addPattern').value,
-        targetId: _add.mode === 'add' ? addEl('addTarget').value || null : null
+        targetId: _add.mode === 'add' ? addEl('addTarget').value || null : null,
+        ssid: _add.mode === 'add' && !addEl('addSsidField').hidden ? addEl('addSsid').value || null : null
     };
 }
 
@@ -400,7 +451,24 @@ function onAddChanged() {
     document.querySelectorAll('#addRows .setup-tile').forEach((tile) => {
         tile.classList.toggle('off', clampCount(tile.querySelector('input').value) === 0);
     });
+    renderAddSsid();
     renderAddSummary();
+}
+
+// The Wi-Fi network pick: only in the full editor, only onto a target that
+// broadcasts more than one, and only while something joins it by radio.
+// What was picked stays picked while the counts change.
+function renderAddSsid() {
+    const field = addEl('addSsidField'), pick = addEl('addSsid');
+    const target = _add.mode === 'add' ? getNode(addEl('addTarget').value) : null;
+    const ids = target && !isReduced() ? addTargetSsids(target) : [];
+    const radio = ids.length > 1 && planAddDevices(Object.assign(addDevicesRequest(), { ssid: null })).devices.some((d) => d.wireless);
+    field.hidden = !radio;
+    if (!radio) return;
+    const was = pick.value;
+    pick.innerHTML = ids.map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(wifiLabel(wifiById(id)))}</option>`).join('');
+    pick.value = ids.includes(was) && pick.dataset.target === target.id ? was : addDefaultSsid(target);
+    pick.dataset.target = target.id;
 }
 
 // "Names: Phone-01 … Phone-12, Printer": a run per kind, the first four.
@@ -460,11 +528,14 @@ function renderAddSummary() {
                     { name: target.name, from: ports[0], to: ports[ports.length - 1] }));
                 else if (radio) lines.push(t('Joined to {name} by radio.', { name: target.name }));
                 else lines.push(t('Cabled to {name}.', { name: target.name }));
+                if (radio && plan.ssid) lines.push(t('On the Wi-Fi network {ssid}.', { ssid: wifiLabel(wifiById(plan.ssid)) }));
                 const ips = plan.devices.filter((d) => d.ip).map((d) => d.ip.split('/')[0]);
-                const net = plan.network ? networkLabel(plan.network) : plan.cidr;
+                // All of them on the Wi-Fi network's subnet: that one is named.
+                const allWifi = plan.wifiNetwork && plan.devices.every((d) => !d.ip || d.wireless);
+                const net = allWifi ? networkLabel(plan.wifiNetwork) : plan.network ? networkLabel(plan.network) : plan.cidr;
                 if (ips.length) lines.push(t(ips.length === 1 ? 'Address {from} on {network}.' : 'Addresses {from} – {to} on {network}.',
                     { from: ips[0], to: ips[ips.length - 1], network: net }));
-                else if (!plan.cidr) lines.push(t('No addresses: {name} is on no network.', { name: target.name }));
+                else if (!plan.cidr && !plan.wifiCidr) lines.push(t('No addresses: {name} is on no network.', { name: target.name }));
                 if (plan.portsPast) warn.push(t('{n} of them land past the {ports}-port faceplate of {name} and show as a port overflow.',
                     { n: plan.portsPast, ports: portCountOf(target), name: target.name }));
                 if (plan.noAddress > 0) warn.push(t('{network} has no free address left for {n} of them.', { network: net, n: plan.noAddress }));
@@ -486,7 +557,8 @@ function applyAddDevices() {
 addEl('addApplyBtn').onclick = applyAddDevices;
 addEl('addCancelBtn').onclick = closeAddDevices;
 addEl('addPattern').oninput = renderAddSummary;
-addEl('addTarget').onchange = renderAddSummary;
+addEl('addTarget').onchange = onAddChanged;
+addEl('addSsid').onchange = renderAddSummary;
 // The tiles scroll on their own above "More options", so on a phone (and in
 // the longer Spanish or Russian blurb) the summary sits at the foot of the
 // visible body and opening it showed nothing new until you thought to scroll

@@ -182,6 +182,10 @@
                          (doc.groups, js/groups.js). A plain word, so
                          translated, unlike Subnets. -->
                     <button id="groupTabBtn" data-adv class="cfg-tab" data-cfgtab="groups" role="tab" aria-selected="false" data-i18n>Groups</button>
+                    <!-- The Wi-Fi networks (doc.wifi, js/wifi.js), offered
+                         only while the network has an AP, a wireless link or
+                         a Wi-Fi network. Technical vocabulary: English. -->
+                    <button id="wifiTabBtn" data-adv class="cfg-tab hidden" data-cfgtab="wifi" role="tab" aria-selected="false">Wi-Fi</button>
                     <!-- The findings of the whole map (js/diagnostics.js, "The
                          Findings tab"), docked here instead of floating over
                          the canvas. A plain word, so translated; the count is
@@ -220,6 +224,8 @@
                             <button type="button" class="tabbtn" data-bulk="recable" role="tab" aria-selected="false" data-i18n>Re-cable</button>
                             <button type="button" class="tabbtn" data-bulk="group" role="tab" aria-selected="false" data-i18n>Group</button>
                             <button type="button" class="tabbtn" data-bulk="host" role="tab" aria-selected="false" data-i18n>Host</button>
+                            <!-- Only while the set holds a device on Wi-Fi (js/bulk.js). -->
+                            <button type="button" class="tabbtn hidden" data-bulk="wifi" role="tab" aria-selected="false">Wi-Fi</button>
                         </div>
                         <div id="bulkPane-set" class="bulk-pane">
                             <p class="rail-note" data-i18n>A field that says "mixed" differs between them. A field left blank, or as it is, is not changed.</p>
@@ -300,6 +306,19 @@
                             <p id="bulkNoVirtual" class="rail-note hidden" data-i18n>None of them is a VM or a container: only those run on another device.</p>
                             <p class="rail-note" data-i18n>A VM or a container is where the device it runs on is, in its group and its rack.</p>
                         </div>
+                        <!-- Set Wi-Fi: the SSID and band of every wireless
+                             client in the set. Leave as is is the default. -->
+                        <div id="bulkPane-wifi" class="bulk-pane hidden">
+                            <div class="bulk-field">
+                                <label for="bulkWifiSsid" class="prop-lbl">SSID</label>
+                                <select id="bulkWifiSsid" class="select bulk-in"></select>
+                            </div>
+                            <div class="bulk-field">
+                                <label for="bulkWifiBand" class="prop-lbl">Band</label>
+                                <select id="bulkWifiBand" class="select bulk-in mono"></select>
+                            </div>
+                            <p class="rail-note" data-i18n>Only the devices on Wi-Fi change. Auto lets Topo work it out from the access point.</p>
+                        </div>
                         <button id="bulkPreviewBtn" type="button" class="btn btn-primary bulk-go" data-i18n>Preview</button>
                     </div>
                     <button id="printLabelsBtn" type="button" class="rail-btn" data-adv data-i18n>Print labels</button>
@@ -336,6 +355,28 @@
                             <option value="powerline" data-simple="Through power outlets">Powerline (Dash-Dot Yellow)</option>
                             <option value="vpn" data-simple="VPN (internet tunnel)">VPN Tunnel (Overlay · Teal)</option>
                         </select>
+                    </div>
+
+                    <!-- A wireless link's association (link.wifi, js/wifi.js): it
+                         has no cable, so these stand where the cable's facts
+                         would. The first entry of each select is what Topo
+                         infers. The trade's words stay English. -->
+                    <div id="linkWifiProps" data-adv class="hidden prop-sec">
+                        <div class="prop-grid">
+                            <div class="span2">
+                                <label class="prop-lbl" for="propWifiSsid">SSID</label>
+                                <select id="propWifiSsid" class="select"></select>
+                            </div>
+                            <div>
+                                <label class="prop-lbl" for="propWifiBand">Band</label>
+                                <select id="propWifiBand" class="select mono"></select>
+                            </div>
+                            <div>
+                                <label class="prop-lbl" for="propWifiSignal">Signal (dBm)</label>
+                                <input type="number" id="propWifiSignal" class="input mono" min="-100" max="0" step="1" inputmode="numeric" autocomplete="off" placeholder="-60" />
+                            </div>
+                            <p id="wifiApLine" class="rail-note span2 wifi-ap-line hidden"></p>
+                        </div>
                     </div>
 
                     <div id="nodeNetworkProps" data-adv class="prop-stack">
@@ -602,6 +643,19 @@
                     <div id="groupList" class="net-list grp-list"></div>
                 </div>
 
+                <!-- The Wi-Fi networks (doc.wifi): one card each with its SSID,
+                     security, bands, subnet, the APs broadcasting it and its
+                     clients; Select clients, Edit, Delete; the usual three
+                     as one click each while there are none. No passphrase,
+                     ever. Built by js/wifi.js. -->
+                <div id="cfgPanel-wifi" data-adv class="cfg-panel hidden">
+                    <div class="prop-headrow net-toolbar">
+                        <p class="rail-note grp-intro" data-i18n>The networks the access points broadcast. No passphrase is kept: a network travels in files and links.</p>
+                        <button id="addWifiBtn" type="button" class="link-btn" data-i18n>+ Wi-Fi network</button>
+                    </div>
+                    <div id="wifiList" class="net-list"></div>
+                </div>
+
                 <!-- Grouped by check; a line selects and centres what it is
                      about (click again for the next one). Accept… keeps a
                      finding as known, with a reason, stored in the document:
@@ -712,6 +766,7 @@
                         <button type="button" class="tabbtn" role="tab" data-tvtab="ports">Ports</button>
                         <button type="button" class="tabbtn" role="tab" data-tvtab="subnets">Subnets</button>
                         <button type="button" class="tabbtn" role="tab" data-tvtab="groups" data-i18n>Groups</button>
+                        <button type="button" class="tabbtn hidden" role="tab" data-tvtab="wifi">Wi-Fi</button>
                     </div>
                     <div class="tv-bar">
                         <span id="tvCount" class="tv-count"></span>
@@ -949,6 +1004,12 @@
                                 <label for="addTarget" data-i18n>Connect to</label>
                                 <select id="addTarget" class="select"></select>
                             </div>
+                            <!-- Onto an AP broadcasting more than one SSID: which one the
+                                 new devices join (js/add.js). Shown only then. -->
+                            <div id="addSsidField" class="field paste-field" hidden>
+                                <label for="addSsid" data-i18n>Wi-Fi network</label>
+                                <select id="addSsid" class="select"></select>
+                            </div>
                         </details>
                         <div id="addSummary" class="add-summary" role="status" aria-live="polite"></div>
                     </div>
@@ -1087,9 +1148,10 @@
                 </div>
             </div>
 
-            <!-- Place a device in a rack (js/rackview.js): the units dragged
-                 over, changeable here, and the device that goes in them, an
-                 existing one or a new one of a type. One undo step. -->
+            <!-- Place a device in a rack (js/rackview.js). Where it goes is
+                 one line at the top (the units dragged over), opened to change
+                 them; under it two tabs: a new device (a type, a name, Add) or
+                 one already on the map. One undo step. -->
             <div id="rackPlaceDialog" class="modal-scrim" hidden>
                 <div class="modal topo-paste topo-rackplace" role="dialog" aria-modal="true" aria-labelledby="rackPlaceTitle">
                     <div class="modal-head">
@@ -1097,45 +1159,53 @@
                         <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
                     </div>
                     <div class="modal-body">
-                        <div class="rkp-span">
-                            <div class="field">
-                                <label for="rackPlaceU" data-i18n>Lowest unit</label>
-                                <input id="rackPlaceU" type="number" class="input mono" min="1" step="1" inputmode="numeric" autocomplete="off">
+                        <details id="rackPlaceWhere" class="rkp-where">
+                            <summary><span id="rackPlaceMsg" class="rkp-msg" role="status" aria-live="polite"></span><span class="rkp-change" data-i18n>Change</span></summary>
+                            <div class="rkp-span">
+                                <div class="field">
+                                    <label for="rackPlaceU" data-i18n>Lowest unit</label>
+                                    <input id="rackPlaceU" type="number" class="input mono" min="1" step="1" inputmode="numeric" autocomplete="off">
+                                </div>
+                                <div class="field">
+                                    <label for="rackPlaceHeight" data-i18n>Height (U)</label>
+                                    <input id="rackPlaceHeight" type="number" class="input mono" min="1" step="1" inputmode="numeric" autocomplete="off">
+                                </div>
+                                <div class="field">
+                                    <label for="rackPlaceFace" data-i18n>Face</label>
+                                    <select id="rackPlaceFace" class="select">
+                                        <option value="front" data-i18n>Front</option>
+                                        <option value="rear" data-i18n>Rear</option>
+                                    </select>
+                                </div>
                             </div>
-                            <div class="field">
-                                <label for="rackPlaceHeight" data-i18n>Height (U)</label>
-                                <input id="rackPlaceHeight" type="number" class="input mono" min="1" step="1" inputmode="numeric" autocomplete="off">
-                            </div>
-                            <div class="field">
-                                <label for="rackPlaceFace" data-i18n>Face</label>
-                                <select id="rackPlaceFace" class="select">
-                                    <option value="front" data-i18n>Front</option>
-                                    <option value="rear" data-i18n>Rear</option>
-                                </select>
+                            <!-- Ticked unless only one face of the units is free: a new device's depth. A device already on the map keeps its own until the box is changed by hand (placeDepth, js/rackview.js). -->
+                            <label class="prop-check rkp-depth" data-i18n-title title="Ticked, it fills the rack front to back, so nothing can go in the same units on the other face. Untick it for a device on one face only (half depth).">
+                                <input type="checkbox" id="rackPlaceFull" checked>
+                                <span class="prop-lbl" data-i18n>Full depth</span>
+                            </label>
+                        </details>
+                        <div id="rackPlaceTabs" class="tabbar rkp-tabs" role="tablist">
+                            <button type="button" class="tabbtn active" id="rackPlaceTabNew" data-rkp-tab="new" role="tab" aria-selected="true" aria-controls="rackPlaceNewPane" data-i18n>New device</button>
+                            <button type="button" class="tabbtn" id="rackPlaceTabMap" data-rkp-tab="map" role="tab" aria-selected="false" aria-controls="rackPlaceMapPane"><span data-i18n>From the map</span> <span id="rackPlaceMapCount" class="rkp-count"></span></button>
+                        </div>
+                        <div id="rackPlaceNewPane" class="rkp-pane" role="tabpanel" aria-labelledby="rackPlaceTabNew">
+                            <div id="rackPlaceTypes" class="rkp-types" role="radiogroup" data-i18n-aria-label aria-label="Type"></div>
+                            <!-- What the grid above picks: the one value Add reads. -->
+                            <select id="rackPlaceType" class="select" hidden tabindex="-1" aria-hidden="true"></select>
+                            <div class="field rkp-name-field">
+                                <label for="rackPlaceName" data-i18n>Name</label>
+                                <input id="rackPlaceName" type="text" class="input" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="Optional">
                             </div>
                         </div>
-                        <!-- Ticked unless only one face of the units is free: a new device's depth. A device already on the map keeps its own until the box is changed by hand (placeDepth, js/rackview.js). -->
-                        <label class="prop-check rkp-depth" data-i18n-title title="Ticked, it fills the rack front to back, so nothing can go in the same units on the other face. Untick it for a device on one face only (half depth).">
-                            <input type="checkbox" id="rackPlaceFull" checked>
-                            <span class="prop-lbl" data-i18n>Full depth</span>
-                        </label>
-                        <p id="rackPlaceMsg" class="rkp-msg" role="status" aria-live="polite"></p>
-                        <div class="field">
-                            <label for="rackPlaceFilter" data-i18n>A device on the map</label>
+                        <div id="rackPlaceMapPane" class="rkp-pane" role="tabpanel" aria-labelledby="rackPlaceTabMap" hidden>
                             <input id="rackPlaceFilter" type="search" class="input" autocomplete="off" spellcheck="false"
-                                data-i18n-placeholder placeholder="Filter by name, type or address">
-                        </div>
-                        <ul id="rackPlaceList" class="rkp-list"></ul>
-                        <div class="field rkp-new">
-                            <label for="rackPlaceType" data-i18n>Or a new device</label>
-                            <div class="rkp-newrow">
-                                <select id="rackPlaceType" class="select"></select>
-                                <button type="button" id="rackPlaceNewBtn" class="btn" data-i18n>Create here</button>
-                            </div>
+                                data-i18n-aria-label aria-label="Filter by name, type or address" data-i18n-placeholder placeholder="Filter by name, type or address">
+                            <ul id="rackPlaceList" class="rkp-list"></ul>
                         </div>
                     </div>
                     <div class="modal-foot">
                         <button type="button" class="btn" data-close data-i18n>Cancel</button>
+                        <button type="button" id="rackPlaceNewBtn" class="btn btn-primary"></button>
                     </div>
                 </div>
             </div>
@@ -1253,6 +1323,7 @@
     <script src="js/networks.js"></script>
     <script src="js/groups.js"></script>
     <script src="js/hosts.js"></script>
+    <script src="js/wifi.js"></script>
     <script src="js/motion.js"></script>
     <script src="js/groupmap.js"></script>
     <script src="js/table.js"></script>

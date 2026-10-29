@@ -344,7 +344,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     depth = undoDepth();
     el('rackPlaceNewBtn').click();
     const made = state.nodes[state.nodes.length - 1];
-    ok('Create here makes one of that type in those units', state.nodes.length === before + 1 && made.type === 'switch' && made.group === 'rk' && place(made.id) === '20+2r');
+    ok('Add makes one of that type in those units', state.nodes.length === before + 1 && made.type === 'switch' && made.group === 'rk' && place(made.id) === '20+2r');
     ok('selected, on the map beside the rack, in one undo step', state.selectedId === made.id && undoDepth() === depth + 1 && Number.isFinite(made.x) && made.y > 0);
     undo();
     ok('Undo takes it away', state.nodes.length === before && !dev(made.id));

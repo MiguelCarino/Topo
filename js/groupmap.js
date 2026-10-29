@@ -997,7 +997,8 @@ function drawGroupEdges(view, ctx) {
         // One medium for all of them keeps its colour; a mix is a plain line.
         const media = new Set(edge.links.map((l) => effectiveMedium(l, getNode(l.source), getNode(l.target))));
         const medium = media.size === 1 ? [...media][0] : 'utp';
-        const colour = { fiber: '#06b6d4', wireless: '#8b5cf6', powerline: '#eab308', vpn: '#14b8a6' }[medium] || '#94a3b8';
+        const colour = medium === 'wireless' ? wifiMapColours().line   // the --topo-wifi token (js/ui.js)
+            : { fiber: '#06b6d4', powerline: '#eab308', vpn: '#14b8a6' }[medium] || '#94a3b8';
         const selected = edge.links.some((l) => inSelection('link', l.id));
         const lit = reach && edge.links.some((l) => reach.reachableLinks.has(l.id));
         const line = gmEl('path', { d: `M ${a.x} ${a.y} L ${b.x} ${b.y}`, fill: 'none',

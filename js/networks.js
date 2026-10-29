@@ -249,6 +249,8 @@ async function deleteNetwork(id) {
             if (dns.network === net) node.dns = dns.value;
         });
         state.networks = state.networks.filter((n) => n !== net);
+        // A Wi-Fi network on it is left on no subnet, as a reload would.
+        normalizeWifiRefs();
         _netEditOpen.delete(id);
         save(); renderCanvasOnly();
     });

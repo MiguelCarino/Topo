@@ -180,7 +180,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     item('srv').click();
     ok('unticked by hand, a full-depth device is placed half', getNode('srv').rackU === 8 && getNode('srv').rackDepth === 'half');
     undo();
-    // Create here still takes the box: a new one fills the depth.
+    // Add still takes the box: a new one fills the depth.
     openPlaceDialog({ rackId: 'rk', face: 'front', u: 9, height: 1 });
     el('rackPlaceType').value = 'switch';
     el('rackPlaceNewBtn').click();

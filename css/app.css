@@ -1,3 +1,13 @@
+/* The map's Wi-Fi colours (js/ui.js wifiMapColours, js/groupmap.js): the
+   wireless link and its band chip, and the halo the chip's text sits on.
+   Tokens, read by the script and written onto the SVG as plain values,
+   because the PNG export and the report's diagram carry no stylesheet. The
+   map canvas is light in both themes, so they are not redefined for dark. */
+:root {
+    --topo-wifi: #8b5cf6;
+    --topo-wifi-halo: #ffffff;
+}
+
 .grid-bg {
     background-color: #f8fafc;
     background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
@@ -32,6 +42,9 @@
    association itself showing through underneath. */
 .flow-wireless { stroke-dasharray: none; opacity: 0.3; }
 .flow-wave { pointer-events: none; }
+/* A wireless link's band chip (js/ui.js): a press on it selects the link,
+   as a press on the line does; its tooltip is the SSID and the signal. */
+.wifi-band-chip { cursor: pointer; }
 
 /* Respect users who ask the OS for less motion: keep each identity, drop the loop. */
 @media (prefers-reduced-motion: reduce) {
@@ -383,6 +396,53 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .host-guest-in::before { content: '\2514'; color: var(--text-muted); }
 /* A finger needs a taller target than a pointer. */
 @media (max-width: 900px) { .host-guest .link-btn { padding: 10px 0; } }
+/* The Wi-Fi tab (js/wifi.js): the Subnets tab's cards. Empty, the usual
+   three networks as buttons; editing, the bands as three boxes in a row. */
+.wifi-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.wifi-presets-more { display: flex; flex-wrap: wrap; gap: 6px; }
+.wifi-bands { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; border: none; min-width: 0; }
+.wifi-bands legend { padding: 0; margin-bottom: 4px; }
+.wifi-bands .prop-check span { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text-sec); }
+/* The link panel's AP line: the radio's channel and width, read-only, and
+   the way to change them. */
+.wifi-ap-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; }
+.wifi-ap-line .mono { overflow-wrap: anywhere; }
+/* The radio block under a wireless interface (js/wifi.js): one line folded,
+   the standard, a row per band (its channel and width on an AP) and the
+   SSIDs it broadcasts as chips open. */
+.radio-box { margin: 0 0 4px 12px; min-width: 0; }
+.radio-sum { display: flex; align-items: baseline; gap: 6px; min-width: 0; cursor: pointer; list-style: none; padding: 2px 0; }
+.radio-sum::-webkit-details-marker { display: none; }
+.radio-sum::before { content: '\25B8'; flex: none; font-size: var(--fs-micro); color: var(--text-muted); }
+.radio-box[open] > .radio-sum::before { content: '\25BE'; }
+.radio-sum .prop-lbl { flex: none; margin: 0; }
+.radio-sum-text { flex: 1; min-width: 0; font-family: var(--mono); font-size: var(--fs-micro); color: var(--text-sec); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.radio-body { display: flex; flex-direction: column; gap: 6px; padding: 6px 0 4px 12px; border-left: 2px solid var(--border); margin-left: 3px; }
+.radio-std .select { width: 100%; }
+.radio-bands { display: flex; flex-direction: column; gap: 4px; }
+.radio-bands-row { flex-direction: row; flex-wrap: wrap; gap: 4px 14px; }
+/* The tick column is as wide as "2.4 GHz" and no wider, and the selects'
+   right padding is the native arrow's own: "160 MHz" and "ch auto" are
+   read whole in a 300px rail and on a phone. */
+.radio-band { display: grid; grid-template-columns: 78px minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 6px; }
+.radio-band .select { width: 100%; min-width: 0; padding-left: 6px; padding-right: 2px; }
+.radio-tick span { font-size: var(--fs-sm); color: var(--text-sec); white-space: nowrap; }
+.radio-tick.inferred span { color: var(--text-muted); font-style: italic; }
+.radio-ssids { gap: 6px; }
+.radio-none { margin: 0; }
+/* A finger needs taller targets than a pointer. */
+@media (max-width: 900px) {
+    .radio-sum { padding: 8px 0; }
+    .radio-ssids .fchip { padding: 8px 12px; }
+    /* The Wi-Fi cards' Select clients / Edit / Delete, Edit radio on a
+       link and + Wi-Fi network are text buttons only ~11px tall. */
+    #wifiList .net-actions .link-btn, .wifi-ap-line .link-btn, .radio-none .link-btn { padding: 10px 4px; }
+    /* A card's actions are a finger's target both ways: "Edit" alone is a
+       26px-wide word. */
+    #wifiList .net-actions .link-btn { min-width: 44px; min-height: 44px; padding: 10px 8px; }
+    .wifi-presets-more .fchip { padding: 8px 12px; }
+}
+
 /* Make groups from locations, offered under the empty tab's note. */
 .grp-from-loc { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .grp-from-loc .rail-note { margin: 0; }
@@ -1195,13 +1255,43 @@ body.rack-view #conflictPill { display: none !important; }
    it must, never squeezing the row's name and type down to a letter. */
 .rk-unhint { flex: 0 1 5em; min-width: 0; align-self: center; font-size: var(--fs-micro); line-height: 1.25; color: var(--text-muted); text-align: right; }
 /* The place dialog. */
-.modal.topo-rackplace { max-width: 34rem; }
+.modal.topo-rackplace { max-width: 36rem; }
+/* Where it goes: one line, opened to change it (it opens by itself when the
+   units do not fit). */
+.rkp-where { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elev); margin-bottom: 12px; }
+.rkp-where > summary { display: flex; align-items: baseline; gap: 10px; padding: 10px 12px; cursor: pointer; list-style: none; }
+.rkp-where > summary::-webkit-details-marker { display: none; }
+.rkp-where > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rkp-where[open] > summary { border-bottom: 1px solid var(--border); }
+.rkp-change { margin-left: auto; flex: none; font-family: var(--mono); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }
+.rkp-where[open] .rkp-change { color: var(--text-muted); }
+.rkp-where > .rkp-span, .rkp-where > .rkp-depth { margin-left: 12px; margin-right: 12px; }
+.rkp-where > .rkp-span { margin-top: 10px; }
+.rkp-where > .rkp-depth { margin-bottom: 8px; }
 .rkp-span { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .rkp-span .field { margin-bottom: 0; min-width: 0; }
 .rkp-span .input, .rkp-span .select { width: 100%; min-width: 0; }
 .rkp-depth { margin-top: 10px; min-height: 32px; }
-.rkp-msg { margin: 8px 0 10px; font-size: var(--fs-label); color: var(--text-sec); }
+.rkp-msg { flex: 1 1 auto; min-width: 0; font-size: var(--fs-label); color: var(--text); }
 .rkp-msg.rkp-bad { color: var(--err); }
+.rkp-tabs { margin-bottom: 12px; }
+.rkp-count { display: inline-block; min-width: 1.6em; padding: 0 5px; margin-left: 2px; border-radius: 9px; background: var(--accent); color: var(--bg); font-size: var(--fs-micro); text-align: center; }
+.rkp-count:empty { display: none; }
+.rkp-pane[hidden] { display: none; }
+/* New device: the types as a grid of icons, the one picked lit. */
+.rkp-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr)); gap: 6px; }
+.rkp-type {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-height: 64px; padding: 8px 4px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elev); color: var(--text-sec);
+    font: inherit; font-size: var(--fs-micro); line-height: 1.2; text-align: center; cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+}
+.rkp-type .rk-ico { color: inherit; }
+.rkp-type:hover { border-color: var(--accent); color: var(--text); }
+.rkp-type:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rkp-type[aria-checked="true"] { border-color: var(--accent); background: var(--accent-faint); color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.rkp-name-field { margin-top: 12px; min-width: 0; }
+#rackPlaceFilter { width: 100%; margin-bottom: 8px; }
 .rkp-list {
     margin: 6px 0 12px; padding: 0; list-style: none; max-height: 15rem; overflow: auto;
     border: 1px solid var(--border); border-radius: 6px;
@@ -1216,8 +1306,6 @@ body.rack-view #conflictPill { display: none !important; }
 .rkp-item:disabled { opacity: 0.4; cursor: not-allowed; }
 .rkp-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rkp-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-muted); }
-.rkp-newrow { display: flex; gap: 8px; }
-.rkp-newrow .select { flex: 1 1 auto; min-width: 0; }
 /* No room beside the rack: the selected device's buttons go above it and the
    devices not placed yet below it, each kept in sight, the rack scrolling
    between them. */
@@ -1295,6 +1383,7 @@ body.rack-view #conflictPill { display: none !important; }
     .rk-hit { stroke-width: 14; }
     .rk-cap { display: none; }
     .rkp-span { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .rkp-types { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     /* The schedule is the phone's main view, under the elevation that
        sticks above it: each row a finger's tap tall, and the sort buttons
        too. */

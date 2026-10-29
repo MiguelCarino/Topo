@@ -201,6 +201,111 @@ function reportGroups() {
     });
 }
 
+// The bands a network is on the air on: the bands of the radios that
+// broadcast it, as each radio carries it (apBandSsids), so a WPA2/WPA3
+// network set to "every band" (the default) on a Wi-Fi 6 AP with no 6 GHz
+// radio reads 2.4 · 5 GHz, which is what is broadcast. A network nobody
+// broadcasts yet reads as its own setting.
+function wifiOnAirBands(w) {
+    const on = new Set();
+    wifiBroadcasters(w.id).forEach((n) => getInterfaces(n).filter(ifaceIsWireless).forEach((i) => {
+        const radio = radioOf(i);
+        (radioBands(radio) || WIFI_BANDS).forEach((b) => { if (apBandSsids(radio, b).includes(w.id)) on.add(b); });
+    }));
+    return on.size ? WIFI_BANDS.filter((b) => on.has(b)) : wifiBandsOf(w);
+}
+
+// The Wi-Fi networks (doc.wifi, js/model.js "Wi-Fi"), in the document's
+// order: each with its security, the bands it is on (wifiOnAirBands),
+// its subnet and VLAN, whether it is hidden, the APs broadcasting it and the
+// devices on it, counted as the Wi-Fi tab counts them (js/wifi.js). The
+// table's Wi-Fi tab is these rows.
+function reportWifi() {
+    return (state.wifi || []).map((w) => {
+        const net = w.network ? networkById(w.network) : null;
+        const bands = wifiOnAirBands(w);
+        return {
+            id: w.id,
+            ssid: w.ssid || '',
+            security: w.security || '',
+            securityName: w.security ? wifiSecurityName(w.security) : '',
+            bands,
+            bandsText: wifiBandsText(bands),
+            networkId: net ? net.id : '',
+            subnet: net ? networkLabel(net) : '',
+            vlan: net && Number.isInteger(net.vlan) ? net.vlan : null,
+            hidden: !!w.hidden,
+            aps: wifiBroadcasters(w.id).map((n) => n.name || n.id),
+            clients: wifiClients(w.id).map((n) => n.name || n.id)
+        };
+    });
+}
+
+// The access points as the report's Wi-Fi section prints them: per device
+// that serves radio (an AP, or a home router with a radio), its standard and
+// a row per band its radio has, with the channel and width (null is auto),
+// the SSIDs that band broadcasts and the clients on it with their signal.
+// The band of a client is the one the link panel shows (linkWifiBand): what
+// it says, else the inference. A client on a band the radio does not list
+// still gets a row (a finding says why), and a client whose band is not
+// known goes in a last row with no band, so every association is printed
+// once. Every described radio is read, not only the first: an AP with one
+// radio interface per band (wlan0 on 2.4, wlan1 on 5) has its rows from
+// each, and a link bound to an interface lands on that radio's row, as the
+// checks and the link panel read it. An unbound link lands on the one radio
+// that offers its band; when two do, it cannot be said which, and it gets a
+// band row of its own (auto, like an undescribed radio's). A row names its
+// interface (`iface`) only when the device has more than one radio.
+function reportWifiAps() {
+    const wifi = state.wifi || [];
+    const out = [];
+    state.nodes.forEach((node) => {
+        if (!radioServes(node)) return;
+        const links = state.links.filter((l) => { const e = wifiLinkEnds(l); return !!e && !!e.ap && !!e.client && e.ap.node === node; });
+        const radios = getInterfaces(node).filter(ifaceIsWireless).map((iface) => ({ iface, radio: radioOf(iface) })).filter((r) => r.radio);
+        if (node.type !== 'ap' && !links.length && !radios.length) return;
+        const many = radios.length > 1;
+        const rows = [];
+        radios.forEach(({ iface, radio }) => (radioBands(radio) || []).forEach((band) => {
+            const b = radioBand(radio, band) || {};
+            rows.push({ band, ifaceId: iface.id, iface: many ? (iface.name || iface.id) : '',
+                channel: b.channel !== undefined ? b.channel : null, width: b.width !== undefined ? b.width : null,
+                ssids: apBandSsids(radio, band, wifi).map((id) => wifiLabel(wifiById(id, wifi))), clients: [] });
+        }));
+        const loose = { band: '', iface: '', channel: null, width: null, ssids: [], clients: [] };
+        links.forEach((l) => {
+            const e = wifiLinkEnds(l);
+            const band = linkWifiBand(l, wifi) || '';
+            let row = loose;
+            if (band) {
+                const bound = e.ap.iface && rows.find((r) => r.band === band && r.ifaceId === e.ap.iface.id);
+                const offering = rows.filter((r) => r.band === band && r.ifaceId);
+                row = bound || (!e.ap.iface && offering.length === 1 ? offering[0] : null)
+                    || rows.find((r) => r.band === band && !r.ifaceId);
+                if (!row) { row = { band, iface: '', channel: null, width: null, ssids: [], clients: [] }; rows.push(row); }
+            }
+            const signal = linkWifiOf(l, 'signal');
+            row.clients.push({ name: e.client.node.name || e.client.node.id, signal: signal !== undefined ? signal : null });
+        });
+        // By band, a device's radios in their interface order within one.
+        const order = rows.slice();
+        rows.sort((a, b) => WIFI_BANDS.indexOf(a.band) - WIFI_BANDS.indexOf(b.band) || order.indexOf(a) - order.indexOf(b));
+        rows.forEach((r) => { delete r.ifaceId; });
+        if (loose.clients.length) rows.push(loose);
+        const standards = [...new Set(radios.map((r) => r.radio.standard).filter(Boolean))];
+        out.push({ id: node.id, name: node.name || node.id, standard: standards.map(wifiStandardName).join(', '), rows });
+    });
+    return out;
+}
+// The whole section, or null when the site has nothing wireless to print
+// (no Wi-Fi network, no access point, no radio link): a wired site's report
+// reads as it did before Wi-Fi was recorded.
+function reportWifiSection() {
+    const networks = reportWifi();
+    const aps = reportWifiAps();
+    return networks.length || aps.length ? { networks, aps } : null;
+}
+
 // Derived and read-only: these rows are built for reading, and nothing ever
 // writes back through them. A text field reads as '' when unset, a boolean as
 // true or false. The gateway and DNS are the ones in force (R7): a device
@@ -489,6 +594,7 @@ function reportModelNow() {
         connections,
         subnets,
         portMaps: reportPortMaps(),
+        wifi: reportWifiSection(),
         counts: {
             devices: devices.length,
             connections: connections.length,
@@ -1043,6 +1149,41 @@ function connectionsSection(connections) {
         <tbody>${rows}</tbody></table>`;
 }
 
+// Wi-Fi: the networks (SSID, security, bands, subnet and VLAN, who
+// broadcasts it, who is on it), then a block per access point: a row per
+// band with its channel and width ("auto" when the radio leaves it to
+// itself), the SSIDs on it and the clients with their signal. SSID, the
+// bands and dBm are the trade's words and are printed as written.
+function wifiSection(w) {
+    const muted = (text) => `<span class="muted">${escapeHtml(text)}</span>`;
+    const dash = muted('—');
+    const nets = w.networks.length ? `<table class="wifi">
+        <thead><tr><th>SSID</th><th>${t('Security')}</th><th>${t('Bands')}</th><th>${t('Subnet')}</th><th>${t('Access points')}</th><th>${t('Clients')}</th></tr></thead>
+        <tbody>${w.networks.map((n) => `<tr>
+            <td><b>${escapeHtml(n.ssid || t('Wi-Fi network'))}</b>${n.hidden ? `<br>${muted(t('Hidden network'))}` : ''}</td>
+            <td>${n.securityName ? escapeHtml(n.securityName) : dash}</td>
+            <td class="mono">${escapeHtml(n.bandsText)}</td>
+            <td>${n.subnet ? `<span class="mono">${escapeHtml(n.subnet)}</span>${n.vlan !== null ? `<br>${muted(`VLAN ${n.vlan}`)}` : ''}` : dash}</td>
+            <td>${n.aps.length ? escapeHtml(n.aps.join(', ')) : dash}</td>
+            <td>${n.clients.length ? escapeHtml(n.clients.join(', ')) : dash}</td>
+        </tr>`).join('')}</tbody></table>` : `<p class="muted">${escapeHtml(t('No Wi-Fi networks recorded.'))}</p>`;
+    const channel = (r) => (r.channel !== null ? `<span class="mono">${r.channel}</span>` : muted(t('auto')));
+    const width = (r) => (r.width !== null ? `<span class="mono">${r.width} MHz</span>` : muted(t('auto')));
+    const client = (c) => `${escapeHtml(c.name)}${c.signal !== null ? ` <span class="mono muted">${c.signal} dBm</span>` : ''}`;
+    const aps = w.aps.map((ap) => `
+        <h3>${escapeHtml(ap.name)}${ap.standard ? ` <span class="muted">· ${escapeHtml(ap.standard)}</span>` : ''}</h3>
+        ${ap.rows.length ? `<table class="radio">
+        <thead><tr><th>${t('Band')}</th><th>${t('Channel')}</th><th>${t('Width')}</th><th>SSID</th><th>${t('Clients')}</th></tr></thead>
+        <tbody>${ap.rows.map((r) => `<tr>
+            <td class="mono">${r.band ? escapeHtml(wifiBandName(r.band)) : muted(t('Band not known'))}${r.iface ? `<br>${muted(r.iface)}` : ''}</td>
+            <td>${r.band ? channel(r) : dash}</td>
+            <td>${r.band ? width(r) : dash}</td>
+            <td>${r.ssids.length ? escapeHtml(r.ssids.join(', ')) : dash}</td>
+            <td>${r.clients.length ? r.clients.map(client).join('<br>') : dash}</td>
+        </tr>`).join('')}</tbody></table>` : `<p class="muted">${escapeHtml(t('Its radio is not described.'))}</p>`}`).join('');
+    return nets + aps;
+}
+
 // A declared network prints its name, VLAN, purpose, gateway, DNS and DHCP
 // under its address; one only implied by the addressing says so, since
 // nobody has said what it is for.
@@ -1252,7 +1393,10 @@ ${(model.racks || []).length ? `
 ` : ''}
     <h2>${escapeHtml(t('Connections'))}</h2>
     ${connectionsSection(model.connections)}
-
+${model.wifi ? `
+    <h2>Wi-Fi</h2>
+    ${wifiSection(model.wifi)}
+` : ''}
     <h2>${escapeHtml(t('Addressing'))}</h2>
     ${subnetsSection(model.subnets)}
 
@@ -1440,7 +1584,7 @@ async function generateSiteReport(meta) {
 // their canvas to be edited.
 async function withDocRendered(doc, fn) {
     const held = {
-        nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, accepted: state.accepted, annotations: state.annotations, report: state.report,
+        nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted, annotations: state.annotations, report: state.report,
         camera: { x: state.camera.x, y: state.camera.y, zoom: state.camera.zoom },
         selection: state.selection,   // the whole set: a getter pair would lose a set of several
     };
@@ -1451,7 +1595,7 @@ async function withDocRendered(doc, fn) {
         renderCanvasOnly();
         return await fn();
     } finally {
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.accepted = held.accepted;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.accepted = held.accepted;
         state.annotations = held.annotations; state.report = held.report;
         state.camera = held.camera;
         state.selection = held.selection;

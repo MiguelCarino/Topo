@@ -1941,7 +1941,11 @@ function placeInRack(rackId, span, pick) {
     if (!chk.ok) { showToast(rackRefusal(rack, chk)); return null; }
     let node = existing;
     batch(() => {
-        if (!node) node = spawnNodeNow(pick.type, rackDropPoint(rack) ? { at: rackDropPoint(rack) } : {});
+        if (!node) {
+            node = spawnNodeNow(pick.type, rackDropPoint(rack) ? { at: rackDropPoint(rack) } : {});
+            // A name typed in the dialog; blank keeps the one it was given.
+            if (node && typeof pick.name === 'string' && pick.name.trim()) node.name = pick.name.trim();
+        }
         if (!node) return;
         node.group = rack.id;
         // Its depth is the one asked for, else the device's own: the span
@@ -2770,11 +2774,20 @@ function onRackKey(e) {
 
 // ---- The place dialog ----
 // Opened with the units dragged over (or tapped, or an empty run's bottom
-// one from the keyboard); its fields change them. The list is every device
-// not already placed in this rack: this rack's own first, then devices in no
-// group, then those in another group (placing one moves it here). A new
-// device of a type is made here instead with Create here.
-const _rp = { req: null, depthSaid: false };
+// one from the keyboard). Where it goes is one line at the top ("Goes in U23
+// front, full depth."), opened to change the units, face and depth; it opens
+// by itself when they do not fit. Under it two tabs:
+//   New device    a grid of the types that go in a rack, a name (optional:
+//                 blank takes the usual one), and Add <type> in the footer;
+//   From the map  every device not already placed in this rack: this rack's
+//                 own first, then devices in no group, then those in another
+//                 group (placing one moves it here); a click places it.
+// It opens on From the map when this rack has devices waiting for units
+// (the likely reason to have dragged over some), else on New device.
+const _rp = { req: null, depthSaid: false, tab: 'new' };
+// The types most often racked come first in the grid; the rest follow in the
+// palette's order. VMs and containers are left out (they take no units).
+const RP_TYPE_ORDER = ['server', 'switch', 'l3switch', 'router', 'firewall', 'edge', 'loadbalancer', 'vpn', 'ap'];
 const rpEl = (id) => document.getElementById(id);
 const RP_LIST_MAX = 120;
 
@@ -2783,7 +2796,7 @@ function openPlaceDialog(req) {
     const rack = groupById(req && req.rackId);
     if (!isRackGroup(rack)) return false;
     _rp.req = { rackId: rack.id };
-    rpEl('rackPlaceTitle').textContent = t('Place a device in {rack}', { rack: groupLabel(rack) });
+    rpEl('rackPlaceTitle').textContent = t('Add to {rack}', { rack: groupLabel(rack) });
     rpEl('rackPlaceU').max = String(rackTop(rack));
     rpEl('rackPlaceHeight').max = String(rackTop(rack));
     // The unit as the rails print it: on a rack numbered from the top, the
@@ -2796,23 +2809,36 @@ function openPlaceDialog(req) {
     _rp.depthSaid = false;
     placeDialogDepth(rack);
     rpEl('rackPlaceFilter').value = '';
+    rpEl('rackPlaceName').value = '';
+    rpEl('rackPlaceWhere').open = false;
     // A VM or a container takes no units (placeInRack refuses it): offered
     // here, it would be a choice the button always turns down. One goes in a
     // rack by running on a device that is in it.
-    const types = paletteDefs.filter((d) => !isVirtualType(d.type)).map((d) => `<option value="${d.type}">${escapeHtml(d.name)}</option>`).join('');
+    const rank = (d) => { const i = RP_TYPE_ORDER.indexOf(d.type); return i < 0 ? RP_TYPE_ORDER.length : i; };
+    // Nor a cloud: it stands for a network outside, never a box on rails.
+    const defs = paletteDefs.filter((d) => !isVirtualType(d.type) && d.type !== 'cloud').map((d, i) => ({ d, i }))
+        .sort((a, b) => rank(a.d) - rank(b.d) || a.i - b.i).map(({ d }) => d);
+    const types = defs.map((d) => `<option value="${d.type}">${escapeHtml(d.name)}</option>`).join('');
     // A server is what most often goes in a rack; after that, the type last made.
     if (rpEl('rackPlaceType').dataset.options !== types) {
         rpEl('rackPlaceType').innerHTML = types;
         rpEl('rackPlaceType').dataset.options = types;
         rpEl('rackPlaceType').value = 'server';
+        rpEl('rackPlaceTypes').innerHTML = defs.map((d) => `<button type="button" class="rkp-type" role="radio" data-type="${d.type}" aria-checked="false">${rvIcon(d.type, 20)}<span>${escapeHtml(rvTypeName(d.type))}</span></button>`).join('');
     }
+    // From the map first when devices of this rack are waiting for units.
+    _rp.tab = placeCandidates(rack).some((c) => c.rank === 0 && !isVirtualType(c.node.type)) ? 'map' : 'new';
     renderPlaceDialog();
     const scrim = rpEl('rackPlaceDialog');
     if (window.CarinoUI) CarinoUI.modal.open(scrim, { onClose: () => { _rp.req = null; } });
     else scrim.hidden = false;
     // Typing finds a device; on a phone a keyboard sliding up over the list
-    // would hide it, so the list is what shows first there.
-    if (!rvPhone()) rpEl('rackPlaceFilter').focus();
+    // would hide it, so the list is what shows first there. On New device the
+    // type picked has the focus, so Enter adds it.
+    if (!rvPhone()) {
+        if (_rp.tab === 'map') rpEl('rackPlaceFilter').focus();
+        else { const on = rpEl('rackPlaceTypes').querySelector('[aria-checked="true"]'); if (on) on.focus(); }
+    }
     return true;
 }
 
@@ -2889,6 +2915,23 @@ function renderPlaceDialog() {
     const err = rpEl('rackPlaceMsg');
     err.textContent = msg;
     err.classList.toggle('rkp-bad', !ok);
+    // Units that do not fit are the first thing to fix: the fields show.
+    if (!ok) rpEl('rackPlaceWhere').open = true;
+    // The tabs, the type picked, and Add named after it.
+    ['new', 'map'].forEach((tab) => {
+        const btn = rpEl(tab === 'new' ? 'rackPlaceTabNew' : 'rackPlaceTabMap');
+        btn.classList.toggle('active', _rp.tab === tab);
+        btn.setAttribute('aria-selected', String(_rp.tab === tab));
+        rpEl(tab === 'new' ? 'rackPlaceNewPane' : 'rackPlaceMapPane').hidden = _rp.tab !== tab;
+    });
+    const type = rpEl('rackPlaceType').value;
+    rpEl('rackPlaceTypes').querySelectorAll('.rkp-type').forEach((b) => {
+        const on = b.dataset.type === type;
+        b.setAttribute('aria-checked', String(on));
+        b.tabIndex = on ? 0 : -1;
+    });
+    rpEl('rackPlaceNewBtn').textContent = t('Add {type}', { type: rvTypeName(type) });
+    rpEl('rackPlaceNewBtn').hidden = _rp.tab !== 'new';
     // Units are not a VM's or a container's to take: they go onto a host.
     const list = placeCandidates(rack, rpEl('rackPlaceFilter').value).filter((c) => !isVirtualType(c.node.type));
     const heads = ['In this rack, not placed yet', 'In no group', 'In another group: placing it here moves it'];
@@ -2910,6 +2953,10 @@ function renderPlaceDialog() {
     }).join('');
     const more = list.length > RP_LIST_MAX ? `<li class="rkp-more">${escapeHtml(t('…and {n} more. Narrow the filter to see them.', { n: list.length - RP_LIST_MAX }))}</li>` : '';
     rpEl('rackPlaceList').innerHTML = rows + more || `<li class="rkp-more">${escapeHtml(t('No device matches.'))}</li>`;
+    // The tab's count: this rack's own devices waiting for units.
+    const waiting = list.filter((c) => c.rank === 0).length;
+    rpEl('rackPlaceMapCount').textContent = waiting ? String(waiting) : '';
+    rpEl('rackPlaceMapCount').title = waiting ? t('In this rack, not placed yet') : '';
     rpEl('rackPlaceNewBtn').disabled = !ok;
 }
 
@@ -3025,7 +3072,39 @@ function pickInPlaceDialog(pick) {
         const item = e.target.closest('.rkp-item');
         if (item && !item.disabled) pickInPlaceDialog({ nodeId: item.dataset.node });
     });
-    rpEl('rackPlaceNewBtn').addEventListener('click', () => pickInPlaceDialog({ type: rpEl('rackPlaceType').value }));
+    rpEl('rackPlaceNewBtn').addEventListener('click', () => pickInPlaceDialog({ type: rpEl('rackPlaceType').value, name: rpEl('rackPlaceName').value }));
+    // Enter in the name adds it, as Add does.
+    rpEl('rackPlaceName').addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        if (!rpEl('rackPlaceNewBtn').disabled) rpEl('rackPlaceNewBtn').click();
+    });
+    rpEl('rackPlaceTabs').addEventListener('click', (e) => {
+        const tab = e.target.closest('[data-rkp-tab]');
+        if (!tab) return;
+        _rp.tab = tab.dataset.rkpTab;
+        renderPlaceDialog();
+        if (_rp.tab === 'map') rpEl('rackPlaceFilter').focus();
+    });
+    // The type grid: a click picks, a double click adds; arrows move the pick
+    // as a radio group's do, and Enter adds the one picked.
+    const typeGrid = rpEl('rackPlaceTypes');
+    const pickType = (type, focus) => {
+        rpEl('rackPlaceType').value = type;
+        renderPlaceDialog();
+        const b = typeGrid.querySelector(`[data-type="${CSS.escape(type)}"]`);
+        if (focus && b) b.focus();
+    };
+    typeGrid.addEventListener('click', (e) => { const b = e.target.closest('.rkp-type'); if (b) pickType(b.dataset.type, true); });
+    typeGrid.addEventListener('dblclick', (e) => { if (e.target.closest('.rkp-type') && !rpEl('rackPlaceNewBtn').disabled) rpEl('rackPlaceNewBtn').click(); });
+    typeGrid.addEventListener('keydown', (e) => {
+        const all = [...typeGrid.querySelectorAll('.rkp-type')];
+        const i = all.findIndex((b) => b.dataset.type === rpEl('rackPlaceType').value);
+        const cols = Math.max(1, Math.round(typeGrid.clientWidth / ((all[0] && all[0].offsetWidth) || 1)));
+        const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols }[e.key];
+        if (step) { e.preventDefault(); const n = all[Math.min(all.length - 1, Math.max(0, i + step))]; if (n) pickType(n.dataset.type, true); }
+        else if (e.key === 'Enter') { e.preventDefault(); if (!rpEl('rackPlaceNewBtn').disabled) rpEl('rackPlaceNewBtn').click(); }
+    });
     // Enter in the filter takes the first device that fits.
     rpEl('rackPlaceFilter').addEventListener('keydown', (e) => {
         if (e.key !== 'Enter') return;

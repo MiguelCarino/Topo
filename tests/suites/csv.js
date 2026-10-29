@@ -96,9 +96,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('NAT only on a routing device', dev.rows.find((r) => r[0] === 'rt')[col('nat')] === 'true' && pcRow[col('nat')] === '');
     const ifs = csvInterfacesSheet();
     ok('interfaces.csv is keyed by device id and interface id, with the type', ifs.headers.slice(0, 4).join(',') === 'device_id,device,type,interface_id' && ifs.rows.some((r) => r[0] === 'pc1' && r[2] === 'pc' && r[3] === 'i1') && ifs.rows.some((r) => r[0] === 'pc2' && r[3] === 'i1'));
-    ok('and a device with no interface is a row of its own', ifs.rows.some((r) => r.join(',') === 'sw,SW-1,switch,,,,,,'), ifs.rows.filter((r) => r[0] === 'sw').map((r) => r.join(',')).join(' | '));
+    ok('and a device with no interface is a row of its own', ifs.rows.some((r) => r.slice(0, 9).join(',') === 'sw,SW-1,switch,,,,,,' && r.slice(9).every((c) => c === '')), ifs.rows.filter((r) => r[0] === 'sw').map((r) => r.join(',')).join(' | '));
     const cab = csvCablesSheet();
-    ok('cables.csv names both ends and their ports', cab.rows.some((r) => r.join(',') === 'l1,sw,SW-1,1,pc1,PC-1,eth0,,,,,,'), cab.rows.map((r) => r.join(',')).join(' | '));
+    ok('cables.csv names both ends and their ports', cab.rows.some((r) => r.slice(0, 9).join(',') === 'l1,sw,SW-1,1,pc1,PC-1,eth0,,' && r.slice(9).every((c) => c === '')), cab.rows.map((r) => r.join(',')).join(' | '));
     const fnd = csvFindingsSheet();
     // The last column is an accepted finding's reason (p2-report), empty while it is open.
     ok('findings.csv has one row per finding', fnd.rows.length === topologyFindings().length && fnd.headers.join(',') === 'severity,subject,check,finding,accepted');
@@ -405,13 +405,19 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const fkeys = () => topologyFindings().filter(isCountedFinding).map((f) => `${f.check}|${f.subject}|${f.detail}`).sort().join('\n');
     const orders = ['DIC', 'IDC', 'DCI', 'ICD'];
     const bad = Object.fromEntries(orders.map((o) => [o, []]));
+    // A template with Wi-Fi networks (Smart Home, Retail, Hotel, the
+    // Showcase, Common Errors since W2) has radios and associations that
+    // name them, and its networks name subnets: as the README says, the
+    // subnets and Wi-Fi sheets go in first (SW), then the three in each order.
+    const wifiFirst = () => ((state.wifi || []).length ? 'SW' : '');
     Object.keys(templatesData).forEach((key) => {
       loadDocState(cloneData(templatesData[key])); autoBindLinks();
       const want = { nodes: state.nodes.map((n) => `${n.id}:${n.type}`).sort().join(), cables: cableSig(), findings: fkeys() };
-      const sheets = { D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
+      const sheets = { S: csvText(csvSubnetsSheet()), W: csvText(csvWifiSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
+      const first = wifiFirst();
       orders.forEach((order) => {
         blank();
-        const conflicts = importAll([...order].map((k) => sheets[k]));
+        const conflicts = importAll([...(first + order)].map((k) => sheets[k]));
         const got = { nodes: state.nodes.map((n) => `${n.id}:${n.type}`).sort().join(), cables: cableSig(), findings: fkeys() };
         const diff = ['nodes', 'cables', 'findings'].filter((k) => got[k] !== want[k]);
         // The findings that differ, said, so a failure names them.
@@ -440,14 +446,20 @@ window.addEventListener('load', () => { setTimeout(async () => {
     Object.keys(templatesData).forEach((key) => {
       loadDocState(cloneData(templatesData[key])); autoBindLinks();
       const want = { nodes: devSig(), cables: cableSig(), findings: fkeys(), nets: netSig(), grps: grpSig(), eff: effSig() };
-      const sheets = { S: csvText(csvSubnetsSheet()), G: csvText(csvGroupsSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
-      Object.keys(full).forEach((order) => {
+      const sheets = { S: csvText(csvSubnetsSheet()), G: csvText(csvGroupsSheet()), W: csvText(csvWifiSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
+      // With Wi-Fi, the subnets and Wi-Fi sheets first whichever the order
+      // (a Wi-Fi network names its subnet, a radio or a cable its network),
+      // and only groups.csv last.
+      const wifiOrder = { SGDIC: 'SWGDIC', DICSG: 'SWDICG' };
+      const hasWifi = (state.wifi || []).length > 0;
+      Object.keys(full).forEach((key0) => {
+        const order = hasWifi ? wifiOrder[key0] : key0;
         blank();
         // With the review's "make the groups the sheet names" ticked, as a
         // person importing devices.csv on its own would.
         const conflicts = [];
         [...order].forEach((k) => { const sh = sheetOf(sheets[k]); const pl = csvPlan(sh, csvAutoMap(sh), { createGroups: true });
-          pl.rows.filter((r) => r.status === 'conflict').forEach((r) => conflicts.push(`: `)); applyCsvPlan(pl); });
+          pl.rows.filter((r) => r.status === 'conflict').forEach((r) => conflicts.push(`${r.name}: ${r.why}`)); applyCsvPlan(pl); });
         const got = { nodes: devSig(), cables: cableSig(), findings: fkeys(), nets: netSig(), grps: grpSig(), eff: effSig() };
         const diff = Object.keys(want).filter((k) => got[k] !== want[k]);
         if (conflicts.length || diff.length) {
@@ -455,12 +467,12 @@ window.addEventListener('load', () => { setTimeout(async () => {
           const sep = k0 === 'nodes' || k0 === 'findings' ? '\n' : ' ';
           const a = k0 ? want[k0].split(sep) : [], b = k0 ? got[k0].split(sep) : [];
           const i = a.findIndex((x, j) => x !== b[j]);
-          full[order].push(`${key}: ${diff.join('+')} ${k0 ? `${a[i]} ≠ ${b[i]}`.slice(0, 300) : ''} ${conflicts.slice(0, 2).join(' | ')}`);
+          full[key0].push(`${key}: ${diff.join('+')} ${k0 ? `${a[i]} ≠ ${b[i]}`.slice(0, 300) : ''} ${conflicts.slice(0, 2).join(' | ')}`);
         }
       });
     });
     ok('every template with its subnets and groups round-trips whole: networks, groups, every field, inherited gateway and DNS (subnets and groups first)', !full.SGDIC.length, full.SGDIC.slice(0, 2).join(' ; '));
-    ok('and with subnets.csv and groups.csv imported last', !full.DICSG.length, full.DICSG.slice(0, 2).join(' ; '));
+    ok('and with subnets.csv and groups.csv imported last (groups.csv only, on a template with Wi-Fi)', !full.DICSG.length, full.DICSG.slice(0, 2).join(' ; '));
 
     // The two things the round trip above found (Round 4 of the groups
     // work): a group devices.csv makes for rows with units must be a rack, or

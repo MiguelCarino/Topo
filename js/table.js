@@ -57,8 +57,11 @@ const TV_TABS = [
     { key: 'cables', label: 'Cables', plain: true },
     { key: 'ports', label: 'Ports' },
     { key: 'subnets', label: 'Subnets' },
-    { key: 'groups', label: 'Groups', plain: true }
+    { key: 'groups', label: 'Groups', plain: true },
+    // Only while the network has something wireless (wifiOffered, js/wifi.js).
+    { key: 'wifi', label: 'Wi-Fi', when: () => wifiOffered() }
 ];
+const tvTabOffered = (key) => { const tb = TV_TABS.find((x) => x.key === key); return !!tb && (!tb.when || tb.when()); };
 
 const _tv = {
     tab: 'devices',
@@ -66,7 +69,7 @@ const _tv = {
     expanded: new Set(),            // device ids whose interfaces are open
     // Interfaces and subnets are not things the map can select, so their rows
     // are ticked here; devices and cables are ticked in state.selection.
-    checked: { interfaces: new Set(), ports: new Set(), subnets: new Set(), groups: new Set() },
+    checked: { interfaces: new Set(), ports: new Set(), subnets: new Set(), groups: new Set(), wifi: new Set() },
     anchor: null,                   // the last row ticked, for shift-range
     cursor: { row: null, col: null },
     rows: [],                       // on screen, in display order (after the search)
@@ -138,7 +141,7 @@ function applyView() {
 }
 
 function showTableTab(key) {
-    if (!TV_TABS.some((tb) => tb.key === key)) return;
+    if (!tvTabOffered(key)) return;
     cancelEdit();
     if (_tv.tab !== key) { _tv.tab = key; _tv.cursor = { row: null, col: null }; _tv.cursorChosen = false; _tv.anchor = null; }
     renderTableView(true);
@@ -228,11 +231,52 @@ function tvStatusParse(text) {
     return key ? { value: key } : { error: true };
 }
 // A cable's own facts (CABLE_FIELDS, js/model.js), kept in link.cable.
+// A wireless or a VPN link has no cable: a dash, and nothing to type (what
+// it may hold stays stored, as the link panel keeps it).
 function cableColumn(key, opts) {
     return schemaColumn(CABLE_FIELDS, key, 'link', Object.assign({ key: `cable:${key}`, plain: true, sort: 'text',
         get: (target) => cableOf(target, key),
         set: (target, value) => { setCableField(target, key, value); },
-        show: (row) => shown(row.data[key]) }, opts));
+        can: (row) => !tvNoCable(row),
+        show: (row) => (tvNoCable(row) ? shown('—', { muted: true }) : shown(row.data[key])) }, opts));
+}
+const tvLinkOf = (row) => getLink(row.ref.linkId);
+const tvNoCable = (row) => { const l = tvLinkOf(row); const m = l ? effectiveMedium(l) : ''; return m === 'wireless' || m === 'vpn'; };
+
+// ---- Wi-Fi (js/model.js "Wi-Fi", js/wifi.js) ----
+// A radio's standard and bands on the Interfaces tab, its channels read
+// there too (they are picked in the device editor's radio block, from the
+// ones valid for the band); a link's SSID, band and signal on the Cables
+// tab; the networks themselves on a Wi-Fi tab of their own. A dash where it
+// does not apply: a wired interface has no radio, a cable no SSID. What is
+// inferred rather than said (a link's SSID and band, a client's bands from
+// its standard) is greyed, as an inherited gateway is.
+const tvIfaceOf = (row) => findTarget('iface', row.ref);
+const tvIsRadio = (row) => ifaceIsWireless(tvIfaceOf(row));
+const tvWifiLink = (row) => { const l = tvLinkOf(row); return !!l && !!wifiLinkEnds(l); };
+const tvBlank = (text) => { const v = String(text == null ? '' : text).trim(); return !v || v === '—' || v.toLowerCase() === t('Auto').toLowerCase() ? '' : v; };
+const tvDash = () => shown('—', { muted: true });
+// An SSID by its id or its name (one network with it); '' is automatic.
+function tvSsidParse(text) {
+    const v = tvBlank(text);
+    if (!v) return { value: '' };
+    if (wifiById(v)) return { value: v };
+    const hits = (state.wifi || []).filter((w) => String(w.ssid || '').toLowerCase() === v.toLowerCase());
+    return hits.length === 1 ? { value: hits[0].id } : { error: true };
+}
+function tvSetRadio(iface, parts) {
+    const r = applyRadioParts(radioOf(iface), parts);
+    if (r) iface.radio = r; else delete iface.radio;
+}
+// "2.4: ch 6 · 5: ch 36/80": the bands that say a channel or a width.
+function tvChannelsText(radio) {
+    return (radio && radio.bands || []).filter((b) => b.channel !== undefined || b.width).map((b) =>
+        `${b.band}: ${b.channel !== undefined ? 'ch ' + b.channel : t('Auto').toLowerCase()}${b.width ? '/' + b.width : ''}`).join(' · ');
+}
+function wifiColumn(key, opts) {
+    return Object.assign({ key: `wf:${key}`, rec: 'wifi', editor: 'text', sort: 'text', same,
+        get: (w) => w[key], set: (w, v) => { if (v === '' || v === undefined || v === false) delete w[key]; else w[key] = v; },
+        show: (row) => shown(row.data[key]) }, opts);
 }
 
 // A port's own facts (node.portAttrs, js/model.js). The record a port row's
@@ -391,7 +435,29 @@ const TV_COLS = {
         { key: 'vendor', label: 'Vendor', rec: 'iface', editor: null, sort: 'text', show: (row) => shown(row.data.vendor) },
         schemaColumn(IFACE_FIELDS, 'wireless', 'iface', { sort: 'text', show: (row) => shown(row.data.wireless ? '✓' : '') }),
         { key: 'cable', label: 'Cable', plain: true, rec: 'iface', editor: null, sort: 'text', show: (row) => cableCell(row) },
-        { key: 'subnet', label: 'Subnet', rec: 'iface', editor: null, mono: true, sort: 'ip', show: (row) => subnetCell(row) }
+        { key: 'subnet', label: 'Subnet', rec: 'iface', editor: null, mono: true, sort: 'ip', show: (row) => subnetCell(row) },
+        { key: 'radio:standard', label: 'Wi-Fi standard', rec: 'iface', editor: 'select', sort: 'text', same, when: () => wifiOffered(),
+          can: tvIsRadio,
+          options: () => [{ value: '', label: '—' }].concat(WIFI_STANDARDS.map((k) => ({ value: k, label: wifiStandardName(k) }))),
+          parse: (text) => { const v = tvBlank(text); if (!v) return { value: '' }; const k = wifiStandardKey(v); return k ? { value: k } : { error: true }; },
+          get: (i) => (radioOf(i) || {}).standard || '',
+          set: (i, v) => tvSetRadio(i, { standard: v }),
+          show: (row) => (tvIsRadio(row) ? shown(wifiStandardName((radioOf(tvIfaceOf(row)) || {}).standard)) : tvDash()) },
+        { key: 'radio:bands', label: 'Bands', rec: 'iface', editor: 'text', mono: true, sort: 'text', same, when: () => wifiOffered(),
+          can: tvIsRadio,
+          parse: (text) => { const v = tvBlank(text); if (!v) return { value: '' }; const l = wifiBandList(v); return l && l.length ? { value: l.join(' ') } : { error: true }; },
+          get: (i) => radioPartValue(radioOf(i), 'bands') || '',
+          set: (i, v) => tvSetRadio(i, { bands: v }),
+          show: (row) => {
+              if (!tvIsRadio(row)) return tvDash();
+              const radio = radioOf(tvIfaceOf(row));
+              const own = radioPartValue(radio, 'bands');
+              if (own) return shown(wifiBandsText(own.split(' ')));
+              const std = radio && standardBands(radio.standard);
+              return std ? shown(wifiBandsText(std), { muted: true, title: t('From the standard') }) : shown('');
+          } },
+        { key: 'radio:channels', label: 'Channels', rec: 'iface', editor: null, mono: true, sort: 'text', when: () => wifiOffered(),
+          show: (row) => (tvIsRadio(row) ? shown(tvChannelsText(radioOf(tvIfaceOf(row)))) : tvDash()) }
     ],
     cables: [
         schemaColumn(LINK_FIELDS, 'source', 'link', { label: 'From', plain: true, sort: 'text', show: (row) => shown(row.data.from) }),
@@ -408,7 +474,49 @@ const TV_COLS = {
         cableColumn('label', { mono: true }),
         cableColumn('length'),
         cableColumn('color'),
-        cableColumn('via', { mono: true })
+        cableColumn('via', { mono: true }),
+        { key: 'wifi:ssid', label: 'SSID', rec: 'link', editor: 'select', sort: 'text', same, when: () => wifiOffered(),
+          can: tvWifiLink,
+          options: (row) => {
+              const l = tvLinkOf(row);
+              const c = l ? linkWifiChoices(l) : null;
+              return [{ value: '', label: t('Auto') }].concat((c ? c.ssids : []).map((id) => ({ value: id, label: wifiLabel(wifiById(id)) })));
+          },
+          parse: tvSsidParse,
+          get: (l) => linkWifiOf(l, 'ssid') || '',
+          set: (l, v) => { setLinkWifi(l, 'ssid', v || undefined); },
+          show: (row) => {
+              const l = tvLinkOf(row);
+              if (!l || !wifiLinkEnds(l)) return tvDash();
+              const own = linkWifiOf(l, 'ssid');
+              if (own) return shown(wifiLabel(wifiById(own)));
+              const auto = linkWifiSsid(l);
+              return auto ? shown(wifiLabel(wifiById(auto)), { muted: true, title: t('Worked out by Topo') }) : shown('');
+          } },
+        { key: 'wifi:band', label: 'Band', rec: 'link', editor: 'select', mono: true, sort: 'text', same, when: () => wifiOffered(),
+          can: tvWifiLink,
+          options: (row) => {
+              const l = tvLinkOf(row);
+              const c = l ? linkWifiChoices(l) : null;
+              return [{ value: '', label: t('Auto') }].concat((c ? c.bands : WIFI_BANDS).map((b) => ({ value: b, label: wifiBandName(b) })));
+          },
+          parse: (text) => { const v = tvBlank(text); if (!v) return { value: '' }; const b = wifiBandKey(v); return b ? { value: b } : { error: true }; },
+          get: (l) => linkWifiOf(l, 'band') || '',
+          set: (l, v) => { setLinkWifi(l, 'band', v || undefined); },
+          show: (row) => {
+              const l = tvLinkOf(row);
+              if (!l || !wifiLinkEnds(l)) return tvDash();
+              const own = linkWifiOf(l, 'band');
+              if (own) return shown(wifiBandName(own));
+              const auto = linkWifiBand(l);
+              return auto ? shown(wifiBandName(auto), { muted: true, title: t('Worked out by Topo') }) : shown('');
+          } },
+        { key: 'wifi:signal', label: 'Signal (dBm)', rec: 'link', editor: 'text', mono: true, sort: 'num', same, when: () => wifiOffered(),
+          can: tvWifiLink,
+          parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v) return { value: undefined }; const n = asWifiSignal(v); return n === undefined ? { error: true } : { value: n }; },
+          get: (l) => linkWifiOf(l, 'signal'),
+          set: (l, v) => { setLinkWifi(l, 'signal', v); },
+          show: (row) => { const l = tvLinkOf(row); if (!l || !wifiLinkEnds(l)) return tvDash(); const v = linkWifiOf(l, 'signal'); return shown(v === undefined ? '' : v); } }
     ],
     // Ports, Port and VLAN stay English (technical vocabulary); Device,
     // Label, Connected to and Cable are plain words.
@@ -529,8 +637,49 @@ const TV_COLS = {
             show: (row) => (row.data.numbering ? shown(t(row.data.numbering === 'top' ? 'Top down' : 'Bottom up')) : shown('—', { muted: true })) }),
         { key: 'g:deep', label: 'Devices', plain: true, rec: 'group', editor: null, mono: true, sort: 'num',
           show: (row) => shown(row.data.deep, row.data.own && row.data.own !== row.data.deep ? { title: t('{n} here', { n: row.data.own }) } : {}) }
+    ],
+    // The rail's Wi-Fi tab as rows (js/wifi.js). The trade's words, English,
+    // but for the hidden flag, the access points and the clients.
+    wifi: [
+        wifiColumn('ssid', { label: 'SSID',
+            parse: (text) => { const v = wifiSsidText(text); return v ? { value: v } : { error: true }; } }),
+        wifiColumn('security', { label: 'Security', editor: 'select',
+            options: () => [{ value: '', label: '—' }].concat(WIFI_SECURITY.map((k) => ({ value: k, label: wifiSecurityName(k) }))),
+            parse: (text) => { const v = tvBlank(text); if (!v) return { value: '' }; const k = wifiSecurityKey(v); return k ? { value: k } : { error: true }; },
+            get: (w) => w.security || '',
+            show: (row) => shown(row.data.securityName) }),
+        // Every band is the default, and is no value: "2.4 5 6" reads back as ''.
+        wifiColumn('bands', { label: 'Bands', mono: true,
+            parse: (text) => { const v = tvBlank(text); if (!v) return { value: '' }; const l = wifiBandList(v); return l && l.length ? { value: (asWifiBands(l) || []).join(' ') } : { error: true }; },
+            get: (w) => (asWifiBands(w.bands) || []).join(' '),
+            set: (w, v) => { if (v) w.bands = v.split(' '); else delete w.bands; },
+            edit: (row) => row.data.bands.join(' '),
+            show: (row) => shown(row.data.bandsText) }),
+        wifiColumn('network', { label: 'Subnet', editor: 'select', mono: true,
+            options: () => [{ value: '', label: t('— None') }].concat(state.networks.slice().sort((a, b) => compareCidr(a.cidr, b.cidr))
+                .map((n) => ({ value: n.id, label: networkLabel(n) + (Number.isInteger(n.vlan) ? ` · VLAN ${n.vlan}` : '') }))),
+            parse: (text) => {
+                const v = tvBlank(text);
+                if (!v) return { value: '' };
+                const net = networkById(v) || state.networks.find((n) => n.cidr === canonicalCidr(v) || networkLabel(n).toLowerCase() === v.toLowerCase());
+                return net ? { value: net.id } : { error: true };
+            },
+            get: (w) => w.network || '',
+            edit: (row) => row.data.networkId,
+            show: (row) => shown(row.data.subnet + (row.data.vlan != null ? ` · VLAN ${row.data.vlan}` : '')) }),
+        wifiColumn('hidden', { label: 'Hidden network', plain: true, editor: 'bool', parse: tvBoolParse,
+            get: (w) => !!w.hidden, same: (a, b) => !!a === !!b,
+            set: (w, v) => { if (v) w.hidden = true; else delete w.hidden; },
+            show: (row) => shown(row.data.hidden ? '✓' : '') }),
+        { key: 'wf:aps', label: 'Access points', plain: true, rec: 'wifi', editor: null, sort: 'text',
+          show: (row) => shown(row.data.aps.join(', ')) },
+        { key: 'wf:clients', label: 'Clients', plain: true, rec: 'wifi', editor: null, mono: true, sort: 'num',
+          show: (row) => shown(row.data.clients.length, { title: row.data.clients.join(', ') }) }
     ]
 };
+// The columns a tab shows now: a column with `when` only while it applies
+// (the Wi-Fi ones while the network has something wireless).
+const tvCols = (tab) => TV_COLS[tab].filter((c) => !c.when || c.when());
 // Only a declared network has a record to edit.
 TV_COLS.subnets.forEach((c) => { if (c.editor && !c.can) c.can = (row) => !!row.ref.netId; });
 
@@ -567,7 +716,7 @@ function subnetCell(row) {
     return net ? shown(networkLabel(net)) : shown(p.networkStr, { muted: true, title: t('Not declared: implied by the addresses') });
 }
 
-const colsOf = (row) => (row.sub ? TV_SUB_COLS : TV_COLS[_tv.tab]);
+const colsOf = (row) => (row.sub ? TV_SUB_COLS : tvCols(_tv.tab));
 const colByKey = (row, key) => colsOf(row).find((c) => c.key === key) || null;
 const canEdit = (row, col) => !!(row && col && col.editor && (!col.can || col.can(row)));
 
@@ -588,6 +737,7 @@ function findTarget(rec, ref, doc = state) {
     }
     if (rec === 'net') return ref.netId ? (doc.networks || []).find((n) => n.id === ref.netId) || null : null;
     if (rec === 'group') return (doc.groups || []).find((g) => g.id === ref.groupId) || null;
+    if (rec === 'wifi') return (doc.wifi || []).find((w) => w.id === ref.wifiId) || null;
     return null;
 }
 
@@ -601,6 +751,7 @@ function tvBuildRows(tab) {
     if (tab === 'cables') return reportConnections().map((c) => ({ key: `l:${c.id}`, rec: 'link', ref: { linkId: c.id }, data: c }));
     if (tab === 'ports') return reportPorts().map((p) => ({ key: `p:${p.nodeId}:${p.portId}`, rec: 'port', ref: { nodeId: p.nodeId, portId: p.portId }, data: p }));
     if (tab === 'groups') return reportGroups().map((g) => ({ key: `g:${g.id}`, rec: 'group', ref: { groupId: g.id }, data: g }));
+    if (tab === 'wifi') return reportWifi().map((w) => ({ key: `w:${w.id}`, rec: 'wifi', ref: { wifiId: w.id }, data: w }));
     return reportSubnets().map((s) => ({ key: `s:${s.network}`, rec: 'net', ref: { netId: s.id }, data: s }));
 }
 
@@ -633,7 +784,7 @@ let _tvSortDir = 1;   // so a blank stays last when the order is reversed
 function tvSortedRows(tab) {
     const rows = tvBuildRows(tab);
     const s = _tv.sort[tab];
-    const col = s && TV_COLS[tab].find((c) => c.key === s.col);
+    const col = s && tvCols(tab).find((c) => c.key === s.col);
     if (col) {
         _tvSortDir = s.dir;
         rows.forEach((r, i) => { r.seq = i; });
@@ -665,6 +816,7 @@ function rowName(row) {
     if (row.rec === 'link') return `${row.data.from} ↔ ${row.data.to}`;
     if (row.rec === 'port') return `${row.data.device} / ${row.data.port}`;
     if (row.rec === 'group') return row.data.path;
+    if (row.rec === 'wifi') return row.data.ssid || t('Wi-Fi network');
     return row.data.network;
 }
 
@@ -681,7 +833,10 @@ function renderTableView(force) {
     const hadFocus = _tv.keepFocus || view.contains(document.activeElement);
     _tv.keepFocus = false;
 
+    // A tab that stopped applying (the last AP deleted) gives way to Devices.
+    if (!tvTabOffered(_tv.tab)) { _tv.tab = 'devices'; _tv.cursor = { row: null, col: null }; _tv.cursorChosen = false; _tv.anchor = null; }
     document.querySelectorAll('#tableView [data-tvtab]').forEach((b) => {
+        b.classList.toggle('hidden', !tvTabOffered(b.dataset.tvtab));
         const on = b.dataset.tvtab === _tv.tab;
         b.classList.toggle('active', on);
         b.setAttribute('aria-selected', String(on));
@@ -720,7 +875,7 @@ function renderTableView(force) {
     if (tabTicks) [...tabTicks].forEach((k) => { if (!alive.has(k)) tabTicks.delete(k); });
     [..._tv.expanded].forEach((id) => { if (!getNode(id)) _tv.expanded.delete(id); });
 
-    const cols = TV_COLS[tab];
+    const cols = tvCols(tab);
     const top = rows.filter((r) => !r.sub);
     const ticked = top.filter(rowChecked).length;
     const sort = _tv.sort[tab];
@@ -1007,6 +1162,7 @@ function afterTableEdit() {
     else refreshSelectedNodeDiagnostics();
     renderNetworksPanel();
     renderGroupsPanel();
+    renderWifiPanel();
 }
 
 // ---- Selecting ----
@@ -1019,6 +1175,8 @@ function focusRow(row) {
     // A port: the cable in it, else its switch.
     if (row.rec === 'port') { focusOnMap(row.data.linkId ? { type: 'link', id: row.data.linkId } : { type: 'node', id: row.ref.nodeId }); return; }
     if (row.rec === 'group') { selectGroupMembers(row.ref.groupId); return; }
+    // A Wi-Fi network: its clients, as its card's Select clients does.
+    if (row.rec === 'wifi') { selectWifiClients(row.ref.wifiId); return; }
     if (row.ref.netId) { selectNetworkMembers(row.ref.netId); return; }
     const nodes = row.data.nodeIds.map(getNode).filter(Boolean);
     selectEntries(nodes.map((n) => ({ type: 'node', id: n.id })));
@@ -1082,7 +1240,7 @@ function pasteTargets() {
     const at = Math.max(0, top.findIndex((r) => r.key === key));
     return { rows: top.slice(at), mode: 'down', from: top[at] || null };
 }
-const pasteColumns = (tab = _tv.tab) => TV_COLS[tab].filter((c) => c.editor);
+const pasteColumns = (tab = _tv.tab) => tvCols(tab).filter((c) => c.editor);
 
 // A pasted block: one value per line. A spreadsheet ends its copy with a line
 // break and puts a tab between columns, so the last empty line is dropped and
@@ -1099,7 +1257,7 @@ function pasteLines(text) {
 //   skip    a blank line, or a column this row does not have (NAT on a
 //           switch, a subnet nobody declared): left as it is
 function planPaste(colKey, text, targets = pasteTargets(), tab = _tv.tab) {
-    const col = TV_COLS[tab].find((c) => c.key === colKey);
+    const col = tvCols(tab).find((c) => c.key === colKey);
     const lines = pasteLines(text);
     const cells = [];
     let extra = 0;
@@ -1139,7 +1297,7 @@ function planPaste(colKey, text, targets = pasteTargets(), tab = _tv.tab) {
 function pasteFindingsDelta(plan) {
     const changes = plan.cells.filter((c) => c.status === 'change');
     if (!changes.length) return [];
-    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups });
+    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi });
     changes.forEach((c) => { const target = findTarget(plan.col.rec, c.row.ref, scratch); if (target) plan.col.set(target, c.value, scratch); });
     return findingsDelta(topologyFindings(), diagnoseDoc(scratch).findings);
 }

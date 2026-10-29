@@ -540,6 +540,10 @@ const PARALLEL_BOW = 34;
 // stylesheet, so without it a traced link rasterises as a plain solid line.
 const FLOW_CLASS = { utp: 'flow-utp', fiber: 'flow-fiber', wireless: 'flow-wireless', powerline: 'flow-powerline', vpn: 'flow-vpn' };
 const FLOW_DASH = { utp: '7 5', fiber: '22 8', wireless: 'none', powerline: '9 3 2 3 2 3', vpn: '12 4 2 4' };
+// A wireless link at rest is dashed 4 4; one on 6 GHz is a finer 2 3 of the
+// same purple, so the band reads off the line itself (js/ui.js). Traced, every
+// radio link drops its dash for the ))) arcs, as before.
+const WIFI_6G_DASH = '2 3';
 
 // One ")))" wave repeat, and its measured width in px (filled on first use).
 const WAVE_UNIT = ')  ';
@@ -1130,7 +1134,15 @@ const IFACE_FIELDS = [
       fromText: (text) => {
           const [mode, ...members] = String(text == null ? '' : text).trim().split(/[\s,;]+/).filter(Boolean);
           return mode && Object.prototype.hasOwnProperty.call(BOND_MODES, mode) && members.length ? { mode, members } : null;
-      } }
+      } },
+    // The radio's standard, bands, channels and broadcast SSIDs ("Wi-Fi"
+    // below; document v12). Read and written on a wireless interface only,
+    // as a faceplate's port names are only a switch's: a NIC made wired in
+    // this session keeps it in memory, but it does not leave in a file or a
+    // sealed link. In a spreadsheet it is several columns (RADIO_CSV_PARTS).
+    { key: 'radio', kind: 'raw', omit: true, label: 'Radio',
+      read: (v, src) => (ifaceIsWireless(src) ? normalizeRadio(v) : undefined),
+      write: (v, rec) => (rec && ifaceIsWireless(rec) ? normalizeRadio(v) : undefined) }
 ];
 
 const NODE_FIELDS = [
@@ -1313,7 +1325,11 @@ const LINK_FIELDS = [
     { key: 'targetIface', kind: 'raw', label: 'To port', csv: 'to_port', table: 'show',
       read: (v) => asOptionalText(v) || null, write: (v) => v || undefined },
     // CABLE_FIELDS above; document v4.
-    { key: 'cable', kind: 'raw', label: 'Cable', read: readCable, write: writeCable }
+    { key: 'cable', kind: 'raw', label: 'Cable', read: readCable, write: writeCable },
+    // What a wireless association is: its SSID, band and signal ("Wi-Fi"
+    // below; document v12). readLinkWifi both ways, so only those three
+    // keys ever leave.
+    { key: 'wifi', kind: 'raw', label: 'Wi-Fi', read: readLinkWifi, write: readLinkWifi }
 ];
 
 const fieldRead = (f) => f.read || FIELD_KINDS[f.kind].read;
@@ -1896,6 +1912,521 @@ function planRenumber(netId, cidrText) {
     // One reason once: two members that both do not fit say so twice.
     plan.errors = [...new Set(errors)];
     return plan;
+}
+
+// ============================================================================
+// Wi-Fi (Review-Packs/Topo-wifi.md, document v12)
+// ============================================================================
+// Three records, each where the fact lives:
+//   iface.radio   what a wireless interface's radio is: its standard and the
+//                 bands it works on, with an AP's channel, width and power
+//                 per band and the SSIDs it broadcasts there. { standard,
+//                 bands: [{ band, channel, width, power, ssids }] }, every
+//                 key optional. Kept on a wireless interface only (the
+//                 IFACE_FIELDS row reads and writes it through
+//                 ifaceIsWireless), so a NIC turned into a wired one does not
+//                 carry a radio into a file or a sealed link.
+//   doc.wifi      the Wi-Fi networks, a list of their own like the subnets:
+//                 { id, ssid, security, bands, network, hidden }
+//                 (WIFI_FIELDS). `network` is a declared subnet, which gives
+//                 the VLAN through that subnet. There is no passphrase or PSK
+//                 field, and there never will be (the owner's decision): a
+//                 document travels in files and links, and a key written into
+//                 one is a key given to everyone who ever holds it.
+//   link.wifi     what one association is: { ssid, band, signal }, the SSID
+//                 by its id in doc.wifi, the band, and the signal in dBm.
+//
+// Defaults and inference come before fields, so very little of it needs
+// typing (the owner: "simplify the UI wherever possible"):
+//   - a radio with no bands listed offers its standard's bands; with no
+//     standard either it is unknown, and unknown is never a fault;
+//   - an AP broadcasts on each band every SSID whose own bands include that
+//     band, unless the band lists its SSIDs (apBandSsids);
+//   - a Wi-Fi network is on every band unless it says otherwise;
+//   - a link's SSID is the AP's only one when it broadcasts exactly one, and
+//     its band the best band the client, the AP and the SSID all have
+//     (linkWifiSsid, linkWifiBand). Neither is stored until somebody picks.
+// Nothing here is checked: the checks are the diagnostics' (W2), which read
+// these helpers, so a band the editor shows and a band a finding names are
+// one answer.
+//
+// The vocabulary is the trade's and stays English in the full editor (SSID,
+// WPA3, 5 GHz, 802.11ax, dBm): a standard is shown by its Wi-Fi Alliance
+// name with the IEEE letters, "Wi-Fi 6 (802.11ax)".
+
+// n, ac, ax, ax on 6 GHz (6E) and be, in the order they arrived. 'axe' is
+// 6E: the same 802.11ax, and the one generation the letters cannot tell
+// apart, so it has a key of its own.
+const WIFI_STANDARDS = ['n', 'ac', 'ax', 'axe', 'be'];
+const WIFI_STANDARD_INFO = {
+    n: { name: 'Wi-Fi 4', ieee: '802.11n', bands: ['2.4', '5'], maxWidth: 40 },
+    // An 802.11ac radio is 5 GHz only, but every Wi-Fi 5 access point and
+    // card sold has an 802.11n radio beside it on 2.4 GHz, and that pair is
+    // what "Wi-Fi 5" means on a box.
+    ac: { name: 'Wi-Fi 5', ieee: '802.11ac', bands: ['2.4', '5'], maxWidth: 160 },
+    ax: { name: 'Wi-Fi 6', ieee: '802.11ax', bands: ['2.4', '5'], maxWidth: 160 },
+    axe: { name: 'Wi-Fi 6E', ieee: '802.11ax', bands: ['2.4', '5', '6'], maxWidth: 160 },
+    be: { name: 'Wi-Fi 7', ieee: '802.11be', bands: ['2.4', '5', '6'], maxWidth: 320 }
+};
+// "Wi-Fi 6 (802.11ax)", or '' for no standard.
+const wifiStandardName = (key) => { const s = WIFI_STANDARD_INFO[key]; return s ? s.name + ' (' + s.ieee + ')' : ''; };
+// "Wi-Fi 6": the summary line's short form.
+const wifiStandardShort = (key) => { const s = WIFI_STANDARD_INFO[key]; return s ? s.name : ''; };
+// A standard however it is written: its key, its IEEE letters (802.11ax),
+// its Wi-Fi name (Wi-Fi 6, wifi6e, 6E, 7), or the whole label this page
+// prints. '' when it is none of them.
+// Controllers also write "11ax" and the PHY names: HT, VHT, HE, EHT.
+const WIFI_STANDARD_WORDS = { n: 'n', 4: 'n', ac: 'ac', 5: 'ac', ax: 'ax', 6: 'ax', axe: 'axe', '6e': 'axe', ax6e: 'axe', be: 'be', 7: 'be',
+    ht: 'n', vht: 'ac', he: 'ax', eht: 'be' };
+function wifiStandardWord(t) {
+    const s = t.replace(/wi-?fi|802\.11|ieee|[\s_-]+/g, '').replace(/^11(?=[a-z])/, '');
+    return Object.prototype.hasOwnProperty.call(WIFI_STANDARD_WORDS, s) ? WIFI_STANDARD_WORDS[s] : '';
+}
+function wifiStandardKey(v) {
+    // "Wi-Fi 6E (802.11ax)": the name before the brackets says which, as
+    // the letters inside cannot for 6 and 6E. Written the other way round,
+    // "802.11ax (Wi-Fi 6E)", the letters outside read as plain 6, so a 6E
+    // in the brackets wins: it is the more exact of the two answers.
+    const t = asText(v).toLowerCase();
+    const outside = wifiStandardWord(t.replace(/\(.*\)/, ''));
+    const inner = t.match(/\((.*)\)/);
+    return outside === 'ax' && inner && wifiStandardWord(inner[1]) === 'axe' ? 'axe' : outside;
+}
+const standardBands = (key) => (WIFI_STANDARD_INFO[key] ? WIFI_STANDARD_INFO[key].bands.slice() : null);
+
+// The bands, low to high, and best first: a link left to its default goes on
+// the highest band every side has, which is the faster and the less crowded.
+const WIFI_BANDS = ['2.4', '5', '6'];
+const WIFI_BANDS_BEST = ['6', '5', '2.4'];
+const wifiBandName = (band) => (WIFI_BANDS.includes(band) ? band + ' GHz' : '');
+// A band however it is written: 2.4, "2.4 GHz", 2g, 2, 24, 5g, 6e...
+function wifiBandKey(v) {
+    const s = asText(v).toLowerCase().replace(/\s+/g, '').replace(/ghz$|g$|e$/, '');
+    if (['2.4', '2', '24', '2,4'].includes(s)) return '2.4';
+    if (s === '5' || s === '6') return s;
+    return '';
+}
+// A list of bands, from a list or from one cell ("2.4 5", "2.4 GHz, 5 GHz"):
+// each once, low to high. An unknown word makes it null, so a cell that says
+// something else is refused rather than read as fewer bands.
+// "2,4 GHz" is 2.4 written with a decimal comma (Spanish, Portuguese,
+// Russian), and is read as one band before the commas between bands are.
+function wifiBandList(v) {
+    const words = Array.isArray(v) ? v : asText(v).replace(/(^|[^\d.])2,4(?!\d)/g, '$12.4').replace(/ghz/gi, ' ').split(/[\s,;/+&]+/).filter(Boolean);
+    const keys = words.map(wifiBandKey);
+    if (keys.some((k) => !k)) return null;
+    return WIFI_BANDS.filter((b) => keys.includes(b));
+}
+
+// A 20 MHz channel is the unit everything below counts in. Wider ones are
+// bonded blocks of them, and two radios on overlapping blocks share the air.
+const WIFI_WIDTHS = [20, 40, 80, 160, 320];
+// A whole number, or a string of one with its unit around it ("80 MHz").
+const asWifiNumber = (v, unit) => {
+    const s = typeof v === 'string' ? v.trim().toLowerCase().replace(unit, '').trim() : v;
+    const n = typeof s === 'string' && /^-?\d+$/.test(s) ? Number(s) : s;
+    return Number.isInteger(n) ? n : undefined;
+};
+// Kept when it is a channel number at all, valid for its band or not: a 5
+// GHz channel 13 is a slip somebody has to see, and the channel check says so
+// (wifiChannelValid). Blank or 0 is "auto", which is no value.
+const asWifiChannel = (v) => { const n = asWifiNumber(v, /^ch(annel)?\s*/); return n !== undefined && n >= 1 && n <= 255 ? n : undefined; };
+// One of the widths, or none ("auto").
+const asWifiWidth = (v) => { const n = asWifiNumber(v, /\s*mhz$/); return WIFI_WIDTHS.includes(n) ? n : undefined; };
+// Transmit power in dBm, as a controller shows it: optional, a whole number.
+const asWifiPower = (v) => { const n = asWifiNumber(v, /\s*dbm$/); return n !== undefined && n >= -20 && n <= 40 ? n : undefined; };
+// The signal of an association in dBm, -100 to 0. A signal is never
+// positive, so a 67 typed without its sign is -67, not a refusal.
+const asWifiSignal = (v) => {
+    let n = asWifiNumber(v, /\s*dbm$/);
+    if (n !== undefined && n > 0 && n <= 100) n = -n;
+    return n !== undefined && n >= -100 && n <= 0 ? n : undefined;
+};
+
+// 2.4 GHz: 1 to 14. 5 GHz: the 20 MHz channels a regulator has ever opened,
+// 36 to 177. 6 GHz: 1 to 233 in steps of 4 (1, 5, 9...).
+const WIFI_5G_CHANNELS = [36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144,
+    149, 153, 157, 161, 165, 169, 173, 177];
+function wifiChannelValid(band, channel) {
+    if (!Number.isInteger(channel)) return false;
+    if (band === '2.4') return channel >= 1 && channel <= 14;
+    if (band === '5') return WIFI_5G_CHANNELS.includes(channel);
+    if (band === '6') return channel >= 1 && channel <= 233 && (channel - 1) % 4 === 0;
+    return false;
+}
+// 2.4 GHz is at most 40 MHz wide, 320 MHz is 6 GHz only, and a standard is
+// at most as wide as it can bond (Wi-Fi 4: 40, Wi-Fi 5 and 6: 160, Wi-Fi 7:
+// 320). No width is auto, and no standard is unknown: neither is a fault.
+function wifiWidthValid(band, width, standard) {
+    if (width === undefined || width === null) return true;
+    if (!WIFI_WIDTHS.includes(width)) return false;
+    if (band === '2.4' && width > 40) return false;
+    if (width === 320 && band !== '6') return false;
+    const s = WIFI_STANDARD_INFO[standard];
+    return !s || width <= s.maxWidth;
+}
+// The frequencies a channel of this width takes, [low, high] in MHz, or null
+// when the channel is unknown or invalid. 2.4 GHz channels are 5 MHz apart
+// and 22 MHz wide, which is why only 1, 6 and 11 stay clear of each other; a
+// 40 MHz one there bonds the channel four above it (four below from 8 up,
+// where above would leave the band). On 5 and 6 GHz a wide channel is the
+// aligned block its primary falls in: 36-48 for 80 MHz on 36, 40, 44 or 48,
+// and from 149 up the blocks start again at 149.
+function wifiChannelSpan(band, channel, width) {
+    if (!wifiChannelValid(band, channel)) return null;
+    const w = WIFI_WIDTHS.includes(width) ? width : 20;
+    if (band === '2.4') {
+        const centre = channel === 14 ? 2484 : 2407 + 5 * channel;
+        if (w < 40) return [centre - 11, centre + 11];
+        const mid = channel <= 7 ? centre + 10 : centre - 10;
+        return [mid - 20, mid + 20];
+    }
+    const block = 4 * (w / 20);
+    const base = band === '5' ? (channel >= 149 ? 149 : 36) : 1;
+    const lo = base + Math.floor((channel - base) / block) * block;
+    const hi = lo + block - 4;
+    const f0 = band === '5' ? 5000 : 5950;
+    return [f0 + 5 * lo - 10, f0 + 5 * hi + 10];
+}
+// Two radios' channels share air: the same band and overlapping spans. a and
+// b are { band, channel, width }; an unknown channel overlaps nothing.
+function wifiChannelsOverlap(a, b) {
+    if (!a || !b || a.band !== b.band) return false;
+    const x = wifiChannelSpan(a.band, a.channel, a.width), y = wifiChannelSpan(b.band, b.channel, b.width);
+    return !!x && !!y && x[0] < y[1] && y[0] < x[1];
+}
+
+// Security, by key. WEP and WPA (TKIP) are here only so that a real site can
+// be written down as it is and then flagged.
+const WIFI_SECURITY = ['open', 'owe', 'wpa2', 'wpa3', 'wpa2/3', 'wpa2-ent', 'wpa3-ent', 'wep', 'wpa'];
+const WIFI_SECURITY_NAMES = { open: 'Open', owe: 'OWE (Enhanced Open)', wpa2: 'WPA2-Personal', wpa3: 'WPA3-Personal', 'wpa2/3': 'WPA2/WPA3-Personal',
+    'wpa2-ent': 'WPA2-Enterprise', 'wpa3-ent': 'WPA3-Enterprise', wep: 'WEP', wpa: 'WPA (TKIP)' };
+const wifiSecurityName = (key) => WIFI_SECURITY_NAMES[key] || '';
+// A security mode however a controller or a person writes it: its key, its
+// name, WPA2-PSK, SAE, "WPA2/WPA3", "Enhanced Open"... '' when none of them.
+const WIFI_SECURITY_WORDS = {
+    open: 'open', none: 'open', opn: 'open', owe: 'owe', enhancedopen: 'owe', oweenhancedopen: 'owe',
+    wpa2: 'wpa2', wpa2personal: 'wpa2', wpa2psk: 'wpa2', wpa3: 'wpa3', wpa3personal: 'wpa3', wpa3sae: 'wpa3', sae: 'wpa3',
+    'wpa2/3': 'wpa2/3', 'wpa2/wpa3': 'wpa2/3', 'wpa2/wpa3personal': 'wpa2/3', wpa2wpa3: 'wpa2/3', wpa3transition: 'wpa2/3', 'wpa2/3personal': 'wpa2/3',
+    wpa2ent: 'wpa2-ent', wpa2enterprise: 'wpa2-ent', wpa2eap: 'wpa2-ent', wpa3ent: 'wpa3-ent', wpa3enterprise: 'wpa3-ent', wpa3eap: 'wpa3-ent',
+    wep: 'wep', wpa: 'wpa', wpapsk: 'wpa', wpatkip: 'wpa', wpa1: 'wpa', wpapersonal: 'wpa',
+    // WPA/WPA2 mixed still lets TKIP clients on: it is as weak as WPA.
+    'wpa/wpa2': 'wpa', 'wpa/wpa2personal': 'wpa', wpawpa2: 'wpa', 'wpapsk/wpa2psk': 'wpa',
+    'wpa2psk/wpa3sae': 'wpa2/3', 'wpa2/wpa3sae': 'wpa2/3',
+    noencryption: 'open', unencrypted: 'open', unsecured: 'open', disabled: 'open'
+};
+// The cipher and the "mixed" a controller adds after the mode say nothing
+// the mode does not ("WPA2 PSK AES", "WPA2/WPA3 Personal Mixed").
+const WIFI_SECURITY_NOISE = /aes|ccmp(128|256)?|gcmp(128|256)?|mixed|mode/g;
+function wifiSecurityKey(v) {
+    const t = asText(v).toLowerCase();
+    // As written first ("OWE (Enhanced Open)"), then without what the
+    // brackets add ("WPA2-Personal (AES)", "Open (no encryption)"), then
+    // without the cipher too.
+    const tries = [t, t.replace(/\(.*?\)/g, '')].map((x) => x.replace(/[\s_()-]+/g, ''));
+    tries.push(...tries.map((x) => x.replace(WIFI_SECURITY_NOISE, '')));
+    const hit = tries.find((x) => x && Object.prototype.hasOwnProperty.call(WIFI_SECURITY_WORDS, x));
+    if (hit) return WIFI_SECURITY_WORDS[hit];
+    // WPA3 "transition" mode is WPA2/WPA3 however it is dressed: "WPA3
+    // Transition", "WPA2/WPA3 Transitional", "WPA3-Personal Transition".
+    return tries.some((x) => /^(wpa2\/?(wpa)?|wpa)3(personal|sae|psk)*transition(al)?$/.test(x)) ? 'wpa2/3' : '';
+}
+
+// ---- iface.radio ----
+// Rebuilt key by key, as a bond is: nothing a hand-edited file puts inside
+// it rides along. Bands once each, low to high. Left off altogether when it
+// says nothing, so a radio nobody described carries no key.
+function normalizeRadio(v) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+    const standard = wifiStandardKey(v.standard);
+    const bands = [];
+    (Array.isArray(v.bands) ? v.bands : []).forEach((b) => {
+        const entry = b && typeof b === 'object' ? b : { band: b };
+        const band = wifiBandKey(entry.band);
+        if (!band || bands.some((x) => x.band === band)) return;
+        const out = { band };
+        const channel = asWifiChannel(entry.channel), width = asWifiWidth(entry.width), power = asWifiPower(entry.power);
+        if (channel !== undefined) out.channel = channel;
+        if (width !== undefined) out.width = width;
+        if (power !== undefined) out.power = power;
+        // Which SSIDs this band broadcasts, by id. Absent is the default
+        // (every SSID on the band); an empty list is a band that broadcasts
+        // none (a mesh backhaul), and is kept.
+        if (Array.isArray(entry.ssids)) out.ssids = [...new Set(entry.ssids.map(asGroupRef).filter(Boolean))];
+        bands.push(out);
+    });
+    bands.sort((a, b) => WIFI_BANDS.indexOf(a.band) - WIFI_BANDS.indexOf(b.band));
+    if (!standard && !bands.length) return undefined;
+    const out = {};
+    if (standard) out.standard = standard;
+    if (bands.length) out.bands = bands;
+    return out;
+}
+// A new access point's radio: Wi-Fi 6 on 2.4 and 5 GHz, channel and width
+// left to auto (the agreed default). A new client's radio is left blank:
+// unknown, and never flagged.
+const defaultApRadio = () => ({ standard: 'ax', bands: [{ band: '2.4' }, { band: '5' }] });
+const radioOf = (iface) => (iface && iface.radio && typeof iface.radio === 'object' ? iface.radio : null);
+const radioBand = (radio, band) => (radio && Array.isArray(radio.bands) ? radio.bands.find((b) => b && b.band === band) || null : null);
+// The bands a radio offers: the ones it lists, else its standard's, else
+// null (unknown, which every check reads as "could be any").
+function radioBands(radio) {
+    if (radio && Array.isArray(radio.bands) && radio.bands.length) return WIFI_BANDS.filter((b) => radio.bands.some((x) => x && x.band === b));
+    return radio ? standardBands(radio.standard) : null;
+}
+// The bands two radios (or any two band lists) have in common, best first;
+// one unknown side leaves the other's, and both unknown is null.
+function commonWifiBands(a, b) {
+    if (!a && !b) return null;
+    return WIFI_BANDS_BEST.filter((x) => (!a || a.includes(x)) && (!b || b.includes(x)));
+}
+
+// ---- doc.wifi ----
+const WIFI_SSID_MAX = 64;
+// One line, trimmed. An SSID is at most 32 bytes on the air; the record keeps
+// a little more rather than cut a name somebody typed in another script.
+const wifiSsidText = (v) => portText(v).trim().slice(0, WIFI_SSID_MAX);
+// Every band is the default and is not stored, nor is a list that names none.
+const asWifiBands = (v) => { const l = wifiBandList(v); return l && l.length && l.length < WIFI_BANDS.length ? l : undefined; };
+const asWifiSecurity = (v) => wifiSecurityKey(v) || undefined;
+
+// The order is the key order of the JSON (see the schema's header).
+const WIFI_FIELDS = [
+    // Links and radios name a network by id, so a missing one is minted.
+    { key: 'id', kind: 'raw', read: (v) => asGroupRef(v) || nextId('wf'), label: 'ID', csv: 'wifi_id' },
+    { key: 'ssid', kind: 'raw', read: wifiSsidText, write: wifiSsidText, label: 'SSID', csv: 'ssid', table: 'edit' },
+    { key: 'security', kind: 'raw', read: asWifiSecurity, write: asWifiSecurity, label: 'Security', csv: 'security', table: 'edit',
+      validate: (v) => isBlank(v) || !!wifiSecurityKey(v) },
+    { key: 'bands', kind: 'raw', read: asWifiBands, write: asWifiBands, label: 'Bands', csv: 'bands', table: 'edit',
+      validate: (v) => isBlank(v) || !!(wifiBandList(v) || []).length },
+    // A declared subnet, by id (normalizeWifiRefs drops one the document
+    // does not hold). In a spreadsheet it is the subnet's CIDR.
+    { key: 'network', kind: 'raw', read: asGroupRef, write: asGroupRef, label: 'Subnet', csv: 'subnet' },
+    { key: 'hidden', kind: 'flag', label: 'Hidden network', csv: 'hidden', table: 'edit' }
+];
+// Load: coerced through the table, one record per id (a repeated id is
+// reminted, as a network's is). Mutates nothing it is given.
+function normalizeWifi(list) {
+    const ids = new Set();
+    return (Array.isArray(list) ? list : [])
+        .filter((w) => w && typeof w === 'object' && !Array.isArray(w))
+        .map((w) => readFields(WIFI_FIELDS, w))
+        .map((w) => { if (ids.has(w.id)) w.id = nextId('wf'); ids.add(w.id); return w; });
+}
+// Save: no key at all when there are none, so a document that never had a
+// Wi-Fi network serializes as it did before they existed.
+const serializeWifi = (list) => (list && list.length ? list.map((w) => writeFields(WIFI_FIELDS, w)) : undefined);
+const makeWifi = (fields) => readFields(WIFI_FIELDS, Object.assign({ id: nextId('wf') }, fields));
+// Every reference into doc.wifi and out of it must name a record the
+// document holds: a network's subnet, a link's SSID, a radio band's SSID
+// list. One that does not is dropped (the default answers instead). A band
+// whose whole list named networks that are gone goes back to the default
+// too: the list said nothing about the networks that are left. In place; on
+// every load, and what the editor runs after deleting a Wi-Fi network or a
+// subnet.
+function normalizeWifiRefs(nodes = state.nodes, links = state.links, networks = state.networks, wifi = state.wifi) {
+    const nets = new Set((networks || []).map((n) => n.id)), ids = new Set((wifi || []).map((w) => w.id));
+    (wifi || []).forEach((w) => { if (w.network !== undefined && !nets.has(w.network)) delete w.network; });
+    (links || []).forEach((l) => {
+        if (!l || !l.wifi || l.wifi.ssid === undefined || ids.has(l.wifi.ssid)) return;
+        delete l.wifi.ssid;
+        if (!Object.keys(l.wifi).length) delete l.wifi;
+    });
+    (nodes || []).forEach((n) => (n && Array.isArray(n.interfaces) ? n.interfaces : []).forEach((i) => {
+        const radio = radioOf(i);
+        (radio && Array.isArray(radio.bands) ? radio.bands : []).forEach((b) => {
+            if (!Array.isArray(b.ssids)) return;
+            const kept = b.ssids.filter((id) => ids.has(id));
+            if (kept.length === b.ssids.length) return;
+            if (kept.length) b.ssids = kept; else delete b.ssids;
+        });
+    }));
+}
+const wifiById = (id, wifi = state.wifi) => (id ? (wifi || []).find((w) => w.id === id) || null : null);
+// What a network is called where it is listed: its SSID, or a plain word
+// while it has none.
+const wifiLabel = (w) => (w ? (w.ssid || t('Wi-Fi network')) : '');
+const wifiBandsOf = (w) => (w && Array.isArray(w.bands) && w.bands.length ? w.bands.slice() : WIFI_BANDS.slice());
+
+// ---- What an access point broadcasts ----
+// The SSIDs one band of a radio broadcasts: the ones it lists (those that
+// still exist), else every network whose own bands include the band, so
+// nobody has to tick boxes for the common case.
+function apBandSsids(radio, band, wifi = state.wifi) {
+    const entry = radioBand(radio, band);
+    if (entry && Array.isArray(entry.ssids)) return entry.ssids.filter((id) => !!wifiById(id, wifi));
+    return (wifi || []).filter((w) => wifiBandsOf(w).includes(band)).map((w) => w.id);
+}
+// Every SSID a radio broadcasts on any of its bands, in the list's order. A
+// radio whose bands are unknown is taken to have them all.
+function apSsids(radio, wifi = state.wifi) {
+    const bands = radioBands(radio) || WIFI_BANDS;
+    const on = new Set();
+    bands.forEach((b) => apBandSsids(radio, b, wifi).forEach((id) => on.add(id)));
+    return (wifi || []).filter((w) => on.has(w.id)).map((w) => w.id);
+}
+
+// The access points (and home routers) broadcasting a network: the Wi-Fi
+// tab's "Broadcast by", and the devices a security finding names.
+function wifiBroadcasters(id, nodes = state.nodes, wifi = state.wifi) {
+    return nodes.filter((n) => radioServes(n)
+        && (n.interfaces || []).some((i) => ifaceIsWireless(i) && apSsids(radioOf(i), wifi).includes(id)));
+}
+
+// ---- link.wifi ----
+// Kept on any link, as a cable's facts are kept on a radio link: the editor
+// shows it on a wireless one only, and a link turned back into a cable keeps
+// it for when it is turned round again.
+function readLinkWifi(v) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+    const out = {};
+    const ssid = asGroupRef(v.ssid), band = wifiBandKey(v.band), signal = asWifiSignal(v.signal);
+    if (ssid) out.ssid = ssid;
+    if (band) out.band = band;
+    if (signal !== undefined) out.signal = signal;
+    return Object.keys(out).length ? out : undefined;
+}
+const linkWifiOf = (link, key) => (link && link.wifi && link.wifi[key] !== undefined ? link.wifi[key] : undefined);
+// Sets one fact, dropping the object when it ends up empty. Returns the link.
+function setLinkWifi(link, key, value) {
+    link.wifi = readLinkWifi(Object.assign({}, link.wifi || {}, { [key]: value }));
+    if (!link.wifi) delete link.wifi;
+    return link;
+}
+// A device that serves clients by radio: an AP, or a router, firewall or the
+// like with a radio of its own (a home router). wifiLinkEnds below ranks the
+// two ends of an association the same way. The Wi-Fi tab (js/wifi.js) and
+// the checks (js/diagnostics.js) both ask it who broadcasts a network.
+const radioServes = (node) => !!node && (node.type === 'ap' || isRoutingDevice(node.type));
+// The two ends of a wireless link, and which of them is the access point:
+// an AP, else a router, firewall or the like with a radio (a home router),
+// else neither (two clients, or a bridge). Between two APs (a mesh
+// backhaul) the source is taken as the AP. Null for a link that is not
+// wireless. -> { ends: [end, end], ap, client }, an end being { node, iface }.
+function wifiLinkEnds(link, src, tgt) {
+    src = src || getNode(link && link.source);
+    tgt = tgt || getNode(link && link.target);
+    if (!src || !tgt || effectiveMedium(link, src, tgt) !== 'wireless') return null;
+    const a = { node: src, iface: explicitIface(src, link.sourceIface) }, b = { node: tgt, iface: explicitIface(tgt, link.targetIface) };
+    const rank = (e) => (e.node.type === 'ap' ? 2 : isRoutingDevice(e.node.type) ? 1 : 0);
+    if (!rank(a) && !rank(b)) return { ends: [a, b], ap: null, client: null };
+    return rank(b) > rank(a) ? { ends: [a, b], ap: b, client: a } : { ends: [a, b], ap: a, client: b };
+}
+// The SSID a link is on: the one it names, else the AP's only one when it
+// broadcasts exactly one, else the one of those whose subnet holds the
+// client's address (a phone on 10.2.0.21 is on Guest, 10.2.0.0/24), else
+// null (not known). The client's address is the one on its end of the link,
+// else any of its own, but only when they all point at the same SSID.
+// Between two devices that both serve radio (a mesh backhaul, an AP on a
+// home router's radio) nothing is worked out: the far one is not a client
+// joining a network, and taking the first AP's SSID would count it among
+// that network's clients and test its management address against the
+// SSID's subnet.
+function linkWifiSsid(link, wifi = state.wifi) {
+    const own = linkWifiOf(link, 'ssid');
+    if (own && wifiById(own, wifi)) return own;
+    const e = wifiLinkEnds(link);
+    if (!e || !e.ap || radioServes(e.client.node)) return null;
+    const all = apSsids(radioOf(e.ap.iface), wifi);
+    if (all.length < 2) return all.length ? all[0] : null;
+    const bySubnet = all.filter((id) => { const w = wifiById(id, wifi); return !!w && !!w.network; });
+    if (!bySubnet.length) return null;
+    const endIp = e.client.iface && parseValidCIDR(e.client.iface.ip);
+    const ips = endIp ? [endIp] : getValidIps(e.client.node);
+    const hits = new Set();
+    ips.forEach((p) => {
+        const net = networkOfIp(p.ip);
+        if (net) bySubnet.forEach((id) => { if (wifiById(id, wifi).network === net.id) hits.add(id); });
+    });
+    return hits.size === 1 ? [...hits][0] : null;
+}
+// The band a link is on: the one it names, else the best band every side
+// that is known has: the client's radio, the AP's radio (only the bands it
+// broadcasts the link's SSID on, when that is known) and the SSID's own
+// bands. Null when nothing is known, or when the sides have no band in
+// common (a finding's business, not a guess's).
+function linkWifiBand(link, wifi = state.wifi) {
+    const e = wifiLinkEnds(link);
+    if (!e) return null;
+    const own = linkWifiOf(link, 'band');
+    if (own) return own;
+    const ssid = linkWifiSsid(link, wifi);
+    const net = ssid ? wifiById(ssid, wifi) : null;
+    const sides = e.ends.map((end) => {
+        const radio = radioOf(end.iface);
+        const bands = radioBands(radio);
+        return bands && net && end === e.ap ? bands.filter((b) => apBandSsids(radio, b, wifi).includes(ssid)) : bands;
+    });
+    if (net) sides.push(wifiBandsOf(net));
+    const known = sides.filter(Boolean);
+    if (!known.length) return null;
+    return WIFI_BANDS_BEST.find((b) => known.every((s) => s.includes(b))) || null;
+}
+
+// The radio in one line, for the collapsed editor and the table: "Wi-Fi 6 ·
+// 2.4 GHz ch 6 · 5 GHz ch 36/80 · Staff, Guest". The SSIDs only on an AP
+// (withSsids), where they are what it broadcasts. '' for a radio that says
+// nothing.
+function radioSummary(radio, withSsids = false, wifi = state.wifi) {
+    if (!radio) return '';
+    const parts = [];
+    if (radio.standard) parts.push(wifiStandardShort(radio.standard));
+    (radio.bands || []).forEach((b) => {
+        const width = b.width ? '/' + b.width : '';
+        const ch = b.channel !== undefined ? ' ch ' + b.channel + width : (b.width ? ' ' + b.width + ' MHz' : '');
+        parts.push(wifiBandName(b.band) + ch);
+    });
+    if (withSsids) {
+        const names = apSsids(radio, wifi).map((id) => wifiLabel(wifiById(id, wifi)));
+        if (names.length) parts.push(names.join(', '));
+    }
+    return parts.join(' · ');
+}
+
+// ---- In a spreadsheet (interfaces.csv) ----
+// A radio is one value and a row is cells, so it travels as parts: the
+// standard, the bands it lists, and per band its channel, width, power and
+// the SSIDs it broadcasts (ch_2g, width_5g, ssids_6g...). A blank cell says
+// nothing, as everywhere in a sheet; a band's SSIDs are written by name
+// ("none" for a band that broadcasts none, blank for the default).
+const WIFI_BAND_CSV = { '2.4': '2g', 5: '5g', 6: '6g' };
+const RADIO_CSV_PARTS = [
+    { part: 'standard', csv: 'standard', label: 'Wi-Fi standard' },
+    { part: 'bands', csv: 'bands', label: 'Bands' }
+].concat(...[['channel', 'ch', 'Channel'], ['width', 'width', 'Width'], ['power', 'power', 'Power (dBm)'], ['ssids', 'ssids', 'SSID list']]
+    .map(([attr, stem, label]) => WIFI_BANDS.map((band) => {
+        const name = stem + '_' + WIFI_BAND_CSV[band];
+        return { part: name, csv: name, label: label + ' ' + band + ' GHz', band, attr };
+    })));
+const radioCsvPart = (part) => RADIO_CSV_PARTS.find((p) => p.part === part) || null;
+// The part's value as stored: the standard's key, the bands as "2.4 5", a
+// band's number, or its SSID ids (an array). Undefined when it says nothing.
+function radioPartValue(radio, part) {
+    const p = radioCsvPart(part);
+    if (!p || !radio) return undefined;
+    if (part === 'standard') return radio.standard || undefined;
+    if (part === 'bands') return radio.bands && radio.bands.length ? radio.bands.map((b) => b.band).join(' ') : undefined;
+    const b = radioBand(radio, p.band);
+    return b ? b[p.attr] : undefined;
+}
+// A radio with parts laid over it: the standard; the bands (those it lists
+// now, keeping what each already says); then each band's facts, which list
+// their band if it was not. -> the normalized radio, or undefined.
+function applyRadioParts(radio, parts) {
+    const r = cloneData(radio || {});
+    r.bands = Array.isArray(r.bands) ? r.bands : [];
+    if (parts.standard !== undefined) r.standard = parts.standard;
+    if (parts.bands !== undefined) {
+        const want = wifiBandList(parts.bands) || [];
+        r.bands = want.map((band) => r.bands.find((b) => b.band === band) || { band });
+    }
+    RADIO_CSV_PARTS.forEach((p) => {
+        if (!p.attr || parts[p.part] === undefined) return;
+        let b = r.bands.find((x) => x.band === p.band);
+        if (!b) { b = { band: p.band }; r.bands.push(b); }
+        b[p.attr] = parts[p.part];
+    });
+    return normalizeRadio(r);
 }
 
 // ============================================================================
@@ -2750,6 +3281,15 @@ function rackShrinkQuestion(rack, height, nodes = state.nodes, groups = state.gr
 //                   "Round 5": the rack view draws ports). Nothing to
 //                   convert: absent is the type's side, which is what every
 //                   device before it had. A v10 build would drop it.
+//   v 12            Wi-Fi ("Wi-Fi" above, Review-Packs/Topo-wifi.md): the
+//                   networks (doc.wifi), a wireless interface's radio
+//                   (iface.radio) and an association's SSID, band and
+//                   signal (link.wifi), and an accepted finding's scope
+//                   (accepted[].scope: the network or band it was accepted
+//                   on). Nothing to convert: an AP from before has no radio
+//                   described, which reads as unknown and is never a fault,
+//                   and an entry with no scope matches as before. A v11
+//                   build would drop all four.
 //
 // A document with a higher `v` was written by a newer Topo. Its unknown fields
 // cannot be kept — the serializer is an allowlist, and that is a privacy rule,
@@ -2761,14 +3301,14 @@ function rackShrinkQuestion(rack, height, nodes = state.nodes, groups = state.gr
 // DOC_VERSION. A step takes a plain document and returns one, and never
 // mutates its input. Never edit a shipped step: documents in the wild were
 // read by it.
-const DOC_VERSION = 11;
+const DOC_VERSION = 12;
 
 // A document's outline: an object whose lists, where present, are lists. The
 // loader tolerates a missing list (a bare { nodes } file is a document), but a
 // list that is something else is a damaged document, and saying so beats
 // reading it as an empty, finding-free network.
 const isDocShape = (doc) => !!doc && typeof doc === 'object' && !Array.isArray(doc)
-    && ['nodes', 'links', 'networks', 'groups', 'annotations'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
+    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
 
 const docVersionOf = (doc) => (doc && Number.isInteger(doc.v) && doc.v >= 1 ? doc.v : 1);
 
@@ -2889,7 +3429,9 @@ const MIGRATIONS = [
     // A virtual device's host is a new key, not a new shape.
     { from: 9, to: 10, run: (doc) => ({ ...doc, v: 10 }) },
     // A device's ports face is a new key, not a new shape.
-    { from: 10, to: 11, run: (doc) => ({ ...doc, v: 11 }) }
+    { from: 10, to: 11, run: (doc) => ({ ...doc, v: 11 }) },
+    // Wi-Fi networks, radios and associations are new keys, not a new shape.
+    { from: 11, to: 12, run: (doc) => ({ ...doc, v: 12 }) }
 ];
 
 // The v2 interface zone flags of `src`, put back on the same node as written.

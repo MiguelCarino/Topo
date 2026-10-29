@@ -160,7 +160,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const before = state.nodes.length;
     el('rackPlaceNewBtn').click();
     const made = state.nodes[state.nodes.length - 1];
-    ok('Create here makes it half depth on the rear, one step', state.nodes.length === before + 1 && made.type === 'switch' && made.rackU === 20
+    ok('Add makes it half depth on the rear, one step', state.nodes.length === before + 1 && made.type === 'switch' && made.rackU === 20
        && made.rackFace === 'rear' && made.rackDepth === 'half' && undoDepth() === d0 + 1 && rackFindings().length === 0, json(made));
     undo();
     openPlaceDialog({ rackId: 'rk', face: 'front', u: 16, height: 1 });

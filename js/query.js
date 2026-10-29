@@ -34,9 +34,16 @@
 //                id (host:esx-01): the devices on it, and a container on a
 //                VM on it too, as group: takes the groups inside
 //   tag:         the asset tag
+//   ssid:        the SSID (or its id) an AP broadcasts or a client's link
+//                is on, as inferred when nobody picked it (js/model.js
+//                "Wi-Fi"): ssid:guest
+//   band:        2.4, 5 or 6 (GHz optional): a radio that offers it, a link
+//                on it (its own, or the best band both ends share)
+//   wifi:        a radio's standard: wifi:6e, wifi:ax, wifi:7, wifi:5
+//   channel:     a radio on that channel, and a link through it
 //   has:         finding, critical, advisory, ip, mac, gateway, dns, os,
 //                notes, tag, cable, group, host (runs on a device), guests
-//                (something runs on it)
+//                (something runs on it), wifi (a radio or an association)
 //
 // A cable's own facts (link.cable: its label, length, colour, via) are plain
 // text of the cable, so "WS-3B" finds the run with that label. A port's
@@ -129,7 +136,11 @@ const Q_PLAIN = {
     port: (p, q) => qPortText(p, q) || qNodeFieldText(p.node, q) || qIfaces(p.node).some((i) => qIfaceText(i, q)) || (!!p.peer && Q_PLAIN.node(p.peer, q)),
     iface: (n, i, q) => qIfaceText(i, q) || qNodeOwnText(n, q),
     link: (l, q) => qFieldsHave(LINK_FIELDS, l, q.v) || qFieldsHave(CABLE_FIELDS, l.cable, q.v) || qHas(mediumName(effectiveMedium(l)), q.v)
+        || (!!l.wifi || effectiveMedium(l) === 'wireless') && qLinkSsid(l, q.v)
         || [l.source, l.target].some((id) => { const n = getNode(id); return !!n && Q_PLAIN.node(n, q); }),
+    // A Wi-Fi network (the table's Wi-Fi tab) by its own fields and its
+    // security's name ("WPA3-Personal").
+    wifi: (w, q) => qFieldsHave(WIFI_FIELDS, w, q.v) || qHas(wifiSecurityName(w.security), q.v),
     net: (s, q) => qFieldsHave(NETWORK_FIELDS, s.net, q.v) || qHas(s.cidr, q.v)
         || (s.net && s.net.vlan != null && qText(s.net.vlan) === q.v) || s.nodes.some((n) => Q_PLAIN.node(n, q))
 };
@@ -181,17 +192,20 @@ const Q_HAS = {
     cable: (n) => linksAtNode(n.id).length > 0,
     group: (n) => !!groupOfNode(n),
     host: (n) => !!hostOf(n),
-    guests: (n) => guestsOf(n).length > 0
+    guests: (n) => guestsOf(n).length > 0,
+    // A radio, or an association: an AP, a laptop, a phone on Wi-Fi.
+    wifi: (n) => qRadios(n).length > 0 || qWifiLinks(n).length > 0
 };
 const Q_HAS_ALIAS = { findings: 'finding', problem: 'finding', warning: 'advisory', gw: 'gateway', address: 'ip', cables: 'cable', note: 'notes', groups: 'group',
-    guest: 'guests' };
+    guest: 'guests', 'wi-fi': 'wifi', wireless: 'wifi', radio: 'wifi' };
 const Q_HAS_LINK = {
     finding: (l) => !!qLinkSeverity(l),
     critical: (l) => qLinkSeverity(l) === 'bad',
-    advisory: (l) => qLinkSeverity(l) === 'warn'
+    advisory: (l) => qLinkSeverity(l) === 'warn',
+    wifi: (l) => !!wifiLinkEnds(l)
 };
 // An interface row asks its own address and MAC, not its device's.
-const Q_HAS_IFACE = { ip: (n, i) => !!qAddrOf(i.ip), mac: (n, i) => hasMac(i) };
+const Q_HAS_IFACE = { ip: (n, i) => !!qAddrOf(i.ip), mac: (n, i) => hasMac(i), wifi: (n, i) => ifaceIsWireless(i) };
 
 // ---- ip: ----
 function qIpPrep(v) {
@@ -248,6 +262,28 @@ function qNodeVlan(n, vlan) {
 const Q_SWITCH_TYPES = ['switch', 'l3switch'];
 const qIsSwitch = (n, v) => !!n && Q_SWITCH_TYPES.includes(n.type) && qHas(n.name, v);
 
+// ---- ssid:, band:, wifi: and channel: (js/model.js "Wi-Fi") ----
+// A device by its radios and its associations: an AP by what it broadcasts,
+// a client by the SSID and band its link is on, as the editor infers them
+// (linkWifiSsid, linkWifiBand), so a link nobody filled in still answers.
+const qRadios = (n) => qIfaces(n).filter((i) => ifaceIsWireless(i));
+const qWifiLinks = (n) => linksAtNode(n.id).filter((l) => !!wifiLinkEnds(l));
+const qSsidHas = (id, v) => { const w = wifiById(id); return !!w && (qHas(w.ssid, v) || qLower(w.id) === v); };
+const qLinkSsid = (l, v) => qSsidHas(linkWifiSsid(l), v);
+// An AP's radios broadcast it, a client's link is on it.
+const qNodeSsid = (n, v) => (n.type === 'ap' || isRoutingDevice(n.type)) && qRadios(n).some((i) => apSsids(radioOf(i)).some((id) => qSsidHas(id, v)))
+    || qWifiLinks(n).some((l) => qLinkSsid(l, v));
+const qRadioBand = (i, band) => (radioBands(radioOf(i)) || []).includes(band);
+const qNodeBand = (n, band) => qRadios(n).some((i) => qRadioBand(i, band)) || qWifiLinks(n).some((l) => linkWifiBand(l) === band);
+const qRadioChannel = (i, ch) => (radioOf(i) && radioOf(i).bands || []).some((b) => b.channel === ch);
+// A link by the channel its AP is on, on the band the link is on.
+function qLinkChannel(l, ch) {
+    const e = wifiLinkEnds(l);
+    const band = e && e.ap ? linkWifiBand(l) : null;
+    const b = band ? radioBand(radioOf(e.ap.iface), band) : null;
+    return !!b && b.channel === ch;
+}
+
 // ---- group: and loc: ----
 // A group by its name, or by a fragment of its path however its slashes were
 // spaced (placeKey, js/model.js). Its own path holds every ancestor's name,
@@ -281,6 +317,26 @@ const Q_PREFIXES = {
     status: { field: 'status', node: (n, q) => qLower(n.status) === q.v || qHas(n.status, q.v) },
     tag: { field: 'assetTag', node: (n, q) => qHas(n.assetTag, q.v) },
     host: { field: 'host', node: (n, q) => hostChainOf(n).some((h) => qHas(h.name, q.v) || qLower(h.id) === q.v) },
+    ssid: { node: (n, q) => qNodeSsid(n, q.v),
+            iface: (n, i, q) => (ifaceIsWireless(i) && (n.type === 'ap' || isRoutingDevice(n.type)) && apSsids(radioOf(i)).some((id) => qSsidHas(id, q.v)))
+                || linksAtNode(n.id).some((l) => ifaceIdOn(l, n.id) === i.id && !!wifiLinkEnds(l) && qLinkSsid(l, q.v)),
+            link: (l, q) => qLinkSsid(l, q.v),
+            wifi: (w, q) => qHas(w.ssid, q.v) },
+    // 2.4, 5 or 6, with or without GHz.
+    band: { prep: (v) => { const band = wifiBandKey(v); return band ? { band } : { error: true }; },
+            node: (n, q) => qNodeBand(n, q.band),
+            iface: (n, i, q) => qRadioBand(i, q.band) || linksAtNode(n.id).some((l) => ifaceIdOn(l, n.id) === i.id && linkWifiBand(l) === q.band),
+            link: (l, q) => linkWifiBand(l) === q.band,
+            wifi: (w, q) => wifiBandsOf(w).includes(q.band) },
+    // The standard, as a key, its letters or its Wi-Fi name: wifi:6e, wifi:ax, wifi:7.
+    wifi: { prep: (v) => { const std = wifiStandardKey(v); return std ? { std } : { error: true }; },
+            node: (n, q) => qRadios(n).some((i) => (radioOf(i) || {}).standard === q.std),
+            iface: (n, i, q) => (radioOf(i) || {}).standard === q.std,
+            link: (l, q) => { const e = wifiLinkEnds(l); return !!e && e.ends.some((end) => (radioOf(end.iface) || {}).standard === q.std); } },
+    channel: { prep: (v) => { const ch = asWifiChannel(v); return ch === undefined ? { error: true } : { ch }; },
+               node: (n, q) => qRadios(n).some((i) => qRadioChannel(i, q.ch)),
+               iface: (n, i, q) => qRadioChannel(i, q.ch),
+               link: (l, q) => qLinkChannel(l, q.ch) },
     has: { prep: (v) => { const k = Q_HAS_ALIAS[v] || v; return Q_HAS[k] ? { has: k } : { error: true }; },
            node: (n, q) => Q_HAS[q.has](n),
            iface: (n, i, q) => (Q_HAS_IFACE[q.has] ? Q_HAS_IFACE[q.has](n, i) : Q_HAS[q.has](n)),
@@ -350,10 +406,24 @@ const qTermGrp = (term, g) => {
     if (term.def.grp && term.def.grp(g, term.q)) return true;
     return groupMembers(g.id, true).some((n) => qTermNode(term, n));
 };
-const Q_SCOPES = { node: qTermNode, iface: qTermIface, link: qTermLink, net: qTermNet, port: qTermPort, grp: qTermGrp };
+// A Wi-Fi network (the table's Wi-Fi tab) by what it says itself, else by
+// any association on it.
+const qTermWifi = (term, w) => {
+    if (term.def.wifi && term.def.wifi(w, term.q)) return true;
+    return state.links.some((l) => linkWifiSsid(l) === w.id && qTermLink(term, l));
+};
+// A device row (the map, the Devices tab) is also found by plain text naming
+// an SSID, as ssid: finds it: an AP by what it broadcasts, a client by what
+// its link is on, so "Staff" finds the devices on Staff and not only their
+// links. Here, not in Q_PLAIN.node, which a cable, a port, a subnet and a
+// Wi-Fi row ask about their devices: there it would light every cable of an
+// AP for each SSID it broadcasts.
+const qTermNodeRow = (term, n) => qTermNode(term, n)
+    || (term.def === Q_PLAIN && !!(state.wifi || []).length && qNodeSsid(n, term.q.v));
+const Q_SCOPES = { node: qTermNodeRow, iface: qTermIface, link: qTermLink, net: qTermNet, port: qTermPort, grp: qTermGrp, wifi: qTermWifi };
 
 // kind: 'node' (n), 'iface' (n, iface), 'link' (l), 'net' ({ net, cidr,
-// nodes }), 'port' ({ node, portId, peer }), 'grp' (g). A query that was not
+// nodes }), 'port' ({ node, portId, peer }), 'grp' (g), 'wifi' (w). A query that was not
 // understood matches nothing: showing everything would read as "all of these
 // match".
 function queryMatch(query, kind, ...args) {
@@ -398,6 +468,7 @@ function queryKeepsRow(row, q = activeQuery()) {
     }
     if (row.rec === 'link') return queryMatch(q, 'link', getLink(row.ref.linkId));
     if (row.rec === 'group') return queryMatch(q, 'grp', groupById(row.ref.groupId));
+    if (row.rec === 'wifi') return queryMatch(q, 'wifi', wifiById(row.ref.wifiId));
     if (row.rec === 'port') {
         const node = getNode(row.ref.nodeId);
         return !!node && queryMatch(q, 'port', { node, portId: row.ref.portId, peer: row.data.peerId ? getNode(row.data.peerId) : null });

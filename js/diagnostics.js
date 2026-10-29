@@ -332,15 +332,54 @@ function evaluateRadio(node) {
         else if (medium !== 'wireless' && wireless) problems.push(t('{iface} is a radio but carries the {medium} cable to {peer}', { iface: iface.name, medium, peer: name }));
     });
 
+    // What the radios say about themselves (iface.radio): a channel the band
+    // does not have, a width it cannot take, 6 GHz on a standard without it.
+    // The device's own settings, so they are its badge and its verdict here,
+    // not a relational finding.
+    const settings = radioSettingProblems(node);
     if (problems.length) {
-        return { level: 'bad', text: t('{problems}. Wi-Fi needs a wireless NIC (wlan0, wlp1s0); cables need an Ethernet port.', { problems: problems.join('; ') }) };
+        const text = t('{problems}. Wi-Fi needs a wireless NIC (wlan0, wlp1s0); cables need an Ethernet port.', { problems: problems.join('; ') });
+        return { level: 'bad', text: settings.length ? text + ' ' + settings.join(' ') : text };
     }
+    if (settings.length) return { level: 'bad', text: settings.join(' ') };
     const radios = getInterfaces(node).filter(ifaceIsWireless).length;
     if (!linksAtNode(node.id).length) return { level: 'info', text: t('No links attached.') };
     const key = !radios ? 'Links match their interface type.'
         : radios === 1 ? 'Links match their interface type ({n} radio).'
             : 'Links match their interface type ({n} radios).';
     return { level: 'good', text: t(key, { n: radios }) };
+}
+
+// A radio's own settings, checked against its band and its standard (the
+// tables are js/model.js "Wi-Fi"): the channel must be one the band has, the
+// width one the band and the standard can bond, and a radio listing 6 GHz
+// must be Wi-Fi 6E or 7. Blank is auto and unknown, never a fault. One
+// sentence per fault, naming the interface.
+const WIFI_6G_STANDARDS = ['axe', 'be'];
+const WIFI_CHANNEL_RANGES = {
+    '2.4': '{iface} is on channel {ch}, which 2.4 GHz does not have (1 to 14).',
+    5: '{iface} is on channel {ch}, which 5 GHz does not have (36 to 144 and 149 to 177, in steps of 4).',
+    6: '{iface} is on channel {ch}, which 6 GHz does not have (1 to 233, in steps of 4: 1, 5, 9…).'
+};
+function radioSettingProblems(node) {
+    const out = [];
+    getInterfaces(node).forEach((iface) => {
+        const radio = ifaceIsWireless(iface) ? radioOf(iface) : null;
+        if (!radio) return;
+        const name = iface.name || 'radio';
+        const std = radio.standard;
+        (radio.bands || []).forEach((b) => {
+            if (b.channel !== undefined && !wifiChannelValid(b.band, b.channel)) out.push(t(WIFI_CHANNEL_RANGES[b.band], { iface: name, ch: b.channel }));
+            if (b.width === undefined || wifiWidthValid(b.band, b.width, std)) return;
+            if (b.band === '2.4' && b.width > 40) out.push(t('{iface}: 2.4 GHz is at most 40 MHz wide, not {width} MHz.', { iface: name, width: b.width }));
+            else if (b.width === 320 && b.band !== '6') out.push(t('{iface}: 320 MHz is on 6 GHz only, not on {band}.', { iface: name, band: wifiBandName(b.band) }));
+            else out.push(t('{iface}: {standard} bonds at most {max} MHz, not {width} MHz.', { iface: name, standard: wifiStandardName(std), max: WIFI_STANDARD_INFO[std].maxWidth, width: b.width }));
+        });
+        if (std && !WIFI_6G_STANDARDS.includes(std) && radioBand(radio, '6')) {
+            out.push(t('{iface} lists 6 GHz, but {standard} has no 6 GHz: that takes Wi-Fi 6E or Wi-Fi 7.', { iface: name, standard: wifiStandardName(std) }));
+        }
+    });
+    return out;
 }
 
 // Bonds are the remedy evaluateMultiHoming prescribes, so a half-built one has
@@ -1016,18 +1055,20 @@ const runNodeCheck = (c, node, ctx) => (isRetired(node)
 // The groups are read the same way, for the same reason: a scratch copy's
 // devices name the document's groups, and read as having none, every device
 // placed in a rack would preview as a new "rack fields without a rack".
+// The Wi-Fi networks likewise: a scratch copy's links name the document's.
 function diagnoseDoc(doc) {
     if (!doc) return withLookupPass(runDiagnosis);
-    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, accepted: state.accepted };
+    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted };
     try {
         state.nodes = Array.isArray(doc.nodes) ? doc.nodes : [];
         state.links = Array.isArray(doc.links) ? doc.links : [];
         state.networks = Array.isArray(doc.networks) ? doc.networks : [];
         if (Array.isArray(doc.groups)) state.groups = doc.groups;
+        if (Array.isArray(doc.wifi)) state.wifi = doc.wifi;
         if (Array.isArray(doc.accepted)) state.accepted = doc.accepted;
         return withLookupPass(runDiagnosis);
     } finally {
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.accepted = held.accepted;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.accepted = held.accepted;
     }
 }
 
@@ -1070,12 +1111,13 @@ function runDiagnosis() {
     labelFindings().forEach(add);
     placeFindings().forEach(add);
     hostFindings().forEach(add);
+    wifiFindings().forEach(add);
 
     // Each finding says whether it was accepted, and why: { reason, index }
     // (the entry's place in state.accepted, which the Findings tab's Reopen
     // removes), or null while it is open.
     findings.forEach((f) => {
-        const entry = acceptedEntryFor(accepted, f.key, f.nodeIds, f.linkIds);
+        const entry = acceptedEntryFor(accepted, f.key, f.nodeIds, f.linkIds, f.scope);
         f.accepted = entry ? { reason: entry.reason, index: accepted.indexOf(entry) } : null;
     });
     return { findings, nodes };
@@ -1101,11 +1143,20 @@ function runDiagnosis() {
 // cable the finding names. So an accepted conflict between A and B comes back
 // the day C joins it, and a gateway accepted on thirty PCs comes back on the
 // thirty-first: what was accepted was those devices, not the check.
+//
+// Where the devices alone do not say which finding it was, the finding has a
+// scope and the entry keeps it (v12, with Wi-Fi): the network a security
+// finding is about (the same three APs broadcast Staff and Guest, and
+// accepting Staff's WEP must not accept Guest turning open), and the band of
+// an overlap (accepting two APs sharing 2.4 GHz is not accepting them on
+// 5 GHz). No scope matches only no scope, so every older entry reads as it
+// did.
 const ACCEPT_REASON_MAX = 300;
+const ACCEPT_SCOPE_MAX = 64;
 const acceptedList = () => (Array.isArray(state.accepted) ? state.accepted : []);
-function acceptedEntryFor(accepted, key, nodeIds, linkIds) {
+function acceptedEntryFor(accepted, key, nodeIds, linkIds, scope) {
     if (!accepted.length || !((nodeIds || []).length + (linkIds || []).length)) return null;
-    return accepted.find((a) => a.check === key
+    return accepted.find((a) => a.check === key && (a.scope || '') === (scope || '')
         && (nodeIds || []).every((id) => a.nodeIds.includes(id))
         && (linkIds || []).every((id) => a.linkIds.includes(id))) || null;
 }
@@ -1115,8 +1166,8 @@ const isOpenFinding = (f) => !f.accepted;
 // spreadsheet, but it is no fault: it raises no pill, no badge, no total.
 const isCountedFinding = (f) => isOpenFinding(f) && f.level !== 'info';
 
-// Read from a document: only the four fields, ids as strings, a reason that
-// is text and not empty. Anything else is dropped, as the serializer's
+// Read from a document: only the four fields (and a scope that is text), ids
+// as strings, a reason that is text and not empty. Anything else is dropped, as the serializer's
 // allowlist drops an unknown key.
 function normalizeAccepted(list) {
     const ids = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === 'string' && x))] : []);
@@ -1124,6 +1175,8 @@ function normalizeAccepted(list) {
         if (!a || typeof a !== 'object' || typeof a.check !== 'string' || !a.check) return null;
         const reason = typeof a.reason === 'string' ? a.reason.trim().slice(0, ACCEPT_REASON_MAX) : '';
         const out = { check: a.check, nodeIds: ids(a.nodeIds), linkIds: ids(a.linkIds), reason };
+        const scope = typeof a.scope === 'string' ? a.scope.trim().slice(0, ACCEPT_SCOPE_MAX) : '';
+        if (scope) out.scope = scope;
         return reason && (out.nodeIds.length || out.linkIds.length) ? out : null;
     }).filter(Boolean);
 }
@@ -1136,7 +1189,7 @@ function serializeAccepted(list) {
     const out = [];
     normalizeAccepted(list).forEach((a) => {
         const n = a.nodeIds.filter((id) => nodeIds.has(id)), l = a.linkIds.filter((id) => linkIds.has(id));
-        if (n.length || l.length) out.push({ check: a.check, nodeIds: n.length ? n : undefined, linkIds: l.length ? l : undefined, reason: a.reason });
+        if (n.length || l.length) out.push({ check: a.check, scope: a.scope, nodeIds: n.length ? n : undefined, linkIds: l.length ? l : undefined, reason: a.reason });
     });
     return out.length ? out : undefined;
 }
@@ -1144,18 +1197,29 @@ function serializeAccepted(list) {
 // The name a check goes by in the tab and the report, for an accepted entry
 // that matches nothing at the moment (there is no finding to borrow it from).
 const FINDING_CHECK_NAMES = { 'ip-conflict': 'IP Conflict', 'mac-conflict': 'MAC Conflict', cabling: 'Cabling', loop: 'L2 loop',
-    'cable-label': 'Cable label', 'asset-tag': 'Asset tag', group: 'Groups', rack: 'Rack', 'rack-tag': 'Cable tags' };
+    'cable-label': 'Cable label', 'asset-tag': 'Asset tag', group: 'Groups', rack: 'Rack', 'rack-tag': 'Cable tags', host: 'Runs on',
+    'wifi-band': 'Wi-Fi band', 'wifi-ssid': 'SSID', 'wifi-subnet': 'Wi-Fi subnet', 'wifi-overlap': 'Channel overlap', 'wifi-plan': 'Channel plan',
+    'wifi-security': 'Wi-Fi security', 'wifi-signal': 'Signal' };
 const findingCheckName = (key) => t(FINDING_CHECK_NAMES[key] || (NODE_CHECKS_BY_KEY[key] && NODE_CHECKS_BY_KEY[key].label) || key);
 
 // One undo step: the findings of one line of the tab (the same finding on
-// one or more devices), accepted together under one reason.
+// one or more devices), accepted together under one reason. One entry per
+// scope among them (almost always one), so no entry covers a scope that was
+// not on the line.
 function acceptFindings(findings, reason) {
     const text = String(reason || '').trim().slice(0, ACCEPT_REASON_MAX);
     const list = (findings || []).filter((f) => f && !f.accepted);
     if (!text || !list.length || readOnlyRefuses()) return false;
-    const union = (key) => [...new Set(list.flatMap((f) => f[key] || []))];
+    const union = (fs, key) => [...new Set(fs.flatMap((f) => f[key] || []))];
+    const scopes = [...new Set(list.map((f) => f.scope || ''))];
+    const entries = scopes.map((scope) => {
+        const fs = list.filter((f) => (f.scope || '') === scope);
+        const entry = { check: list[0].key, nodeIds: union(fs, 'nodeIds'), linkIds: union(fs, 'linkIds'), reason: text };
+        if (scope) entry.scope = scope;
+        return entry;
+    });
     batch(() => {
-        state.accepted = acceptedList().concat([{ check: list[0].key, nodeIds: union('nodeIds'), linkIds: union('linkIds'), reason: text }]);
+        state.accepted = acceptedList().concat(entries);
         save(); renderCanvasOnly();
     });
     refreshSelectedNodeDiagnostics();
@@ -1427,6 +1491,248 @@ function hostFindings() {
     return out;
 }
 
+// ---- Wi-Fi (Review-Packs/Topo-wifi.md, W2) ----
+// The relational half of the Wi-Fi checks; a radio's own settings are its
+// Radio verdict (radioSettingProblems). Everything here reads the inference
+// the editor shows (linkWifiSsid, linkWifiBand, apBandSsids in js/model.js),
+// so the band a finding names is the band the link panel says, and what
+// nobody wrote down (no standard, no channel, no signal) is unknown and
+// never a fault. A link or a radio on a retired device is off the air. A
+// link between two devices that serve radio (a mesh backhaul) has a band
+// but no client, so only the band and signal checks read it. Findings of
+// one check on the same devices, links and scope are one line
+// (mergeSameFindings).
+//
+//   wifi-band     Problem. A client on a band its AP's radio does not offer
+//                 (or its own radio does not have), two ends with no band in
+//                 common, and 6 GHz without Wi-Fi 6E or 7 at both ends. A
+//                 radio that lists 6 GHz on the wrong standard is already
+//                 its own Radio finding, so the link does not repeat it.
+//   wifi-ssid     Warning. A link set to an SSID its AP does not broadcast,
+//                 or not on that band.
+//   wifi-subnet   Problem. The SSID's subnet does not hold the client's
+//                 address: the client is drawn on one network and numbered
+//                 for another.
+//   wifi-overlap  Warning. Two APs on overlapping channels of one band, in
+//                 the same room or floor (the nearest group of either kind
+//                 they share); with neither in any group, on the same
+//                 subnet. Width counts: 36/80 and 44/20 share the air. One
+//                 line per band (its scope).
+//   wifi-plan     Info. A 2.4 GHz channel off 1, 6 and 11. Listed, never
+//                 counted: one AP on 3 is a choice, two are wifi-overlap.
+//   wifi-security Warning. Open (OWE is fine: it encrypts), WEP or WPA/TKIP,
+//                 on a network an AP broadcasts. One line per network (its
+//                 scope), named by it.
+//   wifi-signal   Advisory. Weaker than -75 dBm, or -67 for a VoIP phone,
+//                 which needs the margin for a call not to break up.
+const WIFI_PLAN_24 = [1, 6, 11];
+const WIFI_SIGNAL_WEAK = -75;
+const WIFI_SIGNAL_VOICE = -67;
+const WIFI_WEAK_SECURITY = {
+    open: '{ssid} is open: anyone in range can join it and read what it carries. Use WPA2/WPA3, or OWE (Enhanced Open) for a guest network.',
+    wep: '{ssid} uses WEP, which free tools break in minutes. Use WPA2/WPA3.',
+    wpa: '{ssid} allows WPA (TKIP), which is retired and weak, and which Wi-Fi 6 devices will not use. Use WPA2/WPA3.'
+};
+const wifiBandsList = (bands) => bands.map(wifiBandName).join(', ');
+// "ch 36/80": a radio band's channel and, when set, its width.
+const wifiChannelText = (b) => 'ch ' + b.channel + (b.width ? '/' + b.width : '');
+
+function wifiFindings() {
+    const out = [];
+    const wifi = Array.isArray(state.wifi) ? state.wifi : [];
+    const nameOf = (n) => n.name || n.id;
+
+    state.links.forEach((link) => {
+        const e = wifiLinkEnds(link);
+        if (!e || e.ends.some((end) => isRetired(end.node))) return;
+        // The client first, then its AP; between two clients (or two APs
+        // with no client) the link's own order.
+        const [one, two] = e.ap ? [e.client, e.ap] : e.ends;
+        const a = nameOf(one.node), b = nameOf(two.node);
+        const say = (key, level, check, detail) => out.push({ key, level, check: t(check), subject: a + ' ↔ ' + b, detail,
+            nodeIds: [one.node.id, two.node.id], linkIds: [link.id] });
+        const band = linkWifiOf(link, 'band') || linkWifiBand(link, wifi);
+        const apRadio = e.ap ? radioOf(e.ap.iface) : null;
+        // Two devices that both serve radio (a mesh backhaul) share a band,
+        // which is checked, but the far one joins no SSID: its address is a
+        // management one, and an SSID typed on the link names no network it
+        // is a client of. The SSID and subnet checks are for clients.
+        const backhaul = !!e.ap && radioServes(e.client.node);
+
+        // ---- the band ----
+        const handled = new Set();
+        if (band === '6') {
+            e.ends.forEach((end) => {
+                const r = radioOf(end.iface);
+                const std = r && r.standard;
+                if (!std || WIFI_6G_STANDARDS.includes(std)) return;
+                handled.add(end);
+                if (radioBand(r, '6')) return;   // its own Radio finding says it
+                say('wifi-band', 'bad', 'Wi-Fi band', t('{a} and {b} are on 6 GHz, but {name} is {standard}. 6 GHz takes Wi-Fi 6E or Wi-Fi 7 at both ends.',
+                    { a, b, name: nameOf(end.node), standard: wifiStandardName(std) }));
+            });
+        }
+        if (e.ap && band) {
+            const apBands = radioBands(apRadio);
+            if (apBands && !apBands.includes(band) && !handled.has(e.ap)) {
+                say('wifi-band', 'bad', 'Wi-Fi band', t('{a} is on {band}, which the radio of {b} does not offer (it has {bands}).',
+                    { a, b, band: wifiBandName(band), bands: wifiBandsList(apBands) }));
+            }
+            const own = radioBands(radioOf(e.client.iface));
+            if (own && !own.includes(band) && !handled.has(e.client)) {
+                say('wifi-band', 'bad', 'Wi-Fi band', t('{a} is on {band}, but its own radio has only {bands}.',
+                    { a, band: wifiBandName(band), bands: wifiBandsList(own) }));
+            }
+        } else if (e.ap && !band) {
+            const x = radioBands(radioOf(e.client.iface)), y = radioBands(apRadio);
+            if (x && y && !commonWifiBands(x, y).length) {
+                say('wifi-band', 'bad', 'Wi-Fi band', t('{a} and {b} have no band in common: {a} has {bandsA}, {b} has {bandsB}.',
+                    { a, b, bandsA: wifiBandsList(x), bandsB: wifiBandsList(y) }));
+            }
+        }
+
+        // ---- the SSID ----
+        const picked = linkWifiOf(link, 'ssid');
+        const w = picked ? wifiById(picked, wifi) : null;
+        if (e.ap && w && !backhaul) {
+            const label = wifiLabel(w);
+            if (!apSsids(apRadio, wifi).includes(w.id)) {
+                say('wifi-ssid', 'warn', 'SSID', t('{a} is set to {ssid}, but {b} does not broadcast it.', { a, b, ssid: label }));
+            } else if (band && (radioBands(apRadio) || WIFI_BANDS).includes(band) && !apBandSsids(apRadio, band, wifi).includes(w.id)) {
+                const on = (radioBands(apRadio) || WIFI_BANDS).filter((x) => apBandSsids(apRadio, x, wifi).includes(w.id));
+                say('wifi-ssid', 'warn', 'SSID', t('{a} is on {ssid} on {band}, but {b} broadcasts {ssid} only on {bands}.',
+                    { a, b, ssid: label, band: wifiBandName(band), bands: wifiBandsList(on) }));
+            }
+        }
+
+        // ---- the subnet ----
+        const ssid = e.client && !backhaul ? linkWifiSsid(link, wifi) : null;
+        const net = ssid ? wifiById(ssid, wifi) : null;
+        const subnet = net && net.network ? networkById(net.network) : null;
+        const p = subnet ? parseValidCIDR(subnet.cidr) : null;
+        if (p) {
+            // The address on the client's end of the link, else its own
+            // addresses of the subnet's family: one inside is enough.
+            const endIp = e.client.iface ? parseValidCIDR(e.client.iface.ip) : null;
+            const ips = (endIp ? [endIp] : getValidIps(e.client.node)).filter((x) => x.kind === p.kind);
+            if (ips.length && !ips.some((x) => ipInParsed(x.ip, p))) {
+                say('wifi-subnet', 'bad', 'Wi-Fi subnet', t('{a} is on {ssid}, whose subnet is {cidr}, but its address {ip} is not in it.',
+                    { a, ssid: wifiLabel(net), cidr: p.networkStr, ip: ips[0].ip.toString() }));
+            }
+        }
+
+        // ---- the signal ----
+        const signal = linkWifiOf(link, 'signal');
+        if (signal !== undefined) {
+            const voice = e.ends.some((end) => end.node.type === 'voip' && end !== e.ap);
+            const limit = voice ? WIFI_SIGNAL_VOICE : WIFI_SIGNAL_WEAK;
+            if (signal < limit) {
+                say('wifi-signal', 'warn', 'Signal', voice
+                    ? t('{a} hears {b} at {signal} dBm. A phone needs {limit} dBm or better for calls that do not break up.', { a, b, signal, limit })
+                    : t('{a} hears {b} at {signal} dBm, weaker than {limit} dBm: expect a slow link that drops. Move one closer, or add an access point.', { a, b, signal, limit }));
+            }
+        }
+    });
+
+    // ---- channels: the plan, and APs sharing the air ----
+    // Only devices that serve radio: a client's channel (a controller's
+    // export records the one each client is on) is its AP's, and would read
+    // as a second AP on top of it. A width the band or standard cannot take
+    // already has its Radio Problem; it is spread as 20 MHz here, so a 5 GHz
+    // radio set to 320 does not also claim to overlap half the band.
+    const cells = [];
+    state.nodes.forEach((node) => {
+        if (isRetired(node) || !radioServes(node)) return;
+        getInterfaces(node).forEach((iface) => {
+            const radio = ifaceIsWireless(iface) ? radioOf(iface) : null;
+            (radio && radio.bands || []).forEach((band) => {
+                if (!wifiChannelValid(band.band, band.channel)) return;
+                const b = wifiWidthValid(band.band, band.width, radio.standard) ? band : { band: band.band, channel: band.channel };
+                cells.push({ node, iface, b });
+                if (b.band === '2.4' && !WIFI_PLAN_24.includes(b.channel)) {
+                    const name = nameOf(node);
+                    out.push({ key: 'wifi-plan', level: 'info', check: t('Channel plan'), subject: name, nodeIds: [node.id],
+                        detail: t('{name} ({iface}) is on 2.4 GHz channel {ch}. Only 1, 6 and 11 stay clear of each other; a channel between them overlaps two.', { name, iface: iface.name || 'radio', ch: b.channel }) });
+                }
+            });
+        });
+    });
+    // Where two APs share the air: the nearest room or floor they are both
+    // in. The subnet they share stands in only while neither is in any
+    // group: once the groups are drawn they are the record of where things
+    // are, and two APs in different buildings (or racks with no room above
+    // them) are not known to be near, however they are numbered. Likewise
+    // one placed and one not.
+    const placeOf = new Map();
+    const placesOf = (node) => {
+        if (!placeOf.has(node.id)) {
+            const chain = groupChain(groupById(node.group));
+            placeOf.set(node.id, chain.length ? chain.filter((g) => g.kind === 'room' || g.kind === 'floor').reverse() : null);
+        }
+        return placeOf.get(node.id);
+    };
+    const whereShared = (x, y) => {
+        const px = placesOf(x), py = placesOf(y);
+        if (px || py) {
+            if (!px || !py) return null;
+            const ids = new Set(py.map((g) => g.id));
+            const g = px.find((c) => ids.has(c.id));
+            return g ? groupLabel(g) : null;
+        }
+        const shared = sharedSubnetOf(x, y);
+        return shared && shared !== '__cloud__' ? t('the subnet {net}', { net: shared }) : null;
+    };
+    for (let i = 0; i < cells.length; i++) {
+        for (let j = i + 1; j < cells.length; j++) {
+            const x = cells[i], y = cells[j];
+            if (x.node.id === y.node.id || x.b.band !== y.b.band) continue;
+            if (!wifiChannelsOverlap(x.b, y.b)) continue;
+            const where = whereShared(x.node, y.node);
+            if (!where) continue;
+            const a = nameOf(x.node), b = nameOf(y.node), band = wifiBandName(x.b.band);
+            const same = x.b.channel === y.b.channel && (x.b.width || 20) === (y.b.width || 20);
+            const detail = same
+                ? t('{a} and {b} are both on {band} {ch} in {where}: they take turns on the same air and slow each other down.', { a, b, band, ch: wifiChannelText(x.b), where })
+                : t('{a} ({chA}) and {b} ({chB}) overlap on {band} in {where}: they take turns on the same air and slow each other down.', { a, b, band, chA: wifiChannelText(x.b), chB: wifiChannelText(y.b), where });
+            out.push({ key: 'wifi-overlap', level: 'warn', check: t('Channel overlap'), subject: a + ', ' + b, detail, nodeIds: [x.node.id, y.node.id], scope: x.b.band });
+        }
+    }
+
+    // ---- security ----
+    wifi.forEach((w) => {
+        const text = WIFI_WEAK_SECURITY[w.security];
+        if (!text) return;
+        // Only a network on the air: one no AP broadcasts is a plan, and the
+        // finding needs a device to point at (and to be accepted on).
+        const aps = wifiBroadcasters(w.id).filter((n) => !isRetired(n));
+        if (!aps.length) return;
+        const ssid = wifiLabel(w);
+        out.push({ key: 'wifi-security', level: 'warn', check: t('Wi-Fi security'), subject: ssid, detail: t(text, { ssid }), nodeIds: aps.map((n) => n.id), scope: w.id });
+    });
+    return mergeSameFindings(out);
+}
+
+// One finding per check, set of devices and links, and scope: a link whose
+// band neither the AP nor the client has, or two APs whose two 5 GHz radios
+// both overlap, are one line each, their sentences joined. Accepting goes by
+// check, devices, links and scope (acceptedEntryFor), so two lines with the
+// same ones could only ever be accepted together: accepting the one would
+// silently accept the other. The scope keeps apart what must be accepted
+// apart (two networks on the same APs, one pair of APs on two bands).
+function mergeSameFindings(list) {
+    const rank = { bad: 3, warn: 2, info: 1 };
+    const byKey = new Map();
+    const merged = [];
+    list.forEach((f) => {
+        const k = [f.key, f.scope || '', (f.nodeIds || []).slice().sort().join(','), (f.linkIds || []).slice().sort().join(',')].join('|');
+        const had = byKey.get(k);
+        if (!had) { const copy = { ...f }; byKey.set(k, copy); merged.push(copy); return; }
+        had.detail += ' ' + f.detail;
+        if ((rank[f.level] || 0) > (rank[had.level] || 0)) had.level = f.level;
+    });
+    return merged;
+}
+
 // The document on screen, diagnosed once per change. A render, a click that
 // only selects, or the node tab after an edit would otherwise rerun every
 // reachability walk on an unchanged network. The key is the document minus
@@ -1447,7 +1753,9 @@ function currentDiagnosis() {
 }
 function currentDiagnosisNow() {
     const lang = window.CarinoI18N ? window.CarinoI18N.current() : '';
-    const key = `${lang}\u0000${JSON.stringify(state.nodes, omitPosition)}\u0000${JSON.stringify(state.links)}\u0000${JSON.stringify(state.networks)}\u0000${JSON.stringify(state.groups || [])}\u0000${JSON.stringify(state.accepted || [])}`;
+    // state.wifi too: the Wi-Fi checks read a network's security, subnet and
+    // bands, so editing only a Wi-Fi network must not give the old findings.
+    const key = `${lang}\u0000${JSON.stringify(state.nodes, omitPosition)}\u0000${JSON.stringify(state.links)}\u0000${JSON.stringify(state.networks)}\u0000${JSON.stringify(state.groups || [])}\u0000${JSON.stringify(state.accepted || [])}\u0000${JSON.stringify(state.wifi || [])}`;
     if (diagnosisMemo && diagnosisMemo.key === key) {
         // Same network, but maybe not the same objects: undo, redo and
         // Back/Forward rebuild every node from the stored document, and a move

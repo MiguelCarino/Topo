@@ -536,6 +536,7 @@ function renderCanvasOnly() {
     validateTopology(diag);
     renderNetworksPanel();   // js/networks.js: the Subnets tab's counts follow the drawing
     renderGroupsPanel();     // js/groups.js: so do the Groups tab's
+    renderWifiPanel();       // js/wifi.js: and the Wi-Fi tab's, and whether it is offered
     renderTableView();       // js/table.js: so does the table view, while it shows
     renderRackView();        // js/rackview.js: and the rack view, and the switch's Rack
     if (typeof updateQueryBar === 'function') updateQueryBar();   // js/query.js: the match count
@@ -555,6 +556,48 @@ function canvasIcon(type) {
     return _canvasIcons.get(key).cloneNode(true);
 }
 
+// The map's Wi-Fi colours are tokens (css/app.css, --topo-wifi*), read here
+// and written onto the SVG as plain values: the PNG export and the report's
+// diagram serialize the drawing without the stylesheet, so a var() would
+// come out black. Read afresh per redraw (cheap: one computed style) so a
+// theme switch is picked up; the fallbacks are the tokens' own values, for
+// a page that has not loaded app.css.
+function mapToken(name, fallback) {
+    try {
+        const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        return v || fallback;
+    } catch (e) { return fallback; }
+}
+function wifiMapColours() {
+    return {
+        line: mapToken('--topo-wifi', '#8b5cf6'),
+        halo: mapToken('--topo-wifi-halo', '#ffffff')
+    };
+}
+
+// Where a wireless link's band chip goes: ON its own line (so nobody has to
+// guess which of an AP's fanned-out links it belongs to), toward the client
+// end first (links leaving one AP are furthest apart there), and off the
+// midpoint, where a selected link's ✕ sits. Each place is tried in turn and
+// the first that clears every box in `avoid` (zone and group name tabs,
+// devices, other chips and cable labels, a selected link's port labels and
+// ✕) wins; when
+// none does, the first is used: a crowded map still gets its label.
+// `fromAp` is true when the AP is the link's source end. Returns the chip's
+// centre and its box (which the caller adds to `avoid`).
+const WIFI_CHIP_AT = [0.7, 0.3, 0.8, 0.2, 0.6, 0.4];
+function wifiChipPlace(geo, fromAp, w, h, avoid) {
+    const hit = (b) => avoid.some((o) => b.x1 < o.x2 && b.x2 > o.x1 && b.y1 < o.y2 && b.y2 > o.y1);
+    let first = null;
+    for (const t of WIFI_CHIP_AT) {
+        const p = geo.pointAt(fromAp ? t : 1 - t);
+        const box = { x1: p.x - w / 2, y1: p.y - h / 2, x2: p.x + w / 2, y2: p.y + h / 2 };
+        if (!first) first = { p, box };
+        if (!hit(box)) return { p, box };
+    }
+    return first;
+}
+
 function drawCanvas() {
     lZones.innerHTML = ''; lLinks.innerHTML = ''; lNodes.innerHTML = ''; lAnn.innerHTML = '';
     state.annotations.forEach(renderAnnotation);
@@ -567,6 +610,9 @@ function drawCanvas() {
 
     // 1. Zone bubbles, one per network drawn (zonesToDraw above).
     let labelOffsets = {};
+    // Where each zone's label tab landed, so a Wi-Fi band chip (below) can
+    // keep off it: the chip is drawn over the zones and would bury the name.
+    const zoneTagBoxes = [];
     zonesToDraw(gv).forEach(({ net, nodes, box }) => {
         const subnet = net.cidr;
         const { minX, minY, maxX, maxY } = box;
@@ -613,6 +659,7 @@ function drawCanvas() {
             bg.setAttribute('fill', '#f8fafc'); bg.setAttribute('fill-opacity', '0.9');
             bg.setAttribute('stroke', `hsla(${hue}, 70%, 50%, 0.35)`); bg.setAttribute('stroke-width', '1');
             g.insertBefore(bg, text);
+            zoneTagBoxes.push({ x1: bb.x - 5, y1: bb.y - 2, x2: bb.x + bb.width + 5, y2: bb.y + bb.height + 2 });
         } catch (e) { /* getBBox unavailable */ }
     });
 
@@ -627,6 +674,29 @@ function drawCanvas() {
     const qm = typeof queryMapMatches === 'function' ? queryMapMatches() : null;
 
     // 2. Render Links
+    // What a Wi-Fi band chip must not cover (wifiChipPlace): the zone name
+    // tabs, every device drawn (its glyph and the name under it), the group
+    // frames' name tabs, and each chip and cable label as it is placed. The
+    // devices and tabs are listed only when the first chip asks, so a wired
+    // map pays nothing for it.
+    const wifiInk = wifiMapColours();
+    const chipAvoid = zoneTagBoxes.slice();
+    let chipNodesIn = false;
+    const chipAvoidNodes = () => {
+        if (chipNodesIn) return;
+        chipNodesIn = true;
+        // A device: its 48px glyph and the name and address under it.
+        state.nodes.forEach((n) => {
+            if (gv && (gv.hidden.has(n.id) || gv.guestHidden.has(n.id))) return;
+            chipAvoid.push({ x1: n.x - 46, y1: n.y - 28, x2: n.x + 46, y2: n.y + 54 });
+        });
+        // A group frame's name tab (js/groupmap.js drawGroupFrames, drawn
+        // after the links): its size as that function first guesses it.
+        ((gv && gv.frames) || []).forEach(({ group, rect, members }) => {
+            const words = `${groupLabel(group)} · ${(members || []).length}`;
+            chipAvoid.push({ x1: rect.x + 14, y1: rect.y - 10, x2: rect.x + 14 + 46 + words.length * 6, y2: rect.y + 10 });
+        });
+    };
     state.links.forEach((link) => {
         const src = getNode(link.source), tgt = getNode(link.target);
         if (!src || !tgt) return;
@@ -645,8 +715,15 @@ function drawCanvas() {
         let dashArray = null;
         let baseWidth = 2;
 
+        // A wireless link's band (link.wifi, else the inference the link panel
+        // shows: js/model.js "Wi-Fi"), for its label below and its look: 6 GHz
+        // is drawn in a finer dash of the same purple (WIFI_6G_DASH) with a
+        // filled chip, so a 6E/7 association reads apart from 2.4 and 5 GHz at
+        // a glance and in a PNG. The purple is the --topo-wifi token.
+        const wifiBand = medium === 'wireless' ? linkWifiBand(link) : null;
+
         if (medium === 'fiber') defaultColor = '#06b6d4';
-        else if (medium === 'wireless') { defaultColor = '#8b5cf6'; dashArray = '4 4'; }
+        else if (medium === 'wireless') { defaultColor = wifiInk.line; dashArray = wifiBand === '6' ? WIFI_6G_DASH : '4 4'; }
         else if (medium === 'powerline') { defaultColor = '#eab308'; dashArray = '8 4 2 4'; }
         else if (medium === 'vpn') { defaultColor = '#14b8a6'; dashArray = '10 6'; baseWidth = 2.5; } // secure overlay tunnel
 
@@ -677,7 +754,10 @@ function drawCanvas() {
         // the ✕ sits on the stroke, the label beside it. Explicit fonts and a
         // white halo because the PNG export carries no stylesheet; data-adv so
         // the reduced views (which hide cable details) leave it out.
-        const cableLabel = cableOf(link, 'label').trim();
+        // A radio or a tunnel is no cable: its stored cable facts are kept but
+        // not shown (Review-Packs/Topo-wifi.md), and a wireless link carries
+        // its band instead, as a chip on its line (below).
+        const cableLabel = medium === 'wireless' || medium === 'vpn' ? '' : cableOf(link, 'label').trim();
         if (cableLabel) {
             const mid = geo.pointAt(0.5);
             const span = Math.hypot(tgt.x - src.x, tgt.y - src.y) || 1;
@@ -698,6 +778,77 @@ function drawCanvas() {
             tag.textContent = cableLabel;
             tag.style.pointerEvents = 'none';
             lLinks.appendChild(tag);
+            const cx = mid.x + nx * 16, cy = mid.y + ny * 16, half = cableLabel.length * 2.5 + 2;
+            chipAvoid.push({ x1: cx - half, y1: cy - 6, x2: cx + half, y2: cy + 6 });
+        }
+
+        // The band ("5 GHz") as a small chip sitting on the link's own line
+        // (wifiChipPlace says where), outlined in the link's colour; a 6 GHz
+        // link's chip is filled, which with its finer dash is the 6E/7 look.
+        // The SSID and the signal are its tooltip, and a press on the chip
+        // (or the transparent margin round it, a finger-sized target) selects
+        // the link as a press on the line does, so on a phone the link panel,
+        // which shows them, is one tap away. Full editor only (data-adv).
+        if (wifiBand) {
+            const text = wifiBandName(wifiBand);
+            const w = text.length * 4.9 + 8, h = 12;
+            chipAvoidNodes();
+            if (isSelected && state.selection.size === 1) {
+                // This link's ✕ and port labels, drawn further down and placed
+                // there the same way.
+                const m = geo.pointAt(0.5);
+                chipAvoid.push({ x1: m.x - 9, y1: m.y - 9, x2: m.x + 9, y2: m.y + 9 });
+                const span = Math.hypot(tgt.x - src.x, tgt.y - src.y) || 1;
+                const off = Math.min(0.42, Math.max(0.15, 66 / span));
+                const pnx = -(tgt.y - src.y) / span, pny = (tgt.x - src.x) / span;
+                [[src, link.sourceIface, off, 1], [tgt, link.targetIface, 1 - off, -1]].forEach(([node, ifaceId, at, side]) => {
+                    const q = geo.pointAt(at), half = (ifaceId ? ifaceLabel(node, ifaceId) : 'unbound').length * 2.5 + 2;
+                    const cx = q.x + pnx * 10 * side, cy = q.y + pny * 10 * side;
+                    chipAvoid.push({ x1: cx - half, y1: cy - 6, x2: cx + half, y2: cy + 6 });
+                });
+            }
+            const ends = wifiLinkEnds(link, src, tgt);
+            const fromAp = !ends || !ends.ap || ends.ap.node === src;
+            const { p, box } = wifiChipPlace(geo, fromAp, w, h, chipAvoid);
+            chipAvoid.push(box);
+            const six = wifiBand === '6';
+            const chip = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            chip.setAttribute('class', qm && !qm.links.has(link.id) ? 'wifi-band-chip q-dim' : 'wifi-band-chip');
+            chip.setAttribute('data-adv', '');
+            chip.setAttribute('data-link', link.id);
+            chip.setAttribute('transform', 'translate(' + p.x + ', ' + p.y + ')');
+            const pad = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            pad.setAttribute('x', String(-w / 2 - 6)); pad.setAttribute('y', String(-h / 2 - 6));
+            pad.setAttribute('width', String(w + 12)); pad.setAttribute('height', String(h + 12));
+            pad.setAttribute('fill', 'transparent');
+            chip.appendChild(pad);
+            const pill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            pill.setAttribute('x', String(-w / 2)); pill.setAttribute('y', String(-h / 2));
+            pill.setAttribute('width', String(w)); pill.setAttribute('height', String(h)); pill.setAttribute('rx', String(h / 2));
+            pill.setAttribute('fill', six ? defaultColor : wifiInk.halo);
+            pill.setAttribute('stroke', defaultColor); pill.setAttribute('stroke-width', '1');
+            chip.appendChild(pill);
+            const tag = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            tag.setAttribute('class', 'wifi-band-label');
+            tag.setAttribute('data-link', link.id);
+            tag.setAttribute('y', '2.8');
+            tag.setAttribute('text-anchor', 'middle');
+            tag.setAttribute('font-size', '8');
+            tag.setAttribute('font-family', 'monospace');
+            tag.setAttribute('font-weight', '700');
+            tag.setAttribute('fill', six ? wifiInk.halo : defaultColor);
+            tag.textContent = text;
+            chip.appendChild(tag);
+            const ssid = linkWifiSsid(link), signal = linkWifiOf(link, 'signal');
+            const tip = [ssid ? wifiLabel(wifiById(ssid)) : '', text, signal !== undefined ? signal + ' dBm' : ''].filter(Boolean).join(' · ');
+            const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            title.textContent = tip;
+            chip.appendChild(title);
+            chip.addEventListener('mousedown', (event) => {
+                event.stopPropagation();
+                if (addsToSelection(event)) toggleSelected('link', link.id); else select(link.id, 'link');
+            });
+            lLinks.appendChild(chip);
         }
 
         // Radio does not march down a wire, so a traced wireless link emits ")))"
@@ -1461,6 +1612,10 @@ function renderSidebarData(node) {
             // lying about itself.
             if (node.macOpen || hasMac(iface)) ifCont.appendChild(renderMacLine(node, iface));
 
+            // What the radio is (iface.radio, js/wifi.js): folded to one line
+            // under it, since most of the time the line is all anyone needs.
+            if (!isBond(iface) && ifaceIsWireless(iface)) ifCont.appendChild(radioBlock(node, iface));
+
             if (isBond(iface)) {
                 // The mode gets its own line. It will not fit beside the address
                 // in a 281px sidebar, and squeezing the CIDR down to "10" to make
@@ -2033,7 +2188,7 @@ function select(id, type) {
     nPane.classList.add('hidden'); pPane.classList.remove('hidden');
     // A device's tag and QR, or a cable's label (js/assets.js); a note has none.
     document.getElementById('printLabelBtn').classList.toggle('hidden', type !== 'node' && type !== 'link');
-    if (type !== 'link') renderCableFields(null);
+    if (type !== 'link') { renderCableFields(null); renderLinkWifi(null); }
 
     if (type === 'node') {
         const node = getNode(id); if (!node) return;
@@ -2098,12 +2253,23 @@ function select(id, type) {
         } else { linkProps.classList.add('hidden'); }
 
         renderLinkPorts(link);
-        renderCableFields(link);   // label, length, colour, via (js/assets.js)
+        // A cable's facts (label, length, colour, via: js/assets.js), or, on a
+        // wireless link, its SSID, band and signal instead (js/wifi.js). A VPN
+        // link has neither. Nor a label to print: there is no cable to stick
+        // one on.
+        const linkFacts = () => {
+            renderCableFields(link);
+            renderLinkWifi(link);
+            const m = effectiveMedium(link);
+            document.getElementById('printLabelBtn').classList.toggle('hidden', m === 'wireless' || m === 'vpn');
+        };
+        linkFacts();
 
         const linkMediumProps = document.getElementById('linkMediumProps');
         linkMediumProps.classList.remove('hidden');
-        document.getElementById('propMedium').value = link.medium || 'utp';
-        document.getElementById('propMedium').onchange = (e) => { link.medium = e.target.value; save(); renderCanvasOnly(); renderLinkPorts(link); };
+        // As drawn: a link onto a radio is wireless though it never said so.
+        document.getElementById('propMedium').value = effectiveMedium(link);
+        document.getElementById('propMedium').onchange = (e) => { link.medium = e.target.value; save(); renderCanvasOnly(); renderLinkPorts(link); linkFacts(); };
     }
     renderCanvasOnly();
 }

@@ -100,9 +100,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a VM has no ports in the rack', rackPortsOf(node('vm')).length === 0);
 
     // ---- 3: the document ----
-    ok('the document is v11', DOC_VERSION === 11 && serializeDoc().v === 11);
+    // v11 when the ports face shipped; later versions (v12, Wi-Fi) add keys
+    // of their own and convert nothing of it.
+    ok('the document is v11 or later', DOC_VERSION >= 11 && serializeDoc().v === DOC_VERSION);
     const m10 = migrateDoc(Object.assign(site(10), {}));
-    ok('a v10 document migrates with nothing converted', m10.doc.v === 11 && m10.from === 10 && !m10.newer && json(m10.doc.nodes) === json(site(10).nodes));
+    ok('a v10 document migrates with nothing converted', m10.doc.v === DOC_VERSION && m10.from === 10 && !m10.newer && json(m10.doc.nodes) === json(site(10).nodes));
     batch(() => { node('srv').portsFace = 'front'; node('core').portsFace = 'front'; save(); });
     const saved = serializeDoc();
     const savedJson = JSON.parse(json(saved));

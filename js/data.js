@@ -51,8 +51,9 @@ const COMMON_ERRORS = {
           interfaces: [{ id: 'd1', name: 'eth0', ip: '192.168.9.10/24' }] },
 
         // Wi-Fi association cabled out of the Ethernet port while a radio sits idle.
+        // The AP also broadcasts an open guest network (COMMON_ERRORS.wifi below).
         { tid: 'ap', type: 'ap', name: 'Access Point', dx: -10, dy: 90, portCount: 1,
-          interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
+          interfaces: [{ id: 'w1', name: 'wlan0', ip: '', radio: { standard: 'ax', bands: [{ band: '2.4', channel: 6 }, { band: '5', channel: 36 }] } }] },
         { tid: 'lap', type: 'pc', name: 'Laptop (Wi-Fi on eth0)', dx: -10, dy: 220, gw: '192.168.9.1',
           interfaces: [{ id: 'l1', name: 'eth0', ip: '192.168.9.50/24' }, { id: 'l2', name: 'wlan0', ip: '' }] },
 
@@ -73,7 +74,11 @@ const COMMON_ERRORS = {
         { s: 'lap', t: 'ap', si: 'l1', ti: 'w1', medium: 'wireless' }, // radio out of eth0
         { s: 'dup', t: 'sw2', si: 'd1', ti: 'p3' },
         { s: 'mis', t: 'rtr', si: 'm1', ti: 'r1' }               // subnet mismatch on one cable
-    ]
+    ],
+    // An open guest network: no encryption, so anyone in range reads what it
+    // carries. The fix the finding names is OWE (Enhanced Open), which keeps
+    // "no password" and encrypts.
+    wifi: [{ id: 'ce_guest', ssid: 'Guest', security: 'open' }]
 };
 
 // Same block, placed absolutely, so it can also be opened as a whole workspace.
@@ -85,7 +90,8 @@ const commonErrorsTemplate = (originX, originY) => ({
     links: COMMON_ERRORS.links.map((l, i) => ({
         id: `ce${i}`, source: l.s, target: l.t, sourceIface: l.si, targetIface: l.ti,
         medium: l.medium, attachment: l.attachment || null
-    }))
+    })),
+    wifi: cloneData(COMMON_ERRORS.wifi)
 });
 
 // ── The offline plan, drawn ──────────────────────────────────────────────
@@ -236,7 +242,17 @@ const OFFLINE_EXTENDED = {
 
 const templatesData = {
     // Two rooms and the hall cupboard the router lives in.
+    // Wi-Fi as a home has it: one Wi-Fi 6 AP, the household network on both
+    // bands and an IoT one on 2.4 GHz for the gadgets that only have that.
+    // The TV's SSID and every band are left to inference (js/model.js
+    // "Wi-Fi"): the TV's address is in Home's subnet, and each link goes on
+    // the best band both ends have. The gadgets are set to IoT, which has
+    // no subnet of its own (it shares the LAN, as a home router does it).
     house: {
+        wifi: [
+            { id: 'wf_home', ssid: 'Home', security: 'wpa2/3', network: '192.168.1.0/24' },
+            { id: 'wf_iot', ssid: 'IoT', security: 'wpa2', bands: ['2.4'] }
+        ],
         groups: [
             { id: 'g_cup', kind: 'room', name: 'Hall cupboard' },
             { id: 'g_study', kind: 'room', name: 'Study' },
@@ -246,12 +262,12 @@ const templatesData = {
             { id: 'h1', type: 'cloud', name: 'ISP', x: 400, y: 40, interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.1/30' }] },
             { id: 'h2', type: 'router', name: 'Home Router', x: 400, y: 230, group: 'g_cup', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.1/24' }, { id: 'i2', name: 'eth1', ip: '203.0.113.2/30' }, { id: 'i3', name: 'eth2', ip: '' }], gw: '203.0.113.1', dns: '8.8.8.8' },
             { id: 'h3', type: 'pc', name: 'Home PC', x: 140, y: 470, group: 'g_study', interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.50/24' }], gw: '192.168.1.1', dns: '8.8.8.8' },
-            { id: 'hp1', type: 'printer', name: 'Wireless Printer', x: 240, y: 470, group: 'g_study', gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.80/24' }] },
-            { id: 'hap', type: 'ap', name: 'WiFi AP', x: 520, y: 230, group: 'g_cup', interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
-            { id: 'h5', type: 'iot', name: 'Smart TV', x: 560, y: 470, group: 'g_living', gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.101/24' }] },
-            { id: 'h6', type: 'camera', name: 'Porch Cam', x: 700, y: 470, gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.102/24' }] }
+            { id: 'hp1', type: 'printer', name: 'Wireless Printer', x: 240, y: 470, group: 'g_study', gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.80/24', radio: { standard: 'n', bands: [{ band: '2.4' }] } }] },
+            { id: 'hap', type: 'ap', name: 'WiFi AP', x: 520, y: 230, group: 'g_cup', interfaces: [{ id: 'w1', name: 'wlan0', ip: '', radio: { standard: 'ax', bands: [{ band: '2.4', channel: 6, width: 20 }, { band: '5', channel: 36, width: 80 }] } }] },
+            { id: 'h5', type: 'iot', name: 'Smart TV', x: 560, y: 470, group: 'g_living', gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.101/24', radio: { standard: 'ac' } }] },
+            { id: 'h6', type: 'camera', name: 'Porch Cam', x: 700, y: 470, gw: '192.168.1.1', dns: '8.8.8.8', interfaces: [{ id: 'i1', name: 'wlan0', ip: '192.168.1.102/24', radio: { standard: 'n', bands: [{ band: '2.4' }] } }] }
         ],
-        links: [{ id: 'hl1', source: 'h1', target: 'h2', sourceIface: 'i1', targetIface: 'i2' }, { id: 'hl2', source: 'h2', target: 'h3', sourceIface: 'i1', targetIface: 'i1' }, { id: 'hl3', source: 'h2', target: 'hap', sourceIface: 'i3', targetIface: 'p1' }, { id: 'hl4', source: 'hap', target: 'h5', sourceIface: 'w1', targetIface: 'i1' }, { id: 'hl5', source: 'hap', target: 'h6', sourceIface: 'w1', targetIface: 'i1' }, { id: 'hl6', source: 'hap', target: 'hp1', sourceIface: 'w1', targetIface: 'i1' }]
+        links: [{ id: 'hl1', source: 'h1', target: 'h2', sourceIface: 'i1', targetIface: 'i2' }, { id: 'hl2', source: 'h2', target: 'h3', sourceIface: 'i1', targetIface: 'i1' }, { id: 'hl3', source: 'h2', target: 'hap', sourceIface: 'i3', targetIface: 'p1' }, { id: 'hl4', source: 'hap', target: 'h5', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -58 } }, { id: 'hl5', source: 'hap', target: 'h6', sourceIface: 'w1', targetIface: 'i1', wifi: { ssid: 'wf_iot', signal: -71 } }, { id: 'hl6', source: 'hap', target: 'hp1', sourceIface: 'w1', targetIface: 'i1', wifi: { ssid: 'wf_iot', signal: -54 } }]
     },
     bank: {
         nodes: [
@@ -340,10 +356,15 @@ const templatesData = {
         ],
         links: [{ id: 'cl1', source: 'c1', target: 'c2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'cl2', source: 'c2', target: 'c3', sourceIface: 'i2', targetIface: 'i1' }, { id: 'cl3', source: 'c3', target: 'c4', sourceIface: 'i2', targetIface: 'p1' }, { id: 'cl4', source: 'c3', target: 'c7', sourceIface: 'i3', targetIface: 'p1' }, { id: 'cl5', source: 'c3', target: 'c9', sourceIface: 'i4', targetIface: 'p1' }, { id: 'cl6', source: 'c4', target: 'c5', sourceIface: 'p2', targetIface: 'i1' }, { id: 'cl7', source: 'c4', target: 'c6', sourceIface: 'p3', targetIface: 'i1' }, { id: 'cl8', source: 'c7', target: 'c8', sourceIface: 'p2', targetIface: 'i1' }, { id: 'cl9', source: 'c9', target: 'c10', sourceIface: 'w1', targetIface: 'i1' }]
     },
+    // The guest Wi-Fi of the blurb: its own port on the router and its own
+    // subnet, so a shopper's phone never shares a segment with the tills.
+    // OWE (Enhanced Open): no password to print on the counter, and still
+    // encrypted.
     retail: {
+        wifi: [{ id: 'wf_shop', ssid: 'Shop Guest', security: 'owe', network: '10.5.9.0/24' }],
         nodes: [
             { id: 'r1', type: 'cloud', name: 'ISP', x: 400, y: 50, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
-            { id: 'r2', type: 'router', name: 'Store Router', x: 400, y: 150, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.5.1/24' }, { id: 'i2', name: 'eth1', ip: '10.5.5.1/24' }], gw: '0.0.0.0' },
+            { id: 'r2', type: 'router', name: 'Store Router', x: 400, y: 150, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.5.1/24' }, { id: 'i2', name: 'eth1', ip: '10.5.5.1/24' }, { id: 'i3', name: 'eth2', ip: '10.5.9.1/24' }], gw: '0.0.0.0' },
             { id: 'r3', type: 'switch', name: 'Core SW', x: 400, y: 250, portCount: 8, interfaces: [] },
             { id: 'r4', type: 'switch', name: 'POS SW', x: 250, y: 350, portCount: 8, interfaces: [] },
             { id: 'r5', type: 'pc', name: 'Register 1', x: 150, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.5.10/24' }], gw: '192.168.5.1' },
@@ -352,9 +373,11 @@ const templatesData = {
             { id: 'r8', type: 'switch', name: 'CCTV SW', x: 550, y: 350, portCount: 8, interfaces: [] },
             { id: 'r9', type: 'server', name: 'NVR', x: 450, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.5.10/24' }], gw: '10.5.5.1' },
             { id: 'r10', type: 'camera', name: 'Entrance Cam', x: 550, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.5.90/24' }], gw: '10.5.5.1' },
-            { id: 'r11', type: 'camera', name: 'Aisle Cam', x: 650, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.5.91/24' }], gw: '10.5.5.1' }
+            { id: 'r11', type: 'camera', name: 'Aisle Cam', x: 650, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.5.5.91/24' }], gw: '10.5.5.1' },
+            { id: 'r12', type: 'ap', name: 'Guest AP', x: 700, y: 150, portCount: 1, interfaces: [{ id: 'w1', name: 'wlan0', ip: '', radio: { standard: 'ax', bands: [{ band: '2.4', channel: 1, width: 20 }, { band: '5', channel: 44, width: 40 }] } }] },
+            { id: 'r13', type: 'iot', name: 'Shopper Phone', x: 700, y: 270, interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.5.9.120/24', radio: { standard: 'ax' } }], gw: '10.5.9.1' }
         ],
-        links: [{ id: 'rl1', source: 'r1', target: 'r2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'rl2', source: 'r2', target: 'r3', sourceIface: 'i2', targetIface: 'p1' }, { id: 'rl3', source: 'r3', target: 'r4', sourceIface: 'p2', targetIface: 'p1' }, { id: 'rl4', source: 'r3', target: 'r8', sourceIface: 'p3', targetIface: 'p1' }, { id: 'rl5', source: 'r4', target: 'r5', sourceIface: 'p2', targetIface: 'i1' }, { id: 'rl6', source: 'r4', target: 'r6', sourceIface: 'p3', targetIface: 'i1' }, { id: 'rl7', source: 'r4', target: 'r7', sourceIface: 'p4', targetIface: 'i1' }, { id: 'rl8', source: 'r8', target: 'r9', sourceIface: 'p2', targetIface: 'i1' }, { id: 'rl9', source: 'r8', target: 'r10', sourceIface: 'p3', targetIface: 'i1' }, { id: 'rl10', source: 'r8', target: 'r11', sourceIface: 'p4', targetIface: 'i1' }]
+        links: [{ id: 'rl1', source: 'r1', target: 'r2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'rl2', source: 'r2', target: 'r3', sourceIface: 'i2', targetIface: 'p1' }, { id: 'rl3', source: 'r3', target: 'r4', sourceIface: 'p2', targetIface: 'p1' }, { id: 'rl4', source: 'r3', target: 'r8', sourceIface: 'p3', targetIface: 'p1' }, { id: 'rl5', source: 'r4', target: 'r5', sourceIface: 'p2', targetIface: 'i1' }, { id: 'rl6', source: 'r4', target: 'r6', sourceIface: 'p3', targetIface: 'i1' }, { id: 'rl7', source: 'r4', target: 'r7', sourceIface: 'p4', targetIface: 'i1' }, { id: 'rl8', source: 'r8', target: 'r9', sourceIface: 'p2', targetIface: 'i1' }, { id: 'rl9', source: 'r8', target: 'r10', sourceIface: 'p3', targetIface: 'i1' }, { id: 'rl10', source: 'r8', target: 'r11', sourceIface: 'p4', targetIface: 'i1' }, { id: 'rl11', source: 'r2', target: 'r12', sourceIface: 'i3', targetIface: 'p1' }, { id: 'rl12', source: 'r12', target: 'r13', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -63 } }]
     },
     factory: {
         nodes: [
@@ -425,7 +448,15 @@ const templatesData = {
     // switch on the back of one), a wall rack in the call centre, the web tier
     // as VMs on the app server with the API container inside the web VM, and
     // the branch and the home as groups of their own.
+    // The office's Wi-Fi 6E AP shows every Wi-Fi feature: Office on all
+    // three bands (WPA3, which 6 GHz requires), an IoT network on 2.4 GHz
+    // only, a 6E laptop that lands on 6 GHz by itself (the best band both
+    // ends have), and a phone whose signal clears the stricter voice limit.
     showcase: {
+        wifi: [
+            { id: 'wf_office', ssid: 'Office', security: 'wpa3', network: '10.10.30.0/24' },
+            { id: 'wf_oiot', ssid: 'Office-IoT', security: 'wpa2', bands: ['2.4'] }
+        ],
         groups: [
             { id: 'g_tower',  kind: 'building', name: 'Harbour Tower' },
             { id: 'g_base',   kind: 'floor',    name: 'Basement', parent: 'g_tower' },
@@ -482,11 +513,12 @@ const templatesData = {
             { id: 'scam', type: 'camera',       name: 'Studio Cam',          x: 550, y: 980, group: 'g_studio', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.20.90/24' }], gw: '10.10.20.1', ports: '554' },
             { id: 'epc',  type: 'pc',           name: 'Edit Bay',            x: 650, y: 980, group: 'g_studio', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.20.50/24' }], gw: '10.10.20.1' },
             // --- On-site office tenant (VLAN 30, wireless) ---
-            { id: 'oap',  type: 'ap',           name: 'Office WiFi',         x: 940, y: 860, group: 'g_office', interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
-            { id: 'opc',  type: 'pc',           name: 'Office WS',           x: 890, y: 980, group: 'g_office', gw: '10.10.30.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.50/24' }] },
-            { id: 'opr',  type: 'printer',      name: 'Office Printer',      x: 990, y: 980, group: 'g_office', gw: '10.10.30.1', ports: '9100', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.80/24' }] },
-            { id: 'oph',  type: 'voip',         name: 'Desk Phone',          x: 1090, y: 980, group: 'g_office', gw: '10.10.30.1', ports: '5060', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.60/24' }] },
-            { id: 'osen', type: 'iot',          name: 'Smart Sensor',        x: 990, y: 1100, group: 'g_office', gw: '10.10.30.1', ports: '1883', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.100/24' }] },
+            { id: 'oap',  type: 'ap',           name: 'Office WiFi',         x: 940, y: 860, group: 'g_office', interfaces: [{ id: 'w1', name: 'wlan0', ip: '',
+              radio: { standard: 'axe', bands: [{ band: '2.4', channel: 11, width: 20 }, { band: '5', channel: 149, width: 80 }, { band: '6', channel: 37, width: 160 }] } }] },
+            { id: 'opc',  type: 'pc',           name: 'Office WS',           x: 890, y: 980, group: 'g_office', gw: '10.10.30.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.50/24', radio: { standard: 'axe' } }] },
+            { id: 'opr',  type: 'printer',      name: 'Office Printer',      x: 990, y: 980, group: 'g_office', gw: '10.10.30.1', ports: '9100', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.80/24', radio: { standard: 'ac' } }] },
+            { id: 'oph',  type: 'voip',         name: 'Desk Phone',          x: 1090, y: 980, group: 'g_office', gw: '10.10.30.1', ports: '5060', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.60/24', radio: { standard: 'ax' } }] },
+            { id: 'osen', type: 'iot',          name: 'Smart Sensor',        x: 990, y: 1100, group: 'g_office', gw: '10.10.30.1', ports: '1883', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.100/24', radio: { standard: 'n', bands: [{ band: '2.4' }] } }] },
             // --- Call center tenant (VLAN 40) ---
             { id: 'csw',  type: 'switch',       name: 'Call Center Switch',  x: 1760, y: 860, group: 'g_ccrk', rackU: 10, rackHeight: 1, rackFace: 'front', portCount: 24, interfaces: [] },
             { id: 'cp1',  type: 'voip',         name: 'Agent Phone 1',       x: 1400, y: 860, group: 'g_cc', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.61/24' }], gw: '10.10.40.1', ports: '5060' },
@@ -513,7 +545,7 @@ const templatesData = {
             { id: 'k12', source: 'l3', target: 'hsw', sourceIface: 'i2', targetIface: 'p1' },   { id: 'k13', source: 'l3', target: 'ssw', sourceIface: 'i3', targetIface: 'p1' }, { id: 'k14', source: 'l3', target: 'oap', sourceIface: 'i4', targetIface: 'p1' }, { id: 'k15', source: 'l3', target: 'csw', sourceIface: 'i5', targetIface: 'p1' },
             { id: 'k16', source: 'hsw', target: 'dcm', sourceIface: 'p2', targetIface: 'i1' },  { id: 'k17', source: 'hsw', target: 'pacs', sourceIface: 'p3', targetIface: 'i1' }, { id: 'k18', source: 'hsw', target: 'radpc', sourceIface: 'p4', targetIface: 'i1' }, { id: 'k19', source: 'hsw', target: 'wcam', sourceIface: 'p5', targetIface: 'i1' },
             { id: 'k20', source: 'ssw', target: 'scam', sourceIface: 'p2', targetIface: 'i1' }, { id: 'k21', source: 'ssw', target: 'epc', sourceIface: 'p3', targetIface: 'i1' },
-            { id: 'k22', source: 'oap', target: 'opc', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1' }, { id: 'k23', source: 'oap', target: 'opr', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1' }, { id: 'k24', source: 'oap', target: 'oph', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1' }, { id: 'k25', source: 'oap', target: 'osen', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1' },
+            { id: 'k22', source: 'oap', target: 'opc', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -52 } }, { id: 'k23', source: 'oap', target: 'opr', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -66 } }, { id: 'k24', source: 'oap', target: 'oph', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -60 } }, { id: 'k25', source: 'oap', target: 'osen', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { ssid: 'wf_oiot', signal: -70 } },
             { id: 'k26', source: 'csw', target: 'cp1', sourceIface: 'p2', targetIface: 'i1' },  { id: 'k27', source: 'csw', target: 'cp2', sourceIface: 'p3', targetIface: 'i1' }, { id: 'k28', source: 'csw', target: 'capc', sourceIface: 'p4', targetIface: 'i1' }, { id: 'k29', source: 'csw', target: 'pbx', sourceIface: 'p5', targetIface: 'i1' },
             { id: 'k30', source: 'ro', target: 'rsw', sourceIface: 'i2', targetIface: 'p1' },   { id: 'k31', source: 'rsw', target: 'rmtpc', sourceIface: 'p2', targetIface: 'i1' }, { id: 'k32', source: 'rsw', target: 'rpr', sourceIface: 'p3', targetIface: 'i1' },
             { id: 'k33', source: 'hm', target: 'hpc', sourceIface: 'i2', targetIface: 'i1' },   { id: 'k34', source: 'hm', target: 'hiot', medium: 'powerline', sourceIface: 'i2', targetIface: 'i1' },
@@ -580,7 +612,11 @@ const templatesData = {
             { id: 'im17', source: 'i_vpn', target: 'i_rad', sourceIface: 't', medium: 'vpn', targetIface: 'i1' }
         ]
     },
+    // One guest network on both floors' APs, OWE so it is encrypted with no
+    // password at the desk, on the guest VLAN's subnet. The two APs are on
+    // 1/36 and 6/52: clear of each other on both bands.
     hotel: {
+        wifi: [{ id: 'wf_guest', ssid: 'Hotel Guest', security: 'owe', network: '10.70.20.0/24' }],
         nodes: [
             { id: 'h_net', type: 'cloud', name: 'Internet',        x: 480, y: 40,  interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
             { id: 'h_edge',type: 'edge',  name: 'Hotel Edge GW',   x: 480, y: 150, nat: true, gw: '198.51.100.1', dns: '1.1.1.1', ports: '443',
@@ -591,10 +627,10 @@ const templatesData = {
             { id: 'h_pms', type: 'server', name: 'PMS Server',     x: 120, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.70.10.10/24' }], gw: '10.70.10.1', ports: '443, 1433' },
             { id: 'h_rec', type: 'pc',     name: 'Reception WS',   x: 230, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.70.10.50/24' }], gw: '10.70.10.1' },
             { id: 'h_ph',  type: 'voip',   name: 'Front Desk Phone', x: 340, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.70.10.60/24' }], gw: '10.70.10.1', ports: '5060' },
-            { id: 'h_ap1', type: 'ap',     name: 'Guest AP – Floor 1', x: 480, y: 390, interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
-            { id: 'h_ap2', type: 'ap',     name: 'Guest AP – Floor 2', x: 620, y: 390, interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
-            { id: 'h_gl',  type: 'pc',     name: 'Guest Laptop',   x: 450, y: 520, gw: '10.70.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.70.20.101/24' }] },
-            { id: 'h_gp',  type: 'iot',    name: 'Guest Phone',    x: 640, y: 520, gw: '10.70.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.70.20.102/24' }] },
+            { id: 'h_ap1', type: 'ap',     name: 'Guest AP – Floor 1', x: 480, y: 390, interfaces: [{ id: 'w1', name: 'wlan0', ip: '', radio: { standard: 'ax', bands: [{ band: '2.4', channel: 1, width: 20 }, { band: '5', channel: 36, width: 80 }] } }] },
+            { id: 'h_ap2', type: 'ap',     name: 'Guest AP – Floor 2', x: 620, y: 390, interfaces: [{ id: 'w1', name: 'wlan0', ip: '', radio: { standard: 'ax', bands: [{ band: '2.4', channel: 6, width: 20 }, { band: '5', channel: 52, width: 80 }] } }] },
+            { id: 'h_gl',  type: 'pc',     name: 'Guest Laptop',   x: 450, y: 520, gw: '10.70.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.70.20.101/24', radio: { standard: 'ax' } }] },
+            { id: 'h_gp',  type: 'iot',    name: 'Guest Phone',    x: 640, y: 520, gw: '10.70.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.70.20.102/24', radio: { standard: 'ac' } }] },
             { id: 'h_bsw', type: 'switch', name: 'Building Switch', x: 820, y: 390, portCount: 16, interfaces: [] },
             { id: 'h_tv',  type: 'iot',    name: 'Room IPTV',      x: 740, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.70.30.20/24' }], gw: '10.70.30.1', ports: '554' },
             { id: 'h_lock',type: 'iot',    name: 'Door Lock Hub',  x: 850, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.70.30.30/24' }], gw: '10.70.30.1', ports: '1883' },
@@ -611,8 +647,8 @@ const templatesData = {
             // exemption is what makes that legal rather than a double-booked port.
             { id: 'ho7', source: 'h_l3', target: 'h_ap1', sourceIface: 'g', targetIface: 'p1' },
             { id: 'ho8', source: 'h_l3', target: 'h_ap2', sourceIface: 'g', targetIface: 'p1' },
-            { id: 'ho9', source: 'h_ap1', target: 'h_gl', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1' },
-            { id: 'ho10', source: 'h_ap2', target: 'h_gp', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1' },
+            { id: 'ho9', source: 'h_ap1', target: 'h_gl', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -61 } },
+            { id: 'ho10', source: 'h_ap2', target: 'h_gp', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -66 } },
             { id: 'ho11', source: 'h_l3', target: 'h_bsw', sourceIface: 'b', targetIface: 'p1' },
             { id: 'ho12', source: 'h_bsw', target: 'h_tv', sourceIface: 'p2', targetIface: 'i1' },
             { id: 'ho13', source: 'h_bsw', target: 'h_lock', sourceIface: 'p3', targetIface: 'i1' },
@@ -773,6 +809,12 @@ Object.keys(templatesData).forEach((key) => {
     const half = new Set((templatesData[key].nodes || []).filter((n) => n.rackDepth === 'half').map((n) => n.id));
     const doc = migrateDoc({ ...templatesData[key], v: 2 }).doc;
     if (half.size) doc.nodes.forEach((n) => { if (half.has(n.id)) n.rackDepth = 'half'; });
+    // A sample's Wi-Fi network names its subnet by address: the networks are
+    // only declared (and given their ids) by the migration above.
+    (doc.wifi || []).forEach((w) => {
+        const net = (doc.networks || []).find((x) => x.cidr === w.network);
+        if (net) w.network = net.id;
+    });
     templatesData[key] = doc;
 });
 
@@ -794,7 +836,7 @@ const TEMPLATE_META = [
     { key: 'retail',     icon: '🛒', name: 'Retail POS',      blurb: 'Tills, back office and guest Wi-Fi' },
     { key: 'callcenter', icon: '📞', name: 'Call Center',     blurb: 'PBX, agent phones and workstations' },
     { key: 'datacenter', icon: '🏢', name: 'Data Centre',     blurb: 'Spine/leaf fabric with server pods' },
-    { key: 'errors',     icon: '🚑', name: 'Common Errors',   blurb: 'Broken on purpose — six faults to find' },
+    { key: 'errors',     icon: '🚑', name: 'Common Errors',   blurb: 'Broken on purpose — seven faults to find' },
     { key: 'hospital',   icon: '🏥', name: 'Hospital',        blurb: 'Clinical VLANs, PACS and modalities', example: true },
     { key: 'bank',       icon: '🏦', name: 'Bank Branch',     blurb: 'Segmented cardholder and staff zones', example: true },
     { key: 'campus',     icon: '🎓', name: 'Corporate Campus', blurb: 'Multi-building core with wireless', example: true },

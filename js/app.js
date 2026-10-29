@@ -98,6 +98,12 @@ function newNodeRecord(type, x, y) {
     const seeded = isReduced();
     const interfaces = cloneData(defs.interfaces);
     if (!seeded) interfaces.forEach((f) => { f.ip = ''; });
+    // A new access point's radio is Wi-Fi 6 on 2.4 and 5 GHz, channels and
+    // widths on auto (js/model.js "Wi-Fi"): what nearly every AP sold now
+    // is, so the common case needs no typing. Unlike the seeds above it is
+    // the hardware's, not a guess about the site, so the full editor keeps
+    // it too. Any other device's radio starts blank, unknown.
+    if (type === 'ap') interfaces.forEach((f) => { if (ifaceIsWireless(f) && !f.radio) f.radio = defaultApRadio(); });
     const node = { id: nextId('n'), type, name: defaultName, x, y, gw: seeded ? defs.gw || '' : '', dns: seeded ? defs.dns || '' : '', os: seeded ? defs.os || '' : '',
         ports: seeded ? defs.ports || '' : '', notes: '', nat: seeded ? !!defs.nat : false, interfaces };
     return node;
@@ -714,8 +720,9 @@ function serializeDoc() {
     // carries no key for them. So does `accepted` (the findings accepted with
     // a reason, js/diagnostics.js): allowlisted to its four fields, and the
     // ids of devices and cables that are gone left out. And `groups` (v7):
-    // allowlisted through GROUP_FIELDS, no key when there are none.
-    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), accepted: serializeAccepted(state.accepted), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report) };
+    // allowlisted through GROUP_FIELDS, no key when there are none. And
+    // `wifi` (v12): the Wi-Fi networks, through WIFI_FIELDS, likewise.
+    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), accepted: serializeAccepted(state.accepted), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report) };
 }
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
@@ -1074,9 +1081,15 @@ function bridgeIntent(node) {
             search: '',
             routes: [],
         };
-        // SSID is a placeholder from the node name; the passphrase never rides
-        // a URL — fragments land in browser history.
-        if (wifi) entry.ssid = node.name || 'MyWiFi';
+        // The SSID the radio's association is on (link.wifi, or the AP's only
+        // one), else a placeholder from the node name. The passphrase never
+        // rides a URL — fragments land in browser history — and Topo keeps
+        // none to ride anywhere (js/model.js "Wi-Fi").
+        if (wifi) {
+            const assoc = linkOnIface(node.id, i.id);
+            const net = assoc ? wifiById(linkWifiSsid(assoc)) : null;
+            entry.ssid = (net && net.ssid) || node.name || 'MyWiFi';
+        }
         return entry;
     });
     const anyV6 = ifaces.some((i) => i.addr.includes(':'));
@@ -1351,6 +1364,10 @@ function loadDocState(doc) {
     // Groups after the devices: a device's group must be one of them.
     state.groups = normalizeGroups(d.groups);
     normalizeGroupRefs(state.nodes, state.groups);
+    // The Wi-Fi networks after the subnets they name, and every reference
+    // to them (a link's SSID, a radio band's list) checked against them.
+    state.wifi = normalizeWifi(d.wifi);
+    normalizeWifiRefs(state.nodes, state.links, state.networks, state.wifi);
     // And after both: a VM's host must be a device here it may run on, and
     // its group is its host's (js/model.js "Hosts").
     repairHosts(state.nodes);
@@ -2089,6 +2106,7 @@ function showConfigTab(name) {
     // The Subnets tab is only kept up to date while it shows (js/networks.js).
     if (name === 'networks') renderNetworksPanel(true);
     if (name === 'groups') renderGroupsPanel(true);   // and the Groups tab (js/groups.js)
+    if (name === 'wifi') renderWifiPanel(true);       // and the Wi-Fi tab (js/wifi.js)
 }
 document.querySelectorAll('.cfg-tab').forEach((t) => { t.onclick = () => showConfigTab(t.dataset.cfgtab); });
 
@@ -2198,6 +2216,7 @@ function applyLocale(lang) {
     if (sel) { refreshInheritance(sel); document.getElementById('propOs').placeholder = fieldHints(sel).os; renderAssetFields(sel); }
     renderNetworksPanel(true);   // its counts and buttons are built, not marked up
     renderGroupsPanel(true);     // so are the Groups tab's
+    renderWifiPanel(true);       // and the Wi-Fi tab's
     renderTableView(true);       // so are the table's headers and counts
     renderBulkPanel(true);       // and the bulk panel's field rows
 }

@@ -197,9 +197,14 @@ const CABLE_INPUTS = [
     { key: 'color', id: 'propCableColor' },
     { key: 'via', id: 'propCableVia' }
 ];
+// A wireless or VPN link has no cable: its facts are not shown (the owner's
+// decision), though any it holds stay stored, for when it is turned back
+// into a cable. A wireless link shows its SSID, band and signal instead
+// (renderLinkWifi, js/wifi.js).
 function renderCableFields(link) {
     const panel = assetEl('linkCableProps');
-    panel.classList.toggle('hidden', !link);
+    const medium = link ? effectiveMedium(link) : null;
+    panel.classList.toggle('hidden', !link || medium === 'wireless' || medium === 'vpn');
     CABLE_INPUTS.forEach(({ key, id }) => { assetEl(id).value = link ? cableOf(link, key) : ''; });
 }
 CABLE_INPUTS.forEach(({ key, id }) => {

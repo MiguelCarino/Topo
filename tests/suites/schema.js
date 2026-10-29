@@ -79,10 +79,18 @@ window.addEventListener('load', () => {
   // here without those keys; tests/suites/hosts.js, groups.js and the rack
   // suites hold the keys themselves.
   const LATER_KEYS = ['host', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth'];
-  const currentMinusHost = (n) => { const o = serializeNode(n); LATER_KEYS.forEach((k) => delete o[k]); return o; };
+  // The fourth: Wi-Fi (v12). Smart Home, Retail, Hotel, the Showcase and
+  // Common Errors ship radios on their wireless interfaces and associations
+  // on their wireless links, which the reference drops (a radio) or never
+  // knew (link.wifi); both sides are read without them here, and
+  // tests/suites/wifimodel.js holds the keys themselves.
+  const minusRadio = (o) => { (o.interfaces || []).forEach((i) => { delete i.radio; }); return o; };
+  const currentMinusHost = (n) => { const o = serializeNode(n); LATER_KEYS.forEach((k) => delete o[k]); return minusRadio(o); };
+  const legacyMinusLater = (n) => minusRadio(legacyMinusNetcfg(n));
+  const currentLinkMinusWifi = (l) => { const o = serializeLink(l); delete o.wifi; return o; };
   const both = (doc) => frozen(() => [
-    pipe(doc, legacyNormalizeNode, legacyMinusNetcfg, legacyNormalizeLink, legacySerializeLink),
-    pipe(doc, normalizeLoadedNode, currentMinusHost, normalizeLoadedLink, serializeLink)
+    pipe(doc, legacyNormalizeNode, legacyMinusLater, legacyNormalizeLink, legacySerializeLink),
+    pipe(doc, normalizeLoadedNode, currentMinusHost, normalizeLoadedLink, currentLinkMinusWifi)
   ]);
 
   // ---- 1: byte identity over everything Topo ships ----

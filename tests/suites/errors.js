@@ -17,6 +17,7 @@ window.addEventListener('load', () => { setTimeout(() => {
   ok('Wi-Fi on a wired NIC demonstrated', has(/carries the Wi-Fi link/i), alerts.find(a => /Wi-Fi link/i.test(a))?.slice(0, 72));
   ok('subnet mismatch demonstrated', has(/different subnets/i), alerts.find(a => /different subnets/i.test(a))?.slice(0, 72));
   ok('unreachable gateway demonstrated', has(/unreachable/i), alerts.find(a => /unreachable/i.test(a))?.slice(0, 50));
+  ok('open Wi-Fi network demonstrated', has(/Wi-Fi security: .*Guest is open/i), alerts.find(a => /Guest is open/i.test(a))?.slice(0, 72));
 
   // The bindings must survive auto-bind — that is the whole trick.
   const lap = state.nodes.find(n => n.tid === 'lap' || n.id === 'lap');
