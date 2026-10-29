@@ -896,7 +896,8 @@ function rackGuestBarHtml(one) {
 // always done.
 const RV_CABLES = ['all', 'sel', 'one'];
 const RV_CABLES_KEY = 'topo.rackCables';
-const RV_TRACK_PX = 4;     // between two tracks in a channel
+const RV_TRACK_PX = 4;     // between two tracks in a channel, at the least
+const RV_TRACK_MAX = 18;   // and at the most, while there is room
 const RV_FLAG_H = 15;      // a flag's height (css/app.css .rk-flag)
 const RV_FLAG_GAP = 2;     // between two flags
 const RV_FLAG_MAX = 132;   // a flag's widest; its words are cut past it
@@ -1149,15 +1150,27 @@ function rvDrawCables() {
         else it.far = e.gy - laneTop <= laneBot - e.gy ? laneTop : laneBot;
         it.lo = Math.min(e.gy, it.far); it.hi = Math.max(e.gy, it.far);
     });
+    // While a channel has a track for each of its cables, each takes its own
+    // (two runs one above the other in one track read as one cable); past
+    // that they share. Then the tracks spread over the channel's width, up to
+    // RV_TRACK_MAX apart, so a few cables are a few clear lines, not a bundle
+    // against the face.
+    const per = { front: 0, rear: 0 };
+    drawn.forEach((it) => { per[it.chan]++; });
+    const room = (c) => Math.abs(c.outer - c.inner) - 10;
     drawn.slice().sort((x, y) => (x.hi - x.lo) - (y.hi - y.lo) || x.i - y.i).forEach((it) => {
-        const c = chan[it.chan];
-        const K = Math.max(1, Math.floor((Math.abs(c.outer - c.inner) - 8) / RV_TRACK_PX));
+        const K = Math.max(1, Math.floor((room(chan[it.chan]) + 2) / RV_TRACK_PX));
         const list = used[it.chan];
         let k = 0;
-        while (k < K - 1 && (list[k] || []).some(([a, b]) => a <= it.hi + 4 && it.lo <= b + 4)) k++;
+        if (per[it.chan] <= K) k = list.length;
+        else while (k < K - 1 && (list[k] || []).some(([a, b]) => a <= it.hi + 4 && it.lo <= b + 4)) k++;
         (list[k] = list[k] || []).push([it.lo, it.hi]);
         it.k = k;
-        it.x = c.inner + dir(it.chan) * (5 + k * RV_TRACK_PX);
+    });
+    drawn.forEach((it) => {
+        const c = chan[it.chan], n = used[it.chan].length;
+        const step = n > 1 ? Math.min(RV_TRACK_MAX, Math.max(RV_TRACK_PX, room(c) / (n - 1))) : 0;
+        it.x = c.inner + dir(it.chan) * (5 + it.k * step);
     });
 
     const r1 = (v) => Math.round(v * 10) / 10;

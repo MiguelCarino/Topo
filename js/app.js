@@ -595,11 +595,12 @@ function loadSettings() {
         // Map, Table or Rack, once chosen (js/table.js); until then the width
         // decides. Rack stands only while the document has a rack.
         if (saved.view === 'map' || saved.view === 'table' || saved.view === 'rack') state.settings.view = saved.view;
+        if (typeof saved.mapInk === 'boolean') state.settings.mapInk = saved.mapInk;
     } catch (e) { /* first run or blocked storage */ }
 }
 
 function saveSettings() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ profile: state.settings.profile, advanced: !!state.settings.advanced, lang: state.settings.lang, libraryTab: state.settings.libraryTab, subnetZones: state.settings.subnetZones !== false, view: state.settings.view })); } catch (e) { /* private mode */ }
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ profile: state.settings.profile, advanced: !!state.settings.advanced, lang: state.settings.lang, libraryTab: state.settings.libraryTab, subnetZones: state.settings.subnetZones !== false, view: state.settings.view, mapInk: !!state.settings.mapInk })); } catch (e) { /* private mode */ }
 }
 
 // Saved templates used to have a store of their own here (USER_TPL_KEY,
@@ -2201,6 +2202,7 @@ function applyLocale(lang) {
     if (shareDialogOpen()) renderShareDialog();
     document.getElementById('binderReportBtn').innerHTML = `📋 ${t('Binder report')}`;
     document.getElementById('binderLinkBtn').innerHTML = `🔗 ${t('Copy binder link')}`;
+    setMapInk(state.settings.mapInk);   // its title
     renderLibrary();
     renderDocBar();
     updateUndoButtons();
@@ -2398,6 +2400,18 @@ document.getElementById('selOnlyLinksBtn').onclick = () => selectOnly('link');
 document.getElementById('zoomInBtn').onclick = () => { state.camera.zoom = Math.min(5, state.camera.zoom * 1.2); applyCamera(); };
 document.getElementById('zoomOutBtn').onclick = () => { state.camera.zoom = Math.max(0.2, state.camera.zoom / 1.2); applyCamera(); };
 document.getElementById('zoomResetBtn').onclick = () => { state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera(); };
+// The dark map (css/app.css .map-ink): black on Carino, a blueprint on
+// Colourful. A preference of this browser, like the view; the drawing and
+// its exports are unchanged.
+function setMapInk(on) {
+    state.settings.mapInk = !!on;
+    document.getElementById('canvasContainer').classList.toggle('map-ink', !!on);
+    const btn = document.getElementById('mapInkBtn');
+    btn.setAttribute('aria-pressed', String(!!on));
+    btn.title = on ? t('Light background') : t('Dark background');
+    btn.setAttribute('aria-label', btn.title);
+}
+document.getElementById('mapInkBtn').onclick = () => { setMapInk(!state.settings.mapInk); saveSettings(); };
 // New network, in the File menu, replaced the toolbar's Clear. Clear emptied
 // the nodes and cables and nothing else — the card stayed attached (so the
 // next Save overwrote the saved network with nothing), and the notes, the
@@ -2869,6 +2883,7 @@ document.getElementById('shortcutHelp').onclick = (e) => {
 renderLibrary();
 renderShortcutHelp();
 loadSettings();
+setMapInk(state.settings.mapInk);
 // '?profile=<name>' (or the legacy '?simple') also selects a home profile —
 // unlike the '#<profile>' hash it composes with a shared diagram hash, so one
 // link can carry both the network and the profile.

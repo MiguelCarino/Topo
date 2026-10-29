@@ -14,6 +14,36 @@
     background-size: 20px 20px;
 }
 
+/* The dark map (the ◐ button, js/app.js setMapInk): black with white
+   drawing on Carino, a blueprint on Colourful. The drawing writes its
+   colours as attributes, for the exports, so this repaints them by value:
+   a rule beats an attribute, and an export, which carries no stylesheet,
+   stays on paper. Cable media, findings and the selection keep their
+   colours; the greys become the ink. */
+#canvasContainer.map-ink {
+    --mi-bg: #0a0a0a; --mi-fg: #fafafa; --mi-muted: rgba(250, 250, 250, 0.62); --mi-line: rgba(250, 250, 250, 0.78);
+    background-color: var(--mi-bg);
+    background-image: radial-gradient(rgba(250, 250, 250, 0.16) 1px, transparent 1px);
+}
+:root[data-carino-theme="color"] #canvasContainer.map-ink {
+    --mi-bg: #1b4f8c; --mi-fg: #ffffff; --mi-muted: rgba(255, 255, 255, 0.7); --mi-line: rgba(255, 255, 255, 0.85);
+    background-image: linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+}
+.map-ink .topo-svg :is([fill="#ffffff"], [fill="#f1f5f9"], [fill="#f8fafc"]):not(text) { fill: var(--mi-bg); }
+.map-ink .topo-svg [fill="#fefce8"], .map-ink .topo-svg [fill="#fef3c7"] { fill: color-mix(in srgb, #eab308 24%, var(--mi-bg)); }
+.map-ink .topo-svg [fill="#fffbeb"] { fill: color-mix(in srgb, #f59e0b 20%, var(--mi-bg)); }
+.map-ink .topo-svg [fill="#fef2f2"] { fill: color-mix(in srgb, #dc2626 24%, var(--mi-bg)); }
+.map-ink .topo-svg :is([fill="#334155"], [fill="#1e293b"], [fill="#475569"]),
+.map-ink .topo-svg #layer-zones text { fill: var(--mi-fg); }
+.map-ink .topo-svg [fill="#64748b"] { fill: var(--mi-muted); }
+.map-ink .topo-svg :is([stroke="#334155"], [stroke="#475569"]) { stroke: var(--mi-fg); }
+.map-ink .topo-svg :is([stroke="#cbd5e1"], [stroke="#94a3b8"], [stroke="#64748b"]) { stroke: var(--mi-line); }
+.map-ink .topo-svg [stroke="#ffffff"] { stroke: var(--mi-bg); }
+/* A sticky note stays yellow with dark writing; plain text turns white. */
+.map-ink .topo-svg #layer-annotations rect[fill="#fef9c3"] + text { fill: #1e293b; }
+.map-ink .topo-svg #layer-annotations rect[fill="transparent"] + text { fill: var(--mi-fg); }
+.zoom-ctl .map-ink-btn[aria-pressed="true"] { color: var(--accent); background: var(--accent-faint); }
+
 /* Trace flow. Each medium moves signal differently, so each animates differently:
    fibre sprints in long streaks, copper walks, powerline crawls over a noisy
    dash-dot-dot line, a tunnel marches in encrypted blocks, and radio does not
@@ -203,7 +233,9 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .topo-rail .ws-rail-foot { margin-top: 0; padding: 10px 16px 12px; }
 .lib-tabs { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--border); }
 .rail-lib { flex: 1; min-height: 200px; overflow-y: auto; padding: 16px; border-bottom: 1px solid var(--border); }
-.rail-props { flex-shrink: 0; max-height: 50%; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; position: relative; }
+/* A fixed half of the rail, whatever is selected: a panel that grew and
+   shrank with its content moved the library above it on every click. */
+.rail-props { flex-shrink: 0; height: 50%; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; position: relative; }
 .palette-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .palette-item {
     display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px;
@@ -859,7 +891,7 @@ body.rack-view #conflictPill { display: none !important; }
 .rk-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rk-span { flex: none; font-family: var(--mono); font-size: var(--fs-micro); color: var(--text-muted); }
 .rk-status { flex: none; font-family: var(--mono); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
-.rk-dev.rk-sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev)); box-shadow: 0 0 0 1px var(--accent); }
+.rk-dev.rk-sel { z-index: 6; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev)); box-shadow: 0 0 0 1px var(--accent); }
 .rk-dev.rk-planned { border-style: dashed; }
 .rk-dev.rk-retired { opacity: 0.45; }
 .rk-dev.rk-bad { border-color: var(--err); box-shadow: inset 3px 0 0 var(--err); }
@@ -918,7 +950,7 @@ body.rack-view #conflictPill { display: none !important; }
     --rk-G: max(var(--rk-H), calc(var(--rk-u0) + 6px + var(--rk-pr) * 15px));
     --rk-ps: clamp(3px, calc((var(--rk-G) - var(--rk-u0) - 2px) / var(--rk-pr) - 3px), 12px);
     --rk-B: clamp(1px, calc((var(--u) - 1) * var(--rk-u) + 1px - (var(--rk-G) - var(--rk-H)) / 2), calc(var(--rk-n) * var(--rk-u) - var(--rk-G) - 1px));
-    height: var(--rk-G); z-index: 4; bottom: var(--rk-B);
+    height: var(--rk-G); z-index: 6; bottom: var(--rk-B);
     background: var(--bg-elev);
 }
 /* Its own units inside the grown box, tinted as a selected box is, with the
@@ -1038,12 +1070,15 @@ body.rack-view #conflictPill { display: none !important; }
 .rk-lane-empty { display: flex; align-items: flex-start; justify-content: center; }
 .rk-lane-empty p { margin: 8px 6px 0; font-size: var(--fs-micro); color: var(--text-muted); text-align: center; }
 /* The cables, port to port (js/rackview.js, "The cables, port to port"):
-   one SVG over the faces and the manager, above the boxes (a selected box
-   grown over its neighbours is z-index 4, and its cables run into its
-   ports). It takes no pointer but on a line's hit stroke, which is its run
-   in the manager only, and the flags. */
-.rk-wiring { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
-.rk-wires { position: absolute; left: 0; top: 0; overflow: visible; }
+   one SVG over the faces and the manager, above the boxes, but under a
+   selected box (z-index 6), which is solid: the lines that ran across it
+   made it look see-through, the more so grown over its neighbours. Its own
+   cables come out under their ports. The flags are over all of it. It takes
+   no pointer but on a line's hit stroke, which is its run in the manager
+   only, and the flags. The layer itself sets no z-index, so the lines and
+   the flags stack with the boxes. */
+.rk-wiring { position: absolute; inset: 0; pointer-events: none; }
+.rk-wires { position: absolute; left: 0; top: 0; overflow: visible; z-index: 5; }
 .rk-cable, .rk-flag { transition: opacity 0.15s; }
 .rk-wire { fill: none; stroke: var(--text-muted); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
 /* Out of the rack (or, on a phone, round to the face not shown): dashed, in
@@ -1082,13 +1117,13 @@ body.rack-view #conflictPill { display: none !important; }
     position: absolute; display: none; align-items: center; min-width: 0; height: 15px; padding: 0 4px 0 3px; box-sizing: border-box;
     background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--fcol, var(--text-muted)); border-radius: 3px;
     color: var(--text); font: inherit; font-family: var(--mono); font-size: var(--fs-micro); line-height: 13px; text-align: left;
-    cursor: pointer; pointer-events: auto; box-shadow: 0 1px 4px color-mix(in srgb, var(--bg) 50%, transparent);
+    cursor: pointer; pointer-events: auto; box-shadow: 0 1px 4px color-mix(in srgb, var(--bg) 50%, transparent); z-index: 7;
 }
 .rk-flag.rk-on { display: flex; }
 .rk-flag span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rk-flag-out { border-top-style: dashed; border-right-style: dashed; border-bottom-style: dashed; }
 .rk-flag:hover, .rk-flag:focus-visible, .rk-flag.rk-hot, .rk-flag.rk-wsel { border-top-color: var(--accent); border-right-color: var(--accent); border-bottom-color: var(--accent); outline: none; }
-.rk-flag:hover, .rk-flag:focus-visible, .rk-flag.rk-hot { z-index: 1; }
+.rk-flag:hover, .rk-flag:focus-visible, .rk-flag.rk-hot { z-index: 8; }
 .rk-swatch { flex: none; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 1px var(--border); }
 /* The two ends of a lit cable. */
 .rk-dev.rk-hot, .rk-dev.rk-cabled { border-color: var(--accent); }
