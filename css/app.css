@@ -825,7 +825,7 @@ body.rack-view #conflictPill { display: none !important; }
    a name fit. */
 .rk-faces {
     --rk-face: minmax(calc(3rem + max(6rem, 7rem * var(--rk-w, 1))), calc(3rem + max(9.5rem, 13rem * var(--rk-w, 1))));
-    display: grid; grid-template-columns: var(--rk-face) minmax(6.5rem, 12rem) var(--rk-face);
+    display: grid; grid-template-columns: var(--rk-face) minmax(8rem, 22rem) var(--rk-face);
     gap: 0; min-width: 0;
 }
 .rk-face { margin: 0; min-width: 0; }

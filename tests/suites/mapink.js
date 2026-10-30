@@ -6,8 +6,8 @@
 //      an export carries no stylesheet, so it stays on paper;
 //   2. the properties panel is half the rail whatever is selected;
 //   3. a few cables take a track each, spread over their channel, wider apart
-//      than the least gap; a selected box stacks over the lines, the flags
-//      over it.
+//      than the least gap; the cables out of one box run under it at levels of their own;
+//      a selected box stacks over the lines, the flags over it.
 window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
@@ -70,6 +70,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const gaps = xs.slice(1).map((x, i) => x - xs[i]);
     ok('three cables, three tracks', new Set(items.map((it) => it.k)).size === 3, items.map((it) => it.k).join());
     ok('spread wider than the least gap, no wider than the most', gaps.every((g) => g > RV_TRACK_PX + 1 && g <= RV_TRACK_MAX + 0.01), gaps.join());
+    const swEnds = items.map((it) => it.ends.find((e) => e.at && e.node.id === 'sw'));
+    const swBox = el('rackView').querySelector('.rk-slots[data-face="front"] .rk-dev[data-node="sw"]').getBoundingClientRect();
+    const top = el('rackView').querySelector('.rk-wires').getBoundingClientRect().top;
+    const levels = swEnds.map((e) => e.gy);
+    ok('the cables out of one box run under it at levels of their own, below its edge', new Set(levels).size === 3
+      && levels.every((y) => y + top > swBox.bottom + 2), levels.join());
+    const byX = swEnds.slice().sort((p, q) => q.x - p.x);
+    ok('the port nearest the manager runs highest', byX.every((e, j) => !j || e.gy > byX[j - 1].gy), byX.map((e) => [e.x, e.gy].join('@')).join());
     setSelectionEntries([{ type: 'node', id: 'a' }]); renderRackView(true);
     const boxEl = el('rackView').querySelector('.rk-slots[data-face="front"] .rk-dev[data-node="a"]');
     const z = (x) => Number(getComputedStyle(x).zIndex) || 0;

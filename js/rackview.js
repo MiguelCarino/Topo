@@ -898,6 +898,7 @@ const RV_CABLES = ['all', 'sel', 'one'];
 const RV_CABLES_KEY = 'topo.rackCables';
 const RV_TRACK_PX = 4;     // between two tracks in a channel, at the least
 const RV_TRACK_MAX = 18;   // and at the most, while there is room
+const RV_DROP_PX = 5;      // between two cables' runs out under one box
 const RV_FLAG_H = 15;      // a flag's height (css/app.css .rk-flag)
 const RV_FLAG_GAP = 2;     // between two flags
 const RV_FLAG_MAX = 132;   // a flag's widest; its words are cut past it
@@ -1116,6 +1117,23 @@ function rvDrawCables() {
     };
     items.forEach((it) => it.ends.forEach((e) => { if (e.at) place(e); }));
     const drawn = items.filter((it) => it.ends.some((e) => e.at));
+    // Each cable leaving a box runs out under it at a level of its own, a
+    // little below the box and RV_DROP_PX under the last: on one line along
+    // the box's edge, a box's cables read as one. The port nearest the
+    // manager runs highest, so no drop crosses another's run.
+    const unitPx = rvSlotsOf(shown[0]).getBoundingClientRect().height / rackTop(rack) || 22;
+    const leaving = new Map();
+    drawn.forEach((it) => it.ends.forEach((e) => {
+        if (!e.at) return;
+        const k = `${e.box.id}\u0000${e.face}`;
+        if (!leaving.has(k)) leaving.set(k, []);
+        leaving.get(k).push(e);
+    }));
+    leaving.forEach((ends) => {
+        ends.sort((p, q) => (p.face === 'front' ? q.x - p.x : p.x - q.x));
+        const step = ends.length > 1 ? Math.min(RV_DROP_PX, (unitPx - 8) / (ends.length - 1)) : 0;
+        ends.forEach((e, j) => { e.gy += 3 + j * Math.max(2, step); });
+    });
 
     // Tracks, a channel at a time: as many as fit, the shortest runs nearest
     // the face. A front-to-rear cable takes one in the front's channel.
@@ -1157,6 +1175,13 @@ function rvDrawCables() {
     // against the face.
     const per = { front: 0, rear: 0 };
     drawn.forEach((it) => { per[it.chan]++; });
+    // Two faces share the manager by how many cables each runs in it (a
+    // quarter at the least for one that has any), not half and half: a rack
+    // cabled on its front only had them in half the room, the rest empty.
+    if (both && per.front + per.rear) {
+        const share = !per.rear ? 1 : !per.front ? 0 : Math.min(0.75, Math.max(0.25, per.front / (per.front + per.rear)));
+        chan.front.outer = chan.rear.outer = L + (R - L) * share;
+    }
     const room = (c) => Math.abs(c.outer - c.inner) - 10;
     drawn.slice().sort((x, y) => (x.hi - x.lo) - (y.hi - y.lo) || x.i - y.i).forEach((it) => {
         const K = Math.max(1, Math.floor((room(chan[it.chan]) + 2) / RV_TRACK_PX));
