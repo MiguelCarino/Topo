@@ -578,6 +578,8 @@ function tidyPositionsGrouped(nodes, links) {
 // tracePortOn) is deliberately not persisted: reopening into an active trace
 // with nothing selected is confusing, and a port is one session's question.
 const SETTINGS_KEY = 'nettopo_settings';
+// The map's backgrounds besides light (setMapInk, below).
+const MAP_INKS = ['dark', 'blue'];
 
 function loadSettings() {
     try {
@@ -595,12 +597,14 @@ function loadSettings() {
         // Map, Table or Rack, once chosen (js/table.js); until then the width
         // decides. Rack stands only while the document has a rack.
         if (saved.view === 'map' || saved.view === 'table' || saved.view === 'rack') state.settings.view = saved.view;
-        if (typeof saved.mapInk === 'boolean') state.settings.mapInk = saved.mapInk;
+        // '' (light), 'dark' or 'blue'; true, from before the blueprint was a
+        // choice of its own, was the dark map.
+        state.settings.mapInk = saved.mapInk === true ? 'dark' : (MAP_INKS.includes(saved.mapInk) ? saved.mapInk : '');
     } catch (e) { /* first run or blocked storage */ }
 }
 
 function saveSettings() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ profile: state.settings.profile, advanced: !!state.settings.advanced, lang: state.settings.lang, libraryTab: state.settings.libraryTab, subnetZones: state.settings.subnetZones !== false, view: state.settings.view, mapInk: !!state.settings.mapInk })); } catch (e) { /* private mode */ }
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ profile: state.settings.profile, advanced: !!state.settings.advanced, lang: state.settings.lang, libraryTab: state.settings.libraryTab, subnetZones: state.settings.subnetZones !== false, view: state.settings.view, mapInk: state.settings.mapInk || '' })); } catch (e) { /* private mode */ }
 }
 
 // Saved templates used to have a store of their own here (USER_TPL_KEY,
@@ -632,10 +636,23 @@ function getWorkspacePoint(clientX, clientY) {
     return { x: (clientX - rect.left - state.camera.x) / state.camera.zoom, y: (clientY - rect.top - state.camera.y) / state.camera.zoom };
 }
 
+// The grid's spacing on screen at a zoom: GRID_SNAP map units, or 2, 5,
+// 10, 20… of them once that would be closer than GRID_MIN_PX, so zoomed out
+// the dots (or the blueprint's lines) thin out instead of crowding into
+// noise. The major lines of the blueprint are every fifth.
+const GRID_MIN_PX = 12;
+const GRID_STEPS = [1, 2, 5, 10, 20, 50, 100];
+function gridSpacing(zoom) {
+    const unit = GRID_SNAP * zoom;
+    const step = GRID_STEPS.find((k) => unit * k >= GRID_MIN_PX) || GRID_STEPS[GRID_STEPS.length - 1];
+    return { minor: unit * step, major: unit * step * 5, step };
+}
 function applyCamera() {
     document.getElementById('workspace').setAttribute('transform', `translate(${state.camera.x}, ${state.camera.y}) scale(${state.camera.zoom})`);
-    const backgroundSize = GRID_SNAP * state.camera.zoom, canvasContainer = document.getElementById('canvasContainer');
-    canvasContainer.style.backgroundSize = `${backgroundSize}px ${backgroundSize}px`; canvasContainer.style.backgroundPosition = `${state.camera.x}px ${state.camera.y}px`;
+    const grid = gridSpacing(state.camera.zoom), canvasContainer = document.getElementById('canvasContainer');
+    canvasContainer.style.setProperty('--grid', `${grid.minor}px`);
+    canvasContainer.style.setProperty('--grid-major', `${grid.major}px`);
+    canvasContainer.style.backgroundPosition = `${state.camera.x}px ${state.camera.y}px`;
 }
 
 // Frame the whole topology in the viewport (centered + zoomed to fit).
@@ -2410,18 +2427,25 @@ document.getElementById('selOnlyLinksBtn').onclick = () => selectOnly('link');
 document.getElementById('zoomInBtn').onclick = () => { state.camera.zoom = Math.min(5, state.camera.zoom * 1.2); applyCamera(); };
 document.getElementById('zoomOutBtn').onclick = () => { state.camera.zoom = Math.max(0.2, state.camera.zoom / 1.2); applyCamera(); };
 document.getElementById('zoomResetBtn').onclick = () => { state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera(); };
-// The dark map (css/app.css .map-ink): black on Carino, a blueprint on
-// Colourful. A preference of this browser, like the view; the drawing and
-// its exports are unchanged.
-function setMapInk(on) {
-    state.settings.mapInk = !!on;
-    document.getElementById('canvasContainer').classList.toggle('map-ink', !!on);
+// The map's background (css/app.css .map-ink): '' light, 'dark' (white
+// outlines on black) or 'blue' (a blueprint). The button steps through them
+// and is titled for the next one. A preference of this browser, like the
+// view; the drawing and its exports are unchanged.
+function setMapInk(mode) {
+    const m = mode === true ? 'dark' : (MAP_INKS.includes(mode) ? mode : '');
+    state.settings.mapInk = m;
+    const box = document.getElementById('canvasContainer');
+    box.classList.toggle('map-ink', !!m);
+    box.classList.toggle('map-blue', m === 'blue');
     const btn = document.getElementById('mapInkBtn');
-    btn.setAttribute('aria-pressed', String(!!on));
-    btn.title = on ? t('Light background') : t('Dark background');
+    btn.setAttribute('aria-pressed', String(!!m));
+    btn.dataset.ink = m || 'light';
+    btn.title = t(MAP_INK_NEXT_TITLE[m]);
     btn.setAttribute('aria-label', btn.title);
 }
-document.getElementById('mapInkBtn').onclick = () => { setMapInk(!state.settings.mapInk); saveSettings(); };
+const MAP_INK_NEXT = { '': 'dark', dark: 'blue', blue: '' };
+const MAP_INK_NEXT_TITLE = { '': 'Dark background', dark: 'Blueprint background', blue: 'Light background' };
+document.getElementById('mapInkBtn').onclick = () => { setMapInk(MAP_INK_NEXT[state.settings.mapInk || '']); saveSettings(); };
 // New network, in the File menu, replaced the toolbar's Clear. Clear emptied
 // the nodes and cables and nothing else — the card stayed attached (so the
 // next Save overwrote the saved network with nothing), and the notes, the

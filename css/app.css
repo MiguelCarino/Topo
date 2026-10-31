@@ -8,14 +8,18 @@
     --topo-wifi-halo: #ffffff;
 }
 
+/* The map's grid. Its spacing follows the camera (applyCamera, js/app.js,
+   sets --grid and --grid-major), thinned out as the map zooms out so the
+   dots never crowd into noise: --grid is never under GRID_MIN_PX on screen. */
 .grid-bg {
     background-color: #f8fafc;
     background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
-    background-size: 20px 20px;
+    background-size: var(--grid, 20px) var(--grid, 20px);
 }
 
-/* The dark map (the ◐ button, js/app.js setMapInk): black with white
-   drawing on Carino, a blueprint on Colourful. The drawing writes its
+/* The map's background (the ◐ button, js/app.js setMapInk): light, dark
+   (black with the drawing in white outlines) or blueprint (white on blue,
+   on a ruled grid), whatever the site's theme. The drawing writes its
    colours as attributes, for the exports, so this repaints them by value:
    a rule beats an attribute, and an export, which carries no stylesheet,
    stays on paper. Cable media, findings and the selection keep their
@@ -23,11 +27,16 @@
 #canvasContainer.map-ink {
     --mi-bg: #0a0a0a; --mi-fg: #fafafa; --mi-muted: rgba(250, 250, 250, 0.62); --mi-line: rgba(250, 250, 250, 0.78);
     background-color: var(--mi-bg);
-    background-image: radial-gradient(rgba(250, 250, 250, 0.16) 1px, transparent 1px);
+    background-image: radial-gradient(rgba(250, 250, 250, 0.12) 1px, transparent 1px);
 }
-:root[data-carino-theme="color"] #canvasContainer.map-ink {
+#canvasContainer.map-ink.map-blue {
     --mi-bg: #1b4f8c; --mi-fg: #ffffff; --mi-muted: rgba(255, 255, 255, 0.7); --mi-line: rgba(255, 255, 255, 0.85);
-    background-image: linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+    /* Blueprint paper: a stronger line every fifth one, over the fine ruling. */
+    background-image:
+        linear-gradient(rgba(255, 255, 255, 0.2) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.2) 1px, transparent 1px),
+        linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+    background-size: var(--grid-major, 100px) var(--grid-major, 100px), var(--grid-major, 100px) var(--grid-major, 100px),
+        var(--grid, 20px) var(--grid, 20px), var(--grid, 20px) var(--grid, 20px);
 }
 .map-ink .topo-svg :is([fill="#ffffff"], [fill="#f1f5f9"], [fill="#f8fafc"]):not(text) { fill: var(--mi-bg); }
 .map-ink .topo-svg [fill="#fefce8"], .map-ink .topo-svg [fill="#fef3c7"] { fill: color-mix(in srgb, #eab308 24%, var(--mi-bg)); }
@@ -43,6 +52,7 @@
 .map-ink .topo-svg #layer-annotations rect[fill="#fef9c3"] + text { fill: #1e293b; }
 .map-ink .topo-svg #layer-annotations rect[fill="transparent"] + text { fill: var(--mi-fg); }
 .zoom-ctl .map-ink-btn[aria-pressed="true"] { color: var(--accent); background: var(--accent-faint); }
+.zoom-ctl .map-ink-btn[data-ink="blue"] { color: #93c5fd; background: rgba(27, 79, 140, 0.45); }
 
 /* Trace flow. Each medium moves signal differently, so each animates differently:
    fibre sprints in long streaks, copper walks, powerline crawls over a noisy

@@ -12,10 +12,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
   const el = (id) => document.getElementById(id);
+  const show = (v) => JSON.stringify(v);
   // The cards ease their colours (0.1s), and this runner's clock stands still.
   const settle = () => document.getAnimations().forEach((a) => { if (a instanceof CSSTransition) a.finish(); });
   const heldResponder = setDialogResponder(() => null);
-  const savedView = state.settings.view, savedInk = !!state.settings.mapInk;
+  const savedView = state.settings.view, savedInk = state.settings.mapInk || '';
   let held = null;
   try { held = localStorage.getItem('topo.rackCables'); localStorage.removeItem('topo.rackCables'); } catch (e) { /* blocked */ }
   const N = (id, type, u, extra = {}) => Object.assign({ id, type, name: id.toUpperCase(), x: u ? 0 : 300, y: 0, gw: '', dns: '', os: '', notes: '', nat: false,
@@ -34,24 +35,48 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const card = () => el('ui-node-a').querySelector('rect');
     const paper = getComputedStyle(card()).fill;
     el('mapInkBtn').click(); settle();
-    ok('the button darkens the map, pressed and titled for the way back', el('canvasContainer').classList.contains('map-ink')
-      && el('mapInkBtn').getAttribute('aria-pressed') === 'true' && el('mapInkBtn').title === 'Light background', el('mapInkBtn').title);
-    ok('kept in this browser', JSON.parse(localStorage.getItem(SETTINGS_KEY)).mapInk === true);
+    ok('the button darkens the map, pressed and titled for the next step', el('canvasContainer').classList.contains('map-ink')
+      && !el('canvasContainer').classList.contains('map-blue')
+      && el('mapInkBtn').getAttribute('aria-pressed') === 'true' && el('mapInkBtn').title === 'Blueprint background', el('mapInkBtn').title);
+    ok('kept in this browser', JSON.parse(localStorage.getItem(SETTINGS_KEY)).mapInk === 'dark');
     const bg = getComputedStyle(el('canvasContainer')).backgroundColor;
-    ok('Carino: black, the cards the map\'s colour, the names white', bg === 'rgb(10, 10, 10)' && getComputedStyle(card()).fill === bg && paper !== bg
+    ok('dark: black, the cards the map\'s colour, the names white', bg === 'rgb(10, 10, 10)' && getComputedStyle(card()).fill === bg && paper !== bg
       && getComputedStyle(el('ui-node-a').querySelector('text')).fill === 'rgb(250, 250, 250)', [bg, getComputedStyle(card()).fill].join(' | '));
     document.documentElement.setAttribute('data-carino-theme', 'color'); settle();
-    ok('Colourful: a blueprint, and white writing', getComputedStyle(el('canvasContainer')).backgroundColor === 'rgb(27, 79, 140)'
-      && getComputedStyle(el('ui-node-a').querySelector('text')).fill === 'rgb(255, 255, 255)', getComputedStyle(el('canvasContainer')).backgroundColor);
+    ok('whatever the site\'s theme: still dark on Colourful', getComputedStyle(el('canvasContainer')).backgroundColor === 'rgb(10, 10, 10)');
     document.documentElement.setAttribute('data-carino-theme', 'gold');
+    el('mapInkBtn').click(); settle();
+    ok('the next press is the blueprint: white writing on blue, titled for light', el('canvasContainer').classList.contains('map-blue')
+      && getComputedStyle(el('canvasContainer')).backgroundColor === 'rgb(27, 79, 140)'
+      && getComputedStyle(card()).fill === 'rgb(27, 79, 140)'
+      && getComputedStyle(el('ui-node-a').querySelector('text')).fill === 'rgb(255, 255, 255)' && el('mapInkBtn').title === 'Light background',
+      getComputedStyle(el('canvasContainer')).backgroundColor);
+    ok('kept too', JSON.parse(localStorage.getItem(SETTINGS_KEY)).mapInk === 'blue');
     const drawn = canvasSvgMarkup().markup;
-    ok('an export stays on paper', !/map-ink|#0a0a0a/.test(drawn) && /fill="#ffffff"/.test(drawn));
+    ok('an export stays on paper', !/map-ink|map-blue|#0a0a0a|#1b4f8c/.test(drawn) && /fill="#ffffff"/.test(drawn));
     setLocale('es'); applyLocale();
     ok('es: its title', el('mapInkBtn').title === 'Fondo claro', el('mapInkBtn').title);
     setLocale('en'); applyLocale();
     el('mapInkBtn').click(); settle();
-    ok('and back', !el('canvasContainer').classList.contains('map-ink') && el('mapInkBtn').getAttribute('aria-pressed') === 'false'
-      && getComputedStyle(card()).fill === paper);
+    ok('and back to light', !el('canvasContainer').classList.contains('map-ink') && !el('canvasContainer').classList.contains('map-blue')
+      && el('mapInkBtn').getAttribute('aria-pressed') === 'false' && getComputedStyle(card()).fill === paper && el('mapInkBtn').title === 'Dark background');
+    setMapInk(true);
+    ok('a setting saved before the blueprint (true) is the dark map', state.settings.mapInk === 'dark');
+    setMapInk(false);
+    // The grid thins out as the map zooms out: never closer than 12 px.
+    const spacing = [1, 0.5, 0.3, 0.1, 0.05].map((z) => gridSpacing(z).minor);
+    ok('the grid is 20 units at full size, and thins to 2, 5, 10 of them zoomed out', show(spacing) === show([20, 20, 12, 20, 20]), show(spacing));
+    ok('so it is never closer than 12 px on screen', [0.2, 0.25, 0.33, 0.6, 0.75, 1, 2.5, 5].every((z) => gridSpacing(z).minor >= 12 - 1e-9));
+    const camHeld = Object.assign({}, state.camera);
+    state.camera.zoom = 0.3; applyCamera(); settle();
+    ok('the light dots take the spacing', getComputedStyle(el('canvasContainer')).backgroundSize === '12px 12px', getComputedStyle(el('canvasContainer')).backgroundSize);
+    setMapInk('blue'); settle();
+    ok('the blueprint has a major line every fifth', getComputedStyle(el('canvasContainer')).backgroundSize === '60px 60px, 60px 60px, 12px 12px, 12px 12px',
+      getComputedStyle(el('canvasContainer')).backgroundSize);
+    setMapInk('dark'); settle();
+    ok('the dark dots are fainter than before (12% white)', /rgba\(250, 250, 250, 0\.12\)/.test(getComputedStyle(el('canvasContainer')).backgroundImage));
+    setMapInk(false);
+    state.camera = camHeld; applyCamera();
 
     // ---- 2. The properties panel ----
     const props = document.querySelector('.rail-props');
