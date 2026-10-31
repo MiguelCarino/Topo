@@ -47,11 +47,15 @@ let isDraggingCanvas = false, isDraggingNode = false, draggedNode = null, dragOf
 // dragCollapse: a plain press on one device of a set keeps the set (it may be
 // the start of a drag), and a release that moved nothing narrows the
 // selection to that device, as a file manager does.
-let dragGroup = [], dragCollapse = null;
+// _dragPress: where the press came down and the tap margin it must travel
+// past (gmSlopOf, js/groupmap.js) before anything moves; started once it has.
+// The mouseup reads it: a release that never started is a click, not a drag.
+let dragGroup = [], dragCollapse = null, _dragPress = null;
 function startDrag(event, items, pressed) {
     // A read-only document can be inspected but not rearranged: the press
     // selects and arms no drag, so nothing moves only to snap back on release.
     isDraggingNode = !state.readOnly; draggedNode = state.readOnly ? null : pressed;
+    _dragPress = { x: event.clientX, y: event.clientY, slop: gmSlopOf(event), started: false };
     const pt = getWorkspacePoint(event.clientX, event.clientY);
     dragOffset.x = pt.x - pressed.x; dragOffset.y = pt.y - pressed.y;
     dragGroup = state.readOnly ? [] : items.map((item) => ({ item, dx: pt.x - item.x, dy: pt.y - item.y, x0: item.x, y0: item.y }));
@@ -529,18 +533,50 @@ function zonesNow(gv) {
 // reads the document (the listeners it attaches run later, outside the
 // pass). The panels after it are not drawn in it: they open passes of their
 // own and the table can write.
+// The drawing's diagnosis is handed on to the views and to the caller, so
+// none of them builds the memo key again, but only while nothing has saved
+// since the drawing: a panel rebuilt here can fire a field's blur-commit,
+// whose save() changes the document (repairHosts, pruneFindingNotes) and
+// bumps _docSeq (js/app.js). -> live(): that diagnosis, or null once
+// anything has saved; null itself under batch(). Resolve it where it is
+// used (drawnDiag), not before more panels are rebuilt.
+let _canvasRendering = 0;
 function renderCanvasOnly() {
-    if (holdRender()) return;   // inside batch() (js/app.js): drawn once, when it ends
-    const { reach, diag } = withLookupPass(drawCanvas);
-    updateTraceStatus(reach);
-    validateTopology(diag);
-    renderNetworksPanel();   // js/networks.js: the Subnets tab's counts follow the drawing
-    renderGroupsPanel();     // js/groups.js: so do the Groups tab's
-    renderWifiPanel();       // js/wifi.js: and the Wi-Fi tab's, and whether it is offered
-    renderTableView();       // js/table.js: so does the table view, while it shows
-    renderRackView();        // js/rackview.js: and the rack view, and the switch's Rack
-    if (typeof updateQueryBar === 'function') updateQueryBar();   // js/query.js: the match count
+    if (holdRender()) return null;   // inside batch() (js/app.js): drawn once, when it ends
+    _canvasRendering++;
+    try {
+        const seq = _docSeq;
+        const { reach, diag } = withLookupPass(drawCanvas);
+        const live = () => (_docSeq === seq ? diag : null);
+        updateTraceStatus(reach);
+        validateTopology(diag);
+        renderNetworksPanel();   // js/networks.js: the Subnets tab's counts follow the drawing
+        renderGroupsPanel();     // js/groups.js: so do the Groups tab's
+        renderWifiPanel();       // js/wifi.js: and the Wi-Fi tab's, and whether it is offered
+        renderTableView(false, live());   // js/table.js: so does the table view, while it shows
+        renderRackView(false, live());    // js/rackview.js: and the rack view, and the switch's Rack
+        if (typeof updateQueryBar === 'function') updateQueryBar();   // js/query.js: the match count
+        return live;
+    } finally { _canvasRendering--; }
 }
+// renderCanvasOnly()'s answer -> the drawing's diagnosis, if still true now.
+const drawnDiag = (live) => (live ? live() : null);
+
+// ---- Typing redraws ----
+// Keystrokes write the model and saveTyping() at once, and only the drawing
+// waits while a big map is slow (redrawCoalescer, js/state.js). The pending
+// draw renders the selection's diagnostics as they are when it runs, never a
+// device captured at the keystroke. While the binder report has the canvas on
+// loan it stays pending. A flush asked while a drawing is under way (a
+// rebuilt panel's focusout), or inside a lookup pass, leaves it to the
+// coalescer's timer: a nested render there would write under open indexes.
+const typedDraw = redrawCoalescer(() => {
+    if (canvasIsBorrowed()) return false;
+    refreshSelectedNodeDiagnostics(drawnDiag(renderCanvasOnly()));
+});
+function renderTyped() { typedDraw.ask(); }
+function flushTypedRender() { if (!_canvasRendering && !lookupPass) typedDraw.flush(); }
+function cancelTypedRender() { typedDraw.cancel(); }
 
 // A device's glyph on the map: parsed once per type and cloned for each
 // device, rather than parsed from markup per device on every redraw. Built
@@ -1405,7 +1441,7 @@ function renderPortScheme(node) {
         refreshPortMarks(node);
         // Held until the field is left: "Port " on the way to "Port 0/" is a
         // scheme nobody chose, and an idle pause must not make it an undo step.
-        saveTyping(true); renderCanvasOnly();
+        saveTyping(true); renderTyped();
     };
     prefix.addEventListener('input', apply);
     start.addEventListener('input', apply);
@@ -1463,7 +1499,7 @@ function renderPortAttrs(node) {
         label.addEventListener('input', () => {
             setPortAttr(node, id, 'label', label.value);
             refreshPortMarks(node);
-            saveTyping(); renderCanvasOnly();
+            saveTyping(); renderTyped();
         });
         const vlan = document.createElement('input');
         vlan.type = 'text'; vlan.inputMode = 'numeric'; vlan.className = 'if-in port-attr-vlan';
@@ -1489,7 +1525,7 @@ function renderPortAttrs(node) {
             if (vlanNow() === want) return;
             setPortAttr(node, id, 'vlan', want);
             refreshPortMarks(node);
-            saveTyping(); renderCanvasOnly();
+            saveTyping(); renderTyped();
         });
         vlan.addEventListener('blur', () => {
             if (!vlan.classList.contains('bad')) return;
@@ -1560,9 +1596,7 @@ function renderSidebarData(node) {
             const div = document.createElement('div'); div.className = 'if-row';
             const nameInp = document.createElement('input'); nameInp.type = 'text'; nameInp.value = iface.name; nameInp.placeholder = 'eth0';
             nameInp.className = 'if-in if-name';
-            nameInp.addEventListener('input', (e) => { node.interfaces[i].name = e.target.value; saveTyping();
-            renderCanvasOnly();
-            renderNodeDiagnostics(node); });
+            nameInp.addEventListener('input', (e) => { node.interfaces[i].name = e.target.value; saveTyping(); renderTyped(); });
 
             const ipInp = document.createElement('input'); ipInp.type = 'text'; ipInp.value = iface.ip; ipInp.placeholder = 'CIDR';
             ipInp.className = 'if-in if-ip';
@@ -1594,7 +1628,7 @@ function renderSidebarData(node) {
                 iface.wireless = iface.wireless === undefined ? true : (iface.wireless ? false : undefined);
                 // Kind decides what may land here, so a flip can invalidate a
                 // cable. Re-render the diagnostics rather than let it pass quietly.
-                save(); renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node);
+                save(); const d = renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node, drawnDiag(d));
             };
 
             ipInp.addEventListener('input', (e) => { 
@@ -1607,8 +1641,7 @@ function renderSidebarData(node) {
                 refreshInheritance(node);
 
                 saveTyping();   // one undo step per address, taken when the field is left
-                renderCanvasOnly();
-                renderNodeDiagnostics(node); 
+                renderTyped();
             });
 
             const del = document.createElement('button'); del.innerHTML = '✖'; del.className = 'if-del';
@@ -1619,9 +1652,9 @@ function renderSidebarData(node) {
                 if (isBond(iface)) removeBond(node, iface.id);
                 else deleteIface(node, iface.id);
                 save();
-                renderCanvasOnly();
+                const d = renderCanvasOnly();
                 renderSidebarData(node);
-                renderNodeDiagnostics(node);
+                renderNodeDiagnostics(node, drawnDiag(d));
             };
 
             // Show what is plugged into this interface, so the ARP-flux warning
@@ -1819,7 +1852,7 @@ function renderBondChoice(node, addresses, container) {
         keep.onclick = () => {
             if (!createBond(node, { keep: a.ip })) return;
             bondChoiceFor = null;
-            save(); renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node);
+            save(); const d = renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node, drawnDiag(d));
         };
         const line = document.createElement('div');
         line.appendChild(keep);
@@ -1857,7 +1890,7 @@ function renderBondMode(node, bond) {
     });
     mode.onchange = (e) => {
         bond.bond.mode = e.target.value;
-        save(); renderCanvasOnly(); renderNodeDiagnostics(node);
+        save(); renderNodeDiagnostics(node, drawnDiag(renderCanvasOnly()));
     };
 
     row.appendChild(tick); row.appendChild(label); row.appendChild(mode);
@@ -1880,7 +1913,7 @@ function renderBondMember(node, member, bond, container) {
     nameInp.addEventListener('input', (e) => {
         const real = node.interfaces.find((x) => x.id === member.id);
         if (real) real.name = e.target.value;
-        saveTyping(); renderCanvasOnly(); renderNodeDiagnostics(node);
+        saveTyping(); renderTyped();
     });
 
     const note = document.createElement('span');
@@ -1907,7 +1940,7 @@ function renderBondMember(node, member, bond, container) {
             // member to hand the address to — unlist first and it goes in the bin.
             removeBond(node, bond.id);
         }
-        save(); renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node);
+        save(); const d = renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node, drawnDiag(d));
     };
 
     row.appendChild(tick); row.appendChild(nameInp); row.appendChild(note);
@@ -2298,7 +2331,7 @@ function select(id, type) {
         if (isRoutingDevice(node.type)) {
             natRow.classList.remove('hidden');
             propNat.checked = !!node.nat;
-            propNat.onchange = (e) => { node.nat = e.target.checked; save(); renderCanvasOnly(); renderNodeDiagnostics(node); };
+            propNat.onchange = (e) => { node.nat = e.target.checked; save(); renderNodeDiagnostics(node, drawnDiag(renderCanvasOnly())); };
         } else { natRow.classList.add('hidden'); }
         refreshNetcfgLink(node); // "Open in Netplan ↗", host types only
         renderSiteRef(node);
@@ -2312,7 +2345,6 @@ function select(id, type) {
             };
         } else { jumpGwBtn.classList.add('hidden'); }
         renderSidebarData(node);
-        renderNodeDiagnostics(node);
     } else if (type === 'notelink') {
         nameInput.value = t('Note link'); nameInput.disabled = true;
         netProps.classList.add('hidden'); generalProps.classList.add('hidden'); linkProps.classList.add('hidden');
@@ -2356,7 +2388,9 @@ function select(id, type) {
         document.getElementById('propMedium').value = effectiveMedium(link);
         document.getElementById('propMedium').onchange = (e) => { link.medium = e.target.value; save(); renderCanvasOnly(); renderLinkPorts(link); linkFacts(); };
     }
-    renderCanvasOnly();
+    // The device's diagnosis after the drawing, from the drawing's own.
+    const drawn = renderCanvasOnly();
+    if (type === 'node') refreshSelectedNodeDiagnostics(drawnDiag(drawn));
 }
 
 // ---- A length and its unit (CABLE_UNITS, js/model.js) ----

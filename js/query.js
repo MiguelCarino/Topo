@@ -479,13 +479,21 @@ function queryKeepsRow(row, q = activeQuery()) {
 
 // ---- The box ----
 const qEl = (id) => document.getElementById(id);
+// The box's coalescer (wireQuery, below) and the bar's last shape (updateQueryBar).
+let _queryDraw = null, _barShape = null;
 
+// From code (and the suites): at once, and whatever the box still had
+// waiting to be drawn is dropped, so the box and state.query agree.
 function setQuery(text) {
+    if (_queryDraw) _queryDraw.cancel();
+    applyQuery(text);
+}
+function applyQuery(text) {
     const value = String(text == null ? '' : text);
-    if (value === (state.query || '')) { updateQueryBar(); return; }
-    state.query = value;
     const input = qEl('queryInput');
     if (input && input.value !== value) input.value = value;
+    if (value === (state.query || '')) { updateQueryBar(); return; }
+    state.query = value;
     renderCanvasOnly();   // which rebuilds the table too, while it shows
     updateQueryBar();
 }
@@ -522,7 +530,8 @@ function updateQueryBar() {
     bar.classList.toggle('q-on', !!q);
     tools.classList.toggle('q-on', !!q);
     const input = qEl('queryInput');
-    if (input && document.activeElement !== input && input.value !== (state.query || '')) input.value = state.query || '';
+    // Not while the box has typing still to draw: it is ahead, not stale.
+    if (input && document.activeElement !== input && !(_queryDraw && _queryDraw.waiting()) && input.value !== (state.query || '')) input.value = state.query || '';
     const count = qEl('queryCount'), err = qEl('queryError');
     const table = tableShown();
     let n = 0;
@@ -550,30 +559,58 @@ function updateQueryBar() {
     qEl('queryZoomBtn').disabled = !any;
     // Nothing to zoom over the table or the rack view (js/rackview.js).
     qEl('queryZoomBtn').classList.toggle('hidden', table || rackShown());
-    qEl('queryClearBtn').classList.toggle('hidden', !(state.query || '').length);
-    syncTopbarHeight();
+    const clear = !(state.query || '').length;
+    qEl('queryClearBtn').classList.toggle('hidden', clear);
+    // The row's height changes only when one of these flips; the observer
+    // below catches the rest, so an unchanged bar measures nothing.
+    const shape = { on: !!q, none: !!q && !n, err: err.classList.contains('hidden'), clear };
+    if (!_barShape || ['on', 'none', 'err', 'clear'].some((k) => _barShape[k] !== shape[k])) {
+        _barShape = shape;
+        syncTopbarHeight();
+    }
+}
+
+// The box's typing redraws through a coalescer (redrawCoalescer, js/state.js):
+// at once, then at most one more per window while a big map draws slowly.
+// Only the pixels wait: Enter, the buttons and leaving the box flush it
+// first, so they act on what is typed. Not while the canvas is on loan
+// (canvasIsBorrowed, js/app.js): the draw waits, it is not dropped.
+// -> whether state.query now holds the box's text (false: still waiting, so
+// act on nothing rather than on the old query).
+function flushQuery() {
+    if (!_queryDraw) return true;
+    _queryDraw.flush();
+    return !_queryDraw.waiting();
 }
 
 (function wireQuery() {
     const input = qEl('queryInput');
     if (!input) return;
-    input.addEventListener('input', () => setQuery(input.value));
+    _queryDraw = redrawCoalescer(() => {
+        if (typeof canvasIsBorrowed === 'function' && canvasIsBorrowed()) return false;
+        applyQuery(input.value);
+    });
+    input.addEventListener('input', () => _queryDraw.ask());
+    // Only when the focus moves on within the page: a tab or app switch
+    // blurs it too, and that hide path is for saves, not a redraw (the
+    // timer draws it).
+    input.addEventListener('blur', () => { if (document.visibilityState !== 'hidden' && document.hasFocus()) flushQuery(); });
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && input.value) {
             // A first Esc empties the box and keeps the focus in it; the
             // next one leaves it (the page's Esc, js/app.js).
             e.preventDefault(); e.stopPropagation();
-            setQuery('');
+            setQuery('');   // which drops what was waiting
             return;
         }
         if (e.key === 'Enter') {
             e.preventDefault();
-            if (!tableShown()) zoomToQueryMatches();
+            if (flushQuery() && !tableShown()) zoomToQueryMatches();
         }
     });
     qEl('queryClearBtn').addEventListener('click', () => { setQuery(''); input.focus(); });
-    qEl('querySelectBtn').addEventListener('click', selectQueryMatches);
-    qEl('queryZoomBtn').addEventListener('click', zoomToQueryMatches);
+    qEl('querySelectBtn').addEventListener('click', () => { if (flushQuery()) selectQueryMatches(); });
+    qEl('queryZoomBtn').addEventListener('click', () => { if (flushQuery()) zoomToQueryMatches(); });
 })();
 
 // How far down the pane the top row reaches, as --topbar-h on the body, for
@@ -583,8 +620,9 @@ function updateQueryBar() {
 // "not understood" line is showing, and a fixed offset covered the panel's
 // title or the table's tabs whenever the guess was wrong. Zero when the row is
 // hidden (a reduced view). updateQueryBar() calls it straight after the tools
-// card or the line appears, so the panel never waits a frame under the row;
-// the observer catches the rest (a resized window, another language).
+// card, the line or the clear button appears or goes, so the panel never
+// waits a frame under the row; the observer catches the rest (a resized
+// window, another language, a longer count or line).
 function syncTopbarHeight() {
     const bar = document.querySelector('.topo-topbar');
     if (!bar) return;

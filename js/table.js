@@ -831,16 +831,20 @@ const canEdit = (row, col) => !!(row && col && col.editor && (!col.can || col.ca
 // ---- Rows ----
 // The record a row is about, in the live document or in a scratch copy of it
 // (the paste preview runs its writes on one).
+// The live one goes through getNode/getLink, which a lookup pass answers from
+// its indexes (the first holder of an id, as find() gives); a scratch copy
+// keeps the plain find.
 function findTarget(rec, ref, doc = state) {
+    const nodeOf = (id) => doc === state ? getNode(id) : (doc.nodes || []).find((n) => n.id === id);
     if (rec === 'node' || rec === 'iface') {
-        const node = (doc.nodes || []).find((n) => n.id === ref.nodeId);
+        const node = nodeOf(ref.nodeId);
         if (rec === 'node' || !node) return node || null;
         return (node.interfaces || []).find((i) => i.id === ref.ifaceId) || null;
     }
-    if (rec === 'link') return (doc.links || []).find((l) => l.id === ref.linkId) || null;
+    if (rec === 'link') return (doc === state ? getLink(ref.linkId) : (doc.links || []).find((l) => l.id === ref.linkId)) || null;
     // A port is not a record of its own: its facts live on its switch.
     if (rec === 'port') {
-        const node = (doc.nodes || []).find((n) => n.id === ref.nodeId);
+        const node = nodeOf(ref.nodeId);
         return node && hasPortGrid(node) ? { node, portId: ref.portId } : null;
     }
     if (rec === 'net') return ref.netId ? (doc.networks || []).find((n) => n.id === ref.netId) || null : null;
@@ -915,14 +919,19 @@ function tvSortedRows(tab) {
 }
 
 const rowByKey = (key) => _tv.rows.find((r) => r.key === key) || null;
+// While one render builds its rows, the selection as a set (type NUL id), so
+// ticking every row of 300 is not 300 walks of the selection. Per render only,
+// and cleared after it: anything else asks inSelection.
+let _tvSel = null;
+const tvSelected = (type, id) => _tvSel ? _tvSel.has(type + '\u0000' + id) : inSelection(type, id);
 function rowChecked(row) {
     if (row.sub) return false;
-    if (row.rec === 'node') return inSelection('node', row.ref.nodeId);
-    if (row.rec === 'link') return inSelection('link', row.ref.linkId);
+    if (row.rec === 'node') return tvSelected('node', row.ref.nodeId);
+    if (row.rec === 'link') return tvSelected('link', row.ref.linkId);
     return !!(_tv.checked[_tv.tab] && _tv.checked[_tv.tab].has(row.key));
 }
 // The selected device's own interface rows are marked too, more quietly.
-const rowOn = (row) => row.rec === 'iface' && inSelection('node', row.ref.nodeId);
+const rowOn = (row) => row.rec === 'iface' && tvSelected('node', row.ref.nodeId);
 function rowName(row) {
     if (row.rec === 'node') return row.data.name;
     if (row.rec === 'iface') return `${row.device.name} / ${row.data.name}`;
@@ -934,46 +943,21 @@ function rowName(row) {
 }
 
 // ---- Drawing ----
-function renderTableView(force) {
-    const view = tvEl();
-    if (!view) return;
-    if (!tableShown()) { _tv.dirty = true; return; }
-    if (_tv.editor || _tv.pointerDown) {
-        if (!force) { _tv.dirty = true; return; }
-        cancelEdit(true);
-    }
-    _tv.dirty = false;
-    const hadFocus = _tv.keepFocus || view.contains(document.activeElement);
-    _tv.keepFocus = false;
-
-    // A tab that stopped applying (the last AP deleted) gives way to Devices.
-    if (!tvTabOffered(_tv.tab)) { _tv.tab = 'devices'; _tv.cursor = { row: null, col: null }; _tv.cursorChosen = false; _tv.anchor = null; }
-    document.querySelectorAll('#tableView [data-tvtab]').forEach((b) => {
-        b.classList.toggle('hidden', !tvTabOffered(b.dataset.tvtab));
-        const on = b.dataset.tvtab === _tv.tab;
-        b.classList.toggle('active', on);
-        b.setAttribute('aria-selected', String(on));
-    });
-
-    const tab = _tv.tab;
-    // The search box (js/query.js) narrows the rows: a device's interfaces
-    // folded open beneath it stay with it. The rows on screen are the ones
-    // everything else here works on (tick all, paste a column, the cursor),
-    // so a paste down a column runs through the matches only.
-    const query = typeof activeQuery === 'function' ? activeQuery() : null;
-    let total = 0, all = [];
-    const rows = withLookupPass(() => {
-        all = tvSortedRows(tab);
-        total = all.filter((r) => !r.sub).length;
-        if (!query) return all;
+// One render's rows, tick count and markup, as strings: run inside the
+// render's lookup pass, so it reads and touches nothing but this view's state.
+function tvBuildView(tab, query) {
+    const all = tvSortedRows(tab);
+    const total = all.filter((r) => !r.sub).length;
+    let rows = all;
+    if (query) {
         const kept = new Set();
-        return all.filter((r) => {
+        rows = all.filter((r) => {
             if (r.sub) return kept.has(r.ref.nodeId);
             if (!queryKeepsRow(r, query)) return false;
             if (r.rec === 'node') kept.add(r.ref.nodeId);
             return true;
         });
-    });
+    }
     _tv.rows = rows;
     _tv.total = total;
     // What the last document held and this one does not is let go: this
@@ -1030,6 +1014,47 @@ function renderTableView(force) {
                 title="${escapeHtml(t(open ? 'Hide interfaces' : 'Show interfaces'))}">${open ? '▾' : '▸'}</button>` : ''}</td>` : ''}
             ${cols.map((c) => cell(row, c)).join('')}</tr>`;
     }).join('');
+    return { rows, total, top, ticked, head, body };
+}
+
+// diag: the document's diagnosis from the same synchronous render, when the
+// caller has one (renderCanvasOnly), so the pass need not build it again.
+function renderTableView(force, diag) {
+    const view = tvEl();
+    if (!view) return;
+    if (!tableShown()) { _tv.dirty = true; return; }
+    if (_tv.editor || _tv.pointerDown) {
+        if (!force) { _tv.dirty = true; return; }
+        cancelEdit(true);
+    }
+    _tv.dirty = false;
+    const hadFocus = _tv.keepFocus || view.contains(document.activeElement);
+    _tv.keepFocus = false;
+
+    // A tab that stopped applying (the last AP deleted) gives way to Devices.
+    if (!tvTabOffered(_tv.tab)) { _tv.tab = 'devices'; _tv.cursor = { row: null, col: null }; _tv.cursorChosen = false; _tv.anchor = null; }
+    document.querySelectorAll('#tableView [data-tvtab]').forEach((b) => {
+        b.classList.toggle('hidden', !tvTabOffered(b.dataset.tvtab));
+        const on = b.dataset.tvtab === _tv.tab;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', String(on));
+    });
+
+    const tab = _tv.tab;
+    // The search box (js/query.js) narrows the rows: a device's interfaces
+    // folded open beneath it stay with it. The rows on screen are the ones
+    // everything else here works on (tick all, paste a column, the cursor),
+    // so a paste down a column runs through the matches only.
+    const query = typeof activeQuery === 'function' ? activeQuery() : null;
+    // The rows, the head and the body are one lookup pass (js/model.js): every
+    // cell asks for its device, its cables and the diagnosis. The pass only
+    // builds strings and prunes this view's own ticks; the markup goes in
+    // after it closes, so a blur-commit fired by the rebuild never writes
+    // under open indexes.
+    const { rows, total, top, ticked, head, body } = withLookupPass(() => {
+        _tvSel = new Set([...state.selection].map((e) => e.type + '\u0000' + e.id));
+        try { return tvBuildView(tab, query); } finally { _tvSel = null; }
+    }, diag);
 
     const scroller = document.getElementById('tvScroll');
     const sx = scroller.scrollLeft, sy = scroller.scrollTop;

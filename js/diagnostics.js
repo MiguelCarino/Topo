@@ -716,7 +716,10 @@ function evaluateTracePort(node) {
     return getPortStatus(node, typed);
 }
 
-function renderNodeDiagnostics(node) {
+// diag: optional, the document's diagnosis from the same synchronous render
+// (renderCanvasOnly's), so the panel does not build the memo key again.
+// Without it the panel asks currentDiagnosis() as before.
+function renderNodeDiagnostics(node, diag) {
     const panel = document.getElementById('nodeDiagnosticsPanel');
     const body = document.getElementById('nodeDiagnosticsBody');
     const summary = document.getElementById('nodeDiagnosticsSummary');
@@ -739,7 +742,7 @@ function renderNodeDiagnostics(node) {
     // The engine's verdicts for this node, the same ones the panel and the
     // report are filtered from, plus the trace port, which is about the
     // trace above it rather than the network and so is not a finding.
-    const checks = nodeChecks(node)
+    const checks = nodeChecks(node, diag)
         .map((c) => [c.label, c])
         .concat([[t('Trace Port'), evaluateTracePort(node)]]);
 
@@ -758,13 +761,13 @@ function renderNodeDiagnostics(node) {
     panel.classList.remove('hidden');
 }
 
-function refreshSelectedNodeDiagnostics() {
+function refreshSelectedNodeDiagnostics(diag) {
     if (!state.selectedId || state.selectedType !== 'node') {
         renderNodeDiagnostics(null);
         return;
     }
 
-    renderNodeDiagnostics(getNode(state.selectedId));
+    renderNodeDiagnostics(getNode(state.selectedId), diag);
 }
 
 // ---- Reachability ----
@@ -2045,7 +2048,7 @@ function nodeDiagnosis(node, diag) {
     return { node, issues, severity: !issues.length ? null : issues.some((i) => i.level === 'bad') ? 'bad' : 'warn',
         checks: NODE_CHECKS.map((c) => ({ key: c.key, label: t(c.label), ...results[c.key] })) };
 }
-const nodeChecks = (node) => nodeDiagnosis(node).checks;
+const nodeChecks = (node, diag) => nodeDiagnosis(node, diag).checks;
 
 // ---- Grouping, for the panel ----
 // At 300 devices one wrong gateway is 300 lines that say the same thing. The

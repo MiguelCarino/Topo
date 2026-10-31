@@ -124,7 +124,11 @@ window.addEventListener('load', () => {
   ok('a document using every pre-schema field serializes to the same bytes', la === lb, la === lb ? '' : `${la.slice(0, 120)} vs ${lb.slice(0, 120)}`);
 
   // ---- 2: the real round trip, field by field ----
-  frozen(() => applyDoc(JSON.stringify(loaded)));
+  // applyDoc is handed undo snapshots, serializeDoc output, and the suites
+  // hold that a snapshot reloads as itself (TOPO_CHECKS). These documents are
+  // raw on purpose, so they are loaded with that check off.
+  const loadRaw = (doc) => { const c = window.TOPO_CHECKS; window.TOPO_CHECKS = false; try { applyDoc(JSON.stringify(doc)); } finally { window.TOPO_CHECKS = c; } };
+  frozen(() => loadRaw(loaded));
   const first = JSON.stringify(serializeDoc());
   applyDoc(first);
   ok('serializeDoc -> applyDoc is a fixed point', JSON.stringify(serializeDoc()) === first);
@@ -156,7 +160,7 @@ window.addEventListener('load', () => {
   const stray = { nodes: [{ id: 'x', type: 'server', name: 'X', x: 0, y: 0, secret: 'pw', macOpen: true,
       interfaces: [{ id: 'i', name: 'eth0', ip: '10.1.1.1/24', secret: 'pw', implicit: true, bond: { mode: 'balance-rr', members: ['i'], secret: 'pw' } }] }],
     links: [] };
-  applyDoc(JSON.stringify(stray));
+  loadRaw(stray);
   const strayOut = JSON.stringify(serializeDoc());
   ok('a key no schema table names never reaches the document', strayOut.indexOf('secret') === -1 && strayOut.indexOf('macOpen') === -1 && strayOut.indexOf('implicit') === -1, strayOut.slice(0, 160));
 
@@ -165,7 +169,7 @@ window.addEventListener('load', () => {
       interfaces: [{ id: 7, name: 3, ip: 10 }, { name: 'eth1' }, { id: 'q', ip: null, mac: 12, drawZone: 'yes', wireless: 1 }, null, 'junk'] }],
     links: [{ id: 'k', source: 'm', target: 'm', sourceIface: 7 }] };
   let threw = '';
-  try { applyDoc(JSON.stringify(messy)); } catch (e) { threw = e.message; }
+  try { loadRaw(messy); } catch (e) { threw = e.message; }
   ok('a document with wrongly typed fields loads', !threw, threw);
   const m = getNode('m');
   ok('node text fields become strings', ['name', 'gw', 'dns', 'os', 'ports', 'notes'].every((k) => typeof m[k] === 'string'),
@@ -209,7 +213,7 @@ window.addEventListener('load', () => {
      && fieldOk.mac('3c07.5411.2233') && !fieldOk.mac('3C:07'));
 
   // ---- 6: the report reads its columns from the schema ----
-  applyDoc(JSON.stringify(loaded));
+  loadRaw(loaded);
   const dev = reportDevices().find((d) => d.name === 'R');
   ok('report rows carry the schema-marked fields', dev.gw === '0.0.0.0' && dev.dns === '1.1.1.1' && dev.os === 'RouterOS' && dev.allowedPorts === '22' && dev.notes === 'rack 2' && dev.nat === false);
   ok('the inventory columns are Gateway, DNS, Model / firmware, in that order', reportColumns().map((f) => f.report.column).join('|') === 'Gateway|DNS|Model / firmware');

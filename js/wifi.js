@@ -231,7 +231,7 @@ function onWifiField(e) {
         const v = wifiSsidText(el.value);
         if (v) w.ssid = v; else delete w.ssid;
         saveTyping();
-        renderCanvasOnly();
+        renderTyped();
         return;
     }
     if (e.type !== 'change') return;
@@ -467,7 +467,7 @@ function afterLinkWifi(link) {
         if (text && v === undefined) return;
         setLinkWifi(link, 'signal', v);
         saveTyping();
-        renderCanvasOnly();
+        renderTyped();
     });
     wifiEl('propWifiSignal').addEventListener('change', () => { const link = selectedLinkForWifi(); if (link) renderLinkWifi(link); });
     wifiEl('wifiApLine').addEventListener('click', (e) => {

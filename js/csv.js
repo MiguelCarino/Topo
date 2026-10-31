@@ -2106,229 +2106,235 @@ function csvLayout(records, links, given) {
 }
 
 // ---- Cables ----
+// Planned in one lookup pass: every row asks which cables a device has and
+// which ports are taken, and a 600-row sheet would walk every cable per row.
+// It only reads the map: what it decides (said, cableSaid, wifiSaid,
+// madeIfaces, portsTaken) is its own, and the ops go into the plan.
 function csvPlanCables(rows, plan) {
-    const ix = csvIndex();
-    const results = [];
-    const portsTaken = new Set();
-    const said = new Map();   // linkId -> { key: value }
-    const cableSaid = new Map();   // linkId -> { label, length, color, via }: what the rows set of link.cable
-    const wifiSaid = new Map();    // linkId -> { ssid, band, signal }: what the rows set of link.wifi
-    const madeIfaces = new Map();   // node id + NIC name -> the op that makes it
-    const deviceOf = (text) => {
-        const v = String(text).trim();
-        if (ix.byId.has(v)) return { node: getNode(v) };
-        const hits = ix.byName.get(csvLower(v)) || [];
-        if (hits.length > 1) return { error: t('{name} names more than one device.', { name: v }) };
-        return hits.length ? { node: getNode(hits[0]) } : { error: t('No device called {name}.', { name: v }) };
-    };
-    rows.forEach(({ index, vals, blanks }) => {
-        if (!Object.keys(vals).length) return;
-        const out = { index, name: '', status: 'same', changes: [], notes: [], why: '' };
-        const conflict = (why) => { results.push(Object.assign(out, { status: 'conflict', why })); };
-        const values = {}, errors = [];
-        let lengthAsIs;   // a length the parser refuses, held until the cable is known
-        Object.keys(vals).forEach((key) => {
-            const tg = csvTarget(key);
-            if (tg.group !== 'cable') return;
-            if (key === 'lk:source' || key === 'lk:target' || key === 'lk:sourceIface' || key === 'lk:targetIface' || key === 'lk:id') { values[key] = String(vals[key]).trim(); return; }
-            const res = tg.parse(vals[key]);
-            if (res.error && key === 'lk:cable.length') lengthAsIs = String(vals[key]).trim();
-            else if (res.error) errors.push(t('{value} is not a valid {field}.', { value: String(vals[key]).trim(), field: csvTargetLabel(tg) }));
-            else values[key] = res.value;
-        });
-        if (errors.length) return conflict(errors.join(' '));
-        const ends = {};
-        for (const k of ['lk:source', 'lk:target']) {
-            if (!values[k]) continue;
-            const d = deviceOf(values[k]);
-            if (d.error) return conflict(d.error);
-            ends[k] = d.node;
-        }
-        const nameOf = (n) => (n ? n.name || n.id : '—');
-        out.name = `${nameOf(ends['lk:source'])} ↔ ${nameOf(ends['lk:target'])}`;
-        let link = values['lk:id'] ? getLink(values['lk:id']) : null;
-        if (link) {
-            const a = ends['lk:source'], b = ends['lk:target'];
-            const joins = (n) => !n || link.source === n.id || link.target === n.id;
-            if (!joins(a) || !joins(b)) return conflict(t('Cable {id} joins other devices.', { id: link.id }));
-        } else if (ends['lk:source'] && ends['lk:target']) {
-            const a = ends['lk:source'].id, b = ends['lk:target'].id;
-            const between = state.links.filter((l) => (l.source === a && l.target === b) || (l.source === b && l.target === a));
-            // The cable whose ports are the ones the row gives (either end).
-            const want = (l) => {
-                const at = (k, node) => (values[k] ? csvPortOn(node, values[k]).id : null);
-                const sp = at('lk:sourceIface', ends['lk:source']), tp = at('lk:targetIface', ends['lk:target']);
-                const onA = l.source === a ? l.sourceIface : l.targetIface, onB = l.source === a ? l.targetIface : l.sourceIface;
-                return (!sp || onA === sp) && (!tp || onB === tp);
-            };
-            if (between.length > 1) {
-                const narrowed = between.filter(want);
-                if (narrowed.length !== 1) return conflict(t('{n} cables join these two devices: add the cable id to say which.', { n: between.length }));
-                link = narrowed[0];
-            } else if (between.length && !want(between[0]) && values['lk:id']) {
-                // A cable id the map does not have, on other ports than the
-                // one cable there: a second cable between the two (a NAS on
-                // two switch ports), not that one moved.
-                link = null;
-            } else link = between[0] || null;
-        }
-        // A cable typed before lengths were metres or feet keeps its words
-        // ("about 3"), and cables.csv writes them out as they are. Read back,
-        // the same words on the same cable are no change: refused, they made
-        // the whole row a conflict, so a sheet exported, relabelled in Excel
-        // and imported again lost every edit on those cables. Words that are
-        // not what the cable holds are still refused.
-        if (lengthAsIs !== undefined && !(link && cableOf(link, 'length').trim() === lengthAsIs)) {
-            return conflict(t('{value} is not a valid {field}.', { value: lengthAsIs, field: csvTargetLabel(csvTarget('lk:cable.length')) }));
-        }
-        if (link) {
-            const src = getNode(link.source), tgt = getNode(link.target);
-            out.name = `${nameOf(src)} ↔ ${nameOf(tgt)}`;
-            out.linkId = link.id;
-            const prev = said.get(link.id) || {};
-            const draft = {};   // committed only when the whole row is good
-            if (values['lk:medium'] !== undefined) {
-                if (prev.medium !== undefined && prev.medium !== values['lk:medium']) return conflict(t('Another row sets {field} to {value}.', { field: 'Medium', value: csvShow('lk:medium', prev.medium) }));
-                const now = effectiveMedium(link);
-                if (now !== values['lk:medium']) {
-                    out.changes.push({ field: 'Medium', before: csvShow('lk:medium', now), after: csvShow('lk:medium', values['lk:medium']) });
-                    draft.medium = values['lk:medium'];
-                }
-            }
-            if (values['lk:attachment'] !== undefined) {
-                if (prev.attachment !== undefined && prev.attachment !== values['lk:attachment']) return conflict(t('Another row sets {field} to {value}.', { field: 'Attachment', value: prev.attachment }));
-                if ((link.attachment || '') !== values['lk:attachment']) {
-                    out.changes.push({ field: 'Attachment', before: link.attachment || '', after: values['lk:attachment'] });
-                    draft.attachment = values['lk:attachment'];
-                }
-            }
-            // The cable's own facts, field by field: a blank cell leaves one
-            // as it is, and two rows that disagree about one are a conflict.
-            const heldCable = cableSaid.get(link.id) || {};
-            const cableDraft = {};
-            for (const f of CABLE_FIELDS) {
-                const k = `lk:cable.${f.key}`;
-                if (values[k] === undefined) continue;
-                const label = csvTargetLabel(csvTarget(k));
-                if (heldCable[f.key] !== undefined && !csvSame(k, heldCable[f.key], values[k])) return conflict(t('Another row sets {field} to {value}.', { field: label, value: heldCable[f.key] }));
-                if (!csvSame(k, cableOf(link, f.key), values[k])) {
-                    out.changes.push({ field: label, before: cableOf(link, f.key), after: values[k] });
-                    cableDraft[f.key] = values[k];
-                }
-            }
-            if (Object.keys(cableDraft).length) cableSaid.set(link.id, Object.assign(heldCable, cableDraft));
-            // An association's SSID, band and signal, the same way.
-            const heldWifi = wifiSaid.get(link.id) || {};
-            const wifiDraft = {};
-            for (const w of CSV_LINK_WIFI) {
-                const k = `lk:wifi.${w.key}`;
-                if (values[k] === undefined) continue;
-                const label = csvTargetLabel(csvTarget(k));
-                if (heldWifi[w.key] !== undefined && !csvSame(k, heldWifi[w.key], values[k])) return conflict(t('Another row sets {field} to {value}.', { field: label, value: csvShow(k, heldWifi[w.key]) }));
-                const now = linkWifiOf(link, w.key);
-                if (!csvSame(k, now, values[k])) {
-                    out.changes.push({ field: label, before: csvShow(k, now), after: csvShow(k, values[k]) });
-                    wifiDraft[w.key] = values[k];
-                }
-            }
-            if (Object.keys(wifiDraft).length) wifiSaid.set(link.id, Object.assign(heldWifi, wifiDraft));
-            // Its ports are where it is plugged in; a sheet that says otherwise
-            // is noted, not obeyed (moving a cable is done on the map).
-            ['lk:sourceIface', 'lk:targetIface'].forEach((k) => {
-                if (!values[k]) return;
-                const endNode = k === 'lk:sourceIface' ? (ends['lk:source'] || src) : (ends['lk:target'] || tgt);
-                const on = ifaceIdOn(link, endNode.id);
-                const p = csvPortOn(endNode, values[k]);
-                if (p.error || p.id !== on) out.notes.push(t('Already cabled to {name} on port {port}: moving a cable is done on the map.', { name: nameOf(endNode), port: on ? ifaceLabel(endNode, on) : '—' }));
-            });
-            if (Object.keys(draft).length) said.set(link.id, Object.assign(prev, draft));
-            out.status = out.changes.length ? 'change' : 'same';
-            results.push(out);
-            return;
-        }
-        // A new cable needs both ends, and both on the map.
-        if (!ends['lk:source'] || !ends['lk:target']) return conflict(t('A new cable needs both of its devices.'));
-        const a = ends['lk:source'], b = ends['lk:target'];
-        if (a.id === b.id) return conflict(t('A device cannot be cabled to itself.'));
-        // A port the sheet names on a device without a faceplate that the
-        // device does not have is a NIC it gains, under that name: devices.csv
-        // carries one NIC per device, so a map rebuilt from it and then given
-        // cables.csv has the router's LAN side and not yet its WAN one. Shown
-        // in the review as a new interface, never done quietly.
-        const pick = (node, text) => {
-            let p = csvPortOn(node, text);
-            if (p.error && !hasPortGrid(node)) {
-                const name = String(text).trim();
-                const key = `${node.id}\u0000${name.toLowerCase()}`;
-                p = { id: madeIfaces.has(key) ? madeIfaces.get(key).id : nextId('i'), make: { nodeId: node.id, name, key } };
-            }
-            if (p.error) return p;
-            const busy = p.id && (ifaceIsOccupied(node.id, p.id) || portsTaken.has(`${node.id}\u0000${p.id}`));
-            if (busy && csvIsSocket(node, p.id)) return { error: t('Port {port} on {name} is taken.', { port: ifaceLabel(node, p.id), name: nameOf(node) }) };
-            // A NIC with a cable on it already is how the map draws a router
-            // serving hosts through a switch nobody drew, and a radio serves
-            // every client in range: kept as the sheet has it, and said
-            // when it is a host's NIC (the findings will say more).
-            const nic = busy && (node.interfaces || []).find((i) => i.id === p.id);
-            if (busy && !isRoutingDevice(node.type) && !(nic && ifaceIsWireless(nic))) {
-                out.notes.push(t('{port} on {name} carries another cable too.', { port: p.make ? p.make.name : ifaceLabel(node, p.id), name: nameOf(node) }));
-            }
-            return p;
+    return withLookupPass(() => {
+        const ix = csvIndex();
+        const results = [];
+        const portsTaken = new Set();
+        const said = new Map();   // linkId -> { key: value }
+        const cableSaid = new Map();   // linkId -> { label, length, color, via }: what the rows set of link.cable
+        const wifiSaid = new Map();    // linkId -> { ssid, band, signal }: what the rows set of link.wifi
+        const madeIfaces = new Map();   // node id + NIC name -> the op that makes it
+        const deviceOf = (text) => {
+            const v = String(text).trim();
+            if (ix.byId.has(v)) return { node: getNode(v) };
+            const hits = ix.byName.get(csvLower(v)) || [];
+            if (hits.length > 1) return { error: t('{name} names more than one device.', { name: v }) };
+            return hits.length ? { node: getNode(hits[0]) } : { error: t('No device called {name}.', { name: v }) };
         };
-        const sp = pick(a, values['lk:sourceIface']), tp = pick(b, values['lk:targetIface']);
-        if (sp.error) return conflict(sp.error);
-        if (tp.error) return conflict(tp.error);
-        const id = values['lk:id'] && !getLink(values['lk:id']) && !plan.ops.some((o) => o.link && o.link.id === values['lk:id']) ? values['lk:id'] : nextId('l');
-        const l = { id, source: a.id, target: b.id, attachment: values['lk:attachment'] || (isVirtualType(a.type) || isVirtualType(b.type) ? 'bridged' : null),
-            sourceIface: sp.id, targetIface: tp.id };
-        if (values['lk:medium'] !== undefined) l.medium = values['lk:medium'];
-        const facts = {};
-        CABLE_FIELDS.forEach((f) => { if (values[`lk:cable.${f.key}`] !== undefined) facts[f.key] = values[`lk:cable.${f.key}`]; });
-        if (readCable(facts)) l.cable = readCable(facts);
-        const assoc = {};
-        CSV_LINK_WIFI.forEach((w) => { if (values[`lk:wifi.${w.key}`] !== undefined) assoc[w.key] = values[`lk:wifi.${w.key}`]; });
-        if (readLinkWifi(assoc)) l.wifi = readLinkWifi(assoc);
-        const portText = (node, p) => (p.make ? p.make.name : ifaceLabel(node, p.id));
-        [[a, sp], [b, tp]].forEach(([node, p]) => {
-            if (!p.make || madeIfaces.has(p.make.key)) return;
-            const op = { nodeId: node.id, id: p.id, name: p.make.name, create: true, set: {} };
-            madeIfaces.set(p.make.key, op);
-            plan.ops.push({ iface: op });
-            out.changes.push({ field: csvTargetLabel(csvTarget('if:name')), before: '', after: `${nameOf(node)} ${p.make.name}` });
+        rows.forEach(({ index, vals, blanks }) => {
+            if (!Object.keys(vals).length) return;
+            const out = { index, name: '', status: 'same', changes: [], notes: [], why: '' };
+            const conflict = (why) => { results.push(Object.assign(out, { status: 'conflict', why })); };
+            const values = {}, errors = [];
+            let lengthAsIs;   // a length the parser refuses, held until the cable is known
+            Object.keys(vals).forEach((key) => {
+                const tg = csvTarget(key);
+                if (tg.group !== 'cable') return;
+                if (key === 'lk:source' || key === 'lk:target' || key === 'lk:sourceIface' || key === 'lk:targetIface' || key === 'lk:id') { values[key] = String(vals[key]).trim(); return; }
+                const res = tg.parse(vals[key]);
+                if (res.error && key === 'lk:cable.length') lengthAsIs = String(vals[key]).trim();
+                else if (res.error) errors.push(t('{value} is not a valid {field}.', { value: String(vals[key]).trim(), field: csvTargetLabel(tg) }));
+                else values[key] = res.value;
+            });
+            if (errors.length) return conflict(errors.join(' '));
+            const ends = {};
+            for (const k of ['lk:source', 'lk:target']) {
+                if (!values[k]) continue;
+                const d = deviceOf(values[k]);
+                if (d.error) return conflict(d.error);
+                ends[k] = d.node;
+            }
+            const nameOf = (n) => (n ? n.name || n.id : '—');
+            out.name = `${nameOf(ends['lk:source'])} ↔ ${nameOf(ends['lk:target'])}`;
+            let link = values['lk:id'] ? getLink(values['lk:id']) : null;
+            if (link) {
+                const a = ends['lk:source'], b = ends['lk:target'];
+                const joins = (n) => !n || link.source === n.id || link.target === n.id;
+                if (!joins(a) || !joins(b)) return conflict(t('Cable {id} joins other devices.', { id: link.id }));
+            } else if (ends['lk:source'] && ends['lk:target']) {
+                const a = ends['lk:source'].id, b = ends['lk:target'].id;
+                const between = linksAtNode(a).filter((l) => (l.source === a && l.target === b) || (l.source === b && l.target === a));
+                // The cable whose ports are the ones the row gives (either end).
+                const want = (l) => {
+                    const at = (k, node) => (values[k] ? csvPortOn(node, values[k]).id : null);
+                    const sp = at('lk:sourceIface', ends['lk:source']), tp = at('lk:targetIface', ends['lk:target']);
+                    const onA = l.source === a ? l.sourceIface : l.targetIface, onB = l.source === a ? l.targetIface : l.sourceIface;
+                    return (!sp || onA === sp) && (!tp || onB === tp);
+                };
+                if (between.length > 1) {
+                    const narrowed = between.filter(want);
+                    if (narrowed.length !== 1) return conflict(t('{n} cables join these two devices: add the cable id to say which.', { n: between.length }));
+                    link = narrowed[0];
+                } else if (between.length && !want(between[0]) && values['lk:id']) {
+                    // A cable id the map does not have, on other ports than the
+                    // one cable there: a second cable between the two (a NAS on
+                    // two switch ports), not that one moved.
+                    link = null;
+                } else link = between[0] || null;
+            }
+            // A cable typed before lengths were metres or feet keeps its words
+            // ("about 3"), and cables.csv writes them out as they are. Read back,
+            // the same words on the same cable are no change: refused, they made
+            // the whole row a conflict, so a sheet exported, relabelled in Excel
+            // and imported again lost every edit on those cables. Words that are
+            // not what the cable holds are still refused.
+            if (lengthAsIs !== undefined && !(link && cableOf(link, 'length').trim() === lengthAsIs)) {
+                return conflict(t('{value} is not a valid {field}.', { value: lengthAsIs, field: csvTargetLabel(csvTarget('lk:cable.length')) }));
+            }
+            if (link) {
+                const src = getNode(link.source), tgt = getNode(link.target);
+                out.name = `${nameOf(src)} ↔ ${nameOf(tgt)}`;
+                out.linkId = link.id;
+                const prev = said.get(link.id) || {};
+                const draft = {};   // committed only when the whole row is good
+                if (values['lk:medium'] !== undefined) {
+                    if (prev.medium !== undefined && prev.medium !== values['lk:medium']) return conflict(t('Another row sets {field} to {value}.', { field: 'Medium', value: csvShow('lk:medium', prev.medium) }));
+                    const now = effectiveMedium(link);
+                    if (now !== values['lk:medium']) {
+                        out.changes.push({ field: 'Medium', before: csvShow('lk:medium', now), after: csvShow('lk:medium', values['lk:medium']) });
+                        draft.medium = values['lk:medium'];
+                    }
+                }
+                if (values['lk:attachment'] !== undefined) {
+                    if (prev.attachment !== undefined && prev.attachment !== values['lk:attachment']) return conflict(t('Another row sets {field} to {value}.', { field: 'Attachment', value: prev.attachment }));
+                    if ((link.attachment || '') !== values['lk:attachment']) {
+                        out.changes.push({ field: 'Attachment', before: link.attachment || '', after: values['lk:attachment'] });
+                        draft.attachment = values['lk:attachment'];
+                    }
+                }
+                // The cable's own facts, field by field: a blank cell leaves one
+                // as it is, and two rows that disagree about one are a conflict.
+                const heldCable = cableSaid.get(link.id) || {};
+                const cableDraft = {};
+                for (const f of CABLE_FIELDS) {
+                    const k = `lk:cable.${f.key}`;
+                    if (values[k] === undefined) continue;
+                    const label = csvTargetLabel(csvTarget(k));
+                    if (heldCable[f.key] !== undefined && !csvSame(k, heldCable[f.key], values[k])) return conflict(t('Another row sets {field} to {value}.', { field: label, value: heldCable[f.key] }));
+                    if (!csvSame(k, cableOf(link, f.key), values[k])) {
+                        out.changes.push({ field: label, before: cableOf(link, f.key), after: values[k] });
+                        cableDraft[f.key] = values[k];
+                    }
+                }
+                if (Object.keys(cableDraft).length) cableSaid.set(link.id, Object.assign(heldCable, cableDraft));
+                // An association's SSID, band and signal, the same way.
+                const heldWifi = wifiSaid.get(link.id) || {};
+                const wifiDraft = {};
+                for (const w of CSV_LINK_WIFI) {
+                    const k = `lk:wifi.${w.key}`;
+                    if (values[k] === undefined) continue;
+                    const label = csvTargetLabel(csvTarget(k));
+                    if (heldWifi[w.key] !== undefined && !csvSame(k, heldWifi[w.key], values[k])) return conflict(t('Another row sets {field} to {value}.', { field: label, value: csvShow(k, heldWifi[w.key]) }));
+                    const now = linkWifiOf(link, w.key);
+                    if (!csvSame(k, now, values[k])) {
+                        out.changes.push({ field: label, before: csvShow(k, now), after: csvShow(k, values[k]) });
+                        wifiDraft[w.key] = values[k];
+                    }
+                }
+                if (Object.keys(wifiDraft).length) wifiSaid.set(link.id, Object.assign(heldWifi, wifiDraft));
+                // Its ports are where it is plugged in; a sheet that says otherwise
+                // is noted, not obeyed (moving a cable is done on the map).
+                ['lk:sourceIface', 'lk:targetIface'].forEach((k) => {
+                    if (!values[k]) return;
+                    const endNode = k === 'lk:sourceIface' ? (ends['lk:source'] || src) : (ends['lk:target'] || tgt);
+                    const on = ifaceIdOn(link, endNode.id);
+                    const p = csvPortOn(endNode, values[k]);
+                    if (p.error || p.id !== on) out.notes.push(t('Already cabled to {name} on port {port}: moving a cable is done on the map.', { name: nameOf(endNode), port: on ? ifaceLabel(endNode, on) : '—' }));
+                });
+                if (Object.keys(draft).length) said.set(link.id, Object.assign(prev, draft));
+                out.status = out.changes.length ? 'change' : 'same';
+                results.push(out);
+                return;
+            }
+            // A new cable needs both ends, and both on the map.
+            if (!ends['lk:source'] || !ends['lk:target']) return conflict(t('A new cable needs both of its devices.'));
+            const a = ends['lk:source'], b = ends['lk:target'];
+            if (a.id === b.id) return conflict(t('A device cannot be cabled to itself.'));
+            // A port the sheet names on a device without a faceplate that the
+            // device does not have is a NIC it gains, under that name: devices.csv
+            // carries one NIC per device, so a map rebuilt from it and then given
+            // cables.csv has the router's LAN side and not yet its WAN one. Shown
+            // in the review as a new interface, never done quietly.
+            const pick = (node, text) => {
+                let p = csvPortOn(node, text);
+                if (p.error && !hasPortGrid(node)) {
+                    const name = String(text).trim();
+                    const key = `${node.id}\u0000${name.toLowerCase()}`;
+                    p = { id: madeIfaces.has(key) ? madeIfaces.get(key).id : nextId('i'), make: { nodeId: node.id, name, key } };
+                }
+                if (p.error) return p;
+                const busy = p.id && (ifaceIsOccupied(node.id, p.id) || portsTaken.has(`${node.id}\u0000${p.id}`));
+                if (busy && csvIsSocket(node, p.id)) return { error: t('Port {port} on {name} is taken.', { port: ifaceLabel(node, p.id), name: nameOf(node) }) };
+                // A NIC with a cable on it already is how the map draws a router
+                // serving hosts through a switch nobody drew, and a radio serves
+                // every client in range: kept as the sheet has it, and said
+                // when it is a host's NIC (the findings will say more).
+                const nic = busy && (node.interfaces || []).find((i) => i.id === p.id);
+                if (busy && !isRoutingDevice(node.type) && !(nic && ifaceIsWireless(nic))) {
+                    out.notes.push(t('{port} on {name} carries another cable too.', { port: p.make ? p.make.name : ifaceLabel(node, p.id), name: nameOf(node) }));
+                }
+                return p;
+            };
+            const sp = pick(a, values['lk:sourceIface']), tp = pick(b, values['lk:targetIface']);
+            if (sp.error) return conflict(sp.error);
+            if (tp.error) return conflict(tp.error);
+            const id = values['lk:id'] && !getLink(values['lk:id']) && !plan.ops.some((o) => o.link && o.link.id === values['lk:id']) ? values['lk:id'] : nextId('l');
+            const l = { id, source: a.id, target: b.id, attachment: values['lk:attachment'] || (isVirtualType(a.type) || isVirtualType(b.type) ? 'bridged' : null),
+                sourceIface: sp.id, targetIface: tp.id };
+            if (values['lk:medium'] !== undefined) l.medium = values['lk:medium'];
+            const facts = {};
+            CABLE_FIELDS.forEach((f) => { if (values[`lk:cable.${f.key}`] !== undefined) facts[f.key] = values[`lk:cable.${f.key}`]; });
+            if (readCable(facts)) l.cable = readCable(facts);
+            const assoc = {};
+            CSV_LINK_WIFI.forEach((w) => { if (values[`lk:wifi.${w.key}`] !== undefined) assoc[w.key] = values[`lk:wifi.${w.key}`]; });
+            if (readLinkWifi(assoc)) l.wifi = readLinkWifi(assoc);
+            const portText = (node, p) => (p.make ? p.make.name : ifaceLabel(node, p.id));
+            [[a, sp], [b, tp]].forEach(([node, p]) => {
+                if (!p.make || madeIfaces.has(p.make.key)) return;
+                const op = { nodeId: node.id, id: p.id, name: p.make.name, create: true, set: {} };
+                madeIfaces.set(p.make.key, op);
+                plan.ops.push({ iface: op });
+                out.changes.push({ field: csvTargetLabel(csvTarget('if:name')), before: '', after: `${nameOf(node)} ${p.make.name}` });
+            });
+            if (sp.id) portsTaken.add(`${a.id}\u0000${sp.id}`);
+            if (tp.id) portsTaken.add(`${b.id}\u0000${tp.id}`);
+            // A faceplate's port column the sheet has, left blank on this row:
+            // the cable is plugged into none of its ports the sheet knows, and is
+            // made so, with no port at that end (the rack view's "no port" spot,
+            // to Pick a port), rather than into one of 24 the binder picks and
+            // nobody patched. That is how the cables sheet writes such a cable,
+            // so it reads back as one ("Round 5", R5b: the patch schedule
+            // round-trips). A device's own NIC is still bound (a PC's one NIC is
+            // where its cable is), and so is a sheet with no port column at all.
+            const noPort = [['lk:sourceIface', 'sourceIface', a], ['lk:targetIface', 'targetIface', b]]
+                .filter(([k, side, node]) => !l[side] && hasPortGrid(node) && (blanks || []).includes(k)).map(([, side]) => side);
+            plan.ops.push(noPort.length ? { link: l, noPort } : { link: l });
+            out.status = 'add';
+            out.changes.unshift({ field: t('Cable'), before: '', after: [sp.id ? `${nameOf(a)} ${portText(a, sp)}` : nameOf(a), tp.id ? `${nameOf(b)} ${portText(b, tp)}` : nameOf(b)].join(' ↔ ') + (l.medium ? ` · ${csvShow('lk:medium', l.medium)}` : '') });
+            results.push(out);
         });
-        if (sp.id) portsTaken.add(`${a.id}\u0000${sp.id}`);
-        if (tp.id) portsTaken.add(`${b.id}\u0000${tp.id}`);
-        // A faceplate's port column the sheet has, left blank on this row:
-        // the cable is plugged into none of its ports the sheet knows, and is
-        // made so, with no port at that end (the rack view's "no port" spot,
-        // to Pick a port), rather than into one of 24 the binder picks and
-        // nobody patched. That is how the cables sheet writes such a cable,
-        // so it reads back as one ("Round 5", R5b: the patch schedule
-        // round-trips). A device's own NIC is still bound (a PC's one NIC is
-        // where its cable is), and so is a sheet with no port column at all.
-        const noPort = [['lk:sourceIface', 'sourceIface', a], ['lk:targetIface', 'targetIface', b]]
-            .filter(([k, side, node]) => !l[side] && hasPortGrid(node) && (blanks || []).includes(k)).map(([, side]) => side);
-        plan.ops.push(noPort.length ? { link: l, noPort } : { link: l });
-        out.status = 'add';
-        out.changes.unshift({ field: t('Cable'), before: '', after: [sp.id ? `${nameOf(a)} ${portText(a, sp)}` : nameOf(a), tp.id ? `${nameOf(b)} ${portText(b, tp)}` : nameOf(b)].join(' ↔ ') + (l.medium ? ` · ${csvShow('lk:medium', l.medium)}` : '') });
-        results.push(out);
+        // link.cable is one value: what the rows said, laid over what it holds.
+        cableSaid.forEach((facts, linkId) => {
+            const link = getLink(linkId);
+            const set = said.get(linkId) || {};
+            set.cable = readCable(Object.assign({}, (link && link.cable) || {}, facts)) || null;
+            said.set(linkId, set);
+        });
+        // link.wifi likewise.
+        wifiSaid.forEach((facts, linkId) => {
+            const link = getLink(linkId);
+            const set = said.get(linkId) || {};
+            set.wifi = readLinkWifi(Object.assign({}, (link && link.wifi) || {}, facts)) || null;
+            said.set(linkId, set);
+        });
+        said.forEach((set, linkId) => plan.ops.push({ linkId, set }));
+        return csvFinish(plan, results);
     });
-    // link.cable is one value: what the rows said, laid over what it holds.
-    cableSaid.forEach((facts, linkId) => {
-        const link = getLink(linkId);
-        const set = said.get(linkId) || {};
-        set.cable = readCable(Object.assign({}, (link && link.cable) || {}, facts)) || null;
-        said.set(linkId, set);
-    });
-    // link.wifi likewise.
-    wifiSaid.forEach((facts, linkId) => {
-        const link = getLink(linkId);
-        const set = said.get(linkId) || {};
-        set.wifi = readLinkWifi(Object.assign({}, (link && link.wifi) || {}, facts)) || null;
-        said.set(linkId, set);
-    });
-    said.forEach((set, linkId) => plan.ops.push({ linkId, set }));
-    return csvFinish(plan, results);
 }
 
 // ---- Ports ----
@@ -2723,129 +2729,141 @@ function csvSameNet(key, a, b) {
 // the sheet gave no port for on the document being written, not the live one.
 // Every record touched or made is then read back through the normalizer.
 function csvWrite(plan, doc) {
-    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi };
-    if (!Array.isArray(doc.networks)) doc.networks = [];
-    if (!Array.isArray(doc.groups)) doc.groups = [];
-    if (!Array.isArray(doc.wifi)) doc.wifi = [];
-    state.nodes = doc.nodes; state.links = doc.links; state.networks = doc.networks; state.groups = doc.groups; state.wifi = doc.wifi;
-    const touched = new Set(), newLinks = new Set();
-    try {
-        // Groups before anything names them, each read back through
-        // GROUP_FIELDS as a loaded document's are; the parents are made sound
-        // once they all exist (a sheet may name a parent further down).
-        const readGroup = (rec) => readFields(GROUP_FIELDS, writeFields(GROUP_FIELDS, rec));
-        plan.ops.forEach((op) => {
-            if (!op.grp) return;
-            if (op.grp.create) { doc.groups.push(readGroup(cloneData(op.grp.create))); return; }
-            const at = doc.groups.findIndex((g) => g.id === op.grp.id);
-            if (at > -1) {
-                const set = Object.assign({}, op.grp.set);
-                // 'bottom' is the default, which is stored as nothing.
-                if (set.numbering === 'bottom') set.numbering = undefined;
-                const next = Object.assign({}, doc.groups[at], set);
-                if (op.grp.set.kind === 'rack' && !Number.isInteger(next.uHeight)) next.uHeight = RACK_U_DEFAULT;
-                // A rack's new height moves its devices as the rail's does
-                // (applyRackHeight: each keeps the units printed beside it,
-                // and those in units it loses lose their places), worked out
-                // with the numbering the row leaves it with.
-                if (set.uHeight !== undefined && isRackGroup(doc.groups[at]) && next.kind === 'rack') {
-                    applyRackHeight(Object.assign(next, { uHeight: doc.groups[at].uHeight }), set.uHeight, doc.nodes);
+    // Out of any pass the caller has open: the swap below lends doc's arrays
+    // to the model's helpers, and an open pass would answer from the live
+    // document's indexes. The binds open their own over doc. Not a pass
+    // itself: it writes.
+    return withoutLookupPass(() => {
+        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi };
+        if (!Array.isArray(doc.networks)) doc.networks = [];
+        if (!Array.isArray(doc.groups)) doc.groups = [];
+        if (!Array.isArray(doc.wifi)) doc.wifi = [];
+        state.nodes = doc.nodes; state.links = doc.links; state.networks = doc.networks; state.groups = doc.groups; state.wifi = doc.wifi;
+        const touched = new Set(), newLinks = new Set();
+        try {
+            // Groups before anything names them, each read back through
+            // GROUP_FIELDS as a loaded document's are; the parents are made sound
+            // once they all exist (a sheet may name a parent further down).
+            const readGroup = (rec) => readFields(GROUP_FIELDS, writeFields(GROUP_FIELDS, rec));
+            plan.ops.forEach((op) => {
+                if (!op.grp) return;
+                if (op.grp.create) { doc.groups.push(readGroup(cloneData(op.grp.create))); return; }
+                const at = doc.groups.findIndex((g) => g.id === op.grp.id);
+                if (at > -1) {
+                    const set = Object.assign({}, op.grp.set);
+                    // 'bottom' is the default, which is stored as nothing.
+                    if (set.numbering === 'bottom') set.numbering = undefined;
+                    const next = Object.assign({}, doc.groups[at], set);
+                    if (op.grp.set.kind === 'rack' && !Number.isInteger(next.uHeight)) next.uHeight = RACK_U_DEFAULT;
+                    // A rack's new height moves its devices as the rail's does
+                    // (applyRackHeight: each keeps the units printed beside it,
+                    // and those in units it loses lose their places), worked out
+                    // with the numbering the row leaves it with.
+                    if (set.uHeight !== undefined && isRackGroup(doc.groups[at]) && next.kind === 'rack') {
+                        applyRackHeight(Object.assign(next, { uHeight: doc.groups[at].uHeight }), set.uHeight, doc.nodes);
+                    }
+                    doc.groups[at] = readGroup(next);
                 }
-                doc.groups[at] = readGroup(next);
-            }
-        });
-        if (plan.ops.some((op) => op.grp)) repairGroupParents(doc.groups);
-        // Subnets first, each read back through NETWORK_FIELDS as a loaded
-        // document's are, so what a device row in the same apply finds is
-        // already the network a reload would read.
-        plan.ops.forEach((op) => {
-            if (!op.net) return;
-            const read = (rec) => readFields(NETWORK_FIELDS, writeFields(NETWORK_FIELDS, rec));
-            if (op.net.create) { doc.networks.push(read(cloneData(op.net.create))); return; }
-            const at = doc.networks.findIndex((n) => n.id === op.net.id);
-            if (at > -1) doc.networks[at] = read(Object.assign({}, doc.networks[at], op.net.set));
-        });
-        // The Wi-Fi networks likewise, through WIFI_FIELDS. A row names a
-        // subnet the map already has (csvPlanWifi), so they can come after.
-        plan.ops.forEach((op) => {
-            if (!op.wifi) return;
-            const read = (rec) => readFields(WIFI_FIELDS, writeFields(WIFI_FIELDS, rec));
-            if (op.wifi.create) { doc.wifi.push(read(cloneData(op.wifi.create))); return; }
-            const at = doc.wifi.findIndex((w) => w.id === op.wifi.id);
-            if (at > -1) doc.wifi[at] = read(Object.assign({}, doc.wifi[at], op.wifi.set));
-        });
-        // The columns the sheet makes, before any device holds a value for one.
-        plan.ops.forEach((op) => {
-            if (op.column && !(doc.columns || []).some((c) => c.id === op.column.id)) doc.columns = normalizeCustomColumns((doc.columns || []).concat(op.column));
-        });
-        plan.ops.forEach((op) => {
-            if (op.create) { const rec = cloneData(op.create); doc.nodes.push(rec); touched.add(rec.id); }
-        });
-        plan.ops.forEach((op) => {
-            if (op.create || op.link || op.net || op.grp || op.wifi || op.column) return;
-            if (op.linkId) {
-                const link = doc.links.find((l) => l.id === op.linkId);
-                if (link) Object.assign(link, op.set);
-                if (link && link.cable === null) delete link.cable;   // every fact cleared
-                if (link && link.wifi === null) delete link.wifi;
-                return;
-            }
-            if (op.order) {
-                const node = doc.nodes.find((n) => n.id === op.order.nodeId);
+            });
+            if (plan.ops.some((op) => op.grp)) repairGroupParents(doc.groups);
+            // Subnets first, each read back through NETWORK_FIELDS as a loaded
+            // document's are, so what a device row in the same apply finds is
+            // already the network a reload would read.
+            plan.ops.forEach((op) => {
+                if (!op.net) return;
+                const read = (rec) => readFields(NETWORK_FIELDS, writeFields(NETWORK_FIELDS, rec));
+                if (op.net.create) { doc.networks.push(read(cloneData(op.net.create))); return; }
+                const at = doc.networks.findIndex((n) => n.id === op.net.id);
+                if (at > -1) doc.networks[at] = read(Object.assign({}, doc.networks[at], op.net.set));
+            });
+            // The Wi-Fi networks likewise, through WIFI_FIELDS. A row names a
+            // subnet the map already has (csvPlanWifi), so they can come after.
+            plan.ops.forEach((op) => {
+                if (!op.wifi) return;
+                const read = (rec) => readFields(WIFI_FIELDS, writeFields(WIFI_FIELDS, rec));
+                if (op.wifi.create) { doc.wifi.push(read(cloneData(op.wifi.create))); return; }
+                const at = doc.wifi.findIndex((w) => w.id === op.wifi.id);
+                if (at > -1) doc.wifi[at] = read(Object.assign({}, doc.wifi[at], op.wifi.set));
+            });
+            // The columns the sheet makes, before any device holds a value for one.
+            plan.ops.forEach((op) => {
+                if (op.column && !(doc.columns || []).some((c) => c.id === op.column.id)) doc.columns = normalizeCustomColumns((doc.columns || []).concat(op.column));
+            });
+            plan.ops.forEach((op) => {
+                if (op.create) { const rec = cloneData(op.create); doc.nodes.push(rec); touched.add(rec.id); }
+            });
+            // By id, first wins as find() does. The loop below only sets fields
+            // on the records it finds and never adds to or drops from the
+            // lists, so the maps stay true for its length.
+            const nodeById = new Map(), linkById = new Map();
+            doc.nodes.forEach((n) => { if (!nodeById.has(n.id)) nodeById.set(n.id, n); });
+            doc.links.forEach((l) => { if (!linkById.has(l.id)) linkById.set(l.id, l); });
+            plan.ops.forEach((op) => {
+                if (op.create || op.link || op.net || op.grp || op.wifi || op.column) return;
+                if (op.linkId) {
+                    const link = linkById.get(op.linkId);
+                    if (link) Object.assign(link, op.set);
+                    if (link && link.cable === null) delete link.cable;   // every fact cleared
+                    if (link && link.wifi === null) delete link.wifi;
+                    return;
+                }
+                if (op.order) {
+                    const node = nodeById.get(op.order.nodeId);
+                    if (!node) return;
+                    const at = (i) => op.order.ids.indexOf(i.id);
+                    node.interfaces = (node.interfaces || []).slice().sort((a, b) => at(a) - at(b));
+                    touched.add(node.id);
+                    return;
+                }
+                if (op.port) {
+                    const node = nodeById.get(op.port.nodeId);
+                    if (!node) return;
+                    Object.keys(op.port.set).forEach((k) => setPortAttr(node, op.port.id, k, op.port.set[k]));
+                    touched.add(node.id);
+                    return;
+                }
+                if (op.iface) {
+                    const node = nodeById.get(op.iface.nodeId);
+                    if (!node) return;
+                    node.interfaces = node.interfaces || [];
+                    let iface = node.interfaces.find((i) => i.id === op.iface.id);
+                    if (!iface && op.iface.create) { iface = { id: op.iface.id, name: op.iface.name, ip: '' }; node.interfaces.push(iface); }
+                    if (iface) csvSetIface(iface, op.iface.set);
+                    touched.add(node.id);
+                    return;
+                }
+                const node = nodeById.get(op.nodeId);
                 if (!node) return;
-                const at = (i) => op.order.ids.indexOf(i.id);
-                node.interfaces = (node.interfaces || []).slice().sort((a, b) => at(a) - at(b));
+                Object.keys(op.set).forEach((k) => csvSetNodeValue(node, k, op.set[k]));
+                (op.drop || []).forEach((k) => { delete node[k]; });
                 touched.add(node.id);
-                return;
-            }
-            if (op.port) {
-                const node = doc.nodes.find((n) => n.id === op.port.nodeId);
-                if (!node) return;
-                Object.keys(op.port.set).forEach((k) => setPortAttr(node, op.port.id, k, op.port.set[k]));
-                touched.add(node.id);
-                return;
-            }
-            if (op.iface) {
-                const node = doc.nodes.find((n) => n.id === op.iface.nodeId);
-                if (!node) return;
-                node.interfaces = node.interfaces || [];
-                let iface = node.interfaces.find((i) => i.id === op.iface.id);
-                if (!iface && op.iface.create) { iface = { id: op.iface.id, name: op.iface.name, ip: '' }; node.interfaces.push(iface); }
-                if (iface) csvSetIface(iface, op.iface.set);
-                touched.add(node.id);
-                return;
-            }
-            const node = doc.nodes.find((n) => n.id === op.nodeId);
-            if (!node) return;
-            Object.keys(op.set).forEach((k) => csvSetNodeValue(node, k, op.set[k]));
-            (op.drop || []).forEach((k) => { delete node[k]; });
-            touched.add(node.id);
-        });
-        // Bound in a lookup pass kept true as each cable lands: a thousand
-        // devices hanging off one box without a faceplate is a thousand
-        // binds, each asking which of the box's NICs are free, and unindexed
-        // that froze the Review click for minutes.
-        withLookupPass(() => plan.ops.forEach((op) => {
-            if (!op.link) return;
-            if (!getNode(op.link.source) || !getNode(op.link.target)) return;
-            const link = bindLink(cloneData(op.link));
-            // An end the sheet left blank in its port column stays with no port.
-            (op.noPort || []).forEach((side) => { link[side] = null; });
-            doc.links.push(link);
-            lookupPassAddLink(link);
-            newLinks.add(link.id);
-            touched.add(link.source); touched.add(link.target);
-        }));
-        // Through the normalizer: what a reload would read these records as.
-        doc.nodes.forEach((n, i) => { if (touched.has(n.id)) doc.nodes[i] = normalizeLoadedNode(serializeNode(n)); });
-        // And the host rule over the whole list, as save() and a reload keep
-        // it: a VM the sheet put on a host goes where the host is.
-        repairHosts(doc.nodes);
-        const setLinks = new Set(plan.ops.filter((op) => op.linkId).map((op) => op.linkId));
-        doc.links.forEach((l, i) => { if (newLinks.has(l.id) || setLinks.has(l.id)) doc.links[i] = normalizeLoadedLink(serializeLink(l)); });
-    } finally {
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi;
-    }
+            });
+            // Bound in a lookup pass kept true as each cable lands: a thousand
+            // devices hanging off one box without a faceplate is a thousand
+            // binds, each asking which of the box's NICs are free, and unindexed
+            // that froze the Review click for minutes.
+            withLookupPass(() => plan.ops.forEach((op) => {
+                if (!op.link) return;
+                if (!getNode(op.link.source) || !getNode(op.link.target)) return;
+                const link = bindLink(cloneData(op.link));
+                // An end the sheet left blank in its port column stays with no port.
+                (op.noPort || []).forEach((side) => { link[side] = null; });
+                doc.links.push(link);
+                lookupPassAddLink(link);
+                newLinks.add(link.id);
+                touched.add(link.source); touched.add(link.target);
+            }));
+            // Through the normalizer: what a reload would read these records as.
+            doc.nodes.forEach((n, i) => { if (touched.has(n.id)) doc.nodes[i] = normalizeLoadedNode(serializeNode(n)); });
+            // And the host rule over the whole list, as save() and a reload keep
+            // it: a VM the sheet put on a host goes where the host is.
+            repairHosts(doc.nodes);
+            const setLinks = new Set(plan.ops.filter((op) => op.linkId).map((op) => op.linkId));
+            doc.links.forEach((l, i) => { if (newLinks.has(l.id) || setLinks.has(l.id)) doc.links[i] = normalizeLoadedLink(serializeLink(l)); });
+        } finally {
+            state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi;
+        }
+    });
 }
 
 // The findings the plan would leave, against the ones there now.

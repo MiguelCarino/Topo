@@ -120,6 +120,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 6: presets under the cards ----
     open();
     state.wifi = [];
+    normalizeWifiRefs();   // as deleting them in the editor does: no band names one that is gone
     save();
     showConfigTab('wifi');
     renderWifiPanel(true);

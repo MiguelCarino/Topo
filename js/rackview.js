@@ -193,7 +193,9 @@ function syncRackSwitch() {
 }
 
 // ---- Drawing ----
-function renderRackView(force) {
+// diag: the document's diagnosis from the same synchronous render, when the
+// caller has one (renderCanvasOnly), so the pass need not build it again.
+function renderRackView(force, diag) {
     if (syncRackSwitch()) return;
     if (!rackShown()) { _rv.dirty = true; return; }
     if (_rv.drag && !force) { _rv.dirty = true; return; }
@@ -231,23 +233,40 @@ function renderRackView(force) {
     renderRackSize(rack, force);
     if (!rack) { body.innerHTML = ''; rvEl('rackCount').textContent = ''; rvHidePortTip(); return; }
 
-    const members = rackMembers(rack);
-    const placed = members.filter((n) => Number.isInteger(n.rackU));
-    // A VM or a container on a host is where its host is, drawn in its box:
-    // not a device waiting for units.
-    const unplaced = members.filter((n) => !Number.isInteger(n.rackU) && !hostOf(n));
+    const qm = typeof _queryLastMap !== 'undefined' ? _queryLastMap : null;
+    // The members, the rings, the no-port spots and the markup are one lookup
+    // pass (js/model.js): every box asks for its cables, its ports and the
+    // diagnosis. The pass only builds strings and this view's own state
+    // (_rv); everything that touches the page is after it, so a blur-commit
+    // fired by the rebuild never writes under open indexes.
+    const { members, unplaced, html } = withLookupPass(() => {
+        const members = rackMembers(rack);
+        const placed = members.filter((n) => Number.isInteger(n.rackU));
+        // A VM or a container on a host is where its host is, drawn in its box:
+        // not a device waiting for units.
+        const unplaced = members.filter((n) => !Number.isInteger(n.rackU) && !hostOf(n));
+        // A Cable to… left waiting on a device that has left the rack, or that is
+        // no longer the one selected (the map or the table picked another), is
+        // let go.
+        if (_rv.cableFrom && (!placed.some((n) => n.id === _rv.cableFrom)
+            || !(state.selectedType === 'node' && state.selectedId === _rv.cableFrom))) _rv.cableFrom = null;
+        // The rings on the ports, from the findings as they are now, and the
+        // cables that meet a box at its no-port spot: set before the markup,
+        // which reads them.
+        _rv.badLinks = rvBadLinks();
+        _rv.noPort = rvNoPortLinks(rack);
+        // Front, the cable manager, rear: the manager is between the faces, as the cables
+        // are between the devices' fronts and backs.
+        const html = `<div class="rk-main"><div class="rk-faces">${rackFaceHtml(rack, 'front', placed, qm)}${rackLaneHtml(rack)}${rackFaceHtml(rack, 'rear', placed, qm)}<div class="rk-wiring"></div></div></div>
+        <aside class="rk-side">${rackSelBarHtml(rack)}${rackScheduleHtml(rack, qm)}${rackUnplacedHtml(rack, unplaced, qm)}${rackOthersHtml(rack, qm)}</aside>`;
+        return { members, unplaced, html };
+    }, diag);
     rvEl('rackCount').textContent = [rackSizeText(rack), devicesText(members.length),
         unplaced.length ? t('{n} not placed', { n: unplaced.length }) : ''].filter(Boolean).join(' · ');
     // Drawn as wide as the rack is against a 19" one (the faces' columns
     // and, on a phone, the frame read --rk-w; css/app.css).
     body.style.setProperty('--rk-w', String(Math.round(rackWidthInches(rack) / 19 * 1000) / 1000));
     body.dataset.width = asRackWidth(rack.width);
-    const qm = typeof _queryLastMap !== 'undefined' ? _queryLastMap : null;
-    // A Cable to… left waiting on a device that has left the rack, or that is
-    // no longer the one selected (the map or the table picked another), is
-    // let go.
-    if (_rv.cableFrom && (!placed.some((n) => n.id === _rv.cableFrom)
-        || !(state.selectedType === 'node' && state.selectedId === _rv.cableFrom))) _rv.cableFrom = null;
     view.classList.toggle('rk-arming', !!_rv.cableFrom);
     // The units scroll in a pane of their own, so the selected device's
     // buttons and the list beside them stay in sight however far down the
@@ -265,14 +284,7 @@ function renderRackView(force) {
     const motion = body.dataset.zoom === String(_rv.zoom) ? rackMotionStart(body) : null;
     body.dataset.rack = rack.id;
     body.dataset.zoom = String(_rv.zoom);
-    // The rings on the ports, from the findings as they are now, and the
-    // cables that meet a box at its no-port spot.
-    _rv.badLinks = rvBadLinks();
-    _rv.noPort = rvNoPortLinks(rack);
-    // Front, the cable manager, rear: the manager is between the faces, as the cables
-    // are between the devices' fronts and backs.
-    body.innerHTML = `<div class="rk-main"><div class="rk-faces">${rackFaceHtml(rack, 'front', placed, qm)}${rackLaneHtml(rack)}${rackFaceHtml(rack, 'rear', placed, qm)}<div class="rk-wiring"></div></div></div>
-        <aside class="rk-side">${rackSelBarHtml(rack)}${rackScheduleHtml(rack, qm)}${rackUnplacedHtml(rack, unplaced, qm)}${rackOthersHtml(rack, qm)}</aside>`;
+    body.innerHTML = html;
     // The cables are drawn over the boxes once they are laid out.
     rvDrawCables();
     if (scroll) body.querySelector('.rk-main').scrollTop = scroll;
@@ -1060,7 +1072,9 @@ function rvDrawCables() {
     _rv.wired = null;
     if (!fr.width || !shown.length) { layer.innerHTML = ''; return; }
     const qm = typeof _queryLastMap !== 'undefined' ? _queryLastMap : null;
-    const items = rvCableItems(rack, shown, qm);
+    // The items in a lookup pass of their own (each asks for its two devices
+    // and their ports); the measuring below is outside it.
+    const items = withLookupPass(() => rvCableItems(rack, shown, qm));
     if (!items.length) { layer.innerHTML = ''; return; }
 
     const lr = laneEl.getBoundingClientRect();
@@ -1547,7 +1561,10 @@ function rackOthersHtml(rack, qm) {
         <ul class="rk-unlist rk-others-list">${rackOthersItems(rack, qm)}</ul>
     </details>`;
 }
-function rackOthersItems(rack, qm) {
+// A string, built in a lookup pass (the rack view's own, reused, or one of
+// its own from the filter's input): the caller puts it in, after the pass.
+function rackOthersItems(rack, qm) { return withLookupPass(() => rackOthersItemsNow(rack, qm)); }
+function rackOthersItemsNow(rack, qm) {
     const list = placeCandidates(rack, _rv.othersFilter).filter((c) => c.rank > 0);
     const dis = state.readOnly ? ' disabled' : '';
     const rows = list.slice(0, RV_OTHERS_MAX).map(({ node: n }) => {
@@ -2967,14 +2984,43 @@ function renderPlaceDialog() {
     const rack = _rp.req && groupById(_rp.req.rackId);
     if (!rack) return;
     const span = placeDialogSpan();
-    let msg = '', ok = false;
-    if (span.u === undefined || !span.height) msg = t(rackTopDown(rack) ? 'Give the top unit and the height as whole numbers.' : 'Give the lowest unit and the height as whole numbers.');
-    else {
-        const chk = rackSpanCheck(rack, span.face, span.u, span.height, null, state.nodes, span.full);
-        ok = chk.ok;
-        if (!ok) msg = rackRefusal(rack, chk);
-        else msg = t('Goes in {span}.', { span: `${rvSpanText(rack, span.u, span.u + span.height - 1, span.face)}, ${t(span.full ? 'full depth' : 'half depth')}` });
-    }
+    const filter = rpEl('rackPlaceFilter').value;
+    // The check and the list's rows are one lookup pass (js/model.js): each
+    // candidate asks for its addresses and whether its depth fits. Strings
+    // only; the dialog is written after it.
+    const { msg, ok, html, waiting } = withLookupPass(() => {
+        let msg = '', ok = false;
+        if (span.u === undefined || !span.height) msg = t(rackTopDown(rack) ? 'Give the top unit and the height as whole numbers.' : 'Give the lowest unit and the height as whole numbers.');
+        else {
+            const chk = rackSpanCheck(rack, span.face, span.u, span.height, null, state.nodes, span.full);
+            ok = chk.ok;
+            if (!ok) msg = rackRefusal(rack, chk);
+            else msg = t('Goes in {span}.', { span: `${rvSpanText(rack, span.u, span.u + span.height - 1, span.face)}, ${t(span.full ? 'full depth' : 'half depth')}` });
+        }
+        // Units are not a VM's or a container's to take: they go onto a host.
+        const list = placeCandidates(rack, filter).filter((c) => !isVirtualType(c.node.type));
+        const heads = ['In this rack, not placed yet', 'In no group', 'In another group: placing it here moves it'];
+        let last = -1;
+        const rows = list.slice(0, RP_LIST_MAX).map(({ node: n, rank }) => {
+            // A device that is the one in the way is still offered: placed
+            // elsewhere in this rack it is not listed, so the check is on others.
+            const fit = placeDepth(rack, span, n);
+            const fits = ok && fit.ok;
+            const head = rank !== last ? `<li class="rkp-head">${escapeHtml(t(heads[rank]))}</li>` : '';
+            last = rank;
+            // The message under the fields is a new device's depth: a device that
+            // would go in at half depth where that says full says so on its row.
+            const half = !span.said && fits && span.full && (fit.full === false || !rackFullDepth(n)) ? t('half depth') : '';
+            const where = rank === 2 ? nodePlaceText(n) : '';
+            return `${head}<li><button type="button" class="rkp-item" data-node="${escapeHtml(n.id)}"${fits ? '' : ' disabled'}>${rvIcon(n.type, 16)}
+                <span class="rkp-name">${escapeHtml(rvName(n))}</span>
+                <span class="rkp-meta">${escapeHtml([rvTypeName(n.type), half, where].filter(Boolean).join(' · '))}</span></button></li>`;
+        }).join('');
+        const more = list.length > RP_LIST_MAX ? `<li class="rkp-more">${escapeHtml(t('…and {n} more. Narrow the filter to see them.', { n: list.length - RP_LIST_MAX }))}</li>` : '';
+        // The tab's count: this rack's own devices waiting for units.
+        const waiting = list.filter((c) => c.rank === 0).length;
+        return { msg, ok, html: rows + more || `<li class="rkp-more">${escapeHtml(t('No device matches.'))}</li>`, waiting };
+    });
     const err = rpEl('rackPlaceMsg');
     err.textContent = msg;
     err.classList.toggle('rkp-bad', !ok);
@@ -2995,29 +3041,7 @@ function renderPlaceDialog() {
     });
     rpEl('rackPlaceNewBtn').textContent = t('Add {type}', { type: rvTypeName(type) });
     rpEl('rackPlaceNewBtn').hidden = _rp.tab !== 'new';
-    // Units are not a VM's or a container's to take: they go onto a host.
-    const list = placeCandidates(rack, rpEl('rackPlaceFilter').value).filter((c) => !isVirtualType(c.node.type));
-    const heads = ['In this rack, not placed yet', 'In no group', 'In another group: placing it here moves it'];
-    let last = -1;
-    const rows = list.slice(0, RP_LIST_MAX).map(({ node: n, rank }) => {
-        // A device that is the one in the way is still offered: placed
-        // elsewhere in this rack it is not listed, so the check is on others.
-        const fit = placeDepth(rack, span, n);
-        const fits = ok && fit.ok;
-        const head = rank !== last ? `<li class="rkp-head">${escapeHtml(t(heads[rank]))}</li>` : '';
-        last = rank;
-        // The message under the fields is a new device's depth: a device that
-        // would go in at half depth where that says full says so on its row.
-        const half = !span.said && fits && span.full && (fit.full === false || !rackFullDepth(n)) ? t('half depth') : '';
-        const where = rank === 2 ? nodePlaceText(n) : '';
-        return `${head}<li><button type="button" class="rkp-item" data-node="${escapeHtml(n.id)}"${fits ? '' : ' disabled'}>${rvIcon(n.type, 16)}
-            <span class="rkp-name">${escapeHtml(rvName(n))}</span>
-            <span class="rkp-meta">${escapeHtml([rvTypeName(n.type), half, where].filter(Boolean).join(' · '))}</span></button></li>`;
-    }).join('');
-    const more = list.length > RP_LIST_MAX ? `<li class="rkp-more">${escapeHtml(t('…and {n} more. Narrow the filter to see them.', { n: list.length - RP_LIST_MAX }))}</li>` : '';
-    rpEl('rackPlaceList').innerHTML = rows + more || `<li class="rkp-more">${escapeHtml(t('No device matches.'))}</li>`;
-    // The tab's count: this rack's own devices waiting for units.
-    const waiting = list.filter((c) => c.rank === 0).length;
+    rpEl('rackPlaceList').innerHTML = html;
     rpEl('rackPlaceMapCount').textContent = waiting ? String(waiting) : '';
     rpEl('rackPlaceMapCount').title = waiting ? t('In this rack, not placed yet') : '';
     rpEl('rackPlaceNewBtn').disabled = !ok;

@@ -538,42 +538,47 @@ function bulkPlanRecable(ids, req) {
     // cable from the switch to itself and neither device cabled. The second
     // is planned without it: with nothing else, it gets a cable of its own.
     const claimed = new Set();   // link ids
-    bulkOrder(bulkSet(ids), req.order || 'port').forEach((node) => {
-        const base = { nodeId: node.id, name: node.name, field: t('Switch port') };
-        if (node.id === target.id) { rows.push(Object.assign(base, { status: 'skip', before: '', after: '', why: t('This is the switch they are moving to.') })); return; }
-        const found = patchCables(node);
-        const by = found.by;
-        const patch = found.links.filter((l) => !claimed.has(l.id));
-        const took = found.links.find((l) => claimed.has(l.id));
-        const peerOf = (l) => (l.source === node.id ? l.target : l.source);
-        const here = patch.find((l) => peerOf(l) === target.id);
-        if (here) {
-            const at = switchPort(target, ifaceIdOn(here, target.id));
-            rows.push(Object.assign(base, { status: 'same', before: at, after: at, why: t('Already on {switch}.', { switch: label }) }));
-            return;
-        }
-        if (patch.length > 1) {
-            const why = by === 'port' ? t('Cabled to more than one switch: re-cable it by hand.') : t('More than one cable: re-cable it by hand.');
-            rows.push(Object.assign(base, { status: 'skip', before: '', after: '', why }));
-            return;
-        }
-        if (!patch.length && linksAtNode(node.id).some((l) => !claimed.has(l.id))) { rows.push(Object.assign(base, { status: 'skip', before: '', after: '', why: t('Not on a switch port: re-cable it by hand.') })); return; }
-        const link = patch[0];
-        const peer = link ? getNode(peerOf(link)) : null;
-        // (One whose cable went with another device of the set says where it
-        // was plugged in until now.)
-        const was = took ? getNode(peerOf(took)) : null;
-        const before = link ? switchPort(peer, ifaceIdOn(link, peer.id)) : (was ? switchPort(was, ifaceIdOn(took, was.id)) : t('No cable'));
-        const port = nextPort();
-        if (!port) { rows.push(Object.assign(base, { status: 'bad', before, after: '', why: t('No free port left on {switch}.', { switch: label }) })); return; }
-        rows.push(Object.assign(base, { status: 'change', before, after: switchPort(target, port) }));
-        if (link) {
-            claimed.add(link.id);
-            ops.push({ linkId: link.id, set: { [link.source === peer.id ? 'source' : 'target']: target.id, [ifaceKeyFor(link, peer.id)]: port } });
-        } else {
-            const bridged = isVirtualType(target.type) || isVirtualType(node.type);
-            ops.push({ addLink: { id: nextId('l'), source: target.id, target: node.id, attachment: bridged ? 'bridged' : null, sourceIface: port, targetIface: null } });
-        }
+    // Planned in one lookup pass: each device asks which cables it has and
+    // each port handed out asks whether it is taken. It only reads the map;
+    // the rows and ops are its own, and claimed and the cursor are local.
+    withLookupPass(() => {
+        bulkOrder(bulkSet(ids), req.order || 'port').forEach((node) => {
+            const base = { nodeId: node.id, name: node.name, field: t('Switch port') };
+            if (node.id === target.id) { rows.push(Object.assign(base, { status: 'skip', before: '', after: '', why: t('This is the switch they are moving to.') })); return; }
+            const found = patchCables(node);
+            const by = found.by;
+            const patch = found.links.filter((l) => !claimed.has(l.id));
+            const took = found.links.find((l) => claimed.has(l.id));
+            const peerOf = (l) => (l.source === node.id ? l.target : l.source);
+            const here = patch.find((l) => peerOf(l) === target.id);
+            if (here) {
+                const at = switchPort(target, ifaceIdOn(here, target.id));
+                rows.push(Object.assign(base, { status: 'same', before: at, after: at, why: t('Already on {switch}.', { switch: label }) }));
+                return;
+            }
+            if (patch.length > 1) {
+                const why = by === 'port' ? t('Cabled to more than one switch: re-cable it by hand.') : t('More than one cable: re-cable it by hand.');
+                rows.push(Object.assign(base, { status: 'skip', before: '', after: '', why }));
+                return;
+            }
+            if (!patch.length && linksAtNode(node.id).some((l) => !claimed.has(l.id))) { rows.push(Object.assign(base, { status: 'skip', before: '', after: '', why: t('Not on a switch port: re-cable it by hand.') })); return; }
+            const link = patch[0];
+            const peer = link ? getNode(peerOf(link)) : null;
+            // (One whose cable went with another device of the set says where it
+            // was plugged in until now.)
+            const was = took ? getNode(peerOf(took)) : null;
+            const before = link ? switchPort(peer, ifaceIdOn(link, peer.id)) : (was ? switchPort(was, ifaceIdOn(took, was.id)) : t('No cable'));
+            const port = nextPort();
+            if (!port) { rows.push(Object.assign(base, { status: 'bad', before, after: '', why: t('No free port left on {switch}.', { switch: label }) })); return; }
+            rows.push(Object.assign(base, { status: 'change', before, after: switchPort(target, port) }));
+            if (link) {
+                claimed.add(link.id);
+                ops.push({ linkId: link.id, set: { [link.source === peer.id ? 'source' : 'target']: target.id, [ifaceKeyFor(link, peer.id)]: port } });
+            } else {
+                const bridged = isVirtualType(target.type) || isVirtualType(node.type);
+                ops.push({ addLink: { id: nextId('l'), source: target.id, target: node.id, attachment: bridged ? 'bridged' : null, sourceIface: port, targetIface: null } });
+            }
+        });
     });
     return bulkFinish('recable', rows, ops, { target });
 }
@@ -774,13 +779,17 @@ function bulkWrite(plan, doc) {
     // A new cable's device end is the binder's pick, made on the document
     // being written: it is lent to the model's helpers for the length of the
     // bind (as csvWrite does), so a scratch copy's NICs are the ones looked at.
-    const held = { nodes: state.nodes, links: state.links };
-    state.nodes = doc.nodes; state.links = doc.links;
-    try {
-        added.forEach((l) => { if (getNode(l.source) && getNode(l.target)) doc.links.push(bindLink(cloneData(l))); });
-    } finally {
-        state.nodes = held.nodes; state.links = held.links;
-    }
+    // Out of any pass the caller has open, whose getNode would answer from
+    // the live document's index.
+    withoutLookupPass(() => {
+        const held = { nodes: state.nodes, links: state.links };
+        state.nodes = doc.nodes; state.links = doc.links;
+        try {
+            added.forEach((l) => { if (getNode(l.source) && getNode(l.target)) doc.links.push(bindLink(cloneData(l))); });
+        } finally {
+            state.nodes = held.nodes; state.links = held.links;
+        }
+    });
 }
 
 // The findings the plan would leave, against the ones there now.

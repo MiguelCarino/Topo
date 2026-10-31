@@ -106,3 +106,65 @@ function setSelectionEntries(entries) {
     });
     state.selection = out;
 }
+
+// ---- Redraw coalescing ----
+// The one throttle for redraws that follow typing (the search box, the
+// fields). Only the pixels wait: the model write, saveTyping and save() run
+// on every keystroke as before, and whoever calls ask() has already made them.
+// ask() draws at once (the leading edge); a draw slower than REDRAW_SLOW_MS
+// opens a window of REDRAW_WAIT_MS in which asks only mark the draw pending,
+// and the window's end draws once more (and opens again if that was slow too),
+// so a fast map never waits and a slow one draws at most once per window.
+// flush() draws what is pending now and closes the window, for whatever acts
+// on what is drawn (Enter, a button, leaving the field). cancel() drops it.
+// waiting(): whether a draw is pending.
+// Pending is cleared before draw() runs, and an ask or a flush during the
+// draw (a rebuilt panel's focusout) only marks it pending again. A draw()
+// that returns false (the canvas is on loan) stays pending and arms the
+// timer, on every path: it is never dropped.
+// Off under automation: the suites read the map right after an action.
+// Playwright's Chromium reports navigator.webdriver; tests/run.sh's headless
+// one does not, so its probe sets window.TOPO_COALESCE = false. Adaptive in a
+// browser; a suite that wants to see the window sets it to true, which opens
+// it after every draw, slow or not.
+const REDRAW_WAIT_MS = 120;
+const REDRAW_SLOW_MS = 24;
+const coalesceOn = () => {
+    if (typeof window.TOPO_COALESCE === 'boolean') return window.TOPO_COALESCE;
+    return !navigator.webdriver;
+};
+function redrawCoalescer(draw) {
+    let timer = null, pending = false, drawing = false;
+    const arm = () => { if (timer === null) timer = setTimeout(end, REDRAW_WAIT_MS); };
+    const close = () => { if (timer !== null) { clearTimeout(timer); timer = null; } };
+    // One draw. -> whether it was slow enough (or forced) to hold the window.
+    const run = () => {
+        pending = false;
+        drawing = true;
+        const t0 = performance.now();
+        let out;
+        try { out = draw(); } finally { drawing = false; }
+        if (out === false) pending = true;
+        return coalesceOn() && (window.TOPO_COALESCE === true || performance.now() - t0 > REDRAW_SLOW_MS);
+    };
+    function end() {
+        timer = null;
+        if (!pending) return;
+        if (run() || pending) arm();
+    }
+    return {
+        ask() {
+            if (drawing || timer !== null) { pending = true; return; }
+            if (run() || pending) arm();
+        },
+        flush() {
+            if (drawing) { pending = true; return; }
+            close();
+            if (!pending) return;
+            run();
+            if (pending) arm();
+        },
+        cancel() { pending = false; close(); },
+        waiting: () => pending
+    };
+}

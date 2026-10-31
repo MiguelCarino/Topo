@@ -825,6 +825,7 @@ function nextGroupName(kind) {
     while (taken.has(`${base} ${i}`.toLowerCase())) i++;
     return `${base} ${i}`;
 }
+let _gmPairAsked = false;   // the pair question is open: its move waits to be one step with the group
 async function offerGroupFromPair(drop) {
     const other = getNode(drop.target.pair);
     const parentId = drop.target.parent || null;
@@ -839,10 +840,15 @@ async function offerGroupFromPair(drop) {
         : t('Make a new group of {n} devices and {b}?', { n: devices.length, b: name(other) })];
     if (parent) lines.push(t('It goes inside {group}.', { group: groupLabel(parent) }));
     lines.push(t(one ? 'Cancel only moves {a}.' : 'Cancel only moves them.', { a: one ? name(devices[0]) : '' }));
-    const answer = await askPromptPick(lines.join('\n'), {
-        title: t('New group'), ok: t('Make group'), value: nextGroupName(kind),
-        pick: { label: t('Kind'), value: kind, options: GROUP_KINDS.map((k) => ({ id: k, label: groupKindName(k), text: nextGroupName(k) })) }
-    });
+    // While asked, the move is in the model unfiled (flushPendingSaves, js/app.js).
+    _gmPairAsked = true;
+    let answer = null;
+    try {
+        answer = await askPromptPick(lines.join('\n'), {
+            title: t('New group'), ok: t('Make group'), value: nextGroupName(kind),
+            pick: { label: t('Kind'), value: kind, options: GROUP_KINDS.map((k) => ({ id: k, label: groupKindName(k), text: nextGroupName(k) })) }
+        });
+    } finally { _gmPairAsked = false; }
     // Still the same document, devices and group as when it was asked?
     const here = (n) => getNode(n.id) === n;
     if (!answer || !here(other) || !devices.every(here) || (parentId && !groupById(parentId)) || state.readOnly) return fileMove();
@@ -990,6 +996,7 @@ function drawGroupEdges(view, ctx) {
     const lLinks = document.getElementById('layer-links');
     const folds = new Map(view.folds.map((b) => [b.group.id, b]));
     const { reach, qm } = ctx;
+    const selLinks = new Set(selectedOf('link'));   // once per call, not a walk of the selection per edge
     view.edges.forEach((edge) => {
         const a = gmEnd(edge.a, folds), b = gmEnd(edge.b, folds);
         if (!a || !b) return;
@@ -999,7 +1006,7 @@ function drawGroupEdges(view, ctx) {
         const medium = media.size === 1 ? [...media][0] : 'utp';
         const colour = medium === 'wireless' ? wifiMapColours().line   // the --topo-wifi token (js/ui.js)
             : { fiber: '#06b6d4', powerline: '#eab308', vpn: '#14b8a6' }[medium] || '#94a3b8';
-        const selected = edge.links.some((l) => inSelection('link', l.id));
+        const selected = edge.links.some((l) => selLinks.has(l.id));
         const lit = reach && edge.links.some((l) => reach.reachableLinks.has(l.id));
         const line = gmEl('path', { d: `M ${a.x} ${a.y} L ${b.x} ${b.y}`, fill: 'none',
             stroke: lit ? '#f59e0b' : selected ? '#eab308' : colour,
@@ -1051,6 +1058,7 @@ function drawGroupFolds(view, ctx) {
     if (!view || !view.folds.length) return;
     const lNodes = document.getElementById('layer-nodes');
     const { reach, qm, diag } = ctx;
+    const sel = new Set(selectedOf('node'));   // once per call: a drag redraws this per mouse move
     view.folds.forEach((fold) => {
         const { group, members, x, y } = fold;
         const roll = diag ? groupRollup(members, diag) : (_gmLast.rollup.get(group.id) || { worst: null, count: 0 });
@@ -1058,7 +1066,7 @@ function drawGroupFolds(view, ctx) {
         // Selected: all of it (pressed, or Select members), or some of it (a
         // device picked in the table or from a finding, whose own node is
         // folded in here: this node is where it is on the map).
-        const picked = members.filter((n) => inSelection('node', n.id)).length;
+        const picked = members.filter((n) => sel.has(n.id)).length;
         const selected = picked === members.length;
         const lit = reach && members.some((n) => reach.reachableNodes.has(n.id));
         // The trace starts inside: the device traced from is folded in here.

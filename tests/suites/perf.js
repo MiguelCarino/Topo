@@ -87,7 +87,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const mapScans = linkScans(() => renderCanvasOnly());
     ok('a map redraw walks the cable list a bounded number of times, not once per cable', mapScans <= 20, `${mapScans} walks for 305 cables`);
     const mapKeys = keyBuilds(() => renderCanvasOnly());
-    ok('and builds the diagnosis key a bounded number of times, not once per device', mapKeys <= 3, String(mapKeys));
+    ok('and builds the diagnosis key a bounded number of times, not once per device', mapKeys <= 1, String(mapKeys));
 
     setView('table');
     const tableKeys = {};

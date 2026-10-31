@@ -448,12 +448,13 @@ function apMediumGuess(src, tgt) {
 }
 
 // Cheap lookup that skips implicit faceplate ports — they are never radios.
-// Inside a lookup pass, indexed once per node: every cable's medium asks it,
-// and a node with a NIC per cable made that a walk per cable per cable.
+// Inside a lookup pass, indexed once per node of the document (inLookupDoc):
+// every cable's medium asks it, and a node with a NIC per cable made that a
+// walk per cable per cable.
 // createIfaceFor() drops the index of a node it adds to.
 const explicitIface = (node, ifaceId) => {
     if (!node) return null;
-    if (lookupPass) {
+    if (lookupPass && inLookupDoc(node)) {
         let ix = lookupPass.ifx.get(node);
         if (!ix) {
             ix = new Map();
@@ -718,19 +719,31 @@ function escapeHtml(value) {
 // the indexes once and the lookups below consult them while it is open.
 //
 // Only valid while nothing changes the document, which is why the engine is
-// the only thing that opens one: it reads and never writes. Every call builds
-// its own indexes, even inside another pass, because a nested call may be
-// reading a different document (diagnoseDoc() on a scratch copy); the finally
-// puts the outer pass back, so a throwing check cannot leave stale indexes
-// behind for the editor. (lookupPass itself is declared at the top of this
-// file, ahead of the helpers that read it.)
-function withLookupPass(fn) {
+// the only thing that opens one: it reads and never writes. A nested call
+// over the same arrays (the query's matches, the report, a second diagnosis
+// inside drawCanvas's pass) reuses the open pass, its indexes and its
+// diagnosis, so one render builds them once. A swapped document has other
+// arrays and gets its own: diagnoseDoc() on a scratch copy, withDoc and
+// csvWrite (js/library.js, js/csv.js). The finally puts the outer pass back,
+// so a throwing check cannot leave stale indexes behind for the editor.
+// diag: an optional seed, the caller's word that it is this document's
+// diagnosis from the same synchronous render; only a fresh pass takes it.
+// (lookupPass itself is declared at the top of this file, ahead of the
+// helpers that read it.)
+const lookupPassRefs = () => [state.nodes, state.links, state.networks, state.groups, state.wifi, state.accepted, state.expectedLife];
+function withLookupPass(fn, diag) {
     const outer = lookupPass;
+    const refs = lookupPassRefs();
+    if (outer && refs.every((r, i) => r === outer.refs[i])) return fn();
     const byId = new Map();
     state.nodes.forEach((n) => { if (!byId.has(n.id)) byId.set(n.id, n); }); // find() returns the first
-    const at = new Map();
+    const linkById = new Map(), at = new Map();
     const touch = (id, l) => { if (!at.has(id)) at.set(id, []); at.get(id).push(l); };
-    state.links.forEach((l) => { touch(l.source, l); if (l.target !== l.source) touch(l.target, l); });
+    // One walk for both: linkById's first holder wins too, as find() does.
+    state.links.forEach((l) => {
+        if (!linkById.has(l.id)) linkById.set(l.id, l);
+        touch(l.source, l); if (l.target !== l.source) touch(l.target, l);
+    });
     // nets: the declared networks, parsed and ordered most specific first
     // (networkTable); eff: each device's effective gateway and DNS. Both are
     // asked on every step of every reachability walk (isGatewayOf, natInfo).
@@ -738,19 +751,41 @@ function withLookupPass(fn) {
     // first use. diag: the document's diagnosis (currentDiagnosis, in
     // js/diagnostics.js), whose memo key serializes the whole document, so
     // it is asked once per pass rather than once per row or badge.
-    lookupPass = { byId, at, cidr: new Map(), ips: new Map(), nets: null, eff: new Map(), ifx: new Map(), pairs: null, diag: null };
+    // rackLinks: each rack's cables (rackCableLinks), built on first use.
+    lookupPass = { refs, byId, linkById, at, cidr: new Map(), ips: new Map(), nets: null, eff: new Map(), ifx: new Map(), pairs: null, diag: diag || null, rackLinks: null };
     try { return fn(); } finally { lookupPass = outer; }
 }
+// For code that swaps the document in and must not read the live one's
+// indexes, whatever pass its caller has open (js/library.js, js/csv.js,
+// js/bulk.js). The finally puts the outer pass back.
+function withoutLookupPass(fn) {
+    const outer = lookupPass;
+    lookupPass = null;
+    try { return fn(); } finally { lookupPass = outer; }
+}
+// A write inside a pass breaks its contract, and with reuse the stale indexes
+// would reach every nested pass too. save() and saveTyping() ask this (js/app.js).
+// Logged in the field; thrown under the suites' window.TOPO_CHECKS.
+function assertNoLookupPass(where) {
+    if (!lookupPass) return;
+    console.error(`${where} inside a lookup pass`);
+    if (window.TOPO_CHECKS) throw new Error(`${where} inside a lookup pass`);
+}
+// Memoize only the document's own objects: a record a caller built (a CSV
+// row's fresh device, a preview) may change while the pass is open.
+const inLookupDoc = (node) => !!node && lookupPass.byId.get(node.id) === node;
 // The one write a pass may outlive: binding new cables (js/csv.js, csvWrite).
 // A cable pushed while the pass is open is entered here, so `at` stays true;
 // binding only ever adds blank interfaces (no address, no gateway), so the
-// address, network and gateway memos stay true as well. The two that a new
-// cable does change, the pairs and the diagnosis, are dropped to be rebuilt
-// if asked. Anything else that writes closes the pass first.
+// address, network and gateway memos stay true as well. The ones that a new
+// cable does change, the pairs, the racks' cables and the diagnosis, are
+// dropped to be rebuilt if asked. Anything else that writes closes the pass first.
 function lookupPassAddLink(l) {
     if (!lookupPass) return;
     lookupPass.pairs = null;
     lookupPass.diag = null;
+    lookupPass.rackLinks = null;
+    if (!lookupPass.linkById.has(l.id)) lookupPass.linkById.set(l.id, l);
     const touch = (id) => { const list = lookupPass.at.get(id); if (list) list.push(l); else lookupPass.at.set(id, [l]); };
     touch(l.source);
     if (l.target !== l.source) touch(l.target);
@@ -760,7 +795,10 @@ function getNode(id) {
     if (lookupPass) return lookupPass.byId.get(id) || null;
     return state.nodes.find((n) => n.id === id) || null;
 }
-function getLink(id) { return state.links.find((l) => l.id === id) || null; }
+function getLink(id) {
+    if (lookupPass) return lookupPass.linkById.get(id) || null;
+    return state.links.find((l) => l.id === id) || null;
+}
 
 function findNodeByIp(ipString) {
     const clean = String(ipString || '').trim();
@@ -791,12 +829,12 @@ function parseDnsList(value) {
         .filter(Boolean);
 }
 
-// Inside a lookup pass, once per node: isDumbDevice() asks it of every
-// neighbour on every step of every walk. Shared like parseValidCIDR()'s
-// results, so callers only read it.
+// Inside a lookup pass, once per document node (inLookupDoc): isDumbDevice()
+// asks it of every neighbour on every step of every walk. Shared like
+// parseValidCIDR()'s results, so callers only read it.
 function getValidIps(node) {
     if (!node || !node.interfaces) return [];
-    if (lookupPass) {
+    if (lookupPass && inLookupDoc(node)) {
         const memo = lookupPass.ips;
         if (!memo.has(node)) memo.set(node, node.interfaces.map(iface => parseValidCIDR(iface.ip)).filter(Boolean));
         return memo.get(node);
@@ -1692,7 +1730,7 @@ function dnsSource(node, networks = state.networks) {
 }
 function effectiveOf(node) {
     if (!node) return { gw: '', dns: '' };
-    const memo = lookupPass && lookupPass.eff;
+    const memo = lookupPass && inLookupDoc(node) ? lookupPass.eff : null;
     if (memo && memo.has(node)) return memo.get(node);
     const out = { gw: gatewaySource(node).value, dns: dnsSource(node).value };
     if (memo) memo.set(node, out);
@@ -2999,9 +3037,19 @@ function rackCableText(link, from) {
 // association nor a VPN (neither is a cable in a rack), and not a guest's
 // bridge onto its own host: that runs inside the host's box, with nothing to
 // draw or tag. In the document's order. Pure over its arguments but for the
-// lookups the medium and the hosts read.
+// lookups the medium and the hosts read. Inside a lookup pass over the
+// document's own lists, once per rack: the list is shared, so callers only
+// read it (each filters, maps or walks it).
 function rackCableLinks(rack, links = state.links, nodes = state.nodes) {
     if (!rack) return [];
+    if (lookupPass && links === state.links && nodes === state.nodes) {
+        const memo = lookupPass.rackLinks || (lookupPass.rackLinks = new Map());
+        if (!memo.has(rack)) memo.set(rack, rackCableLinksNow(rack, links, nodes));
+        return memo.get(rack);
+    }
+    return rackCableLinksNow(rack, links, nodes);
+}
+function rackCableLinksNow(rack, links, nodes) {
     const byId = new Map();
     (nodes || []).forEach((n) => { if (n) byId.set(n.id, n); });
     const inRack = (n) => n.group === rack.id;

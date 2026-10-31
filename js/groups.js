@@ -641,8 +641,7 @@ function setNodeGroup(node, groupId) {
             if (key === 'rackHeight' && rackTopDown(rack) && Number.isInteger(node.rackU)) node.rackU = asRackU(node.rackU + before - rackHeightOf(node));
             grpEl('groupPathNote').textContent = nodePlaceText(node);
             saveTyping();
-            renderCanvasOnly();
-            refreshSelectedNodeDiagnostics();
+            renderTyped();
         });
         el.addEventListener('change', () => { const node = selectedGroupNode(); if (node) renderGroupPicker(node); });
     });

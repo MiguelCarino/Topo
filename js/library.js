@@ -147,9 +147,18 @@ function readLocalLibrary() {
 function loadLibrary() {
     if (_libStore !== 'idb') return readLocalLibrary();
     const lib = {};
-    _cards.forEach((json, id) => { try { lib[id] = JSON.parse(json); } catch (e) { /* unreadable: as the blob's junk was */ } });
+    _cards.forEach((json, id) => {
+        try { lib[id] = JSON.parse(json); } catch (e) { return; /* unreadable: as the blob's junk was */ }
+        if (lib[id] && typeof lib[id] === 'object') _cardRaw.set(lib[id], json);
+    });
     return lib;
 }
+// Each card object loadLibrary handed out -> the text it was parsed from, for
+// the landing's summary memo (librarySummary): the text is the card, so a
+// summary keyed by it cannot belong to another. Only true while the object is
+// as handed out, which is how renderLanding uses it.
+const _cardRaw = new WeakMap();
+const libraryRawOf = (entry) => (entry && _cardRaw.get(entry)) || undefined;
 
 // The one guarded write. Safari private mode throws on setItem and so does a
 // full quota, and a saved network is the one place where failing silently
@@ -516,11 +525,34 @@ function stampUpdated(previous) {
 }
 
 // opts.doc: what to store instead of the canvas (a block: the selection).
+//
+// In IndexedDB mode, with the disk in step, only this card is read and
+// written: an autosave of one network no longer parses and re-serializes
+// every card on the shelf. The rest are left untouched, which also leaves an
+// unreadable one where it is (the full path drops it, as loadLibrary skips it
+// and writeCards then deletes it), so this loses less. A disk out of step
+// still takes the full path: only writeCards replays the refused puts and
+// deletes, in one rewrite of every card.
 function librarySave(name, id, opts = {}) {
     if (state.readOnly) return null;   // keepThisNetwork says why
+    if (_libStore === 'idb' && !diskOutOfStep()) {
+        const held = id ? libraryEntry(id) : null;
+        const prev = held && typeof held === 'object' ? held : null;
+        const key = id || mintLibraryId();
+        let json;
+        try { json = JSON.stringify(libraryEntryFor(key, name, prev, opts)); } catch (e) { return null; }
+        // The same text writeCards would hold and put for it.
+        if (_cards.get(key) !== json) { _cards.set(key, json); issueWrite(new Map([[key, json]]), [], false); }
+        return key;
+    }
     const lib = loadLibrary();
     const prev = id && lib[id] && typeof lib[id] === 'object' ? lib[id] : null;
     const key = id || mintLibraryId();
+    lib[key] = libraryEntryFor(key, name, prev, opts);
+    return persistLibrary(lib) ? key : null;
+}
+// The card librarySave stores, built the same on both of its paths.
+function libraryEntryFor(key, name, prev, opts) {
     const given = String(name || '').trim();
     const nameAuto = given ? !!opts.nameAuto : (prev ? !!prev.nameAuto : true);
     const site = state.report && typeof state.report.site === 'string' ? state.report.site.trim() : '';
@@ -536,8 +568,7 @@ function librarySave(name, id, opts = {}) {
     if (opts.template || (prev && prev.template)) entry.template = true;
     if (opts.block || (prev && prev.block)) entry.block = true;
     if (nameAuto) entry.nameAuto = true;
-    lib[key] = entry;
-    return persistLibrary(lib) ? key : null;
+    return entry;
 }
 
 // A second card holding the same network: how a new survey starts from an old
@@ -644,18 +675,23 @@ function binderLinkFile() {
 // doc -> the same document as this build's serializer writes it. Borrows the
 // canvas the way withDoc() does, but keeps the notes and the report header,
 // which withDoc() drops because a summary has no use for them.
+// Out of any lookup pass its caller has open: loadDocState filters the
+// borrowed document's cables with getNode, which inside one would answer from
+// the live document's index.
 function canonicalDoc(doc) {
-    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report };
-    _borrowedState++;
-    try {
-        loadDocState(doc);
-        return serializeDoc();
-    } finally {
-        _borrowedState--;
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
-        state.columns = held.columns; state.tableView = held.tableView;
-        state.annotations = held.annotations; state.report = held.report;
-    }
+    return withoutLookupPass(() => {
+        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report };
+        _borrowedState++;
+        try {
+            loadDocState(doc);
+            return serializeDoc();
+        } finally {
+            _borrowedState--;
+            state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
+            state.columns = held.columns; state.tableView = held.tableView;
+            state.annotations = held.annotations; state.report = held.report;
+        }
+    });
 }
 // Nonzero while canonicalDoc() or withDoc() has another document in state.
 // An autosave that ran then would write that document into the open card.
@@ -944,26 +980,33 @@ function binderStatus() { const s = backupStatus(); return s ? s.text : null; }
 // observe the swap, and the restore sits in a finally: a check that throws on a
 // malformed stored doc must not strand the editor holding someone else's
 // diagram.
+//
+// Out of any lookup pass the caller has open (withoutLookupPass, js/model.js):
+// inside one, getNode and currentDiagnosis would answer from the canvas's
+// indexes and diagnosis, not this document's. fn may open its own over the
+// borrowed arrays. The state goes back first, then the pass.
 function withDoc(doc, fn) {
-    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report };
-    _borrowedState++;
-    try {
-        // The same reader replaceDocument() uses, so a stored v1 card is
-        // migrated here exactly as it would be on opening, and a current one
-        // only normalized. The survey header comes along: the binder report
-        // reads it per site to print who each building was surveyed for, and
-        // leaving it behind would have every site carry the header of
-        // whatever happened to be on the canvas.
-        if (!isDocShape(doc)) throw new Error('not a document');
-        loadDocState(doc);
-        state.annotations = [];
-        return fn();
-    } finally {
-        _borrowedState--;
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
-        state.columns = held.columns; state.tableView = held.tableView;
-        state.annotations = held.annotations; state.report = held.report;
-    }
+    return withoutLookupPass(() => {
+        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report };
+        _borrowedState++;
+        try {
+            // The same reader replaceDocument() uses, so a stored v1 card is
+            // migrated here exactly as it would be on opening, and a current one
+            // only normalized. The survey header comes along: the binder report
+            // reads it per site to print who each building was surveyed for, and
+            // leaving it behind would have every site carry the header of
+            // whatever happened to be on the canvas.
+            if (!isDocShape(doc)) throw new Error('not a document');
+            loadDocState(doc);
+            state.annotations = [];
+            return fn();
+        } finally {
+            _borrowedState--;
+            state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
+            state.columns = held.columns; state.tableView = held.tableView;
+            state.annotations = held.annotations; state.report = held.report;
+        }
+    });
 }
 
 // What a card says about a network. Deliberately not a thumbnail: a topology
@@ -978,15 +1021,31 @@ function withDoc(doc, fn) {
 // MIGRATIONS) every time it is summarised. Keyed by content, a remembered
 // summary cannot belong to a different document, and an edited card is a new
 // key. The findings read nothing but the document (the checks never see the
-// trace port), so the answer is the same however often it is asked.
-const _summaryMemo = new Map();
+// trace port), so the answer is the same however often it is asked that day.
+//
+// raw: the stored text of the card the doc came from (libraryRawOf), which a
+// library card on the landing passes so that a remembered summary costs no
+// serializing at all; the card's text is the key as it is. A shared (guest)
+// site passes none: its id may be a library card's, its text is not. Without
+// it the key is the document serialized. Both are remembered for one day
+// (todayISO): what has lapsed and what is due are counted by the date, so a
+// summary from yesterday is not today's. Kept apart, so a card's text can
+// never be taken for a document's.
+const _summaryMemo = new Map();      // doc JSON -> { day, out }
+const _summaryRawMemo = new Map();   // card text -> { day, out }
 const SUMMARY_MEMO_MAX = 48;
-function librarySummary(doc) {
-    let key = null;
-    try { key = JSON.stringify(doc); } catch (e) { key = null; }
-    if (key !== null && _summaryMemo.has(key)) return { ..._summaryMemo.get(key) };
+function librarySummary(doc, raw) {
+    const day = todayISO();
+    const memo = typeof raw === 'string' ? _summaryRawMemo : _summaryMemo;
+    let key = typeof raw === 'string' ? raw : null;
+    if (key === null) { try { key = JSON.stringify(doc); } catch (e) { key = null; } }
+    const hit = key !== null ? memo.get(key) : null;
+    if (hit && hit.day === day) return { ...hit.out };
     try {
-        const out = withDoc(doc, () => {
+        // One pass over the borrowed document, opened inside the swap (never
+        // around withDoc, which closes the caller's): the findings and the
+        // subnets share its indexes.
+        const out = withDoc(doc, () => withLookupPass(() => {
             // What is open: a finding accepted with a reason is not counted
             // on the card, as it is not in the tab or the report's totals.
             const findings = topologyFindings().filter(isOpenFinding);
@@ -996,10 +1055,11 @@ function librarySummary(doc) {
                 critical: findings.filter((f) => f.level === 'bad').length,
                 advisory: findings.filter((f) => f.level === 'warn').length
             };
-        });
+        }));
         if (key !== null) {
-            if (_summaryMemo.size >= SUMMARY_MEMO_MAX) _summaryMemo.delete(_summaryMemo.keys().next().value);
-            _summaryMemo.set(key, out);
+            memo.delete(key);
+            if (memo.size >= SUMMARY_MEMO_MAX) memo.delete(memo.keys().next().value);
+            memo.set(key, { day, out });
         }
         return { ...out };
     } catch (e) {
@@ -1406,7 +1466,7 @@ function renderGuestSection() {
 }
 
 function landingCard(entry, opts = {}) {
-    const s = librarySummary(entry.doc);
+    const s = librarySummary(entry.doc, opts.guest ? undefined : libraryRawOf(entry));
     // What changed since this card's last back-up or report (js/changes.js).
     // A shared card has no baseline here: it was never backed up from here.
     const changed = opts.guest ? '' : cardChangesText(cardChanges(entry));

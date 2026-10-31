@@ -61,8 +61,7 @@ function spawnNodeNow(type, opts) {
         state.links.push(bindLink({ id: nextId('l'), source: connectTo.id, target: node.id, attachment: isVirtual ? 'bridged' : null }));
     }
     select(node.id, 'node'); save();
-    renderCanvasOnly();
-    renderNodeDiagnostics(node);
+    renderNodeDiagnostics(node, drawnDiag(renderCanvasOnly()));
     return node;   // as spawnAnnotation does, so a caller can go on to configure it
 }
 
@@ -1124,10 +1123,17 @@ function bridgeIntent(node) {
 let _borrowedCanvas = 0;
 const canvasIsBorrowed = () => _borrowedCanvas > 0;
 function borrowCanvas(on) { _borrowedCanvas = Math.max(0, _borrowedCanvas + (on ? 1 : -1)); }
+// Bumped by every write funnel (save, saveTyping, loadDocState), so a
+// render's diagnosis is handed on only while nothing has saved since
+// (renderCanvasOnly, js/ui.js). A validity stamp for the one synchronous
+// render, not a memo key: edits mutate the model before they save.
+let _docSeq = 0;
 
 function save() {
+    ++_docSeq;
     if (_borrowedCanvas) return;
     if (_batchDepth) { _batchSave = true; return; }   // once, when the batch ends
+    assertNoLookupPass('save');
     // A document from a newer Topo is never re-written by this one (see
     // replaceDocument). The entry points that create things refuse up front;
     // this is the catch-all for every other edit, which all end here: the
@@ -1153,6 +1159,9 @@ function save() {
         pruneFindingNotes();   // and an accept or a pin leaves the devices and cables that went (js/diagnostics.js)
         const doc = serializeDoc();
         const json = JSON.stringify(doc);
+        // The serialize above always runs: save() is the change detector.
+        // Only the datalist's rebuild waits for a difference.
+        const changed = json !== _present || _typingJson !== null;
         // A field still being typed into is part of this document already (the
         // model changes on every keystroke), but it was its own edit: it goes
         // into the timeline first, as the step before this one.
@@ -1161,7 +1170,7 @@ function save() {
         recordHistory(json);                           // ride the one chokepoint every mutation already calls
         queueLiveDoc(json);
         noteDocChanged(json);                          // a kept network saves itself (js/library.js)
-        updateOsDatalist();
+        if (changed) updateOsDatalist();
     } catch (err) { console.warn('Could not save diagram state:', err); }
 }
 
@@ -1209,9 +1218,11 @@ let _typingTimer = 0, _typingJson = null;
 // leaving the field (or the next save) does. Without it a slow typist's
 // half-typed scheme was an undo step, and Undo put it back.
 function saveTyping(held) {
+    ++_docSeq;
     if (_borrowedCanvas) return;
     // A read-only document is put back at once, not half a second later.
     if (state.readOnly || _batchDepth) { save(); return; }
+    assertNoLookupPass('saveTyping');
     try { _typingJson = JSON.stringify(serializeDoc()); } catch (err) { _typingJson = null; }
     // The entry follows the keystrokes (under the budget, see queueLiveDoc):
     // only the undo step waits. Holding the entry back too lost the last half
@@ -1241,15 +1252,34 @@ function commitTyping() {
 // network's card is the copy that outlives the tab.
 // A library write still in flight may not outlive the page, so its cards are
 // journalled where the next visit will find them (js/library.js).
-function flushPendingSaves() { commitTyping(); flushLiveDoc(); flushAutosave(); journalUnsettledCards(); }
+// A click no longer saves (mapPointerUp), so an edit that changed the model
+// and never called save() would be in memory only: the one serialize here,
+// per unload rather than per click, files it. The typed redraw, if one is
+// waiting, goes last: pixels never hold up the writes on a page being killed.
+function flushPendingSaves() {
+    commitTyping();
+    if (_present !== null && !state.readOnly && !_borrowedCanvas && !_batchDepth) {
+        const json = JSON.stringify(serializeDoc());
+        // A drag still under the finger, or a move waiting on the pair
+        // question (offerGroupFromPair, js/groupmap.js), files its own one
+        // step later: the entry and the card take it now, the undo stack not.
+        if (json !== _present) {
+            if (isDraggingNode || _gmPairAsked) { queueLiveDoc(json); noteDocChanged(json); }
+            else save();
+        }
+    }
+    flushLiveDoc(); flushAutosave(); journalUnsettledCards();
+    flushTypedRender();
+}
 // The history entry has changed under us (popstate): what was pending belongs
 // to the entry that was left, and is parked for it (see parkLiveDoc). The
 // typing's undo step goes with the document it was typed into; the keystrokes
-// themselves are in the parked write.
-function parkPendingSaves() { cancelTyping(); parkLiveDoc(); }
+// themselves are in the parked write. Its pending redraw too (the load redraws).
+function parkPendingSaves() { cancelTyping(); cancelTypedRender(); parkLiveDoc(); }
 // Leaving any field is the end of its edit. Capture, so the step is taken
 // before the field's own change handler (a checkbox, a select) saves its own.
-document.addEventListener('focusout', commitTyping, true);
+// And the map is drawn as the field left it: the typing's redraw may be waiting.
+document.addEventListener('focusout', () => { commitTyping(); flushTypedRender(); }, true);
 document.addEventListener('change', commitTyping, true);
 // beforeunload is the one a reload keeps: measured in Chromium, a replaceState
 // made in beforeunload is in the entry the reload finds, and one made in
@@ -1277,10 +1307,11 @@ let _undoStack = [];
 let _redoStack = [];
 
 // Call once the initial document is on screen: makes the loaded state the floor
-// of the timeline without itself being an undoable step.
-function initHistory() {
+// of the timeline without itself being an undoable step. json: the document
+// as its caller has just serialized it (replaceDocument), so it is not done twice.
+function initHistory(json) {
     cancelTyping();   // a half-typed edit is not a step below the floor
-    _present = JSON.stringify(serializeDoc());
+    _present = typeof json === 'string' ? json : JSON.stringify(serializeDoc());
     _undoStack = []; _redoStack = [];
     updateUndoButtons();
 }
@@ -1305,19 +1336,23 @@ function recordHistory(json) {
 //
 // An undo snapshot is serializeDoc() output, so it is always at DOC_VERSION:
 // loadDocState() only normalizes it. Undo used to re-run auto-bind and the
-// wlan0 rename on every step.
+// wlan0 rename on every step. And serializeDoc(loadDocState(snapshot)) is
+// the snapshot again, so the entry and the card are given the snapshot
+// itself; the suites (window.TOPO_CHECKS) re-serialize to hold that true,
+// as a drift would file a spurious step on the next save.
 function applyDoc(json) {
     state.linkSourceId = null;
     loadDocState(JSON.parse(json));
     pruneHostFolds();   // the step took a host's last guest away: no fold left on it
     pruneSelection();
+    if (window.TOPO_CHECKS && JSON.stringify(serializeDoc()) !== json) throw new Error('an undo snapshot does not reload as itself');
     // Queued like any edit: a held Ctrl+Z repeats thirty times a second.
-    const now = JSON.stringify(serializeDoc());
+    const now = json;
     queueLiveDoc(now);
     noteDocChanged(now);   // an undo is a change to the card as much as an edit is
     updateOsDatalist();
-    renderSelection();
-    renderCanvasOnly();
+    cancelTypedRender();   // the step's drawing below is the newer one
+    batch(() => { renderSelection(); renderCanvasOnly(); });   // drawn once
     updateUndoButtons();
     // The Expected life by type dialog, if open, shows the step's values.
     if (typeof refreshLifeDialog === 'function') refreshLifeDialog();
@@ -1327,14 +1362,14 @@ function applyDoc(json) {
 // and is what the undo takes back.
 function undo() {
     commitTyping();
-    if (!_undoStack.length) return;
+    if (!_undoStack.length) { flushTypedRender(); return; }
     _redoStack.push(_present);
     _present = _undoStack.pop();
     mapMotion(() => applyDoc(_present));   // what the step changed on the map is played back
 }
 function redo() {
     commitTyping();   // which, being an edit, forks the timeline: nothing to redo after it
-    if (!_redoStack.length) return;
+    if (!_redoStack.length) { flushTypedRender(); return; }
     _undoStack.push(_present);
     _present = _redoStack.pop();
     mapMotion(() => applyDoc(_present));
@@ -1379,6 +1414,7 @@ function normalizeLoadedAnnotation(a) {
 // bare { nodes } file can no longer leave the previous document's cables in
 // place. Returns { newer } for a document this build may not re-save.
 function loadDocState(doc) {
+    ++_docSeq;
     const { doc: d, newer } = migrateDoc(doc);
     const list = (v) => (Array.isArray(v) ? v : []);
     // Two devices or two cables under one id (a merged or hand-edited file):
@@ -1464,6 +1500,7 @@ function replaceDocument(doc, opts = {}) {
     // a new entry, the old entry keeps it (writeLiveDoc flushes before it
     // pushes); replacing this entry, it has nowhere to go.
     if (opts.push) commitTyping(); else cancelTyping();
+    cancelTypedRender();   // the old document's pending pixels: drawn below, from the new one
     const raw = doc && typeof doc === 'object' ? doc : EMPTY_DOC;
     state.selection = new Set(); state.linkSourceId = null;
     const { newer } = loadDocState(raw);
@@ -1483,14 +1520,18 @@ function replaceDocument(doc, opts = {}) {
     // the model, so save() can tell an edit from a call that changed nothing.
     state.readOnly = newer ? { doc: cloneData(raw), loaded: JSON.stringify(serializeDoc()) } : null;
     select(null, null); updateOsDatalist();
-    const json = liveJsonNow();
-    noteDocLoaded(JSON.stringify(serializeDoc()), origin === 'live' ? (opts.shownAs || 'live') : origin);
+    // Serialized once, for the card, the timeline and the entry; a read-only
+    // document's entry is as it arrived (liveJsonNow's branch).
+    const now = JSON.stringify(serializeDoc());
+    const json = state.readOnly ? JSON.stringify(state.readOnly.doc) : now;
+    noteDocLoaded(now, origin === 'live' ? (opts.shownAs || 'live') : origin);
     if (origin !== 'default') writeLiveDoc(json, !!opts.push);
-    if (!(origin === 'live' && JSON.stringify(serializeDoc()) === _present)) initHistory();
+    if (!(origin === 'live' && now === _present)) initHistory(now);
     renderReadOnly();
     renderDocBar();
     renderCanvasOnly();
     if (opts.fit !== false) fitToView();
+    if (window.TOPO_CHECKS && JSON.stringify(serializeDoc()) !== now) throw new Error('replaceDocument: the document changed while it was opened');
 }
 
 // The blank canvas a dismissed landing leaves is a network started here, so it
@@ -1796,8 +1837,10 @@ window.addEventListener('mousedown', (event) => {
         if (event.button === 0 && event.shiftKey && !state.linkSourceId) { event.preventDefault(); startMarquee(event); return; }
         isDraggingCanvas = true; lastMouse = { x: event.clientX, y: event.clientY };
         // Ctrl/Cmd, like Shift, means "add to the selection", so a modified
-        // press on empty canvas keeps the set rather than clearing it.
-        if (event.button === 0 && !isDraggingNode && !event.ctrlKey && !event.metaKey) select(null, null);
+        // press on empty canvas keeps the set rather than clearing it. With
+        // nothing selected or armed there is nothing to clear, and a pan
+        // draws nothing but the camera.
+        if (event.button === 0 && !isDraggingNode && !event.ctrlKey && !event.metaKey && (state.selection.size || state.linkSourceId)) select(null, null);
     }
 });
 
@@ -1815,6 +1858,13 @@ function mapPointerMove(event) {
         // A press on a collapsed group's node is a tap (it expands) until the
         // pointer has travelled a few pixels (js/groupmap.js): nothing moves yet.
         if (foldPressHolds(event)) return;
+        // Nor does a plain press until it has travelled past the same margin:
+        // a jitter, or a move of no distance at all, snapped an off-grid
+        // device to the grid and filed an undo step for a click.
+        if (_dragPress && !_dragPress.started) {
+            if (Math.hypot(event.clientX - _dragPress.x, event.clientY - _dragPress.y) <= _dragPress.slop) return;
+            _dragPress.started = true;
+        }
         const pt = getWorkspacePoint(event.clientX, event.clientY);
         // The pressed item snaps to the grid and every other item takes the
         // same step from where it started, so a set moves as one and keeps its
@@ -1838,20 +1888,22 @@ function mapPointerMove(event) {
         // cables and its two devices are then index lookups, not scans of the
         // document per cable per mouse move. The pass indexes ids and cables,
         // never positions, so the coordinates just set are what is read.
-        withLookupPass(() => state.links.forEach(l => {
-            if (moved.has(l.source) || moved.has(l.target)) {
-                const lineEl = document.getElementById(`ui-link-${l.id}`);
-                const geo = lineEl && linkGeometry(l);
-                if (geo) applyLinkGeometry(lineEl, geo);
-            }
-        }));
+        withLookupPass(() => {
+            state.links.forEach(l => {
+                if (moved.has(l.source) || moved.has(l.target)) {
+                    const lineEl = document.getElementById(`ui-link-${l.id}`);
+                    const geo = lineEl && linkGeometry(l);
+                    if (geo) applyLinkGeometry(lineEl, geo);
+                }
+            });
 
-        // So do the group frames, a collapsed group's node and the cables
-        // folded into it (js/groupmap.js): its members have no element of
-        // their own to move. A device's drag also lights the group it would
-        // be let go into (trackGroupDrop).
-        trackGroupDrop(event);
-        if (mapOverlayLive()) redrawGroupOverlay();
+            // So do the group frames, a collapsed group's node and the cables
+            // folded into it (js/groupmap.js): its members have no element of
+            // their own to move. A device's drag also lights the group it would
+            // be let go into (trackGroupDrop). Both only read, so in the pass too.
+            trackGroupDrop(event);
+            if (mapOverlayLive()) redrawGroupOverlay();
+        });
 
         // Note leaders follow drags just as fluidly — the dragged thing may be
         // the note itself or a node one of its red lines points at.
@@ -1882,13 +1934,16 @@ function mapPointerUp(event) {
     // (js/groupmap.js). Taken before anything else so a drag never leaves it armed.
     const drop = takeGroupDrop(event);
     if (tapped) {
-        isDraggingNode = false; draggedNode = null; dragGroup = []; dragCollapse = null;
+        isDraggingNode = false; draggedNode = null; dragGroup = []; dragCollapse = null; _dragPress = null;
         expandFoldTapped(tapped);
         return;
     }
     // A press on one device of a set that moved nothing was a click on it.
     const collapse = dragCollapse && dragGroup.every((g) => g.item.x === g.x0 && g.item.y === g.y0) ? dragCollapse : null;
     dragCollapse = null;
+    // Whether the press ever travelled past the tap margin (startDrag, js/ui.js).
+    const started = !!(_dragPress && _dragPress.started);
+    _dragPress = null;
     if (isDraggingNode) {
         // One save however many moved: a set dragged is one undo step, and
         // so is a drag that also put it in a group or took it out of one.
@@ -1904,10 +1959,20 @@ function mapPointerUp(event) {
         let motion = null;
         if (moved && drop && drop.target && drop.target.pair) offerGroupFromPair(drop);
         else if (moved && drop) { motion = mapMotionStart(); batch(() => { said = applyGroupDrop(drop); save(); }); }
-        else save();
+        else if (moved) save();
+        else {
+            // A click: nothing to save. The press drew it (select), and only
+            // a field still being typed into is filed, and drawn as typed.
+            commitTyping(); flushTypedRender();
+            // Every edit saves itself; one that relied on this release's save
+            // (it used to save on every click) is caught here by the suites.
+            if (window.TOPO_CHECKS && !(_present === null || state.readOnly || _borrowedCanvas || JSON.stringify(serializeDoc()) === _present)) throw new Error('an edit reached a click unsaved');
+        }
         if (said) { refreshGroupViews(true); showToast(said, 'ok'); }
         if (collapse) { select(collapse, 'node'); return; }   // select() redraws
-        renderCanvasOnly(); // Render zones/traces only ONCE when mouse is released
+        // Render zones/traces only ONCE when mouse is released; a drag that
+        // came back to its start still clears its drop cues.
+        if (moved || started) renderCanvasOnly();
         if (motion) mapMotionPlay(motion, { pulse: drop.target && drop.target.gid });
     } else if (collapse) select(collapse, 'node');
     dragGroup = [];
@@ -2413,8 +2478,7 @@ propertyBindings.forEach((binding) => {
         node[binding.key] = event.target.value;
 
         saveTyping();         // the label follows each keystroke; the undo step waits for the field to be left
-        renderCanvasOnly();
-        renderNodeDiagnostics(node);
+        renderTyped();
     });
 });
 
@@ -2428,13 +2492,12 @@ document.getElementById('addMacBtn').onclick = () => {
     renderSidebarData(node); save();
 };
 document.getElementById('addIfaceBtn').onclick = () => { if (!state.selectedId || state.selectedType !== 'node') return; const node = getNode(state.selectedId); if (!node) return; createIfaceFor(node); renderSidebarData(node); save();
-renderCanvasOnly();
-renderNodeDiagnostics(node); };
+renderNodeDiagnostics(node, drawnDiag(renderCanvasOnly())); };
 document.getElementById('bondIfaceBtn').onclick = () => {
     if (!state.selectedId || state.selectedType !== 'node') return;
     const node = getNode(state.selectedId); if (!node) return;
     if (!createBond(node)) return;
-    renderSidebarData(node); save(); renderCanvasOnly(); renderNodeDiagnostics(node);
+    renderSidebarData(node); save(); renderNodeDiagnostics(node, drawnDiag(renderCanvasOnly()));
 };
 document.getElementById('deleteElementBtn').onclick = deleteSelected;
 // For a set of devices the bulk panel applies to, Delete Selected shows what
@@ -2711,6 +2774,7 @@ function captureCanvasImage(format, scale) {
 // The drawing only. The ✕ on a selected device or cable is a control of the
 // editor, not part of the network, so it is left out of the picture.
 function canvasSvgMarkup(scale = 1) {
+    flushTypedRender();   // an export never reads a drawing a frame behind the typing
     if (!state.nodes.length) return null;
     const PADDING = 90, NODE_HALF_SIZE = 24, LABEL_EXTRA_BOTTOM = 42;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

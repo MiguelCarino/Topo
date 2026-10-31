@@ -133,6 +133,12 @@ probe = ('const _be = (msg) => {'
          # action, where a device's copy flying into its group would be met.
          # tests/suites/motion.js turns it on for itself.
          'window.TOPO_MOTION = false;'
+         # No redraw coalescing (redrawCoalescer, js/state.js), for the same
+         # reason: a suite reads the map right after a keystroke.
+         # tests/suites/passreuse.js turns it on for itself. And the pass
+         # contract's asserts throw (assertNoLookupPass, js/model.js).
+         'window.TOPO_COALESCE = false;'
+         'window.TOPO_CHECKS = true;'
          'window.__topoReady = new Promise((r) => window.addEventListener("topo:ready", r, { once: true }));'
          'const _wadd = window.addEventListener;'
          'window.addEventListener = function (type, fn, opts) {'

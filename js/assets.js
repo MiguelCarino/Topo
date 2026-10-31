@@ -189,8 +189,7 @@ ASSET_INPUTS.forEach(({ key, id }) => {
         if (isBlank(e.target.value)) delete node[key]; else node[key] = e.target.value;
         assetEl('assetSummary').textContent = assetSummaryText(node);
         saveTyping();
-        renderCanvasOnly();
-        renderNodeDiagnostics(node);
+        renderTyped();
     });
 });
 assetEl('propNotes').addEventListener('input', (e) => renderNotesLint(selectedNodeForEdit(), e.target.value));
@@ -443,7 +442,7 @@ assetEl('propCableLength').addEventListener('input', (e) => {
     filterLengthInput(e.target);
     if (!storeCableLength()) return;
     saveTyping();
-    renderCanvasOnly();
+    renderTyped();
 });
 assetEl('propCableLength').addEventListener('blur', () => renderCableLength(selectedLinkForEdit()));
 // Another unit relabels the number already there (8 m becomes 8 ft: the
@@ -459,7 +458,7 @@ CABLE_INPUTS.filter(({ key }) => key !== 'length').forEach(({ key, id }) => {
         if (!link) return;
         setCableField(link, key, e.target.value);
         saveTyping();
-        renderCanvasOnly();
+        renderTyped();
     });
 });
 

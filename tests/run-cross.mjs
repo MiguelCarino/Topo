@@ -42,6 +42,10 @@ const PROBE = 'window.addEventListener("error",(e)=>{if(document.getElementById(
   + 'document.documentElement.appendChild(p);});'
   + 'window.__cspViolations=[];document.addEventListener("securitypolicyviolation",(e)=>'
   + 'window.__cspViolations.push(e.violatedDirective+" "+(e.blockedURI||"inline")));'
+  // The pass contract's asserts throw, as under run.sh (js/model.js,
+  // assertNoLookupPass). Coalescing is already off: Playwright reports
+  // navigator.webdriver (redrawCoalescer, js/state.js).
+  + 'window.TOPO_CHECKS=true;'
   // Suites start after boot has decided, not merely on load — see run.sh.
   + 'window.__topoReady=new Promise((r)=>window.addEventListener("topo:ready",r,{once:true}));'
   + 'const _wadd=window.addEventListener;window.addEventListener=function(type,fn,opts){'
@@ -90,7 +94,9 @@ async function runSuite(browser, suite) {
     await page.goto(`http://127.0.0.1:${PORT}/${RUNFILE}?lang=en#advanced`, { waitUntil: 'load' });
     let text = '';
     try {
-      await page.waitForSelector('#TESTOUT', { timeout: 15000 });
+      // 45 s: the timing suites (perf, perfedit) take ten or more on a busy
+      // machine, and a slow run should fail its budgets, not the wait.
+      await page.waitForSelector('#TESTOUT', { timeout: 45000 });
       text = await page.$eval('#TESTOUT', (el) => el.textContent);
     } catch {
       const boot = await page.$eval('#BOOTERR', (el) => el.textContent).catch(() => '');
@@ -98,7 +104,9 @@ async function runSuite(browser, suite) {
     }
     const lines = text.split('\n').filter((l) => /^(PASS|FAIL) ::/.test(l));
     const bad = lines.filter((l) => l.startsWith('FAIL ::'));
-    return { total: lines.length, failed: bad.length, bad, boot: '' };
+    // A timing suite's numbers (tests/suites/perfedit.js), shown on TOPO_PERF=1.
+    const perf = process.env.TOPO_PERF ? text.split('\n').filter((l) => l.startsWith('PERF ::')) : [];
+    return { total: lines.length, failed: bad.length, bad, boot: '', perf };
   } finally {
     await page.close();
   }
@@ -145,6 +153,7 @@ try {
       } else {
         console.log(`ok   ${suite.padEnd(12)} ${r.total}`);
       }
+      (r.perf || []).forEach((l) => console.log(`       ${l}`));
     }
     console.log(`   ${eFailed ? 'FAIL' : 'ok'} ${engine.name}: ${eTotal} assertions, ${eFailed} failing`);
     summary.push(`${engine.name}: ${eTotal} assertions${eFailed ? `, ${eFailed} failing` : ', all passing'}`);

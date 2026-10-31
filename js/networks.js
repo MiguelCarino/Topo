@@ -175,9 +175,9 @@ function onNetworkField(e) {
         net[key] = el.value;
         el.classList.toggle('bad', fieldBad(net, key));
     }
-    if (e.type === 'input') saveTyping(); else save();
-    renderCanvasOnly();
-    refreshSelectedNodeDiagnostics();
+    // Typed: the drawing may wait (renderTyped, js/ui.js); a change draws now.
+    if (e.type === 'input') { saveTyping(); renderTyped(); }
+    else { save(); refreshSelectedNodeDiagnostics(drawnDiag(renderCanvasOnly())); }
     const sel = state.selectedType === 'node' && getNode(state.selectedId);
     if (sel) refreshInheritance(sel);
 }
