@@ -1675,14 +1675,14 @@ async function load() {
     // A printed asset label's QR code ('#asset/<tag>', js/assets.js): find the
     // device in this browser's networks, open that one and select it. Not a
     // document, so it never reaches the document branch below (which would
-    // read the tag as a broken link and open the demo).
+    // read the tag as a damaged link).
     const assetTag = assetTagOfHash(hash);
     if (assetTag !== null) { await openAssetLink(assetTag); return; }
     // A binder link: many networks, and not a document at all. It opens the
     // landing with them on a guest shelf and touches neither the canvas nor
     // this browser's library — see openBinderLink(). Placed ahead of the
-    // document branch because that branch would atob() this, throw, and load
-    // the demo network, which looks exactly like a working app. The payload
+    // document branch because that branch would atob() this, throw, and call
+    // a good link damaged. The payload
     // leaves the URL once it is on the shelf; the shelf is what a reload finds.
     if (isBinderFragment(hash)) {
         await openBinderLink(hash);
@@ -1717,12 +1717,12 @@ async function load() {
         loadDefaultDoc(false); return;
     }
     // A hash is a document in its own right — a shared link, a pasted URL, an
-    // old link from before the document moved out of the URL — and so is the
-    // demo the catch below falls back to.
+    // old link from before the document moved out of the URL. One that does not
+    // read as a document says so, rather than pass the demo off as what was sent.
     let json = null;
     try { json = hash[0] === FRAG_SCHEME ? await decodeFragment(hash) : decodeURIComponent(atob(hash)); }
-    catch (e) { /* unreadable: openArrivedDocument(null) falls back to the demo */ }
-    openArrivedDocument(json);
+    catch (e) { /* unreadable: openArrivedDocument(null) refuses it, and arrivedUnreadable says so */ }
+    if (!openArrivedDocument(json)) arrivedUnreadable(hash);
 }
 
 // A document that arrived by link — plain or unsealed. Whatever saved network
@@ -1731,14 +1731,41 @@ async function load() {
 // network. The profile-trigger branch keeps the canvas it had, so it keeps its
 // card too. Then the envelope comes off the URL: the document moves into the
 // history entry, and the address bar no longer carries the network.
+// -> false, touching nothing, when json is not a document.
 function openArrivedDocument(json) {
+    // Parsed first: an unreadable link must not drop the card that is open,
+    // or pass the demo off as the network that was sent.
+    const doc = parseDocJson(json);
+    if (!doc) return false;
     // A document arriving by Back/Forward off a binder link would otherwise load
     // underneath a landing page still painted on top of it, with the editor's
     // own controls still suppressed.
     if (landingIsOpen()) landingHandledDocument();
-    // An unreadable link opens the demo rather than a blank page that looks
-    // like a working app with nothing in it.
-    replaceDocument(parseDocJson(json) || templatesData.house, { origin: 'link' });
+    replaceDocument(doc, { origin: 'link' });
+    return true;
+}
+
+// A link that did not read as a document (cut short in a chat, mangled by a
+// mail client, a sealed link whose contents are not a network). It says so,
+// then goes the way a declined sealed link goes: over an open network nothing
+// changes, on a fresh boot it is as if the visit had been bare.
+function arrivedUnreadable(hash) {
+    // A word-like hash (a misspelt #simpel) is no link anyone sent: no message for it.
+    if (!(hash && /^[a-z][a-z-]{0,23}$/i.test(hash))) tell(t('This link is damaged. Ask for it to be sent again.'));   // not awaited, like openAssetLink's tell
+    if (state.nodes.length) { keepNetworkInEntry(); return; }   // mid-session: the open network stays and takes this entry
+    window.history.replaceState(null, '', cleanUrl());
+    if (shouldShowLanding()) openLanding(true); else replaceDocument(templatesData.house, { origin: 'default' });
+}
+
+// A link pasted over an open network that did not open (damaged, or a
+// sealed one declined): the network stays, takes the new history entry, and
+// the fragment comes off the address bar. save() does that through the live
+// write, but returns before it for a read-only document (one from a newer
+// Topo), which would leave the damaged hash in the URL and the entry empty,
+// so a reload lost the network. That one is written as it arrived.
+function keepNetworkInEntry() {
+    if (state.readOnly) writeLiveDoc(liveJsonNow(), false);
+    else save();
 }
 
 // json -> a document object, or null when it is not one.
@@ -1975,24 +2002,27 @@ function mapPointerUp(event) {
     dragGroup = [];
 }
 
-// ---- A finger on a device ----
+// ---- A finger on the map ----
 // A touch screen sends no mouse events for a finger that moves: only a tap
 // becomes a mousedown, mouseup and click, after the finger lifts. So a press
-// on a device that travels past the tap margin is turned into the mouse's
-// drag here, through the same press (pressNode, js/ui.js), move and release
-// as a mouse's, and with the same drops: into a group, onto a host, onto
-// another device for a new group (js/groupmap.js). A finger that lifts
-// without travelling is left alone, and the browser's own mouse events
-// select the device as they always have. A device's card takes no pan or
-// pinch of its own (touch-action, css/app.css), so the browser hands every
-// move to the page and the drag can cancel them.
+// that travels past the tap margin is turned into the mouse's drag here,
+// through the same press, move and release as a mouse's. One wrapper serves
+// every card a mouse drags: a device (pressNode, js/ui.js, with the same
+// drops: into a group, onto a host, onto another device for a new group,
+// js/groupmap.js), a collapsed group (pressFold), a frame's tab (pressGroup)
+// and a note (pressAnnotation, js/ui.js). The caller says how to press and
+// whether what it presses is still in the document when the finger has
+// travelled. A finger that lifts without travelling is left alone, and the
+// browser's own mouse events tap it as they always have. Those cards take no
+// pan or pinch of their own (touch-action, css/app.css), so the browser
+// hands every move to the page and the drag can cancel them.
 //
 // The moves are heard on the element the finger came down on, not on the
-// window: the press selects the device, which redraws the map and takes that
-// element out of the page, and a touch keeps sending its events to where it
+// window: the press selects what it is on, which redraws the map and takes
+// that element out of the page, and a touch keeps sending its events to where it
 // started, which then no longer reaches the window.
 let _touchPress = null;
-function touchPressNode(event, node) {
+function touchPress(event, press, alive) {
     if (_touchPress || !event.touches || event.touches.length !== 1 || state.linkSourceId || state.readOnly) return;
     const first = event.touches[0];
     const el = event.target;
@@ -2008,9 +2038,9 @@ function touchPressNode(event, node) {
         p.last = pt;
         if (!p.started) {
             if (Math.hypot(pt.clientX - p.x, pt.clientY - p.y) <= GM_TAP_SLOP.touch) return;
-            if (!getNode(node.id)) { done(); return; }
+            if (!alive()) { done(); return; }
             p.started = true;
-            pressNode(as(p.x, p.y), node);
+            press(as(p.x, p.y));
         }
         if (e.cancelable) e.preventDefault();
         mapPointerMove(as(pt.clientX, pt.clientY));
@@ -2034,11 +2064,13 @@ function touchPressNode(event, node) {
     el.addEventListener('touchend', end);
     el.addEventListener('touchcancel', end);
 }
+const touchPressNode = (event, node) => touchPress(event, (ev) => pressNode(ev, node), () => !!getNode(node.id));
 
+// The screen point (sx, sy) in #networkCanvas stays put: the pointer for the wheel, the middle of the view for the buttons.
+function zoomCameraAt(nextZoom, sx, sy) { const z = Math.min(5, Math.max(0.2, nextZoom)), k = z / state.camera.zoom; state.camera.x = sx - (sx - state.camera.x) * k; state.camera.y = sy - (sy - state.camera.y) * k; state.camera.zoom = z; applyCamera(); }
 document.getElementById('networkCanvas').addEventListener('wheel', (event) => {
     event.preventDefault(); const rect = document.getElementById('networkCanvas').getBoundingClientRect();
-    const mx = event.clientX - rect.left, my = event.clientY - rect.top, nextZoom = Math.min(Math.max(0.2, state.camera.zoom * Math.exp(-event.deltaY * 0.001)), 5);
-    state.camera.x = mx - (mx - state.camera.x) * (nextZoom / state.camera.zoom); state.camera.y = my - (my - state.camera.y) * (nextZoom / state.camera.zoom); state.camera.zoom = nextZoom; applyCamera();
+    zoomCameraAt(state.camera.zoom * Math.exp(-event.deltaY * 0.001), event.clientX - rect.left, event.clientY - rect.top);
 }, { passive: false });
 
 // ---- Keyboard shortcuts ----
@@ -2074,6 +2106,22 @@ function topoOverlayOpen() {
     return landingIsOpen() || !!document.querySelector('.topo-dlg:not(.hidden)') || addDevicesOpen();
 }
 
+// May a key act on the map? Not while a question (CarinoUI.modal) or a Topo overlay covers it.
+function mapKeysBlocked() { return !!(window.CarinoUI && CarinoUI.modal.top()) || topoOverlayOpen(); }
+
+// Esc closes the topmost overlay only: a dialog opened over the landing goes,
+// and the landing stays under it. The unlock dialog is answered rather than
+// hidden, so the sealed link's own decline path (js/share.js) closes it.
+function closeTopoOverlay() {
+    if (unlockDialogOpen()) { _answerUnlock(null); return; }
+    if (shareDialogOpen()) { closeShareDialog(); return; }
+    if (document.querySelector('.topo-dlg:not(.hidden)') || addDevicesOpen()) {
+        toggleShortcutHelp(false); closeModePicker(); closeReportDialog(); closeAddDevices();
+        return;
+    }
+    if (landingIsOpen()) closeLanding();
+}
+
 function toggleShortcutHelp(force) {
     const panel = document.getElementById('shortcutHelp');
     const show = force !== undefined ? force : panel.classList.contains('hidden');
@@ -2103,44 +2151,83 @@ const SHORTCUTS = [
     { keys: ['+', '−'], label: 'Zoom in / out', test: (e) => ['+', '=', '-', '_'].includes(e.key),
       run: (e) => document.getElementById(['+', '='].includes(e.key) ? 'zoomInBtn' : 'zoomOutBtn').click() },
     // Del and Ctrl+A act on the map, so neither fires while a Topo overlay
-    // covers it: the keys are left to the browser there, where Ctrl+A selects
+    // covers it: the handler below returns first (mapKeysBlocked /
+    // topoOverlayOpen) and leaves the keys to the browser, where Ctrl+A selects
     // the dialog's text, and Ctrl+A then Del cannot wipe a map nobody can see.
     // The table covers the map the same way: there Delete belongs to a cell
     // (it opens the cell empty), and with the focus elsewhere it would remove
     // devices that may be ticked out of sight, so it does nothing at all.
     // The rack view (js/rackview.js) shows one rack: the selection can hold
     // devices that are not in it, so it does nothing there either.
-    { keys: ['Del'], label: 'Delete the selection', test: (e) => (e.key === 'Delete' || e.key === 'Backspace') && !topoOverlayOpen() && !tableShown() && !rackShown(),
+    { keys: ['Del'], label: 'Delete the selection', test: (e) => (e.key === 'Delete' || e.key === 'Backspace') && !tableShown() && !rackShown(),
       run: () => deleteSelected() },
-    { keys: ['Ctrl', 'A'], label: 'Select every device and cable', mod: true, test: (e) => e.key.toLowerCase() === 'a' && !topoOverlayOpen(),
+    { keys: ['Ctrl', 'A'], label: 'Select every device and cable', mod: true, test: (e) => e.key.toLowerCase() === 'a',
       run: () => selectAll() },
     { keys: ['Esc'], label: 'Cancel link mode / deselect', test: (e) => e.key === 'Escape',
-      run: () => {
-          // The landing covers everything below it, so dismissing it is the
-          // whole action — nothing underneath is selectable to deselect.
-          if (landingIsOpen()) { closeLanding(); return; }
-          toggleShortcutHelp(false); closeAddDevices(); closeModePicker(); closeReportDialog(); state.linkSourceId = null; select(null, null); renderCanvasOnly();
-      } },
+      // Over the landing or a dialog, Esc closes that instead (closeTopoOverlay).
+      run: () => { state.linkSourceId = null; select(null, null); renderCanvasOnly(); } },
     { keys: ['?'], label: 'Show this list', test: (e) => e.key === '?', run: () => toggleShortcutHelp() }
 ];
+
+// Which focused elements have a text undo of their own. Chromium's native Undo
+// on a checkbox or a select reached back into the last text field typed into,
+// put that text back and filed it as a new edit, while the tick stayed. So a
+// tick, a select or a button hands Ctrl+Z to the diagram; a text field keeps it.
+const NO_TEXT_UNDO = new Set(['checkbox', 'radio', 'range', 'color', 'file', 'button', 'submit', 'reset', 'image']);
+function hasTextUndo(el) {
+    if (!el) return false;
+    if (el.isContentEditable || el.tagName === 'TEXTAREA') return true;
+    return el.tagName === 'INPUT' && !NO_TEXT_UNDO.has(el.type);
+}
+
+// Behind an overlay Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y must neither touch the
+// diagram nor reach native Undo, which, from a tick or a button, puts back the
+// text of the last field typed into (a sidebar field behind the dialog) and
+// files it as an edit to the hidden map. A text field in the overlay keeps
+// its own undo.
+function stopNativeUndo(event) {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    const k = event.key.toLowerCase();
+    if ((k === 'z' || k === 'y') && !hasTextUndo(document.activeElement)) event.preventDefault();
+}
 
 window.addEventListener('keydown', (event) => {
     // A question on screen (js/dialog.js) owns the keyboard: Delete must not
     // delete the selection behind it, nor F refit the map. CarinoUI.modal
     // handles Esc and Tab itself.
-    if (window.CarinoUI && CarinoUI.modal.top()) return;
+    if (window.CarinoUI && CarinoUI.modal.top()) { stopNativeUndo(event); return; }
     const activeTag = document.activeElement?.tagName || '';
     const inField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag);
 
+    // A Topo overlay (the landing, a dialog, the shortcut list, Add devices)
+    // covers the map, so no map key acts behind it: Esc closes the topmost one,
+    // '?' closes the list when it is all that is open, and everything else,
+    // Ctrl+A and typing in the dialog among it, stays the browser's. Ctrl+Z
+    // stays the browser's only in a text field of the overlay; anywhere else
+    // native Undo would reach the sidebar field behind it (hasTextUndo).
+    if (topoOverlayOpen()) {
+        stopNativeUndo(event);
+        const onlyHelpOpen = !document.getElementById('shortcutHelp').classList.contains('hidden')
+            && !landingIsOpen() && !addDevicesOpen() && document.querySelectorAll('.topo-dlg:not(.hidden)').length === 1;
+        if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); closeTopoOverlay(); }
+        else if (event.key === '?' && !inField && onlyHelpOpen) { event.preventDefault(); toggleShortcutHelp(false); }
+        return;
+    }
+
     // Undo/redo are the exception to "leave Ctrl/Cmd combos alone" below. Inside a
-    // field we defer to the browser's own text undo; on the canvas they act on the
-    // diagram. Ctrl+Z, and either Ctrl+Shift+Z or Ctrl+Y to redo.
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !inField) {
+    // text field we defer to the browser's own text undo; on the canvas, a tick or
+    // a select they act on the diagram. Ctrl+Z, and either Ctrl+Shift+Z or Ctrl+Y
+    // to redo.
+    if ((event.ctrlKey || event.metaKey) && !event.altKey) {
         const k = event.key.toLowerCase();
-        if (k === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
-        if (k === 'y') { event.preventDefault(); redo(); return; }
-        const modHit = !event.shiftKey && SHORTCUTS.find((sc) => sc.mod && sc.test(event));
-        if (modHit) { event.preventDefault(); modHit.run(event); return; }
+        if (!hasTextUndo(document.activeElement)) {
+            if (k === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
+            if (k === 'y') { event.preventDefault(); redo(); return; }
+        }
+        if (!inField) {
+            const modHit = !event.shiftKey && SHORTCUTS.find((sc) => sc.mod && sc.test(event));
+            if (modHit) { event.preventDefault(); modHit.run(event); return; }
+        }
     }
 
     if (event.ctrlKey || event.metaKey || event.altKey) return; // leave browser/OS combos alone
@@ -2287,6 +2374,9 @@ function applyProfile() {
 function applyLocale(lang) {
     if (lang) { state.settings.lang = lang; saveSettings(); }
     applyStaticI18n();
+    // #tracePort's data-i18n-title is the "on" title; applyStaticI18n() just
+    // wrote it whatever the filter says, so the suspended one is put back.
+    updateTracePortUi();
     document.getElementById('undoBtn').textContent = `↶ ${t('Undo')}`;
     document.getElementById('redoBtn').textContent = `↷ ${t('Redo')}`;
     document.getElementById('tidyBtn').textContent = `⤢ ${t('Tidy')}`;
@@ -2318,11 +2408,19 @@ function applyLocale(lang) {
     // renderCanvasOnly() ends in validateTopology(), which redraws the alert
     // list, and the selection panel needs its own nudge. Skipped on an empty
     // canvas, which is the state applyLocale() sees during boot.
-    if (state.nodes.length) { renderCanvasOnly(); refreshSelectedNodeDiagnostics(); }
+    // The trace status is written by the draw, so the empty map needs it said.
+    if (state.nodes.length) { renderCanvasOnly(); refreshSelectedNodeDiagnostics(); } else updateTraceStatus(null);
     // The selected device's grey hints ("10.0.1.1 · from Office LAN") are
     // sentences too, written when it was selected.
     const sel = state.selectedType === 'node' && getNode(state.selectedId);
-    if (sel) { refreshInheritance(sel); document.getElementById('propOs').placeholder = fieldHints(sel).os; renderAssetFields(sel); }
+    // So are its interface rows' titles and MAC notes, and the cloud's site picker.
+    if (sel) {
+        refreshInheritance(sel); document.getElementById('propOs').placeholder = fieldHints(sel).os; renderAssetFields(sel);
+        renderSidebarData(sel); renderSiteRef(sel);
+    }
+    // A selected cable's port pickers are built too ("No interfaces — add one.").
+    const selLink = state.selectedType === 'link' && getLink(state.selectedId);
+    if (selLink) renderLinkPorts(selLink);
     renderNetworksPanel(true);   // its counts and buttons are built, not marked up
     renderGroupsPanel(true);     // so are the Groups tab's
     renderWifiPanel(true);       // and the Wi-Fi tab's
@@ -2497,8 +2595,9 @@ document.getElementById('deleteElementBtn').onclick = deleteSelected;
 document.getElementById('deleteSelectionBtn').onclick = deleteSelectionAsked;
 document.getElementById('selOnlyNodesBtn').onclick = () => selectOnly('node');
 document.getElementById('selOnlyLinksBtn').onclick = () => selectOnly('link');
-document.getElementById('zoomInBtn').onclick = () => { state.camera.zoom = Math.min(5, state.camera.zoom * 1.2); applyCamera(); };
-document.getElementById('zoomOutBtn').onclick = () => { state.camera.zoom = Math.max(0.2, state.camera.zoom / 1.2); applyCamera(); };
+const zoomCentred = (f) => { const r = document.getElementById('networkCanvas').getBoundingClientRect(); zoomCameraAt(state.camera.zoom * f, r.width / 2, r.height / 2); };
+document.getElementById('zoomInBtn').onclick = () => zoomCentred(1.2);
+document.getElementById('zoomOutBtn').onclick = () => zoomCentred(1 / 1.2);
 document.getElementById('zoomResetBtn').onclick = () => { state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera(); };
 // The map's background (css/app.css .map-ink): '' light, 'dark' (white
 // outlines on black) or 'blue' (a blueprint). The button steps through them
@@ -2559,8 +2658,8 @@ function updateTracePortUi() {
     const suspended = !state.settings.tracePortOn && String(state.settings.tracePort || '').trim() !== '';
     port.classList.toggle('suspended', suspended);
     port.title = suspended
-        ? 'Port filter is off — this port is ignored. Toggle Port filter on to apply it.'
-        : 'Port to test when the Port filter is on';
+        ? t('Port filter is off — this port is ignored. Toggle Port filter on to apply it.')
+        : t('Port to test when the Port filter is on');
 }
 function onTraceControlsChanged() {
     updateTracePortUi();

@@ -559,10 +559,43 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('Review lists every row', !el('csvReview').classList.contains('hidden') && el('csvPreview').querySelectorAll('tr').length === 2
        && /1\s*To add/.test(el('csvCounts').textContent) && /1\s*Unchanged/.test(el('csvCounts').textContent), el('csvCounts').textContent);
     ok('and says it is from the sheet\'s own row', /Row 3/.test(el('csvPreview').textContent));
+    ok('a short sheet has no closing line', !el('csvPreview').querySelector('.csv-more'));
     const undoAt = _undoStack.length;
     el('csvApplyBtn').click();
     ok('Apply closes it and adds the device, as one step', !dlgOpen() && !!nodeByName('Kiosk') && _undoStack.length === undoAt + 1);
     ok('cabled to the switch', state.links.some((l) => l.source === 'sw' && l.target === nodeByName('Kiosk').id));
+    // A long sheet: the review lists the first CSV_REVIEW_MAX rows and says
+    // how many more there are; Apply still writes every one.
+    open();
+    el('csvMenuBtn').click();
+    el('csvTabs').querySelector('[data-csvtab="import"]').click();
+    el('csvText').value = 'name,type\n' + Array.from({ length: 1234 }, (_, i) => `PC-${i + 3},pc`).join('\n');
+    csvReparse(); renderCsvDialog();
+    el('csvReviewBtn').click();
+    const more = () => el('csvPreview').querySelector('tr.csv-more');
+    ok('a long sheet lists 500 rows and says how many more',
+       el('csvPreview').querySelectorAll('tr:not(.csv-more)').length === 500 && !!more() && /734 more rows/.test(more().textContent),
+       `${el('csvPreview').querySelectorAll('tr').length} / ${more() && more().textContent}`);
+    ok('the counts still cover the whole sheet', /1234\s*To add/.test(el('csvCounts').textContent), el('csvCounts').textContent);
+    ok('and the closing line points at them rather than promising every row is written (a conflict is not)',
+       /not listed here\. The counts above include them\./.test(more().textContent) && !/Apply writes/.test(more().textContent), more().textContent);
+    setLocale('ru'); renderCsvReview();
+    ok('the closing line is translated, in the colon style', !!more() && /строк: 734/.test(more().textContent), more() && more().textContent);
+    setLocale('en'); renderCsvReview();
+    // One row past the limit: the singular.
+    const fullRows = _csv.plan.rows;
+    _csv.plan.rows = fullRows.slice(0, 501);
+    renderCsvReview();
+    ok('one row left out reads as one row, not "1 more rows"', !!more() && /one more row, not listed here/.test(more().textContent) && !/rows/.test(more().textContent), more() && more().textContent);
+    setLocale('es'); renderCsvReview();
+    ok('in Spanish too', !!more() && /una fila más/.test(more().textContent), more() && more().textContent);
+    setLocale('en');
+    _csv.plan.rows = fullRows; renderCsvReview();
+    const undoLong = _undoStack.length;
+    el('csvApplyBtn').click();
+    ok('Apply writes the rows the review did not list too, as one step', !!nodeByName('PC-1236') && !!nodeByName('PC-600') && _undoStack.length === undoLong + 1,
+       `${!!nodeByName('PC-1236')} ${!!nodeByName('PC-600')} ${_undoStack.length - undoLong}`);
+    open();
     // Words.
     setLocale('es'); applyLocale();
     el('csvMenuBtn').click();

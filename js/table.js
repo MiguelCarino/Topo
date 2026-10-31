@@ -439,7 +439,7 @@ const TV_COLS = {
           show: (row) => {
               const n = getNode(row.ref.nodeId);
               const old = upkeepState(n).old;
-              return shown(ageText(deviceAge(n)), old ? { sev: 'warn', title: t('Past its expected life ({n} years)', { n: old.life }) } : {});
+              return shown(ageText(deviceAge(n)), old ? { sev: 'warn', title: t(old.life === 1 ? 'Past its expected life ({n} year)' : 'Past its expected life ({n} years)', { n: old.life }) } : {});
           } },
         // Coloured as its finding is: overdue (warn), missed twice over (bad).
         { key: 'nextService', label: 'Next service', plain: true, rec: 'node', editor: null, sort: 'text', mono: true,
@@ -973,6 +973,11 @@ function tvBuildView(tab, query) {
     [..._tv.expanded].forEach((id) => { if (!getNode(id)) _tv.expanded.delete(id); });
 
     const cols = tvCols(tab);
+    // The first column is what a row is (Name on Devices, TV_FIXED_COL; the
+    // device on Interfaces), so it stays pinned while the rest scroll under
+    // it (css/app.css .tv-key). An interface row open under a device pins its
+    // own name, which is drawn under the device's.
+    const key0 = cols[0] && cols[0].key;
     const top = rows.filter((r) => !r.sub);
     const ticked = top.filter(rowChecked).length;
     const sort = _tv.sort[tab];
@@ -983,7 +988,7 @@ function tvBuildView(tab, query) {
         ${cols.map((c) => {
             const dir = sort && sort.col === c.key ? sort.dir : 0;
             const label = escapeHtml(tvLabel(c));
-            return `<th data-col="${c.key}"${dir ? ` aria-sort="${dir > 0 ? 'ascending' : 'descending'}"` : ''}>${c.sort
+            return `<th data-col="${c.key}"${c.key === key0 ? ' class="tv-key"' : ''}${dir ? ` aria-sort="${dir > 0 ? 'ascending' : 'descending'}"` : ''}>${c.sort
                 ? `<button type="button" class="tv-sort" data-sort="${c.key}" tabindex="-1">${label}<span class="tv-arrow" aria-hidden="true">${dir > 0 ? '▲' : dir < 0 ? '▼' : ''}</span></button>`
                 : label}</th>`;
         }).join('')}
@@ -992,7 +997,8 @@ function tvBuildView(tab, query) {
     const cell = (row, c) => {
         const v = c.show(row);
         const cls = ['tv-cell', c.mono ? 'mono' : '', c.wide ? 'tv-wide' : '', canEdit(row, c) ? 'tv-edit' : '',
-            v.muted ? 'tv-muted' : '', v.bad ? 'tv-bad' : '', v.sev ? `tv-sev ${v.sev}` : ''].filter(Boolean).join(' ');
+            v.muted ? 'tv-muted' : '', v.bad ? 'tv-bad' : '', v.sev ? `tv-sev ${v.sev}` : '',
+            (row.sub ? c.key === 'if:name' : c.key === key0) ? 'tv-key' : ''].filter(Boolean).join(' ');
         const span = row.sub ? tvSubSpan(c, cols.length) : '';
         const cap = row.sub ? ` data-cap="${escapeHtml(tvLabel(c))}"` : '';
         const title = v.title ? ` title="${escapeHtml(v.title)}"` : (v.text.length > 24 ? ` title="${escapeHtml(v.text)}"` : '');
@@ -1058,7 +1064,10 @@ function renderTableView(force, diag) {
 
     const scroller = document.getElementById('tvScroll');
     const sx = scroller.scrollLeft, sy = scroller.scrollTop;
-    document.getElementById('tvGrid').innerHTML = head + `<tbody>${body}</tbody>`;
+    const grid = document.getElementById('tvGrid');
+    grid.innerHTML = head + `<tbody>${body}</tbody>`;
+    // With the twist column the pinned one sits further right (css/app.css).
+    grid.classList.toggle('tv-has-exp', tab === 'devices');
     const empty = document.getElementById('tvEmpty');
     empty.classList.toggle('hidden', rows.length > 0);
     empty.textContent = query && total ? t('No rows match the search.') : t('Nothing here yet.');
@@ -1084,7 +1093,10 @@ function cursorCell() {
     if (!tr) return null;
     return [...tr.querySelectorAll('td[data-col]')].find((td) => td.dataset.col === _tv.cursor.col) || tr.querySelector('td[data-col]');
 }
-function placeCursor(focus) {
+// moved: the user put the cursor here (setCursor), so a cell left under the
+// pinned column is scrolled out from beneath it. A redraw only keeps the
+// cursor where it was, and reads no layout for that.
+function placeCursor(focus, moved) {
     const grid = document.getElementById('tvGrid');
     grid.querySelectorAll('td[tabindex="0"]').forEach((td) => td.setAttribute('tabindex', '-1'));
     if (_tv.followSelection) {
@@ -1105,17 +1117,24 @@ function placeCursor(focus) {
     if (!td) return;
     td.setAttribute('tabindex', '0');
     td.classList.add('tv-cur');
-    if (focus) { td.focus({ preventScroll: true }); scrollCellIntoView(td); }
+    if (focus) { td.focus({ preventScroll: true }); scrollCellIntoView(td, moved); }
 }
-function scrollCellIntoView(td) {
+function scrollCellIntoView(td, moved) {
     if (td.scrollIntoView) td.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    // scrollIntoView takes the pinned identifier column (css/app.css .tv-key)
+    // for open view, so a cell to the left stops under it, out of sight.
+    if (!moved || td.classList.contains('tv-key')) return;
+    const pin = td.parentElement.querySelector('.tv-key');
+    if (!pin) return;
+    const under = pin.getBoundingClientRect().right - td.getBoundingClientRect().left;
+    if (under > 0) document.getElementById('tvScroll').scrollLeft -= under;
 }
 function setCursor(rowKey, colKey, focus) {
     _tv.cursor = { row: rowKey, col: colKey };
     _tv.cursorChosen = true;
     const grid = document.getElementById('tvGrid');
     grid.querySelectorAll('td.tv-cur').forEach((td) => td.classList.remove('tv-cur'));
-    placeCursor(focus);
+    placeCursor(focus, true);
 }
 
 // ---- Moving ----

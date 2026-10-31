@@ -1117,7 +1117,7 @@ function racksSection(racks) {
 
 function portMapsSection(maps) {
     return maps.map((m) => `
-        <h3>${escapeHtml(m.name)} <span class="muted">· ${escapeHtml(t(m.typeName))} · ${escapeHtml(t('{used} of {total} ports used', { used: m.used, total: m.total }))}</span></h3>
+        <h3>${escapeHtml(m.name)} <span class="muted">· ${escapeHtml(t(m.typeName))} · ${escapeHtml(t(m.total === 1 ? '{used} of {total} port used' : '{used} of {total} ports used', { used: m.used, total: m.total }))}</span></h3>
         <table class="ports">
         <thead><tr><th>${t('Port')}</th>${m.hasLabels ? `<th>${t('Label')}</th>` : ''}${m.hasVlans ? '<th>VLAN</th>' : ''}<th>${t('Device')}</th><th>${t('Interface')}</th><th>${t('Address')}</th><th>${t('Cable')}</th></tr></thead>
         <tbody>${m.rows.map((r) => `<tr${r.free ? ' class="free-port"' : ''}>

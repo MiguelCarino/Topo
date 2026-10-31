@@ -43,8 +43,8 @@ window.addEventListener('load', () => { setTimeout(() => {
   // is obviously unfinished.
   ok('a missing param leaves the brace alone', t('Invalid gateway IP: {gw}', {}) === 'Invalid gateway IP: {gw}',
      t('Invalid gateway IP: {gw}', {}));
-  ok('a zero is still interpolated', t('{n} link(s) on distinct interfaces.', { n: 0 }) === '0 link(s) on distinct interfaces.',
-     t('{n} link(s) on distinct interfaces.', { n: 0 }));
+  ok('a zero is still interpolated', t('{n} links on distinct interfaces.', { n: 0 }) === '0 links on distinct interfaces.',
+     t('{n} links on distinct interfaces.', { n: 0 }));
 
   // ---- The findings, for real, in every language ----
   const before = state.settings.lang;
@@ -179,6 +179,8 @@ window.addEventListener('load', () => { setTimeout(() => {
   [ADD_HUB, ...ADD_KINDS].forEach((k) => { want(k.name, 'Add devices name'); want(k.label, 'Add devices tile'); });
   REPORT_FIELDS.forEach((f) => want(f.label, 'report field'));
   Object.values(PROFILES).forEach((p) => { want(p.label, 'mode picker'); want(p.blurb, 'mode picker'); });
+  // The Blocks tab's names stay English; what each block holds is a sentence.
+  SNIPPET_META.forEach((m) => want(m.blurb, 'Blocks blurb'));
   ok('the plain chrome is a real number of strings', chrome.size > 150, `${chrome.size} keys`);
   locales.forEach((loc) => {
     const missing = [...chrome].filter(([k]) => !has(loc, k));
@@ -203,18 +205,52 @@ window.addEventListener('load', () => { setTimeout(() => {
   // every literal t('…') in those files is read off the source and asked
   // for in each locale. A key built at run time (t(label)) is not seen here;
   // the field labels are checked by name below, since the changes list and
-  // the report print them.
+  // the report print them. The full editor's sidebar, the findings, the
+  // report, the sheets, the library and the share dialog are read the same
+  // way: a singular partner (t(n === 1 ? '…' : '…')) is a literal too, and
+  // it is the key most easily added to one locale and forgotten in the rest.
+  // So the first argument of each t( is walked rather than matched: a quoted
+  // string at its own level counts when it opens the argument or follows a
+  // ? or a :, which takes both branches of a ternary and leaves the operand
+  // of a comparison (t(kind === 'rack' ? …)) and a nested call's own
+  // arguments (t(isWireless(i) ? …)) alone.
+  const firstArgKeys = (src) => {
+    const keys = [];
+    const callRe = /\bt\(/g; let call;
+    while ((call = callRe.exec(src))) {
+      let i = call.index + 2, depth = 0, prev = '(';
+      while (i < src.length) {
+        const c = src[i];
+        if (c === '\'' || c === '"' || c === '`') {
+          let j = i + 1;
+          while (j < src.length && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
+          if (c !== '`' && depth === 0 && '(?:'.includes(prev)) keys.push(src.slice(i + 1, j));
+          prev = c; i = j + 1; continue;
+        }
+        if ('([{'.includes(c)) depth++;
+        else if (')]}'.includes(c)) { if (depth === 0) break; depth--; }
+        else if (c === ',' && depth === 0) break;
+        if (!/\s/.test(c)) prev = c;
+        i++;
+      }
+    }
+    return keys;
+  };
   const grpKeys = new Map();
-  ['js/groups.js', 'js/groupmap.js', 'js/rackview.js'].forEach((file) => {
+  ['js/groups.js', 'js/groupmap.js', 'js/rackview.js', 'js/ui.js', 'js/add.js', 'js/diagnostics.js', 'js/app.js',
+   'js/report.js', 'js/csv.js', 'js/library.js', 'js/share.js', 'js/table.js'].forEach((file) => {
     const req = new XMLHttpRequest(); req.open('GET', file, false); req.send();
-    const re = /\bt\(\s*(['"])((?:\\.|(?!\1).)*)\1/g; let m;
-    while ((m = re.exec(req.responseText))) grpKeys.set(m[2].replace(/\\(['"\\])/g, '$1'), file);
+    firstArgKeys(req.responseText).forEach((k) => grpKeys.set(k.replace(/\\n/g, '\n').replace(/\\(['"\\])/g, '$1'), file));
   });
+  // The walk sees both halves of a singular partner: pinned on one, so a
+  // later change to the walk cannot quietly lose them again.
+  ok('the sweep reads both branches of a ternary inside t()', grpKeys.has('{n} node · reusable template') && grpKeys.has('{n} nodes · reusable template'),
+     [...grpKeys.keys()].filter((k) => /reusable template/.test(k)).join(' | '));
   ['Group', 'Rack U', 'Rack height', 'Rack face', 'Rack depth', 'Ports face'].forEach((k) => grpKeys.set(k, 'NODE_FIELDS'));
-  ok('the Groups files ask for a real number of strings', grpKeys.size > 60, `${grpKeys.size} keys`);
+  ok('the swept files ask for a real number of strings', grpKeys.size > 600, `${grpKeys.size} keys`);
   locales.forEach((loc) => {
     const missing = [...grpKeys].filter(([k]) => !has(loc, k));
-    ok(`${loc} carries every string of the Groups tab, the map's frames and the rack view`, missing.length === 0,
+    ok(`${loc} carries every literal string of the swept files`, missing.length === 0,
        missing.length ? `${missing.length} missing, first: ${JSON.stringify(missing[0][0].slice(0, 50))} (${missing[0][1]})` : '');
   });
   // The report's rack elevation names each device's type as the inventory
@@ -228,6 +264,23 @@ window.addEventListener('load', () => { setTimeout(() => {
     const cell = elev ? elev.textContent : '';
     ok('the rack elevation names the type in the report\'s language', /FW1/.test(cell) && cell.includes(t('Firewall')) && !/Firewall/.test(cell), cell.replace(/\s+/g, ' ').slice(0, 80));
     setLocale('en');
+    if (keep) replaceDocument(keep, { origin: 'file', docId: 'i18n-back' });
+  }
+  // A selected cable's port pickers follow a language switch: they are
+  // built, not marked up, so applyLocale has to rebuild them.
+  {
+    const keep = state.doc;
+    loadDocState({ v: DOC_VERSION, nodes: [
+      { id: 'a', type: 'pc', name: 'A', x: 0, y: 0, interfaces: [{ id: 'i1', name: 'eth0' }] },
+      { id: 'b', type: 'pc', name: 'B', x: 100, y: 0, interfaces: [] }], links: [{ id: 'ab', source: 'a', target: 'b' }] });
+    select('ab', 'link');
+    const ports = () => document.getElementById('linkPortBody').textContent;
+    const enHad = ports().includes('No interfaces — add one.');
+    setLocale('es'); applyLocale();
+    ok('a selected cable\'s port pickers switch language with the page', enHad && ports().includes('Sin interfaces: añade una.') && !ports().includes('No interfaces'),
+       ports().slice(0, 80));
+    setLocale('en'); applyLocale();
+    select(null, null);
     if (keep) replaceDocument(keep, { origin: 'file', docId: 'i18n-back' });
   }
 

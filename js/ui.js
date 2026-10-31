@@ -211,6 +211,43 @@ function canvasDiscButton({ glyph, tip, onClick, at, fill = '#dc2626', fontSize 
 // The ✕ that deletes the selection (deleteSelected, js/app.js, looked up at
 // click time: app.js loads after this file).
 const canvasDeleteMark = (tip, at) => canvasDiscButton({ glyph: '✕', tip, at, onClick: () => deleteSelected() });
+// What a selected cable's end says on the map: its port, or that it has none.
+// Out here rather than inline because the label loop's own `t` (how far down
+// the cable) hides the translator there.
+function portLabelText(node, ifaceId) { return ifaceId ? ifaceLabel(node, ifaceId) : t('unbound'); }
+// Half the drawn width of that label, for keeping chips clear of it: about
+// 5px a character at font-size 8 in monospace, but a full-width glyph (the
+// Japanese ポート未指定, say) is about 8px, so the Latin guess left it
+// sticking out of its box.
+function portLabelHalf(text) {
+    let half = 2;
+    for (const ch of text) half += /[\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]/.test(ch) ? 4 : 2.5;
+    return half;
+}
+
+// A press on a note's card (a mouse's mousedown, or a finger's past the tap
+// margin through touchPress, js/app.js).
+function pressAnnotation(event, a) {
+    event.stopPropagation();
+    // Second press of a double-click: straight into typing. Handled here on
+    // mousedown (event.detail) rather than dblclick, because the first
+    // press re-renders the canvas and replaces this element mid-gesture —
+    // and it must not arm a drag either.
+    if (event.detail > 1) { openAnnotationEditor(a); return; }
+    if (state.linkSourceId) {
+        // Armed from a node or another note → complete a red leader onto
+        // this card. Armed from this same note → cancel.
+        const srcNode = getNode(state.linkSourceId);
+        if (srcNode) { toggleNoteLink(a, srcNode.id); return; }
+        const srcAnn = getAnnotation(state.linkSourceId);
+        if (srcAnn && srcAnn.id !== a.id) { toggleNoteLink(srcAnn, a.id); return; }
+        state.linkSourceId = null; renderCanvasOnly(); return;
+    }
+    delete a._ctlPin;   // moving the card ends any pinned size-control run
+    // A note is only ever selected (and dragged) on its own.
+    dragCollapse = null; startDrag(event, [a], a);
+    select(a.id, 'annotation');
+}
 
 function renderAnnotation(a) {
     const NS = 'http://www.w3.org/2000/svg';
@@ -291,27 +328,9 @@ function renderAnnotation(a) {
 
     // Same drag contract as nodes: shared isDraggingNode/draggedNode globals,
     // the mousemove handler finds this group via the ui-ann-<id> fallback.
-    g.addEventListener('mousedown', (event) => {
-        event.stopPropagation();
-        // Second press of a double-click: straight into typing. Handled here on
-        // mousedown (event.detail) rather than dblclick, because the first
-        // press re-renders the canvas and replaces this element mid-gesture —
-        // and it must not arm a drag either.
-        if (event.detail > 1) { openAnnotationEditor(a); return; }
-        if (state.linkSourceId) {
-            // Armed from a node or another note → complete a red leader onto
-            // this card. Armed from this same note → cancel.
-            const srcNode = getNode(state.linkSourceId);
-            if (srcNode) { toggleNoteLink(a, srcNode.id); return; }
-            const srcAnn = getAnnotation(state.linkSourceId);
-            if (srcAnn && srcAnn.id !== a.id) { toggleNoteLink(srcAnn, a.id); return; }
-            state.linkSourceId = null; renderCanvasOnly(); return;
-        }
-        delete a._ctlPin;   // moving the card ends any pinned size-control run
-        // A note is only ever selected (and dragged) on its own.
-        dragCollapse = null; startDrag(event, [a], a);
-        select(a.id, 'annotation');
-    });
+    g.addEventListener('mousedown', (event) => pressAnnotation(event, a));
+    // A finger drags it too, past the tap margin (touchPress, js/app.js).
+    g.addEventListener('touchstart', (e) => touchPress(e, (ev) => pressAnnotation(ev, a), () => !!getAnnotation(a.id)), { passive: true });
     // Right-click arms link mode from this note, mirroring nodes: the next
     // node clicked gets (or loses) the red leader.
     g.addEventListener('contextmenu', (event) => {
@@ -844,7 +863,7 @@ function drawCanvas() {
                 const off = Math.min(0.42, Math.max(0.15, 66 / span));
                 const pnx = -(tgt.y - src.y) / span, pny = (tgt.x - src.x) / span;
                 [[src, link.sourceIface, off, 1], [tgt, link.targetIface, 1 - off, -1]].forEach(([node, ifaceId, at, side]) => {
-                    const q = geo.pointAt(at), half = (ifaceId ? ifaceLabel(node, ifaceId) : 'unbound').length * 2.5 + 2;
+                    const q = geo.pointAt(at), half = portLabelHalf(portLabelText(node, ifaceId));
                     const cx = q.x + pnx * 10 * side, cy = q.y + pny * 10 * side;
                     chipAvoid.push({ x1: cx - half, y1: cy - 6, x2: cx + half, y2: cy + 6 });
                 });
@@ -950,7 +969,7 @@ function drawCanvas() {
             const pnx = -(tgt.y - src.y) / span, pny = (tgt.x - src.x) / span;
 
             [[src, link.sourceIface, off, 1], [tgt, link.targetIface, 1 - off, -1]].forEach(([node, ifaceId, t, side]) => {
-                const name = ifaceId ? ifaceLabel(node, ifaceId) : 'unbound';
+                const name = portLabelText(node, ifaceId);
                 const at = geo.pointAt(t);
                 const portLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 portLabel.setAttribute('class', 'port-label'); portLabel.setAttribute('data-adv', ''); // hidden in the reduced views (css/app.css)
@@ -1217,6 +1236,7 @@ function renderFaceplate(node, container) {
     count.type = 'number'; count.min = '0'; count.max = '96';
     count.value = String(portCountOf(node));
     count.className = 'if-in faceplate-count';
+    count.setAttribute('aria-label', t('Ports'));
     // Lowering the count under a port that has a cable in it is refused rather
     // than applied: the cable would be left on a port the switch no longer has,
     // which is a fault Topo made up, not one the network has. The field keeps
@@ -1233,7 +1253,8 @@ function renderFaceplate(node, container) {
     refusal.hidden = true;
     const refuse = (n) => {
         count.classList.add('bad');
-        refusal.textContent = t('Port {n} has a cable in it. Move that cable before going below {n} ports.', { n });
+        refusal.textContent = t(n === 1 ? 'Port {n} has a cable in it. Move that cable before going below {n} port.'
+            : 'Port {n} has a cable in it. Move that cable before going below {n} ports.', { n });
         refusal.hidden = false;
     };
     count.onblur = () => {
@@ -1272,7 +1293,7 @@ function renderFaceplate(node, container) {
         .sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
 
     if (!ports.length) {
-        grid.innerHTML = '<span class="rail-none">No ports. Raise the count above.</span>';
+        grid.innerHTML = `<span class="rail-none">${escapeHtml(t('No ports. Raise the count above.'))}</span>`;
     }
 
     // The faceplate shows positions (1, 2, 3…), as the hardware is printed;
@@ -1571,7 +1592,7 @@ function renderSidebarData(node) {
     }
 
     if (!node.interfaces.length) {
-        if (!hasPortGrid(node)) ifCont.innerHTML = '<span class="rail-none">No interfaces defined.</span>';
+        if (!hasPortGrid(node)) ifCont.innerHTML = `<span class="rail-none">${escapeHtml(t('No interfaces defined.'))}</span>`;
     }
     else {
         node.interfaces.forEach((iface, i) => {
@@ -1581,10 +1602,23 @@ function renderSidebarData(node) {
             const div = document.createElement('div'); div.className = 'if-row';
             const nameInp = document.createElement('input'); nameInp.type = 'text'; nameInp.value = iface.name; nameInp.placeholder = 'eth0';
             nameInp.className = 'if-in if-name';
-            nameInp.addEventListener('input', (e) => { node.interfaces[i].name = e.target.value; saveTyping(); renderTyped(); });
+            nameInp.setAttribute('aria-label', t('Interface'));
+            // The address field is named after its interface, and so is the
+            // MAC line's under it, so a rename renames both: one attribute
+            // each, no redraw.
+            let macLine = null;
+            nameInp.addEventListener('input', (e) => {
+                node.interfaces[i].name = e.target.value;
+                ipInp.setAttribute('aria-label', `${t('Address')} · ${e.target.value || t('Interface')}`);
+                if (macLine) macLine.querySelector('input').setAttribute('aria-label', `MAC · ${e.target.value || t('Interface')}`);
+                saveTyping(); renderTyped();
+            });
 
             const ipInp = document.createElement('input'); ipInp.type = 'text'; ipInp.value = iface.ip; ipInp.placeholder = 'CIDR';
             ipInp.className = 'if-in if-ip';
+            // The placeholder is not a name: once there is an address, a
+            // screen reader would have nothing to say what the field is.
+            ipInp.setAttribute('aria-label', `${t('Address')} · ${iface.name || t('Interface')}`);
             // A full /24 CIDR needs ~146px and the row can spare ~102, so a long
             // address scrolls out of sight — and "192.168.1.70/24" clipped to
             // "192.168.1.7" reads as a different, entirely valid address. Until
@@ -1606,9 +1640,12 @@ function renderSidebarData(node) {
             const explicit = iface.wireless !== undefined;
             kindBtn.textContent = ifaceIsWireless(iface) ? '📡' : '🔌';
             kindBtn.style.opacity = explicit ? '1' : '0.35';
+            // Whole sentences per kind: "wired" and "wireless" do not slot into
+            // a translated sentence as English words.
             kindBtn.title = explicit
-                ? `Forced ${iface.wireless ? 'wireless' : 'wired'} — click to cycle (inferred / radio / cable)`
-                : `Inferred ${ifaceIsWireless(iface) ? 'wireless' : 'wired'} from the name — click to override (macOS names Wi-Fi en0)`;
+                ? t(iface.wireless ? 'Forced wireless — click to cycle (inferred / radio / cable)' : 'Forced wired — click to cycle (inferred / radio / cable)')
+                : t(ifaceIsWireless(iface) ? 'Inferred wireless from the name — click to override (macOS names Wi-Fi en0)'
+                    : 'Inferred wired from the name — click to override (macOS names Wi-Fi en0)');
             kindBtn.onclick = () => {
                 iface.wireless = iface.wireless === undefined ? true : (iface.wireless ? false : undefined);
                 // Kind decides what may land here, so a flip can invalidate a
@@ -1629,7 +1666,8 @@ function renderSidebarData(node) {
                 renderTyped();
             });
 
-            const del = rowDeleteButton(isBond(iface) ? `Unbond ${iface.name} (members keep their cables)` : `Delete ${iface.name || 'interface'} and any cable in it`, () => {
+            const del = rowDeleteButton(isBond(iface) ? t('Unbond {name} (members keep their cables)', { name: iface.name })
+                : iface.name ? t('Delete {name} and any cable in it', { name: iface.name }) : t('Delete this interface and any cable in it'), () => {
                 // Unbonding is not deletion: the members outlive it, so the
                 // address has to be handed back rather than dropped.
                 if (isBond(iface)) removeBond(node, iface.id);
@@ -1648,7 +1686,8 @@ function renderSidebarData(node) {
             const radio = ifaceIsWireless(iface);
             wire.className = 'if-ico ' + (peer ? 'linked' : 'free');
             wire.textContent = peer ? (radio ? '📶' : '🔌') : (radio ? '📡' : '○');
-            wire.title = peer ? `${radio ? 'Associated' : 'Linked'} to ${peer.name}` : `${radio ? 'Radio' : 'Interface'} not linked`;
+            wire.title = peer ? t(radio ? 'Associated to {name}' : 'Linked to {name}', { name: peer.name })
+                : t(radio ? 'Radio not linked' : 'Interface not linked');
             if (link) wire.onclick = () => select(link.id, 'link');
 
             div.appendChild(nameInp); div.appendChild(ipInp);
@@ -1668,7 +1707,7 @@ function renderSidebarData(node) {
             // 44px short as it is. An interface already holding an address shows
             // it regardless — hiding a value that exists is how a drawing starts
             // lying about itself.
-            if (node.macOpen || hasMac(iface)) ifCont.appendChild(renderMacLine(node, iface));
+            if (node.macOpen || hasMac(iface)) ifCont.appendChild(macLine = renderMacLine(node, iface));
 
             // What the radio is (iface.radio, js/wifi.js): folded to one line
             // under it, since most of the time the line is all anyone needs.
@@ -1712,6 +1751,7 @@ function renderMacLine(node, iface) {
     inp.type = 'text'; inp.value = iface.mac || '';
     inp.placeholder = 'AA:BB:CC:DD:EE:FF';
     inp.className = 'if-in if-ip';
+    inp.setAttribute('aria-label', `MAC · ${iface.name || t('Interface')}`);
 
     const out = document.createElement('div');
     out.className = 'if-mac-out';
@@ -1728,7 +1768,9 @@ function renderMacLine(node, iface) {
         const d = api.decodeMac(normMac(raw));
         if (d.error) {
             inp.classList.add('bad');
-            out.innerHTML = `<span class="bad">${escapeHtml(d.error)}</span>`;
+            // decodeMac's own sentence is English (js/oui.js is shared, and
+            // untouched); the count it reports is normMac's length.
+            out.innerHTML = `<span class="bad">${escapeHtml(t('Need exactly 12 hex digits — got {n}. A MAC looks like AA:BB:CC:DD:EE:FF.', { n: normMac(raw).length }))}</span>`;
             return;
         }
         const bits = [];
@@ -1746,7 +1788,7 @@ function renderMacLine(node, iface) {
         const v = d.vendor;
         const vendor = v.vendor
             ? `<b>${escapeHtml(v.vendor)}</b>`
-            : '<span class="muted">OUI not in the built-in table</span>';
+            : `<span class="muted">${escapeHtml(t('OUI not in the built-in table'))}</span>`;
 
         // A duplicate is the reason this field exists at all: the flapping
         // diagnostic could only ever guess at it from IP co-location.
@@ -1762,11 +1804,13 @@ function renderMacLine(node, iface) {
         out.innerHTML =
             `<div>${vendor} · ${bits.join(' · ')}</div>` +
             (d.isLocal && !d.isMulticast && !d.isBroadcast
-                ? '<div class="warn">Randomised or hand-set — the vendor prefix means nothing here.</div>' : '') +
+                ? `<div class="warn">${escapeHtml(t('Randomised or hand-set — the vendor prefix means nothing here.'))}</div>` : '') +
             (others.length
                 // Names come from the document, which may be a stranger's
-                // shared link or file: escaped, as every other name in here is.
-                ? `<div class="bad">Also on ${others.map((h) => `${escapeHtml(h.node.name)} / ${escapeHtml(h.iface.name)}`).join(', ')} — two interfaces cannot share an address on one L2 domain.</div>`
+                // shared link or file: passed as a plain param and escaped
+                // with the sentence, as every other name in here is.
+                ? `<div class="bad">${escapeHtml(t('Also on {list} — two interfaces cannot share an address on one L2 domain.',
+                    { list: others.map((h) => `${h.node.name} / ${h.iface.name}`).join(', ') }))}</div>`
                 : '') +
             `<div class="muted">link-local ${escapeHtml(d.ll)}</div>`;
     }
@@ -1789,7 +1833,7 @@ function renderMacLine(node, iface) {
         }
     });
 
-    const clear = rowDeleteButton('Clear this address', () => {
+    const clear = rowDeleteButton(t('Clear this address'), () => {
         iface.mac = '';
         save(); renderSidebarData(node); renderNodeDiagnostics(node);
     });
@@ -1855,7 +1899,7 @@ function renderBondMode(node, bond) {
 
     const mode = document.createElement('select');
     mode.className = 'if-select';
-    mode.title = 'Active-Backup survives a switch failure; LACP needs both cables on one switch (or MLAG)';
+    mode.title = t('Active-Backup survives a switch failure; LACP needs both cables on one switch (or MLAG)');
     Object.entries(BOND_MODES).forEach(([value, text]) => {
         const opt = document.createElement('option'); opt.value = value; opt.textContent = text;
         if (bond.bond.mode === value) opt.selected = true;
@@ -1883,6 +1927,7 @@ function renderBondMember(node, member, bond, container) {
     const nameInp = document.createElement('input');
     nameInp.type = 'text'; nameInp.value = member.name; nameInp.placeholder = 'eno1';
     nameInp.className = 'if-in if-name';
+    nameInp.setAttribute('aria-label', t('Interface'));
     nameInp.addEventListener('input', (e) => {
         const real = node.interfaces.find((x) => x.id === member.id);
         if (real) real.name = e.target.value;
@@ -1891,17 +1936,17 @@ function renderBondMember(node, member, bond, container) {
 
     const note = document.createElement('span');
     note.className = 'if-note';
-    note.textContent = `member of ${bond.name}`;
+    note.textContent = t('member of {name}', { name: bond.name });
 
     const link = linkOnIface(node.id, member.id);
     const peer = link ? getNode(link.source === node.id ? link.target : link.source) : null;
     const wire = document.createElement('button');
     wire.className = 'if-ico ' + (peer ? 'linked' : 'free');
     wire.textContent = peer ? '🔌' : '○';
-    wire.title = peer ? `Linked to ${peer.name}` : 'Not linked';
+    wire.title = peer ? t('Linked to {name}', { name: peer.name }) : t('Not linked');
     if (link) wire.onclick = () => select(link.id, 'link');
 
-    const pull = rowDeleteButton(`Remove ${member.name} from ${bond.name}`, () => {
+    const pull = rowDeleteButton(t('Remove {member} from {bond}', { member: member.name, bond: bond.name }), () => {
         const remaining = (bond.bond.members || []).filter((id) => id !== member.id);
         if (remaining.length) {
             bond.bond.members = remaining;
@@ -1951,7 +1996,7 @@ function renderLinkPorts(link) {
 
         const interfaces = getInterfaces(node);
         if (!interfaces.length) {
-            chips.innerHTML = '<span class="rail-none">No interfaces — add one.</span>';
+            chips.innerHTML = `<span class="rail-none">${escapeHtml(t('No interfaces — add one.'))}</span>`;
         }
 
         interfaces.forEach((iface) => {
@@ -2046,18 +2091,18 @@ function renderSiteRef(node) {
     // among its options silently resets to index 0. Without it, clicking a
     // cloud on a link someone sent you and then touching any other field would
     // destroy the reference the sender wrote.
-    if (ref && !entry) sel.appendChild(new Option(ref.name || '(unnamed site)', SITE_REF_UNRESOLVED));
-    sel.appendChild(new Option('— not a site —', ''));
+    if (ref && !entry) sel.appendChild(new Option(ref.name || t('(unnamed site)'), SITE_REF_UNRESOLVED));
+    sel.appendChild(new Option(t('— not a site —'), ''));
     libraryNetworks()   // a saved template is not a site
         .filter((e) => e.id !== state.libraryId)   // a site cannot stand for itself
         .forEach((e) => sel.appendChild(new Option(e.name, e.id)));
     sel.value = entry ? entry.id : (ref ? SITE_REF_UNRESOLVED : '');
 
     hint.classList.toggle('hidden', !(ref && !entry));
-    if (ref && !entry) hint.textContent = 'Not in this browser — import the binder that holds it to link them.';
+    if (ref && !entry) hint.textContent = t('Not in this browser — import the binder that holds it to link them.');
     open.classList.toggle('hidden', !entry);
     if (entry) {
-        open.textContent = `↗ Open ${entry.name}`;
+        open.textContent = `↗ ${t('Open {name}', { name: entry.name })}`;
         open.className = 'rail-btn go';
         open.onclick = () => openFromLibrary(entry.id);
     }
@@ -2311,7 +2356,7 @@ function select(id, type) {
                 const gwIpStr = effectiveGw(node), targetNode = state.nodes.find((n) => getValidIps(n).some((ipData) => ipData.ip.toString() === gwIpStr));
                 if (targetNode) {
                     focusOnMap({ type: 'node', id: targetNode.id });
-                } else { showToast(`Gateway node (${gwIpStr}) not found in the topology.`); }
+                } else { showToast(t('Gateway node ({ip}) not found in the topology.', { ip: gwIpStr })); }
             };
         } else { jumpGwBtn.classList.add('hidden'); }
         renderSidebarData(node);

@@ -485,7 +485,8 @@ function addNamesLine(devices) {
         if (last && last.type === d.type) last.to = d.name; else runs.push({ type: d.type, from: d.name, to: null });
     });
     const shown = runs.slice(0, 4).map((r) => (r.to ? `${r.from} … ${r.to}` : r.from));
-    if (runs.length > 4) shown.push(t('{n} more kinds', { n: runs.length - 4 }));
+    const rest = runs.length - 4;
+    if (rest > 0) shown.push(t(rest === 1 ? '{n} more kind' : '{n} more kinds', { n: rest }));
     return t('Names: {names}', { names: shown.join(', ') });
 }
 const SHARED_RUN = 'The pattern has no {type}, so every kind shares one run of numbers.';
@@ -500,7 +501,7 @@ function renderAddSummary() {
     const warn = [];
     if (req.mode === 'new') {
         const n = req.items.reduce((s, i) => s + i.count, 0);
-        lines.push(t('A router and {n} devices.', { n }));
+        lines.push(t(n === 1 ? 'A router and {n} device.' : 'A router and {n} devices.', { n }));
         // The names too, as buildNewNetwork will give them: the gear the
         // router serves first, then the hosts, on a map holding only the
         // router. Without them a pattern's surprise (PC-01 is a switch) was
@@ -519,7 +520,7 @@ function renderAddSummary() {
     } else {
         const plan = planAddDevices(req);
         const n = plan.total;
-        btn.textContent = n ? t('Add {n} devices', { n }) : t('Add devices');
+        btn.textContent = n ? t(n === 1 ? 'Add {n} device' : 'Add {n} devices', { n }) : t('Add devices');
         btn.disabled = !n || !!state.readOnly;
         if (n) {
             lines.push(addNamesLine(plan.devices));
@@ -787,7 +788,7 @@ function renderBlocks() {
     list.innerHTML = '';
     SNIPPET_META.forEach((meta) => {
         const block = builtinBlock(meta.key);
-        if (block) list.appendChild(libraryItem(meta, () => insertBlockFromMenu(block)));
+        if (block) list.appendChild(libraryItem({ ...meta, blurb: t(meta.blurb) }, () => insertBlockFromMenu(block)));
     });
     const mine = libraryBlocks();
     const own = addEl('userBlockList');

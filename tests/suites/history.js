@@ -101,6 +101,47 @@ window.addEventListener('load', () => {
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: true, bubbles: true }));
   ok('Ctrl+Shift+Z redoes', getNode('k') && getNode('k').name === 'K1', getNode('k') && getNode('k').name);
 
+  // ---- Ctrl+Z on a tick or a select undoes the diagram ----
+  // Chromium's own Undo there reached back into the last text field typed
+  // into and put its text back as a new edit, while the tick stayed. A tick or
+  // a select has no text undo, so the key is the diagram's; a text field
+  // keeps its own.
+  const press = (target, extra) => {
+      const e = new KeyboardEvent('keydown', Object.assign({ key: 'z', ctrlKey: true, bubbles: true, cancelable: true }, extra));
+      target.dispatchEvent(e);
+      return e;
+  };
+  state.nodes = [normalizeLoadedNode({ id: 'rt', type: 'router', name: 'RT', x: 0, y: 0, nat: false, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.1/24' }] })];
+  state.links = [];
+  initHistory();
+  select('rt', 'node');
+  const nat = document.getElementById('propNat');
+  nat.focus(); nat.click();
+  ok('ticking NAT turns it on', getNode('rt').nat === true);
+  const zNat = press(nat);
+  ok('Ctrl+Z on the NAT box is taken from the browser', zNat.defaultPrevented);
+  ok('and undoes the tick in the diagram', !getNode('rt').nat, String(getNode('rt').nat));
+  ok('and the box shows it unticked', document.getElementById('propNat').checked === false);
+  press(document.getElementById('propNat'), { shiftKey: true });
+  ok('Ctrl+Shift+Z on the box redoes the tick', getNode('rt').nat === true, String(getNode('rt').nat));
+  undo();
+  press(document.getElementById('propNat'), { key: 'y' });
+  ok('Ctrl+Y on the box redoes it too', getNode('rt').nat === true, String(getNode('rt').nat));
+
+  const status = document.getElementById('propStatus');
+  status.focus(); status.value = 'retired'; status.dispatchEvent(new Event('change', { bubbles: true }));
+  ok('a status picked in the select is saved', getNode('rt').status === 'retired');
+  const zStatus = press(document.getElementById('propStatus'));
+  ok('Ctrl+Z on the status select undoes the pick', zStatus.defaultPrevented && getNode('rt').status !== 'retired', String(getNode('rt').status));
+
+  const depth = _undoStack.length;
+  const name = document.getElementById('propName');
+  name.focus();
+  const zName = press(name);
+  ok('inside a text field Ctrl+Z stays the browser\'s', !zName.defaultPrevented);
+  ok('and files no diagram undo', _undoStack.length === depth, `${depth} → ${_undoStack.length}`);
+  name.blur();
+
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);
 });

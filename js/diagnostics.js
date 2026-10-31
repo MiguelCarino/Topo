@@ -248,7 +248,8 @@ function evaluatePorts(node) {
 
     const unbound = adjacent.filter((l) => !ifaceIdOn(l, node.id));
     if (unbound.length) {
-        return { level: 'warn', text: t('{n} link(s) are not bound to an interface. Select the link and pick a port.', { n: unbound.length }) };
+        return { level: 'warn', text: t(unbound.length === 1 ? '{n} link is not bound to an interface. Select the link and pick a port.'
+            : '{n} links are not bound to an interface. Select the links and pick their ports.', { n: unbound.length }) };
     }
 
     // A switch port or a host NIC is a physical socket that takes one cable. A
@@ -297,7 +298,8 @@ function evaluatePorts(node) {
     const known = new Set(getInterfaces(node).map((i) => i.id));
     const orphaned = adjacent.filter((l) => !known.has(ifaceIdOn(l, node.id)));
     if (orphaned.length) {
-        return { level: 'bad', text: t('{n} link(s) land on interfaces this node no longer has. Rebind them or raise the port count.', { n: orphaned.length }) };
+        return { level: 'bad', text: t(orphaned.length === 1 ? '{n} link lands on an interface this node no longer has. Rebind it or raise the port count.'
+            : '{n} links land on interfaces this node no longer has. Rebind them or raise the port count.', { n: orphaned.length }) };
     }
 
     if (hasPortGrid(node)) {
@@ -306,13 +308,19 @@ function evaluatePorts(node) {
         const total = portCountOf(node);
         const used = new Set(adjacent.map((l) => ifaceIdOn(l, node.id)).filter((id) => /^p\d+$/.test(id))).size;
         const clients = adjacent.filter((l) => ifaceIsWireless(ifaceOn(node, ifaceIdOn(l, node.id)))).length;
-        const key = !clients ? '{used} of {total} ports in use.'
-            : clients === 1 ? '{used} of {total} ports in use, {n} wireless client.'
-                : '{used} of {total} ports in use, {n} wireless clients.';
+        // A one-port faceplate (a default AP's uplink) says "port", whatever
+        // its clients number.
+        const key = total === 1
+            ? (!clients ? '{used} of {total} port in use.'
+                : clients === 1 ? '{used} of {total} port in use, {n} wireless client.'
+                    : '{used} of {total} port in use, {n} wireless clients.')
+            : (!clients ? '{used} of {total} ports in use.'
+                : clients === 1 ? '{used} of {total} ports in use, {n} wireless client.'
+                    : '{used} of {total} ports in use, {n} wireless clients.');
         return { level: 'good', text: t(key, { used, total, n: clients }) };
     }
 
-    return { level: 'good', text: t('{n} link(s) on distinct interfaces.', { n: adjacent.length }) };
+    return { level: 'good', text: t(adjacent.length === 1 ? '{n} link, on its own interface.' : '{n} links on distinct interfaces.', { n: adjacent.length }) };
 }
 
 // Radio and copper are not interchangeable: a Wi-Fi association cannot originate
@@ -401,6 +409,9 @@ function evaluateBond(node) {
         }
 
         const members = bondMembers(node, bond);
+        if (!members.length) {
+            return { level: 'warn', text: t('{bond} has no members. Add two members or unbond it.', { bond: bond.name }) };
+        }
         if (members.length < 2) {
             return { level: 'warn', text: t('{bond} has {n} member. A bond of one is a NIC with extra steps — it buys no redundancy and no bandwidth. Add a second member or unbond it.', { bond: bond.name, n: members.length }) };
         }
@@ -986,16 +997,19 @@ function calculateReachability(startNodeId, opts = {}) {
     return { reachableNodes, reachableLinks };
 }
 
+// Written through t() on every draw, not by applyStaticI18n(): the text is
+// the trace's state, so a data-i18n key captured from it would be whatever it
+// said first. applyLocale() calls this on an empty map, where no draw runs.
 function updateTraceStatus(reach) {
         const el = document.getElementById('traceStatus'); if (!el) return;
-        if (!state.settings.traceMode) { el.textContent = 'Trace off'; el.className = 'cs-trace-status'; return; }
-        if (!state.selectedId || state.selectedType !== 'node') { el.textContent = 'Select a node'; el.className = 'cs-trace-status active'; return; }
+        if (!state.settings.traceMode) { el.textContent = t('Trace off'); el.className = 'cs-trace-status'; return; }
+        if (!state.selectedId || state.selectedType !== 'node') { el.textContent = t('Select a node'); el.className = 'cs-trace-status active'; return; }
 
         let count = 0;
         if (reach) {
             reach.reachableNodes.forEach(id => { if(!isDumbDevice(getNode(id)) && id !== state.selectedId) count++; });
         }
-        el.textContent = `→ ${count} devices`; el.className = 'cs-trace-status active';
+        el.textContent = t(count === 1 ? '→ {n} device' : '→ {n} devices', { n: count }); el.className = 'cs-trace-status active';
     }
 
 // ============================================================================
@@ -1385,19 +1399,21 @@ function unpin(index) {
     if (!pinnedList()[index]) return false;
     return dropFindingNotes('pinned', (a, i) => i === index, false);
 }
-// Serviced today: the device's last service is today, so the service it was
-// due is done. Its pins, accepts and schedules for a service are about that
-// service: the device leaves them (an entry naming nobody else goes). One
-// undo step.
+// Serviced today: the devices' last service is today, so the service they
+// were due is done. Their pins, accepts and schedules for a service are
+// about that service: the devices leave them (an entry naming nobody else
+// goes). One device id or several (a Findings line folds the devices with
+// the same detail); one undo step however many.
 const SERVICE_CHECKS = ['service', 'service-due'];
-function servicedToday(nodeId) {
-    const node = getNode(nodeId);
-    if (!node || readOnlyRefuses()) return false;
-    const leave = (list) => list.map((a) => (SERVICE_CHECKS.includes(a.check) && a.nodeIds.includes(nodeId)
-        ? Object.assign({}, a, { nodeIds: a.nodeIds.filter((id) => id !== nodeId) }) : a))
+function servicedToday(nodeIdOrIds) {
+    const ids = [].concat(nodeIdOrIds).filter(getNode);
+    if (!ids.length || readOnlyRefuses()) return false;
+    const leave = (list) => list.map((a) => (SERVICE_CHECKS.includes(a.check) && a.nodeIds.some((id) => ids.includes(id))
+        ? Object.assign({}, a, { nodeIds: a.nodeIds.filter((id) => !ids.includes(id)) }) : a))
         .filter((a) => a.nodeIds.length || a.linkIds.length);
     batch(() => {
-        node.serviced = todayISO();
+        const today = todayISO();
+        ids.forEach((id) => { getNode(id).serviced = today; });
         state.pinned = leave(pinnedList());
         state.accepted = leave(acceptedList());
         save(); renderCanvasOnly();
@@ -1617,21 +1633,22 @@ function labelFindings() {
 // (upkeepState), so the same file says more as it gets older.
 function upkeepFindings(today = checksDay()) {
     const out = [];
-    const ago = (days) => (days < 60 ? t('{n} days ago', { n: days })
+    const ago = (days) => (days < 60 ? t(days === 1 ? '{n} day ago' : '{n} days ago', { n: days })
         : days < 730 ? t('about {n} months ago', { n: Math.round(days / 30.4) }) : t('about {n} years ago', { n: Math.round(days / 365.25) }));
     state.nodes.forEach((node) => {
         const st = upkeepState(node, today);
         const name = node.name || node.id;
         if (st.old) {
             out.push({ key: 'age', level: 'warn', check: t('Age'), subject: name, nodeIds: [node.id],
-                detail: t('In service for {age}, and expected to last {life} years. Plan its replacement.', { age: ageText(st.old), life: st.old.life }) });
+                detail: t(st.old.life === 1 ? 'In service for {age}, and expected to last {life} year. Plan its replacement.'
+                    : 'In service for {age}, and expected to last {life} years. Plan its replacement.', { age: ageText(st.old), life: st.old.life }) });
         }
         const s = st.service;
         if (!s || !s.level) return;
         if (s.level === 'info') {
             out.push({ key: 'service-due', level: 'info', check: t('Service due'), subject: name, nodeIds: [node.id], scope: s.due,
                 detail: s.days === 0 ? t('Due for service today.', { name })
-                    : t('Due for service on {date}, in {n} days.', { name, date: s.due, n: s.days }) });
+                    : t(s.days === 1 ? 'Due for service on {date}, in {n} day.' : 'Due for service on {date}, in {n} days.', { name, date: s.due, n: s.days }) });
             return;
         }
         out.push({ key: 'service', level: s.level, check: t('Service'), subject: name, nodeIds: [node.id], scope: s.due,
@@ -2212,9 +2229,13 @@ function validateTopology(diag) {
             const pinned = linePinned(item);
             const lapsed = item.findings.map((f) => f.lapsed).find(Boolean);
             const at = `data-g="${gi}" data-i="${ii}"`;
+            // A line that is only about a service (due or overdue) can be
+            // closed where it is read: Serviced today does the service for
+            // every device on it, the way Accept takes the whole line.
+            const serviceIds = item.findings.every((f) => SERVICE_CHECKS.includes(f.key)) ? [...new Set(item.findings.flatMap((f) => f.nodeIds))] : [];
             const actions = canAccept ? `<span class="ca-acts">
-                <button type="button" class="link-btn quiet ca-accept" ${at} title="${escapeHtml(t('Keep this finding as known, with a reason. It stays listed but no longer counts.'))}">${escapeHtml(t('Accept…'))}</button>
-                <button type="button" class="link-btn quiet ca-schedule" ${at} title="${escapeHtml(t('Set it aside until a date, with what is planned. It comes back by itself the day after.'))}">${escapeHtml(t('Schedule…'))}</button>
+                ${serviceIds.length ? `<button type="button" class="link-btn quiet ca-serviced" ${at} title="${escapeHtml(t('Record that it was serviced today'))}">${escapeHtml(t('Serviced today'))}</button>` : ''}
+                <button type="button" class="link-btn quiet ca-accept" ${at} title="${escapeHtml(t('Keep this finding as known, with a reason, for good or until a date. It stays listed but no longer counts.'))}">${escapeHtml(t('Accept…'))}</button>
                 <button type="button" class="link-btn quiet ca-pin" ${at} aria-pressed="${pinned}" title="${escapeHtml(t(pinned ? 'Take it off the list for the next visit' : 'Add it to the list to check on the next visit'))}">${escapeHtml(t(pinned ? 'Unpin' : 'Pin'))}</button>
             </span>` : '';
             return `<li class="ca-item ${item.level}"><button type="button" class="ca-line" ${at}
@@ -2321,11 +2342,11 @@ async function onFindingClick(e) {
         head.nextElementSibling.hidden = !open;
         return;
     }
-    const schedule = e.target.closest('.ca-schedule');
-    if (schedule) {
-        const g = panelGroups[Number(schedule.dataset.g)];
-        const item = g && g.items[Number(schedule.dataset.i)];
-        if (item) await askSchedule(item);
+    const serviced = e.target.closest('.ca-serviced');
+    if (serviced) {
+        const g = panelGroups[Number(serviced.dataset.g)];
+        const item = g && g.items[Number(serviced.dataset.i)];
+        if (item && servicedToday([...new Set(item.findings.flatMap((f) => f.nodeIds))])) showToast(t('Serviced today: recorded, and off the list.'), 'ok');
         return;
     }
     const pin = e.target.closest('.ca-pin');
@@ -2356,34 +2377,24 @@ function stepThrough(key, targets) {
     showFindingOnMap(targets[step % targets.length]);
 }
 
-// The reason is asked for, and required: an accept nobody can explain later
-// is a finding swept under the rug, which is what this must not become.
+// Accept, for good or until a date. The reason is always required: an accept
+// nobody can explain later is a finding swept under the rug, which is what
+// this must not become. The date is optional: left empty, the finding is
+// accepted for good; set (today or later), it stops counting until that day
+// and is back the day after, with the reason as what is planned. A date
+// with no plan is a finding put off, so the date never stands in for it.
 async function askAcceptReason(item) {
-    const what = findingItemText(item);
-    const reason = await askPrompt(t('Why is this accepted? The reason is kept with the network and printed in the report.\n\n{finding}', { finding: what }),
-        { title: t('Accept a finding'), ok: t('Accept') });
-    if (reason === null) return false;
-    if (!reason.trim()) { showToast(t('Nothing was accepted: a reason is needed.')); return false; }
-    const done = acceptFindings(item.findings, reason);
-    if (done) showToast(t('Accepted. It stays listed under Accepted and no longer counts.'), 'ok');
-    return done;
-}
-
-// Scheduled: accepted until a date, with what is planned (both needed: a
-// date with no plan is a finding put off, and a plan with no date is an
-// accept). The date is today or later; the finding is back the day after.
-async function askSchedule(item) {
-    const what = findingItemText(item);
-    const today = todayISO();
-    const answer = await askPromptDate(t('What is planned, and until when should it wait? It stops counting until that day and comes back by itself the day after.\n\n{finding}', { finding: what }),
-        { title: t('Schedule a finding'), ok: t('Schedule'),
-          date: { label: t('Until'), value: todayISO(new Date(Date.now() + 30 * 86400000)), min: today } });
+    const what = findingItemText(item), today = todayISO();
+    const answer = await askPromptDate(t('Why is this accepted, or what is planned? The reason is kept with the network and printed in the report. Leave the date empty to accept it for good, or pick the day it may wait until: it comes back by itself the day after.\n\n{finding}', { finding: what }),
+        { title: t('Accept a finding'), ok: t('Accept'), date: { label: t('Until (optional)'), value: '', min: today } });
     if (answer === null) return false;
-    if (!answer.value.trim()) { showToast(t('Nothing was scheduled: say what is planned.')); return false; }
-    const day = customDate(answer.date);
-    if (!day || day < today) { showToast(t('Nothing was scheduled: pick a day from today on.')); return false; }
-    const done = acceptFindings(item.findings, answer.value, day);
-    if (done) showToast(t('Scheduled until {date}. It comes back by itself the day after.', { date: day }), 'ok');
+    if (!answer.value.trim()) { showToast(t('Nothing was accepted: a reason is needed.')); return false; }
+    const day = answer.date ? customDate(answer.date) : null;
+    if (answer.date && (!day || day < today)) { showToast(t('Nothing was scheduled: pick a day from today on.')); return false; }
+    // No third argument with no date, so the entry carries no until key.
+    const done = day ? acceptFindings(item.findings, answer.value, day) : acceptFindings(item.findings, answer.value);
+    if (done) showToast(day ? t('Scheduled until {date}. It comes back by itself the day after.', { date: day })
+        : t('Accepted. It stays listed under Accepted and no longer counts.'), 'ok');
     return done;
 }
 // Pin with what to look at (optional), or unpin when every finding of the

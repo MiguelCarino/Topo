@@ -51,6 +51,11 @@
 /* A sticky note stays yellow with dark writing; plain text turns white. */
 .map-ink .topo-svg #layer-annotations rect[fill="#fef9c3"] + text { fill: #1e293b; }
 .map-ink .topo-svg #layer-annotations rect[fill="transparent"] + text { fill: var(--mi-fg); }
+/* A selected cable's port labels are dark amber (red when unbound) for the
+   paper map; on dark or blue they would sink, so they take the light pair.
+   Their white halo already follows --mi-bg by the stroke rule above. */
+.map-ink .topo-svg .port-label { fill: #fcd34d; }
+.map-ink .topo-svg .port-label[fill="#dc2626"] { fill: #fecaca; }
 .zoom-ctl .map-ink-btn[aria-pressed="true"] { color: var(--accent); background: var(--accent-faint); }
 .zoom-ctl .map-ink-btn[data-ink="blue"] { color: #93c5fd; background: rgba(27, 79, 140, 0.45); }
 
@@ -136,9 +141,10 @@
    drawn, in the ok colour, apart from a frame's accent and a host's info. */
 .pair-drop-ring { fill: color-mix(in srgb, var(--ok) 14%, transparent); stroke: var(--ok); stroke-width: 2.5; stroke-dasharray: 6 4; pointer-events: none; }
 .pair-drop-cue .grp-drop-pill { fill: var(--ok); }
-/* A finger on a device's card drags it (touchPressNode, js/app.js): the card
-   takes no pan or pinch of its own, so its moves reach the page. */
-#layer-nodes > g[id^="ui-node-"] { touch-action: none; }
+/* A finger on a device's card, a collapsed group, a frame's tab or a note
+   drags it (touchPress, js/app.js): these take no pan or pinch of their own,
+   so their moves reach the page. */
+#layer-nodes > g[id^="ui-node-"], #layer-nodes > g.grp-node, #layer-groups .grp-tab, #layer-annotations > g[id^="ui-ann-"] { touch-action: none; }
 .host-badge { cursor: pointer; }
 .host-badge:hover > rect:not(.grp-toggle-hit) { stroke: var(--accent); }
 /* What the pointer is over on the map lights up, so it is plain what a click
@@ -314,7 +320,9 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
     color: var(--text-sec); border: 0; border-right: 1px solid var(--border); border-radius: 5px 0 0 5px;
     font-family: var(--mono); font-size: inherit; cursor: pointer; }
 .unit-field .unit-pick:hover, .unit-field .unit-pick:focus { color: var(--accent); outline: none; }
-.unit-field .unit-pick option { background: #111; color: var(--text); }
+/* The open list is the system's, painted from these: the card's pair, as
+   carino-theme.css gives .select option, so Colourful light is not dark. */
+.unit-field .unit-pick option { background: var(--bg-card); color: var(--text); }
 .unit-field > .input, .unit-field > .tv-in { flex: 1; min-width: 0; border: 0; border-radius: 0 5px 5px 0; background: transparent; box-shadow: none; }
 .unit-field > .input:focus, .unit-field > .tv-in:focus { box-shadow: none; }
 .unit-field:has(> .bad) { border-color: color-mix(in srgb, var(--err) 70%, transparent); background: color-mix(in srgb, var(--err) 12%, transparent); }
@@ -655,7 +663,8 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .ca-line:hover:not(:disabled), .ca-line:focus-visible { background: var(--accent-faint); color: var(--accent); }
 .ca-line:disabled { cursor: default; color: var(--text-muted); }
 .ca-accept, .ca-reopen { flex: none; }
-/* Accept…, Schedule…, Pin on a line; Serviced today, Unpin on the visit list. */
+/* Serviced today (service lines), Accept… and Pin on a line; Serviced today,
+   Unpin on the visit list. Three fit the narrowest rail in every locale. */
 .ca-acts { flex: none; display: inline-flex; gap: 8px; }
 .ca-pin[aria-pressed="true"] { color: var(--accent); }
 .ca-pinned { font-size: 0.9em; }
@@ -821,17 +830,37 @@ body.table-view #conflictPill { display: none !important; }
 .tv-hint { margin: 8px 0; font-size: var(--fs-micro); color: var(--text-muted); }
 .tv-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); }
 .tv-empty { margin: 0; padding: 24px 16px; font-size: var(--fs-sm); color: var(--text-muted); }
-table.data.tv-grid { width: max-content; min-width: 100%; }
+/* The tick and twist columns are a fixed width so the identifier column (the
+   first one, js/table.js tvBuildView) can be pinned just right of them: a
+   wide table scrolled sideways still says which row is which. */
+table.data.tv-grid { width: max-content; min-width: 100%; --tv-chk-w: 2rem; --tv-exp-w: 1.75rem; }
 table.data.tv-grid th, table.data.tv-grid td { padding: 5px 10px; white-space: nowrap; }
-.tv-grid thead th { position: sticky; top: 0; z-index: 1; background: var(--bg-card); }
+.tv-grid thead th { position: sticky; top: 0; z-index: 2; background: var(--bg-card); }
 .tv-grid tbody tr:hover td { background: var(--accent-faint); }
+.tv-grid .tv-chk, .tv-grid .tv-exp, .tv-grid .tv-key { position: sticky; z-index: 1; background-color: var(--bg-card); }
+.tv-grid .tv-chk { left: 0; }
+.tv-grid .tv-exp, .tv-grid .tv-key { left: var(--tv-chk-w); }
+.tv-grid.tv-has-exp .tv-key { left: calc(var(--tv-chk-w) + var(--tv-exp-w)); }
+.tv-grid thead th:is(.tv-chk, .tv-exp, .tv-key) { z-index: 3; }
+/* The row tints are translucent, and a pinned cell has the row scrolling under
+   it, so there the tint is laid over the card instead. */
+.tv-grid tbody tr:not(.tv-sub):hover td:is(.tv-chk, .tv-exp, .tv-key),
+.tv-grid tr.tv-sel td:is(.tv-chk, .tv-exp, .tv-key) { background: linear-gradient(var(--accent-faint), var(--accent-faint)), var(--bg-card); }
+/* The column's edge as a line of its own, since a cell border does not stick
+   in a collapsed table. Inside the cell's right edge: a body cell clips what
+   overflows it (its ellipsis), so a line just outside would never show. */
+.tv-grid .tv-key::after { content: ''; position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: var(--border); pointer-events: none; }
+.tv-grid td.tv-key.tv-editing { z-index: 2; }
 .tv-sort {
     display: inline-flex; align-items: center; gap: 4px; padding: 0; background: none; border: none; cursor: pointer;
     font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;
 }
 .tv-sort:hover { color: var(--accent); }
 .tv-arrow { min-width: 0.8em; color: var(--accent); }
-.tv-chk, .tv-exp { width: 1%; text-align: center; }
+.tv-chk, .tv-exp { text-align: center; }
+.tv-grid .tv-chk { width: var(--tv-chk-w); min-width: var(--tv-chk-w); max-width: var(--tv-chk-w); }
+.tv-grid .tv-exp { width: var(--tv-exp-w); min-width: var(--tv-exp-w); max-width: var(--tv-exp-w); }
+table.data.tv-grid :is(th, td):is(.tv-chk, .tv-exp) { padding-left: 4px; padding-right: 4px; }
 .tv-chk input { accent-color: var(--accent); vertical-align: middle; cursor: pointer; }
 .tv-twist { padding: 0 4px; background: none; border: none; cursor: pointer; color: var(--text-muted); font: inherit; }
 .tv-twist:hover { color: var(--accent); }
@@ -1588,6 +1617,8 @@ body.rack-view #conflictPill { display: none !important; }
 /* table.data sets its cells' colour, so these say which table they mean. */
 .paste-preview table.data tr.paste-bad td { color: var(--err); }
 .paste-preview table.data tr.paste-same td, .paste-preview table.data tr.paste-skip td { color: var(--text-muted); }
+/* The spreadsheet review's closing line: how many rows it does not list. */
+.paste-preview table.data tr.csv-more td { color: var(--text-muted); font-size: var(--fs-micro); text-align: center; }
 
 /* Spreadsheets (js/csv.js): the paste dialog's modal, a little wider for the
    column mapping, with Export and Import on the fleet's .tabbar. */
@@ -1911,6 +1942,8 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 @media (max-width: 640px) {
     /* The hint is about keys and a double click; a phone has neither. */
     .tv-hint { display: none; }
+    /* A pinned name may not take the whole width of a phone. */
+    .tv-grid .tv-key { max-width: 9rem; }
 
     .netline { display: none; }
     .landing-mark img { height: clamp(46px, 13vw, 78px); }

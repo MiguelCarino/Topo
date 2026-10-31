@@ -87,7 +87,7 @@ window.addEventListener('load', () => {
      state.settings.traceMode === true && state.selectedId === 'r' && !diagPanel.classList.contains('hidden')
      && document.getElementById('toggleTrace').checked, `selected=${state.selectedId}`);
   ok('and announces it (the phone button listens)', heard === true);
-  ok('the status line counts what the device reaches', /→ 1 devices/.test(document.getElementById('traceStatus').textContent),
+  ok('the status line counts what the device reaches', /→ 1 device$/.test(document.getElementById('traceStatus').textContent),
      document.getElementById('traceStatus').textContent);
   document.getElementById('toggleTrace').click();
   ok('the checkbox turns it off through the same path', state.settings.traceMode === false && heard === false

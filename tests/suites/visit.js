@@ -6,12 +6,13 @@
 //      unpinned from the line or the list; a pin whose finding went away is
 //      still listed, saying so; pins travel through the file and drop what
 //      is gone, and a damaged entry is dropped;
-//   2. schedules: a finding scheduled until a date is accepted until then and
-//      no longer counted; the dialog asks for both and refuses a past day or
-//      no plan; the day after, it is open again by itself and says what was
+//   2. schedules: a finding accepted until a date (Accept with a day) is
+//      accepted until then and no longer counted; the dialog refuses a past
+//      day or no plan; the day after, it is open again by itself and says what was
 //      scheduled; scheduling again replaces the lapsed entry; until travels
 //      through the file;
-//   3. Serviced today: from the panel or the visit list, Last serviced is
+//   3. Serviced today: from the panel or the visit list (the Findings line
+//      is tests/suites/findingactions.js), Last serviced is
 //      today, the service finding goes, its pin and schedule with it, other
 //      devices' entries stay, one undo step;
 //   4. the report: the technical sheet lists the visit and says "scheduled
@@ -97,21 +98,21 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 2: schedules ----
     const undue = counted();
     answer = { value: 'Vendor visit booked', date: day(10) };
-    click('.ca-schedule', lineFor('late2', 'service'));
+    click('.ca-accept', lineFor('late2', 'service'));
     await settle(); await settle();
     const last = asked[asked.length - 1];
-    ok('Schedule asks what is planned and a day, from today on', /What is planned/.test(last.message) && last.date && last.date.min === day(0) && !!customDate(last.date.value));
+    ok('Accept asks what is planned and, optionally, a day from today on', /what is planned/i.test(last.message) && last.date && last.date.min === day(0) && last.date.value === '');
     const sch = state.accepted.find((a) => a.nodeIds.includes('late2'));
     ok('scheduled: accepted until that day, and no longer counted', sch && sch.until === day(10) && sch.reason === 'Vendor visit booked' && counted() === undue - 1, show(state.accepted));
     validateTopology();
     ok('the Accepted list says until when', new RegExp('Scheduled until ' + day(10) + ': Vendor visit booked').test(el('acceptedList').textContent), el('acceptedList').textContent);
     ok('until travels through the file', saved().accepted.some((a) => a.until === day(10)) && normalizeAccepted([{ check: 'x', nodeIds: ['a'], reason: 'r', until: '2026-02-30' }])[0].until === undefined);
     answer = { value: 'Later', date: day(-1) };
-    click('.ca-schedule', lineFor('old', 'age'));
+    click('.ca-accept', lineFor('old', 'age'));
     await settle(); await settle();
     ok('a day before today is refused', !state.accepted.some((a) => a.check === 'age'));
     answer = { value: '  ', date: day(5) };
-    click('.ca-schedule', lineFor('old', 'age'));
+    click('.ca-accept', lineFor('old', 'age'));
     await settle(); await settle();
     ok('so is a schedule with no plan', !state.accepted.some((a) => a.check === 'age'));
     // The day after: a schedule that ran out (made directly, as the dialog never makes one).
@@ -166,7 +167,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     setLocale('es'); applyLocale();
     validateTopology();
     ok('the buttons and the list are translated', /Para revisar en la próxima visita/.test(el('visitSummary').textContent)
-       && [...document.querySelectorAll('#conflictMsgList .ca-schedule')].every((b) => b.textContent === 'Programar…') && el('servicedTodayBtn').textContent === 'Mantenimiento hecho hoy');
+       && [...document.querySelectorAll('#conflictMsgList .ca-accept')].every((b) => b.textContent === 'Aceptar…') && el('servicedTodayBtn').textContent === 'Mantenimiento hecho hoy');
     setLocale('en'); applyLocale();
   } catch (e) {
     ok('the suite ran to the end', false, e && (e.stack || e.message));

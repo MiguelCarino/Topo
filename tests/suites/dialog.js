@@ -9,6 +9,7 @@
 window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
+  const show = (v) => JSON.stringify(v);
   const tick = () => new Promise((r) => setTimeout(r, 0));
   const scrim = document.getElementById('topoAsk');
   const isOpen = () => !scrim.hidden;
@@ -72,6 +73,29 @@ window.addEventListener('load', () => { setTimeout(async () => {
     await tick();
     press('Cancel');
     ok('Cancel is null', (await p) === null);
+
+    // ---- A line of text and a day ----
+    const dateIn = document.getElementById('topoAskDate');
+    p = askPromptDate('Why?', { date: { label: 'Until (optional)', value: '', min: '2026-01-01' } });
+    await tick();
+    ok('a dated prompt shows the day under the line', !document.getElementById('topoAskDateRow').hidden && dateIn.min === '2026-01-01');
+    input.value = 'r'; dateIn.value = '2026-05-04';
+    press('Continue');
+    ok('with the day picked', show(await p) === show({ value: 'r', date: '2026-05-04' }));
+    p = askPromptDate('Why?', { date: { label: 'Until (optional)' } });
+    await tick();
+    input.value = 'r';
+    press('Continue');
+    ok('none picked is ""', show(await p) === show({ value: 'r', date: '' }));
+    // A day typed in part reads as '' from the input; only validity tells.
+    p = askPromptDate('Why?', { date: { label: 'Until (optional)' } });
+    await tick();
+    input.value = 'r';
+    Object.defineProperty(dateIn, 'validity', { configurable: true, get: () => ({ badInput: true }) });
+    press('Continue');
+    const partial = await p;
+    delete dateIn.validity;
+    ok('a day typed in part is "!", not "" (so it is not taken as no date)', show(partial) === show({ value: 'r', date: '!' }), show(partial));
 
     // ---- One of several answers ----
     p = askChoice('You already have "Casa".', { choices: [{ id: 'copy', label: 'Open as a copy' }, { id: 'update', label: 'Update "Casa" (2 changes)', primary: true }] });

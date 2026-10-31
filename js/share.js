@@ -116,7 +116,8 @@ async function copyShareLink() {
         const { newer } = binderLinkFile();
         if (newer) {
             closeShareDialog();
-            if (await askConfirm(t('{n} of these networks were made by a newer version of Topo and cannot travel in a link. Export the binder file instead?', { n: newer }), { ok: t('Back up all') })) exportBinder();
+            if (await askConfirm(t(newer === 1 ? 'One of these networks was made by a newer version of Topo and cannot travel in a link. Export the binder file instead?'
+                : '{n} of these networks were made by a newer version of Topo and cannot travel in a link. Export the binder file instead?', { n: newer }), { ok: t('Back up all') })) exportBinder();
             return;
         }
     } else if (state.readOnly) { closeShareDialog(); openShareDialog('doc'); return; }
@@ -135,7 +136,8 @@ async function copyShareLink() {
     if (url === null) {
         const n = binderFile().sites.length;
         closeShareDialog();
-        if (await askConfirm(t('These {n} networks are too much for one link. Export the binder file instead?', { n }), { ok: t('Back up all') })) exportBinder();
+        if (await askConfirm(t(n === 1 ? 'This network is too much for one link. Export the binder file instead?'
+            : 'These {n} networks are too much for one link. Export the binder file instead?', { n }), { ok: t('Back up all') })) exportBinder();
         return;
     }
     const done = _shareEl('shareDone');
@@ -227,7 +229,7 @@ async function openSealedLink(frag) {
                 openBinderPayload(json);
                 window.history.replaceState(null, '', cleanUrl());
             } else {
-                openArrivedDocument(json);    // writes the document into the entry and clears the URL
+                if (!openArrivedDocument(json)) arrivedUnreadable('');    // writes the document into the entry and clears the URL, or says the link is damaged
             }
             return;
         } catch (e) {
@@ -240,7 +242,7 @@ async function openSealedLink(frag) {
     // Declined. Mid-session (pasted over an open network) the canvas stays and
     // simply takes this entry. On a fresh boot it is as if the link was bare.
     closeUnlockDialog();
-    if (state.nodes.length) { save(); return; }
+    if (state.nodes.length) { keepNetworkInEntry(); return; }   // js/app.js
     window.history.replaceState(null, '', cleanUrl());
     await load();
 }

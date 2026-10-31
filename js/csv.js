@@ -172,6 +172,7 @@ const CSV_BOM = '﻿';
 const CSV_TRIGGER_RE = /^[=+\-@\t\r]/;
 const CSV_GUARDED_RE = /^'[=+\-@\t\r]/;
 const CSV_NUMBER_RE = /^-?\d+(\.\d+)?$/;
+const CSV_REVIEW_MAX = 500;   // rows the review lists; Apply writes every row (csvApplyDialog re-plans the whole sheet)
 
 // The formula guard: see the header.
 function csvGuard(value) {
@@ -492,7 +493,9 @@ async function copyTsv(key) {
         try { done = document.execCommand('copy'); } catch (e) { done = false; }
         ta.remove();
     }
-    showToast(done ? t('Copied {n} rows as TSV. Paste them into a sheet.', { n: sheet.build().rows.length }) : t('Could not copy to the clipboard.'), done ? 'ok' : 'err');
+    const rows = done ? sheet.build().rows.length : 0;
+    showToast(done ? t(rows === 1 ? 'Copied {n} row as TSV. Paste it into a sheet.' : 'Copied {n} rows as TSV. Paste them into a sheet.', { n: rows })
+        : t('Could not copy to the clipboard.'), done ? 'ok' : 'err');
     return done;
 }
 
@@ -2043,7 +2046,8 @@ function csvCable(ctx, { anchor, v, existing, record, type, group, own, selfName
 function csvFaceplateNote(res, node, portId) {
     const m = /^p(\d+)$/.exec(portId || '');
     if (!m || !hasExplicitPortCount(node) || Number(m[1]) <= node.portCount) return;
-    res.notes.push(t('{name} has {ports} ports: port {port} is past its faceplate and shows as a port overflow.', { name: node.name || node.id, ports: node.portCount, port: ifaceLabel(node, portId) }));
+    res.notes.push(t(node.portCount === 1 ? '{name} has {ports} port: port {port} is past its faceplate and shows as a port overflow.'
+        : '{name} has {ports} ports: port {port} is past its faceplate and shows as a port overflow.', { name: node.name || node.id, ports: node.portCount, port: ifaceLabel(node, portId) }));
 }
 
 function csvCommitCable(ctx, cab) {
@@ -3436,7 +3440,12 @@ function renderCsvReview() {
     const first = sheet.hasHeadings ? 2 : 1;   // the sheet's own row numbers
     // Addresses seen are numbered by the line of the text they came from.
     const where = (r) => (sheet.lines ? t('Line {n}', { n: sheet.lines[r.index] }) : t('Row {n}', { n: r.index + first }));
-    csvEl('csvPreview').innerHTML = plan.rows.slice(0, 500).map((r) => {
+    // A long sheet lists its first rows and says how many more it holds, so
+    // the review never reads as the whole of what Apply is about to write.
+    // It does not promise those rows are written: an unlisted one may be a
+    // conflict, which Apply skips, and the counts above are what tells.
+    const hidden = plan.rows.length - CSV_REVIEW_MAX;
+    csvEl('csvPreview').innerHTML = plan.rows.slice(0, CSV_REVIEW_MAX).map((r) => {
         const detail = r.status === 'conflict' ? escapeHtml(r.why)
             : r.changes.map((ch) => `${ch.field ? `<span class="bulk-what">${escapeHtml(ch.field)}</span>` : ''}${ch.before ? `${escapeHtml(ch.before)} → ` : ''}${escapeHtml(ch.after)}`).join('<br>')
               + r.notes.map((nt) => `<span class="csv-note">${escapeHtml(nt)}</span>`).join('');
@@ -3445,7 +3454,8 @@ function renderCsvReview() {
             <td class="paste-mark" title="${escapeHtml(r.why || '')}">${mark[r.status]}</td>
             <td class="mono">${detail || escapeHtml(t('Nothing to change.'))}</td>
         </tr>`;
-    }).join('');
+    }).join('')
+        + (hidden > 0 ? `<tr class="csv-more"><td colspan="3">${escapeHtml(t(hidden === 1 ? '…and one more row, not listed here. The counts above include it.' : '…and {n} more rows, not listed here. The counts above include them.', { n: hidden }))}</td></tr>` : '');
     csvEl('csvPreviewWrap').classList.toggle('hidden', !plan.rows.length);
     csvEl('csvDelta').innerHTML = findingsDeltaHtml(csvFindingsDelta(plan), (c.add + c.change) > 0 && !plan.errors.length);
 }

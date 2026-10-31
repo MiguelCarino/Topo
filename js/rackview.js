@@ -1952,7 +1952,7 @@ function placeUnplaced(node, rack = rackOfNode(node)) {
             if (lo !== null) return !!rvBringIn(node, rack, { lo, h, face, full: false });
         }
     }
-    showToast(t('There are not {n} free units in a row in {rack}.', { n: h, rack: groupLabel(rack) }));
+    showToast(t(h === 1 ? 'There is no free unit in {rack}.' : 'There are not {n} free units in a row in {rack}.', { n: h, rack: groupLabel(rack) }));
     return false;
 }
 
@@ -2851,6 +2851,9 @@ function onRackKey(e) {
         renderRackView(true);
         return;
     }
+    // The shortcut list, a dialog or a question over the rack has the keys:
+    // an arrow must not move a device nobody can see.
+    if (mapKeysBlocked()) return;
     const dev = e.target.closest('.rk-dev');
     if (!dev || dev.classList.contains('rk-back') || e.ctrlKey || e.metaKey || e.altKey) return;
     const acts = { ArrowUp: e.shiftKey ? 'taller' : 'up', ArrowDown: e.shiftKey ? 'shorter' : 'down', ArrowLeft: 'front', ArrowRight: 'rear' };

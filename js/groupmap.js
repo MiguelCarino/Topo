@@ -975,6 +975,8 @@ function drawGroupFrames(view) {
         tip.textContent = `${groupPath(group)}\n${devicesText(counts.get(group.id))}\n${t('Click to select its devices.')}`;
         tab.appendChild(tip);
         tab.addEventListener('mousedown', (e) => pressGroup(e, groupMembers(group.id, true)));
+        // A finger drags the frame as the mouse does (touchPress, js/app.js).
+        tab.addEventListener('touchstart', (e) => touchPress(e, (ev) => pressGroup(ev, groupMembers(group.id, true)), () => !!groupById(group.id)), { passive: true });
         g.appendChild(tab);
         // Over the tab's left end, but not in it (see gmToggle).
         const toggle = gmToggle(group.id, false);
@@ -1144,6 +1146,8 @@ function drawGroupFolds(view, ctx) {
         // A tap expands, a drag moves (pressFold); the release decides, in
         // the window's mouseup (js/app.js), as it does for a device's drag.
         g.addEventListener('mousedown', (event) => pressFold(event, group, members));
+        // And a finger's, past the tap margin (touchPress, js/app.js).
+        g.addEventListener('touchstart', (e) => touchPress(e, (ev) => pressFold(ev, group, members), () => !!groupById(group.id)), { passive: true });
         g.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); });   // no cable from a group
         lNodes.appendChild(g);
         // The ▸ on the card's top-left corner, beside the node rather than in

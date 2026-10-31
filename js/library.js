@@ -1294,7 +1294,8 @@ async function adoptBinderFile() {
         // and letting binderFile() overwrite the file was how "no, do not add
         // them here" came to mean "delete them from disk".
         if (unknown.length
-            && await askConfirm(t('That file already holds {n} networks you do not have. Add them to this browser?', { n: unknown.length }), { ok: t('Add them') })) {
+            && await askConfirm(t(unknown.length === 1 ? 'That file already holds {n} network you do not have. Add it to this browser?'
+                : 'That file already holds {n} networks you do not have. Add them to this browser?', { n: unknown.length }), { ok: t('Add them') })) {
             importBinderSites(unknown);
         }
     }
@@ -1925,7 +1926,7 @@ function renderUserTemplates() {
     section.classList.toggle('hidden', !tpls.length);
     tpls.forEach((e) => {
         list.appendChild(libraryItem(
-            { icon: '📐', name: e.name, blurb: t('{n} nodes · reusable template', { n: (e.doc.nodes || []).length }) },
+            { icon: '📐', name: e.name, blurb: t((e.doc.nodes || []).length === 1 ? '{n} node · reusable template' : '{n} nodes · reusable template', { n: (e.doc.nodes || []).length }) },
             () => applyTemplate(e.doc),
             async () => {
                 if (!(await askConfirm(t('Delete template "{name}"?', { name: e.name }), { ok: t('Delete'), danger: true }))) return;

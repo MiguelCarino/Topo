@@ -95,11 +95,11 @@ function askPromptPick(message, opts = {}) {
         });
 }
 
-// A line of text and a date, asked together: what is planned and the day
-// (a scheduled finding, js/diagnostics.js). opts.date is { label, value,
+// A line of text and a date, asked together: the reason and, optionally,
+// the day it may wait until (Accept on a finding, js/diagnostics.js). opts.date is { label, value,
 // min } with dates as 'YYYY-MM-DD'. -> { value, date } or null when
-// dismissed; date is '' when none was picked. A test's responder answers
-// with that object.
+// dismissed; date is '' when none was picked and '!' when one was typed
+// only in part. A test's responder answers with that object.
 function askPromptDate(message, opts = {}) {
     const d = opts.date || {};
     return ask({ kind: 'prompt', message, title: opts.title || '', value: opts.value == null ? '' : String(opts.value), ok: opts.ok,
@@ -169,7 +169,12 @@ function showAsk(req) {
             date.value = req.date.value;
             date.min = req.date.min || '';
         }
-        const answer = () => (picking ? { value: input.value, pick: pick.value } : dating ? { value: input.value, date: date.value } : input.value);
+        // A day typed in part (or one that does not exist) reads as '' from
+        // a date input, the same as none picked, and would accept for good
+        // what was meant to wait. It answers '!' instead, which no caller
+        // reads as a day, so it is refused rather than taken as "no date".
+        const dayTyped = () => (date.validity && date.validity.badInput ? '!' : date.value);
+        const answer = () => (picking ? { value: input.value, pick: pick.value } : dating ? { value: input.value, date: dayTyped() } : input.value);
 
         let done = false;
         const finish = (value) => {

@@ -374,27 +374,27 @@
 
                 <div id="propertiesPane" class="hidden">
                     <div>
-                        <label data-i18n class="prop-lbl">Name</label>
+                        <label data-i18n class="prop-lbl" for="propName">Name</label>
                         <input type="text" id="propName" class="input prop-name" />
                     </div>
 
                     <div id="linkProps" data-adv class="hidden prop-sec">
-                        <label class="prop-lbl accent">VM Attachment Type</label>
+                        <label class="prop-lbl accent" for="propAttachment">VM Attachment Type</label>
                         <select id="propAttachment" class="select">
                             <option value="bridged">Bridged (Routed by Host)</option>
                             <option value="passthrough">PCI Passthrough (Direct L2)</option>
                         </select>
-                        <p class="rail-note">Passthrough bypasses the host OS, connecting the VM directly to the physical switch logic.</p>
+                        <p class="rail-note" data-i18n>Passthrough bypasses the host OS, connecting the VM directly to the physical switch logic.</p>
                     </div>
 
                     <div id="linkPortProps" data-adv class="hidden prop-sec">
                         <label class="prop-lbl accent">Plugged Into</label>
                         <div id="linkPortBody" class="port-ends"></div>
-                        <p class="rail-note">Pick the interface this link uses on each end. Occupied ports are marked — you can still pick one, and the node will flag the conflict.</p>
+                        <p class="rail-note" data-i18n>Pick the interface this link uses on each end. Occupied ports are marked — you can still pick one, and the node will flag the conflict.</p>
                     </div>
 
                     <div id="linkMediumProps" class="hidden prop-sec">
-                        <label class="prop-lbl accent" id="linkMediumLabel">Link Material</label>
+                        <label class="prop-lbl accent" id="linkMediumLabel" for="propMedium">Link Material</label>
                         <select id="propMedium" class="select">
                             <option value="utp" data-simple="Network cable">UTP (Solid Gray)</option>
                             <option value="fiber" data-simple="Fiber cable">Fiber Optic (Solid Cyan)</option>
@@ -437,16 +437,16 @@
                                 </div>
                             </div>
                             <div id="ifaceListContainer" class="if-list"></div>
-                            <p class="rail-note">Unassigned switches act as L2 Backplanes.</p>
+                            <p class="rail-note" data-i18n>Unassigned switches act as L2 Backplanes.</p>
                         </div>
 
                         <div class="prop-grid">
                             <div>
-                                <label class="prop-lbl">Gateway</label>
+                                <label class="prop-lbl" for="propGw">Gateway</label>
                                 <input type="text" id="propGw" placeholder="e.g. 10.0.0.1" class="input mono" />
                             </div>
                             <div>
-                                <label class="prop-lbl">DNS</label>
+                                <label class="prop-lbl" for="propDns">DNS</label>
                                 <input type="text" id="propDns" placeholder="8.8.8.8" class="input mono" />
                             </div>
                             <div class="span2">
@@ -475,7 +475,7 @@
                              action and natRow — advanced sidebar vocabulary stays
                              untranslated on purpose (js/i18n.js). -->
                         <div id="siteRefBlock" class="hidden prop-sec">
-                            <label class="prop-lbl" data-i18n-title title="Say that this cloud stands for another network in your binder, so the estate report can draw the link between them.">Stands for another site</label>
+                            <label class="prop-lbl" for="propSiteRef" data-i18n-title title="Say that this cloud stands for another network in your binder, so the estate report can draw the link between them.">Stands for another site</label>
                             <select id="propSiteRef" class="select"></select>
                             <p id="siteRefHint" class="hidden rail-note"></p>
                             <button id="openSiteRefBtn" type="button" class="hidden rail-btn"></button>
@@ -685,7 +685,7 @@
                         <div class="trace-port-row">
                             <label class="prop-check" data-i18n-title title="Filter the trace by a port. Off = IP reachability only — the port stays typed in, just ignored.">
                                 <input type="checkbox" id="tracePortToggle">
-                                <span class="prop-lbl">Port filter</span>
+                                <span class="prop-lbl" data-i18n>Port filter</span>
                             </label>
                             <input type="text" id="tracePort" placeholder="443" class="input mono trace-port" autocomplete="off" spellcheck="false" data-i18n-title title="Port to test when the Port filter is on">
                         </div>
@@ -1166,7 +1166,7 @@
                         <span data-i18n>Lock the link with a passphrase</span>
                     </label>
                     <div id="sharePassRow" class="dlg-row">
-                        <input id="sharePass" type="text" autocomplete="off" spellcheck="false" class="input mono">
+                        <input id="sharePass" type="text" aria-label="Passphrase" data-i18n-aria-label autocomplete="off" spellcheck="false" class="input mono">
                         <button id="shareNewPass" data-i18n data-i18n-title class="cs-btn" title="Make a new random passphrase">New</button>
                     </div>
                     <p id="shareHint" class="dlg-blurb"></p>
@@ -1174,7 +1174,7 @@
                     <div id="shareLint" class="alert warn hidden" role="status"></div>
                     <div id="shareResult" class="hidden dlg-result">
                         <p id="shareDone" class="dlg-blurb strong"></p>
-                        <textarea id="shareLink" readonly rows="3" class="textarea share-link"></textarea>
+                        <textarea id="shareLink" aria-label="Link to share" data-i18n-aria-label readonly rows="3" class="textarea share-link"></textarea>
                     </div>
                     <div class="dlg-actions">
                         <button id="shareCloseBtn" data-i18n class="cs-btn">Close</button>
@@ -1192,7 +1192,7 @@
                 <form id="unlockForm" class="modal topo-card sm">
                     <h4 data-i18n class="dlg-title">This link is locked</h4>
                     <p data-i18n class="dlg-blurb">Whoever sent it should have given you a passphrase separately. Nothing is sent anywhere — it is checked in this browser.</p>
-                    <input id="unlockPass" type="password" autocomplete="off" spellcheck="false" class="input mono">
+                    <input id="unlockPass" type="password" aria-label="Passphrase" data-i18n-aria-label autocomplete="off" spellcheck="false" class="input mono">
                     <p id="unlockError" class="dlg-error"></p>
                     <div class="dlg-actions">
                         <button type="button" id="unlockCancelBtn" data-i18n class="cs-btn">Don't open</button>
@@ -1210,7 +1210,7 @@
                     <div id="topoAskHead" class="modal-head"><h2 id="topoAskTitle" class="modal-title"></h2></div>
                     <div class="modal-body">
                         <p id="topoAskMsg" class="ask-msg"></p>
-                        <input id="topoAskInput" type="text" class="input" autocomplete="off" spellcheck="false" hidden>
+                        <input id="topoAskInput" type="text" aria-labelledby="topoAskMsg" class="input" autocomplete="off" spellcheck="false" hidden>
                         <!-- A prompt that also asks one choice from a list
                              (askPromptPick): a new group's kind, under its name. -->
                         <div id="topoAskPickRow" class="field ask-pick" hidden>
