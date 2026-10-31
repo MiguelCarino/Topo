@@ -86,10 +86,21 @@ function notesSecretHit(text) {
 // -> [{ id, name }]: the devices and text notes whose words look secret.
 function docSecretHits(doc) {
     const out = [];
-    ((doc && doc.nodes) || []).forEach((n) => { if (n && notesSecretHit(n.notes)) out.push({ id: n.id, name: asText(n.name) || n.id, kind: 'node' }); });
+    // A custom column's text travels the same way, and is read with its
+    // heading in front, so a column called "Password" is caught by its name.
+    const cols = new Map(((doc && doc.columns) || []).filter((c) => c && typeof c.name === 'string').map((c) => [c.id, c.name]));
+    const customHit = (n) => !!n.extra && typeof n.extra === 'object'
+        && Object.keys(n.extra).some((k) => typeof n.extra[k] === 'string' && notesSecretHit(`${cols.get(k) || ''}: ${n.extra[k]}`));
+    ((doc && doc.nodes) || []).forEach((n) => {
+        if (!n) return;
+        const inNotes = notesSecretHit(n.notes), inColumns = customHit(n);
+        if (inNotes || inColumns) out.push({ id: n.id, name: asText(n.name) || n.id, kind: 'node', column: inColumns && !inNotes });
+    });
     ((doc && doc.annotations) || []).forEach((a) => { if (a && notesSecretHit(a.text)) out.push({ id: a.id, name: t('Text note'), kind: 'annotation' }); });
     // An accepted finding's reason is free text that travels the same way.
     ((doc && doc.accepted) || []).forEach((a, i) => { if (a && notesSecretHit(a.reason)) out.push({ id: `accepted${i}`, name: t('Accepted finding'), kind: 'accepted' }); });
+    // And a pin's note: what to check on the next visit.
+    ((doc && doc.pinned) || []).forEach((a, i) => { if (a && notesSecretHit(a.note)) out.push({ id: `pinned${i}`, name: t('Pinned finding'), kind: 'accepted' }); });
     return out;
 }
 // The sentence the dialogs show, or '' when there is nothing to say.
@@ -97,6 +108,9 @@ function secretLintText(hits) {
     if (!hits.length) return '';
     const names = [...new Set(hits.map((h) => h.name))];
     const list = names.slice(0, 4).join(', ') + (names.length > 4 ? ` +${names.length - 4}` : '');
+    // Said as notes while every hit is in notes; a hit in one of the
+    // network's own columns would not be found by reading the notes.
+    if (hits.some((h) => h.column)) return t('What is written on {names} looks like it holds a password. Whoever gets this can read it: take it out first, or keep it somewhere else.', { names: list });
     return t('The notes on {names} look like they hold a password. Whoever gets this can read it: take it out first, or keep it somewhere else.', { names: list });
 }
 // Fills one of the dialogs' alert boxes. `select` adds Show them, which
@@ -138,6 +152,7 @@ function renderAssetFields(node) {
     ASSET_INPUTS.forEach(({ key, id }) => { assetEl(id).value = node && typeof node[key] === 'string' ? node[key] : ''; });
     assetEl('propStatus').value = node && asStatus(node.status) ? node.status : '';
     assetEl('statusNote').classList.toggle('hidden', !isRetired(node));
+    renderUpkeepFields(node);
     assetEl('assetSummary').textContent = assetSummaryText(node);
     renderNotesLint(node);
     renderGroupPicker(node);   // the group it sits in, and its place in a rack (js/groups.js)
@@ -190,6 +205,196 @@ assetEl('propStatus').addEventListener('change', (e) => {
     refreshSelectedNodeDiagnostics();
 });
 
+// ---- Age and upkeep (js/model.js "Age and upkeep") ----
+// Typed as text, read by the field's fromText: a year, a month or a day for
+// the dates ("2019", "03/2019", "15/03/2019"), months for the interval ("12",
+// "1 year"). What it cannot read is marked and not stored; leaving the field
+// shows what is kept, written the one way the file writes it.
+const UPKEEP_INPUTS = [
+    { key: 'inService', id: 'propInService' },
+    { key: 'serviced', id: 'propServiced' },
+    { key: 'serviceEvery', id: 'propServiceEvery' },
+    { key: 'lifeYears', id: 'propLifeYears' }
+];
+const upkeepField = (key) => NODE_FIELDS.find((f) => f.key === key);
+function markUpkeep(input, bad) {
+    input.classList.toggle('bad', bad);
+    if (bad) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+}
+// The age and the next service, as of today: one line under the fields.
+function upkeepNoteText(node, today = todayISO()) {
+    if (!node) return '';
+    const age = deviceAge(node, today), next = nextServiceDate(node);
+    const st = upkeepState(node, today);
+    const s = st.service;
+    return [
+        age ? t('Age {age}', { age: ageText(age) }) + (st.old ? ' · ' + t('past its expected life') : '') : '',
+        next ? t('Next service {date}', { date: next }) + (s && (s.level === 'warn' || s.level === 'bad') ? ' · ' + t('overdue') : '') : ''
+    ].filter(Boolean).join(' · ');
+}
+// The line, in the finding's colour when something is late or old.
+function renderUpkeepNote(node) {
+    const el = assetEl('upkeepNote');
+    const text = upkeepNoteText(node);
+    const st = upkeepState(node);
+    const level = st.service && st.service.level === 'bad' ? 'bad' : (st.old || (st.service && st.service.level === 'warn')) ? 'warn' : '';
+    el.textContent = text;
+    el.classList.toggle('hidden', !text);
+    el.classList.toggle('upkeep-bad', level === 'bad');
+    el.classList.toggle('upkeep-warn', level === 'warn');
+}
+function renderUpkeepFields(node) {
+    UPKEEP_INPUTS.forEach(({ key, id }) => {
+        const v = node ? node[key] : undefined;
+        assetEl(id).value = v === undefined || v === null ? '' : String(v);
+        markUpkeep(assetEl(id), false);
+    });
+    // Serviced today: for a device that is serviced at all (it has an
+    // interval, or a date), not on a read-only network.
+    assetEl('servicedTodayBtn').classList.toggle('hidden', !node || state.readOnly || (!asServiceMonths(node.serviceEvery) && !node.serviced));
+    // Its type's life in this network, as the hint: blank is that.
+    const usual = node ? typeLifeOf(node.type) : null;
+    assetEl('propLifeYears').placeholder = usual ? String(usual) : '';
+    renderUpkeepNote(node);
+}
+UPKEEP_INPUTS.forEach(({ key, id }) => {
+    assetEl(id).addEventListener('input', (e) => {
+        const node = selectedNodeForEdit();
+        if (!node) return;
+        const blank = isBlank(e.target.value);
+        const v = blank ? null : upkeepField(key).fromText(e.target.value);
+        markUpkeep(e.target, !blank && v === null);
+        if (!blank && v === null) return;
+        if (blank) delete node[key]; else node[key] = v;
+        saveTyping();
+        renderUpkeepNote(node);
+    });
+    assetEl(id).addEventListener('change', () => { const node = selectedNodeForEdit(); if (node) renderUpkeepFields(getNode(node.id) || node); });
+});
+
+// Records the service as done today (servicedToday, js/diagnostics.js).
+assetEl('servicedTodayBtn').addEventListener('click', () => {
+    const node = selectedNodeForEdit();
+    if (!node || !servicedToday(node.id)) return;
+    renderUpkeepFields(getNode(node.id));
+    showToast(t('Serviced today: recorded, and off the list.'), 'ok');
+});
+
+// ---- Expected life by type (doc.expectedLife, js/model.js) ----
+// One row per type that has a usual life: how many of them the network has,
+// and the years, blank for Topo's usual (shown as the hint). A change is
+// kept when the field is left (or Enter), one undo step; what cannot be read
+// is marked and not kept.
+const lifeEl = (id) => document.getElementById(id);
+function renderLifeDialog() {
+    const own = state.expectedLife || {};
+    const count = new Map();
+    state.nodes.forEach((n) => count.set(n.type, (count.get(n.type) || 0) + 1));
+    // The types this network has first, then the rest, each in Topo's order.
+    const types = Object.keys(EXPECTED_LIFE_YEARS);
+    const ordered = types.filter((ty) => count.get(ty)).concat(types.filter((ty) => !count.get(ty)));
+    const list = lifeEl('lifeList');
+    list.textContent = '';
+    ordered.forEach((type) => {
+        const li = document.createElement('li');
+        li.className = 'life-row';
+        const name = document.createElement('label');
+        name.textContent = t(typeName(type));
+        name.htmlFor = `lifeY-${type}`;
+        const n = document.createElement('span');
+        n.className = 'life-n';
+        n.textContent = count.get(type) ? t('{n} here', { n: count.get(type) }) : '';
+        const input = document.createElement('input');
+        input.type = 'text'; input.className = 'input mono'; input.id = `lifeY-${type}`;
+        input.inputMode = 'numeric'; input.autocomplete = 'off'; input.maxLength = 10;
+        input.dataset.type = type;
+        input.placeholder = String(EXPECTED_LIFE_YEARS[type]);
+        input.value = own[type] ? String(own[type]) : '';
+        input.disabled = !!state.readOnly;
+        const unit = document.createElement('span');
+        unit.className = 'life-unit';
+        unit.textContent = t('years');
+        li.append(name, n, input, unit);
+        list.appendChild(li);
+    });
+    lifeEl('lifeResetBtn').classList.toggle('hidden', !!state.readOnly);
+    lifeEl('lifeResetBtn').disabled = !Object.keys(own).length;
+}
+// Writes the network's lives (null for none), one undo step, and redraws
+// what reads them: the map, the findings, the panel, the table.
+function setExpectedLife(next) {
+    if (readOnlyRefuses()) return false;
+    batch(() => {
+        state.expectedLife = normalizeExpectedLife(next);
+        save(); renderCanvasOnly();
+    });
+    const node = selectedNodeForEdit();
+    if (node) renderAssetFields(node);
+    if (typeof tableShown === 'function' && tableShown()) renderTableView(true);
+    refreshSelectedNodeDiagnostics();
+    return true;
+}
+function openLifeDialog() {
+    const scrim = lifeEl('lifeDialog');
+    if (window.CarinoUI) CarinoUI.modal.open(scrim, {});
+    else scrim.hidden = false;
+    renderLifeDialog();
+}
+const refreshLifeDialog = () => { if (!lifeEl('lifeDialog').hidden) renderLifeDialog(); };
+function closeLifeDialog() {
+    const scrim = lifeEl('lifeDialog');
+    if (window.CarinoUI && CarinoUI.modal.isOpen(scrim)) CarinoUI.modal.close(scrim, 'answered');
+    else scrim.hidden = true;
+}
+assetEl('lifeTypesBtn').addEventListener('click', openLifeDialog);
+lifeEl('lifeList').addEventListener('change', (e) => {
+    const type = e.target.dataset && e.target.dataset.type;
+    if (!type) return;
+    const text = e.target.value.trim();
+    const years = text ? lifeYearsFromText(text) : null;
+    e.target.classList.toggle('bad', !!text && years === null);
+    if (text && years === null) return;
+    const next = Object.assign({}, state.expectedLife || {});
+    // The usual typed in is the usual: no setting, so a later change of
+    // Topo's usual still reaches this network.
+    if (!years || years === EXPECTED_LIFE_YEARS[type]) delete next[type]; else next[type] = years;
+    if (JSON.stringify(normalizeExpectedLife(next)) === JSON.stringify(normalizeExpectedLife(state.expectedLife))) { renderLifeDialog(); return; }
+    setExpectedLife(next);
+    renderLifeDialog();
+});
+lifeEl('lifeList').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.dataset && e.target.dataset.type) { e.preventDefault(); e.target.dispatchEvent(new Event('change', { bubbles: true })); }
+});
+lifeEl('lifeResetBtn').addEventListener('click', () => { if (setExpectedLife({})) renderLifeDialog(); });
+lifeEl('lifeDialog').querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeLifeDialog));
+
+// The calendar beside a date field: the browser's own picker, on a hidden
+// date input under the field. It opens on the field's date (a month or a
+// year alone on its first day), and what is picked is written into the
+// field as if typed, so it is read, stored and undone the same way.
+function pickerStart(text) {
+    const d = looseDateFromText(text);
+    if (!d) return '';
+    const [y, m, day] = d.split('-');
+    return [y, m || '01', day || '01'].join('-');
+}
+document.querySelectorAll('.date-pick-btn').forEach((btn) => {
+    const field = assetEl(btn.dataset.dateFor);
+    const native = btn.parentElement.querySelector('.date-pick-native');
+    btn.addEventListener('click', () => {
+        if (field.disabled || field.readOnly) return;
+        native.value = pickerStart(field.value);
+        try { native.showPicker(); } catch (e) { native.focus(); native.click(); }
+    });
+    native.addEventListener('change', () => {
+        if (!native.value) return;
+        field.value = native.value;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+        commitTyping();
+    });
+});
+
 // ---- A cable's facts ----
 const CABLE_INPUTS = [
     { key: 'label', id: 'propCableLabel' },
@@ -205,9 +410,50 @@ function renderCableFields(link) {
     const panel = assetEl('linkCableProps');
     const medium = link ? effectiveMedium(link) : null;
     panel.classList.toggle('hidden', !link || medium === 'wireless' || medium === 'vpn');
-    CABLE_INPUTS.forEach(({ key, id }) => { assetEl(id).value = link ? cableOf(link, key) : ''; });
+    CABLE_INPUTS.forEach(({ key, id }) => { if (key !== 'length') assetEl(id).value = link ? cableOf(link, key) : ''; });
+    renderCableLength(link);
 }
-CABLE_INPUTS.forEach(({ key, id }) => {
+const selectedLinkForEdit = () => (state.selectedId && state.selectedType === 'link' ? getLink(state.selectedId) : null);
+// The length is a number typed beside the pick of its unit, metres unless
+// said otherwise (cableLengthFromText, js/model.js): only digits and one
+// decimal point or comma can be typed, never the unit. A length an older
+// file wrote some other way ("about 3") shows as it is until typed over.
+function renderCableLength(link) {
+    const v = link ? cableOf(link, 'length') : '';
+    const parts = cableLengthParts(v);
+    assetEl('propCableLength').value = parts ? parts.n : v;
+    assetEl('propCableUnit').value = parts ? parts.unit : CABLE_UNIT_DEFAULT;
+    markUpkeep(assetEl('propCableLength'), false);
+}
+// What the field and the pick say, written to the cable: true when stored.
+function storeCableLength() {
+    const input = assetEl('propCableLength');
+    const link = selectedLinkForEdit();
+    if (!link) return false;
+    const text = input.value;
+    const blank = !text.trim();
+    const v = blank ? '' : cableLengthFromText(text, assetEl('propCableUnit').value);
+    // "2." on the way to "2.5" is not wrong yet, only unfinished.
+    markUpkeep(input, !blank && v === null && !/^\d+[.,]$/.test(text));
+    if (v === null) return false;
+    setCableField(link, 'length', v);
+    return true;
+}
+assetEl('propCableLength').addEventListener('input', (e) => {
+    filterLengthInput(e.target);
+    if (!storeCableLength()) return;
+    saveTyping();
+    renderCanvasOnly();
+});
+assetEl('propCableLength').addEventListener('blur', () => renderCableLength(selectedLinkForEdit()));
+// Another unit relabels the number already there (8 m becomes 8 ft: the
+// number was measured in the unit now picked), or waits for one.
+assetEl('propCableUnit').addEventListener('change', () => {
+    if (isBlank(assetEl('propCableLength').value) || !storeCableLength()) return;
+    save();
+    renderCanvasOnly();
+});
+CABLE_INPUTS.filter(({ key }) => key !== 'length').forEach(({ key, id }) => {
     assetEl(id).addEventListener('input', (e) => {
         const link = state.selectedId && state.selectedType === 'link' ? getLink(state.selectedId) : null;
         if (!link) return;

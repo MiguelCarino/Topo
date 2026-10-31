@@ -95,6 +95,22 @@ function askPromptPick(message, opts = {}) {
         });
 }
 
+// A line of text and a date, asked together: what is planned and the day
+// (a scheduled finding, js/diagnostics.js). opts.date is { label, value,
+// min } with dates as 'YYYY-MM-DD'. -> { value, date } or null when
+// dismissed; date is '' when none was picked. A test's responder answers
+// with that object.
+function askPromptDate(message, opts = {}) {
+    const d = opts.date || {};
+    return ask({ kind: 'prompt', message, title: opts.title || '', value: opts.value == null ? '' : String(opts.value), ok: opts.ok,
+        date: { label: d.label || '', value: d.value || '', min: d.min || '' } })
+        .then((v) => {
+            if (v === null || v === undefined) return null;
+            if (typeof v !== 'object') return { value: String(v), date: '' };
+            return { value: v.value == null ? '' : String(v.value), date: v.date == null ? '' : String(v.date) };
+        });
+}
+
 // One of several answers, by id, or null. choices: [{ id, label, primary? }],
 // in the order they should read; Cancel is added after them.
 function askChoice(message, opts = {}) {
@@ -143,7 +159,17 @@ function showAsk(req) {
                 suggested = o ? o.text : suggested;
             };
         }
-        const answer = () => (picking ? { value: input.value, pick: pick.value } : input.value);
+        // The date under the line, for askPromptDate.
+        const dateRow = document.getElementById('topoAskDateRow');
+        const date = document.getElementById('topoAskDate');
+        const dating = !!(req.date && dateRow && date);
+        if (dateRow) dateRow.hidden = !dating;
+        if (dating) {
+            document.getElementById('topoAskDateLabel').textContent = req.date.label;
+            date.value = req.date.value;
+            date.min = req.date.min || '';
+        }
+        const answer = () => (picking ? { value: input.value, pick: pick.value } : dating ? { value: input.value, date: date.value } : input.value);
 
         let done = false;
         const finish = (value) => {
@@ -195,4 +221,4 @@ function showAsk(req) {
 }
 
 // Published for the suites, which reach the app as bare globals anyway.
-window.TopoDialog = { ask, tell, askConfirm, askPrompt, askPromptPick, askChoice, setDialogResponder };
+window.TopoDialog = { ask, tell, askConfirm, askPrompt, askPromptPick, askPromptDate, askChoice, setDialogResponder };

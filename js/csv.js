@@ -291,7 +291,10 @@ function csvUplink(node, forSheet = false) {
 
 function csvDevicesSheet() {
     const fields = csvNodeFields();
-    const headers = fields.map((f) => f.csv).concat(['interface_id', 'interface', 'ip', 'mac', 'switch', 'port', 'local_port']);
+    // The network's own columns last, by name, in the order they were made:
+    // whatever order the table shows them in (a view), the sheet keeps one.
+    const custom = state.columns || [];
+    const headers = fields.map((f) => f.csv).concat(['interface_id', 'interface', 'ip', 'mac', 'switch', 'port', 'local_port'], custom.map((c) => c.name));
     const rows = state.nodes.map((node) => {
         const up = csvUplink(node, true);
         // The NIC the uplink is on, else the first: one row is one NIC and
@@ -308,7 +311,7 @@ function csvDevicesSheet() {
         const cells = fields.map((f) => ((f.key === 'nat' && !isRoutingDevice(node.type)) || (f.key === 'portScheme' && !hasPortGrid(node)) ? ''
             : f.key === 'rackDepth' ? csvRackDepth(node) : f.key === 'portsFace' ? csvPortsFace(node) : csvValue(f, node[f.key])));
         return cells.concat([nic ? nic.id : '', nic ? nic.name || '' : '', nic ? nic.ip || '' : '', nic && !isBlank(nic.mac) ? fmtColonSafe(nic.mac) : '',
-            up ? up.peer.name || up.peer.id : '', up ? up.port : '', up && up.own ? ifaceLabel(node, up.own) : '']);
+            up ? up.peer.name || up.peer.id : '', up ? up.port : '', up && up.own ? ifaceLabel(node, up.own) : ''], custom.map((c) => customText(c, customValueOf(node, c.id))));
     });
     return { name: 'devices', headers, rows };
 }
@@ -525,6 +528,19 @@ const CSV_ALIASES = {
     assetTag: ['asset', 'asset id', 'asset tag', 'asset number', 'tag', 'inventory number', 'etiqueta', 'patrimonio', 'patrimônio', 'инвентарный номер', '資産番号'],
     location: ['room', 'rack', 'site location', 'ubicación', 'ubicacion', 'localização', 'местоположение', '場所', '設置場所'],
     status: ['state', 'lifecycle', 'estado', 'situação', 'статус', 'ステータス'],
+    // Age and upkeep (js/model.js): when it went in, when it was last seen to.
+    inService: ['in service', 'in service since', 'in use since', 'installed', 'install date', 'installation date', 'date installed',
+        'purchase date', 'purchased', 'date purchased', 'bought', 'acquired', 'acquisition date', 'commissioned', 'deployed',
+        'fecha de compra', 'fecha de instalación', 'fecha de instalacion', 'en servicio desde', 'data de compra', 'data de instalação',
+        'em serviço desde', 'дата покупки', 'дата установки', 'в эксплуатации с', '購入日', '導入日', '設置日'],
+    serviced: ['last service', 'last serviced', 'serviced', 'last maintenance', 'maintenance date', 'last maintained', 'last checked',
+        'último mantenimiento', 'ultimo mantenimiento', 'último servicio', 'última manutenção', 'ultima manutencao',
+        'последнее обслуживание', '最終保守日', '最終点検日'],
+    serviceEvery: ['service every', 'service interval', 'maintenance interval', 'service months', 'interval months',
+        'mantenimiento cada', 'intervalo de mantenimiento', 'manutenção a cada', 'intervalo de manutenção',
+        'интервал обслуживания', '保守間隔', '点検間隔'],
+    lifeYears: ['expected life', 'life expectancy', 'lifespan', 'useful life', 'life years', 'vida útil', 'vida util',
+        'срок службы', '耐用年数'],
     // Groups (js/groups.js): where it sits, as a path, and its place in a rack.
     group: ['group path', 'grupo', 'группа', 'グループ'],
     rackU: ['rack u', 'u', 'rack unit', 'u position'],
@@ -630,6 +646,11 @@ function csvCountParse(text) {
     return Number.isInteger(n) && n >= 1 && n <= 4096 ? { value: n } : { error: true };
 }
 
+// A field read by its schema row's fromText (the service dates, the interval).
+function csvFromText(key, text) {
+    const v = NODE_FIELDS.find((f) => f.key === key).fromText(text);
+    return v === null ? { error: true } : { value: v };
+}
 // Per field, where the schema row's own validator is not the whole story.
 const CSV_PARSERS = {
     type: csvTypeParse,
@@ -657,6 +678,12 @@ const CSV_PARSERS = {
     // planned / active / retired, by key or by its name in the page's
     // language; a word that is none of them is refused, not blanked.
     status: (text) => { const r = tvStatusParse(text); return r.value === undefined ? { error: true } : r; },
+    // Metres: "2.5", "2,5" or "2.5 m" (cableLengthFromText, js/model.js).
+    'lk:cable.length': (text) => { const v = cableLengthFromText(text); return v === null ? { error: true } : { value: v }; },
+    inService: (text) => csvFromText('inService', text),
+    serviced: (text) => csvFromText('serviced', text),
+    serviceEvery: (text) => csvFromText('serviceEvery', text),
+    lifeYears: (text) => csvFromText('lifeYears', text),
     // A path as written; which group it is (or whether it is one to make) is
     // the plan's to say, against the map and the rest of the sheet.
     group: (text) => (splitPlacePath(text).length ? { value: String(text).trim() } : { error: true }),
@@ -796,7 +823,7 @@ function csvBuildTargets() {
         names: new Set([field && field.csv, field && field.label, label, ...(CSV_ALIASES[key] || [])].filter(Boolean).map(csvNorm)
             .filter((n) => !(CSV_NOT_NAMES[key] || []).includes(n)))
     });
-    const PLAIN = new Set(['name', 'type', 'notes', 'serial', 'assetTag', 'location', 'status', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'portsFace', 'host']);
+    const PLAIN = new Set(['name', 'type', 'notes', 'serial', 'assetTag', 'location', 'status', 'inService', 'serviced', 'serviceEvery', 'lifeYears', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'portsFace', 'host']);
     csvNodeFields().forEach((f) => add(f.key, 'device', f, null, PLAIN.has(f.key)));
     ['id', 'name', 'ip', 'mac', 'wireless', 'bond'].forEach((k) => add(`if:${k}`, 'iface', csvIfaceField(k)));
     // A radio's parts (iface.radio, js/model.js "Wi-Fi").
@@ -823,8 +850,70 @@ function csvBuildTargets() {
     return out;
 }
 let _csvTargets = null;
-const csvTargets = () => _csvTargets || (_csvTargets = csvBuildTargets());
-const csvTarget = (key) => csvTargets().find((tg) => tg.key === key) || null;
+// The network's own columns are targets too (js/model.js "Custom columns"):
+// a device's field like any other, keyed 'x:<column id>', found by its name
+// as a heading. Remade when the document's columns change. The columns an
+// import is about to make (_csvPending, while a plan is made) are among them,
+// so the plan reads their values as it reads any column's.
+let _csvPending = [];
+let _csvCustom = { cols: null, pending: null, list: [] };
+function csvCustomTargets() {
+    const cols = state.columns || [];
+    if (_csvCustom.cols !== cols || _csvCustom.pending !== _csvPending) {
+        const make = (def, pending) => ({ key: `x:${def.id}`, group: 'device', field: null, label: def.name, plain: false, csv: null,
+            custom: def.id, def, pending, parse: (text) => parseCustomValue(def, text), names: new Set([csvNorm(def.name)]) });
+        _csvCustom = { cols, pending: _csvPending, list: cols.map((d) => make(d, false)).concat(_csvPending.map((d) => make(d, true))) };
+    }
+    return _csvCustom.list;
+}
+// A heading the user asked to make a column of: 'xnew:' and the heading.
+// Not a target until the plan makes it one; until then it is a device's
+// column (so a sheet that has it is a sheet of devices) with no field.
+const CSV_NEW_COLUMN = 'xnew:';
+const CSV_NEW_TARGET = { key: CSV_NEW_COLUMN, group: 'device', field: null, label: 'New column', plain: true, names: new Set(), parse: (text) => ({ value: String(text) }) };
+const csvTargets = () => (_csvTargets || (_csvTargets = csvBuildTargets())).concat(csvCustomTargets());
+const csvTarget = (key) => (typeof key === 'string' && key.startsWith(CSV_NEW_COLUMN) ? CSV_NEW_TARGET : csvTargets().find((tg) => tg.key === key) || null);
+// A device's value for a column key: its own field, or a custom column's.
+const csvNodeValue = (node, key) => (/^x:/.test(key) ? customValueOf(node, key.slice(2)) : node[key]);
+function csvSetNodeValue(node, key, value) {
+    if (/^x:/.test(key)) setCustomValue(node, key.slice(2), value);
+    else node[key] = value;
+}
+
+// What a new column holds, from the values under its heading: a date, a
+// number or a yes/no when every value is one, else text. Digits alone are a
+// number, never a yes/no (1 and 0 are counts more often than answers).
+function csvGuessKind(values) {
+    const vals = values.map((v) => String(v == null ? '' : v).trim()).filter(Boolean);
+    if (!vals.length) return 'text';
+    const all = (kind) => vals.every((v) => !parseCustomValue({ kind }, v).error);
+    if (all('date')) return 'date';
+    if (all('number')) return 'number';
+    if (vals.every((v) => !/^\d+$/.test(v)) && all('yesno')) return 'yesno';
+    return 'text';
+}
+// The mapping with every 'xnew:' turned into the column it makes, and those
+// columns. A heading that names one of the network's columns already is that
+// column; one that names one of Topo's fields is an error, since the import
+// would not know which was meant. Ids follow the document's (nextCustomId),
+// so planning the same sheet twice makes the same columns.
+function csvNewColumns(sheet, mapping) {
+    const defs = [], errors = [];
+    const list = (state.columns || []).slice();
+    const out = mapping.map((key, col) => {
+        if (!key || !key.startsWith(CSV_NEW_COLUMN)) return key;
+        const name = customName(key.slice(CSV_NEW_COLUMN.length));
+        const had = list.find((c) => c.name.toLowerCase() === name.toLowerCase());
+        if (had) return `x:${had.id}`;
+        const why = !name ? t('A column needs a name.') : typeof customNameProblem === 'function' ? customNameProblem(name) : '';
+        if (why) { errors.push(why); return ''; }
+        if (list.length >= CUSTOM_MAX) { errors.push(t('A network can have at most {n} columns of its own.', { n: CUSTOM_MAX })); return ''; }
+        const def = { id: nextCustomId(list), name, kind: csvGuessKind(sheet.rows.map((r) => r[col])) };
+        list.push(def); defs.push(def);
+        return `x:${def.id}`;
+    });
+    return { mapping: out, defs, errors };
+}
 const csvTargetLabel = (tg) => (tg.plain ? t(tg.label) : tg.label);
 
 // What a column with this heading most likely is, or ''. A subnet's fields
@@ -839,6 +928,11 @@ function csvGuessByHeading(heading, family) {
     const h = csvNorm(heading);
     if (!h) return '';
     const fam = family === true ? 'network' : (family || null);
+    // The network's own column by its exact name first: one made before Topo
+    // had a field of that name ("Purchase date", before In service since)
+    // is still the one the sheet means.
+    const own = fam ? null : csvCustomTargets().find((tg) => tg.names.has(h));
+    if (own) return own.key;
     const hit = csvTargets().find((tg) => (fam ? tg.group === fam : !CSV_OWN_FAMILIES.includes(tg.group)) && tg.names.has(h));
     return hit ? hit.key : '';
 }
@@ -999,6 +1093,7 @@ function csvShow(key, v) {
     if (v === undefined || v === null) return '';
     if (key === 'type') return typeName(v);
     if (key === 'nat' || key === 'if:wireless') return v ? t('Yes') : t('No');
+    if (/^x:/.test(key)) { const tg = csvTarget(key); return tg && tg.def.kind === 'yesno' ? (v ? t('Yes') : t('No')) : String(v); }
     if (key === 'lk:medium') return MEDIUM_NAMES[v] || String(v);
     // A network by its SSID, a band's list by theirs, a radio by its names.
     if (key === 'lk:wifi.ssid') return wifiLabel(wifiById(v)) || String(v);
@@ -1018,6 +1113,7 @@ function csvSame(key, a, b) {
         if (x && y) return x.ip.toString() === y.ip.toString() && x.prefix === y.prefix;
     }
     if (key === 'nat' || key === 'if:wireless') return !!a === !!b;
+    if (/^x:/.test(key)) { const tg = csvTarget(key); return tg ? customText(tg.def, a) === customText(tg.def, b) : a === b; }
     if (key === 'notes') return String(a || '') === String(b || '');
     // A band's SSID list: none ([]) is not the default (no list).
     if (/^if:radio\.ssids_/.test(key)) return JSON.stringify(a == null ? null : a) === JSON.stringify(b == null ? null : b);
@@ -1062,6 +1158,23 @@ function csvIfaceByAddress(list, v) {
 // (the review's tick). Off, those rows apply without their group, and the
 // plan lists the paths (missingGroups) for the review to offer.
 function csvPlan(sheet, mapping, opts = {}) {
+    // The columns the user asked to make, made for the length of the plan:
+    // their values are read and reviewed as any column's, and Apply makes
+    // them first (op.column).
+    const fresh = csvNewColumns(sheet, mapping);
+    const held = _csvPending;
+    _csvPending = fresh.defs;
+    try {
+        const plan = csvPlanMapped(sheet, fresh.mapping, opts);
+        plan.newColumns = fresh.defs;
+        if (fresh.errors.length) plan.errors = fresh.errors.concat(plan.errors);
+        else if (fresh.defs.length) plan.ops = fresh.defs.map((def) => ({ column: def })).concat(plan.ops);
+        return plan;
+    } finally {
+        _csvPending = held;
+    }
+}
+function csvPlanMapped(sheet, mapping, opts = {}) {
     const kind = csvSheetKind(mapping);
     // observed: rows read out of an ARP table or a lease list (seenSheet),
     // whose names never rename a device on the map.
@@ -1273,7 +1386,7 @@ function csvPlanDevices(rows, plan) {
     records.forEach((rec) => plan.ops.push({ create: rec }));
     nodeSets.forEach((set, nodeId) => {
         const node = getNode(nodeId);
-        const keys = Object.keys(set).filter((k) => !csvSame(k, node[k], set[k]));
+        const keys = Object.keys(set).filter((k) => !csvSame(k, csvNodeValue(node, k), set[k]));
         if (!keys.length) return;
         const op = { nodeId, set: {}, drop: [] };
         keys.forEach((k) => { op.set[k] = set[k]; });
@@ -1433,7 +1546,7 @@ function csvPlanDeviceRow(r, anchor, ctx) {
             continue;
         }
         draftSets[key] = value;
-        if (existing && !csvSame(key, existing[key], value)) out.changes.push({ field: csvTargetLabel(tg), before: csvShow(key, existing[key]), after: csvShow(key, value) });
+        if (existing && !csvSame(key, csvNodeValue(existing, key), value)) out.changes.push({ field: csvTargetLabel(tg), before: csvShow(key, csvNodeValue(existing, key)), after: csvShow(key, value) });
     }
 
     // ---- Where it sits ----
@@ -1554,7 +1667,7 @@ function csvPlanDeviceRow(r, anchor, ctx) {
         out.status = 'add';
         out.newGroup = r.group;
     } else {
-        const anyDevice = Object.keys(draftSets).some((k) => !csvSame(k, existing[k], draftSets[k]));
+        const anyDevice = Object.keys(draftSets).some((k) => !csvSame(k, csvNodeValue(existing, k), draftSets[k]));
         const anyIface = ifaceDraft && (ifaceDraft.create || Object.keys(ifaceDraft.set).length);
         out.status = anyDevice || anyIface || cab.link || (cab.fills || []).length ? 'change' : 'same';
     }
@@ -1564,7 +1677,7 @@ function csvPlanDeviceRow(r, anchor, ctx) {
         Object.keys(draftSets).forEach((k) => {
             group.said[k] = draftSets[k];
             if (k === 'x' || k === 'y') record[k] = Math.round(draftSets[k]);
-            else record[k] = draftSets[k];
+            else csvSetNodeValue(record, k, draftSets[k]);
         });
         group.placed = Number.isFinite(group.said.x) && Number.isFinite(group.said.y);
         group.rows.push(r.index);
@@ -2528,11 +2641,15 @@ function csvWrite(plan, doc) {
             const at = doc.wifi.findIndex((w) => w.id === op.wifi.id);
             if (at > -1) doc.wifi[at] = read(Object.assign({}, doc.wifi[at], op.wifi.set));
         });
+        // The columns the sheet makes, before any device holds a value for one.
+        plan.ops.forEach((op) => {
+            if (op.column && !(doc.columns || []).some((c) => c.id === op.column.id)) doc.columns = normalizeCustomColumns((doc.columns || []).concat(op.column));
+        });
         plan.ops.forEach((op) => {
             if (op.create) { const rec = cloneData(op.create); doc.nodes.push(rec); touched.add(rec.id); }
         });
         plan.ops.forEach((op) => {
-            if (op.create || op.link || op.net || op.grp || op.wifi) return;
+            if (op.create || op.link || op.net || op.grp || op.wifi || op.column) return;
             if (op.linkId) {
                 const link = doc.links.find((l) => l.id === op.linkId);
                 if (link) Object.assign(link, op.set);
@@ -2567,7 +2684,7 @@ function csvWrite(plan, doc) {
             }
             const node = doc.nodes.find((n) => n.id === op.nodeId);
             if (!node) return;
-            Object.assign(node, op.set);
+            Object.keys(op.set).forEach((k) => csvSetNodeValue(node, k, op.set[k]));
             (op.drop || []).forEach((k) => { delete node[k]; });
             touched.add(node.id);
         });
@@ -2677,6 +2794,25 @@ function applyCsvPlan(plan) {
 // 169.254 address is a device that failed to get one, not a fact about the
 // network). The same address and MAC seen twice is one observation.
 //
+// A network scan says it too, but not on one line, so it is read before the
+// lines are (seenScan):
+//
+//   nmap      normal output    Nmap scan report for pc1.lan (10.0.0.5)
+//                              Host is up (0.0010s latency).
+//                              MAC Address: AA:BB:CC:DD:EE:FF (Raspberry Pi Trading)
+//             XML (-oX)        <host><status state="up"/><address addr="10.0.0.5"
+//                              addrtype="ipv4"/><address addr="AA:…" addrtype="mac"/>
+//                              <hostnames><hostname name="pc1.lan"/></hostnames></host>
+//
+// A host nmap found up with no MAC is kept: it answered from another network
+// (a router's MAC is all a routed scan sees, and nmap prints none), or it is
+// the machine that ran the scan. It is a device at that address all the same,
+// and the review finds it by its address. A host that is down is not counted.
+// arp-scan and netdiscover print one host per line like an ARP table, but the
+// words after the MAC are its maker, never its name ("Raspberry Pi Trading
+// Ltd" would give "Pi"): their banner, or a tab-separated line whose third
+// field has spaces in it, says so.
+//
 // The observations become a sheet of three columns, IP, MAC and Hostname,
 // mapped to the device's address, MAC and name, and go into the same mapping
 // and review steps as a spreadsheet: matched by MAC, then IP, a
@@ -2785,11 +2921,92 @@ function seenRecords(text) {
     return out;
 }
 
-// -> { rows: [{ ip, mac, host, line }], skipped }. ip carries its prefix when
-// the line gave one (a /n, or a netmask beside it).
+// One host of a scan as a row, or why not: 'skip' (an address or MAC that is
+// no fact about the network) or null (nothing to say). rows/byKey/out as in
+// seenExtract; mac may be ''.
+function seenScanRow(out, byKey, ipText, macText, name, line) {
+    const a = seenIp(ipText);
+    if (!a || !a.ip) return;
+    const m = macText ? seenMac(macText) : null;
+    const mac = m ? m.mac : '';
+    if (SEEN_SKIP_RANGES.has(a.ip.range()) || (mac && !seenMacUsable(mac))) { out.skipped++; return; }
+    const host = name ? seenHost(name, true) : '';
+    const key = `${a.ip.toString()}|${mac}`;
+    const had = byKey.get(key);
+    if (had) { if (!had.host && host) had.host = host; return; }
+    const row = { ip: a.ip.toString(), mac: mac ? fmtColonSafe(mac).toLowerCase() : '', host, line };
+    byKey.set(key, row);
+    out.rows.push(row);
+    if (!mac) out.noMac++;
+}
+const seenAttr = (tag, name) => {
+    const m = new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)')`, 'i').exec(tag);
+    return m ? (m[2] !== undefined ? m[2] : m[3]) : '';
+};
+// A network scan (see the header), as seenExtract's result, or null when the
+// text is not one.
+function seenScan(text) {
+    const src = String(text == null ? '' : text);
+    const out = { rows: [], skipped: 0, noMac: 0 };
+    const byKey = new Map();
+    if (/<nmaprun[\s>]/i.test(src) || /<host[\s>][\s\S]*?<address\s/i.test(src)) {
+        // <host> only: <hosthint> carries the same children for a host nmap
+        // had not finished with, and is reported again as a <host>.
+        const re = /<host[\s>][\s\S]*?<\/host>/gi;
+        let m;
+        while ((m = re.exec(src))) {
+            const block = m[0];
+            const line = src.slice(0, m.index).split(/\r\n|\n|\r/).length;
+            const status = /<status\s[^>]*>/i.exec(block);
+            if (status && seenAttr(status[0], 'state').toLowerCase() !== 'up') continue;
+            let ip = '', mac = '';
+            (block.match(/<address\s[^>]*>/gi) || []).forEach((tag) => {
+                const kind = seenAttr(tag, 'addrtype').toLowerCase();
+                if (kind === 'mac') { if (!mac) mac = seenAttr(tag, 'addr'); } else if (!ip) ip = seenAttr(tag, 'addr');
+            });
+            // What the user typed on the command line names the host better
+            // than its reverse lookup does.
+            const names = (block.match(/<hostname\s[^>]*>/gi) || []).map((tag) => ({ name: seenAttr(tag, 'name'), user: seenAttr(tag, 'type').toLowerCase() === 'user' }));
+            const named = names.find((n) => n.user && n.name) || names.find((n) => n.name);
+            if (ip) seenScanRow(out, byKey, ip, mac, named ? named.name : '', line);
+        }
+        return out;
+    }
+    if (/^Nmap scan report for /im.test(src)) {
+        let cur = null;
+        const flush = () => { if (cur && !cur.down) seenScanRow(out, byKey, cur.ip, cur.mac, cur.name, cur.line); cur = null; };
+        src.split(/\r\n|\n|\r/).forEach((raw, i) => {
+            const report = /^Nmap scan report for (.+?)\s*$/i.exec(raw);
+            if (report) {
+                flush();
+                let what = report[1];
+                const down = /\s*\[host down[^\]]*\]$/i.test(what);
+                what = what.replace(/\s*\[[^\]]*\]$/, '');
+                const paren = /^(\S+)\s+\(([0-9a-f:.]+)\)$/i.exec(what);
+                cur = paren ? { name: paren[1], ip: paren[2], mac: '', line: i + 1, down } : { name: '', ip: what, mac: '', line: i + 1, down };
+                return;
+            }
+            if (!cur) return;
+            if (/^Host seems down/i.test(raw)) cur.down = true;
+            const mac = /^MAC Address:\s*(\S+)/i.exec(raw);
+            if (mac) cur.mac = mac[1];
+        });
+        flush();
+        return out;
+    }
+    return null;
+}
+
+// -> { rows: [{ ip, mac, host, line }], skipped, noMac }. ip carries its
+// prefix when the line gave one (a /n, or a netmask beside it). noMac: the
+// rows of a scan that found a host without its MAC (only seenScan has them).
 function seenExtract(text) {
+    const scan = seenScan(text);
+    if (scan) return scan;
     const rows = [], byKey = new Map();
     let skipped = 0;
+    // arp-scan and netdiscover print the maker where a name would be.
+    const makerTail = /\barp-scan\b|\bnetdiscover\b|MAC Vendor \/ Hostname/i.test(String(text || ''));
     seenRecords(text).forEach(({ text: rec, line, block }) => {
         // A bracket right after a MAC is its maker, as pfSense prints it
         // ("aa:bb:… (Raspberry Pi Trading Ltd)"), never the host's name.
@@ -2818,7 +3035,9 @@ function seenExtract(text) {
         // word that is nothing else. A key or a "?" that says there is none
         // is an answer, and no word is guessed in its place.
         let host = null;
-        const keyed = SEEN_HOST_KEY_RE.exec(rec);
+        const fields = rec.split('\t').map((f) => f.trim());
+        if (makerTail || (fields.length >= 3 && seenIp(fields[0]) && seenMac(fields[1]) && /\S\s+\S/.test(fields[2]))) host = '';
+        const keyed = host === null && SEEN_HOST_KEY_RE.exec(rec);
         if (keyed) host = seenHost(keyed[1] !== undefined ? keyed[1] : keyed[2], true);
         if (host === null) {
             const paren = /(\S+)\s+\(\s*([0-9a-f:.]+)\s*\)/i.exec(rec);
@@ -2842,7 +3061,7 @@ function seenExtract(text) {
         byKey.set(key, row);
         rows.push(row);
     });
-    return { rows, skipped };
+    return { rows, skipped, noMac: 0 };
 }
 
 // The observations as a sheet the import reads like any other: IP, MAC and,
@@ -2989,6 +3208,7 @@ function renderCsvImport() {
     const seenLine = () => {
         const named = _csv.seen.rows.filter((r) => r.host).length;
         let line = t('Addresses seen with their MAC: {n}, with a name: {named}.', { n: found, named });
+        if (_csv.seen.noMac) line += ' ' + t('Of them, found by a scan without their MAC (on another network, or the machine that ran it): {n}.', { n: _csv.seen.noMac });
         if (_csv.seen.skipped) line += ' ' + t('Lines left out: {n} (no MAC beside the address, or a broadcast, multicast or link-local one).', { n: _csv.seen.skipped });
         return line;
     };
@@ -3003,14 +3223,24 @@ function renderCsvImport() {
     // 'Ports' stays English here, like 'Interface': the full editor's
     // technical vocabulary (see the header).
     const groups = [['device', t('Device')], ['iface', 'Interface'], ['cabling', t('Cabling')], ['cable', t('Cables')], ['port', 'Ports'], ['network', 'Subnets'], ['wifidef', 'Wi-Fi'], ['grpdef', t('Groups')]];
-    const options = (sel) => `<option value="">${escapeHtml(t('Ignore'))}</option>` + groups.map(([g, label]) =>
-        `<optgroup label="${escapeHtml(label)}">${csvTargets().filter((tg) => tg.group === g).map((tg) =>
-            `<option value="${escapeHtml(tg.key)}"${tg.key === sel ? ' selected' : ''}>${escapeHtml(csvTargetLabel(tg))}${tg.csv && csvNorm(tg.csv) !== csvNorm(csvTargetLabel(tg)) ? ` · ${escapeHtml(tg.csv)}` : ''}</option>`).join('')}</optgroup>`).join('');
+    const opt = (tg, sel) => `<option value="${escapeHtml(tg.key)}"${tg.key === sel ? ' selected' : ''}>${escapeHtml(csvTargetLabel(tg))}${tg.csv && csvNorm(tg.csv) !== csvNorm(csvTargetLabel(tg)) ? ` · ${escapeHtml(tg.csv)}` : ''}</option>`;
+    // The network's own columns, and a new one named by the heading: a
+    // column of the client's sheet that Topo has no field for comes in as a
+    // column of theirs, instead of being left behind (js/model.js "Custom
+    // columns"). Offered on a sheet of devices, the only tab they live on.
+    const own = csvTargets().filter((tg) => tg.custom && !tg.pending);
+    const yours = (sel, heading) => {
+        const fresh = sheet.observed || !sheet.hasHeadings ? '' : `<option value="${escapeHtml(CSV_NEW_COLUMN + heading)}"${sel === CSV_NEW_COLUMN + heading ? ' selected' : ''}>${escapeHtml(t('New column: {name}', { name: customName(heading) }))}</option>`;
+        return own.length || fresh ? `<optgroup label="${escapeHtml(t('Your columns'))}">${own.map((tg) => opt(tg, sel)).join('')}${fresh}</optgroup>` : '';
+    };
+    const options = (sel, heading) => `<option value="">${escapeHtml(t('Ignore'))}</option>` + groups.map(([g, label]) =>
+        `<optgroup label="${escapeHtml(label)}">${csvTargets().filter((tg) => tg.group === g && !tg.custom).map((tg) => opt(tg, sel)).join('')}</optgroup>`
+        + (g === 'device' ? yours(sel, heading) : '')).join('');
     csvEl('csvMap').innerHTML = sheet.headers.map((h, i) => {
         const samples = sheet.rows.slice(0, 3).map((r) => String(r[i] || '').trim()).filter(Boolean);
         return `<div class="csv-col${_csv.mapping[i] ? ' mapped' : ''}">
             <label for="csvCol-${i}"><b>${escapeHtml(h)}</b><span class="csv-sample mono">${escapeHtml(samples.join(' · ') || '—')}</span></label>
-            <select id="csvCol-${i}" class="select" data-col="${i}">${options(_csv.mapping[i])}</select>
+            <select id="csvCol-${i}" class="select" data-col="${i}">${options(_csv.mapping[i], h)}</select>
         </div>`;
     }).join('');
 }
@@ -3021,6 +3251,9 @@ function renderCsvReview() {
     const bits = [[t('To add'), c.add], [t('To change'), c.change], [t('Unchanged'), c.same], [t('Conflicts'), c.conflict]];
     csvEl('csvCounts').innerHTML = bits.map(([label, n]) => `<span class="paste-count${n ? '' : ' zero'}"><b class="mono">${n}</b> ${escapeHtml(label)}</span>`).join('');
     const msgs = plan.errors.map((m) => `<div class="alert err">${escapeHtml(m)}</div>`);
+    if (!plan.errors.length && (plan.newColumns || []).length) {
+        msgs.push(`<div class="alert info">${escapeHtml(t('Makes the columns: {names}', { names: plan.newColumns.map((c) => `${c.name} (${t(CUSTOM_KIND_NAMES[c.kind])})`).join(' · ') }))}</div>`);
+    }
     csvEl('csvMsgs').innerHTML = msgs.join('');
     csvEl('csvMsgs').classList.toggle('hidden', !msgs.length);
     // Groups the sheet names that the map does not have: made only when

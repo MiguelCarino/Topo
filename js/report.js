@@ -27,13 +27,8 @@ const REPORT_FIELDS = [
     { key: 'scope', label: 'Scope & notes', placeholder: 'What was surveyed, what was not, and anything the reader needs to know.', multiline: true }
 ];
 
-// The LOCAL calendar date. toISOString() is UTC, so from late afternoon on in
-// Mexico (UTC-6) every report, and its filename, was dated tomorrow. Every
-// download is named <slug>-<this date> (docFileStem in js/app.js).
-const todayISO = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
+// The LOCAL calendar date (todayISO, js/model.js) dates every report and
+// names every download: <slug>-<this date> (docFileStem in js/app.js).
 
 // A name as the first half of a filename. Accents fold to their letter
 // ("José" -> "jose") and every run of anything else becomes one hyphen, but a
@@ -162,8 +157,45 @@ function reportDevices() {
         // What it runs on (js/model.js "Hosts"): the table's Runs on column,
         // and the inventory lists it under its host.
         hostId: hostOf(node) ? node.host : '',
-        host: hostOf(node) ? (hostOf(node).name || node.host) : ''
+        host: hostOf(node) ? (hostOf(node).name || node.host) : '',
+        // The network's own columns (js/model.js "Custom columns") that the
+        // Devices table shows, in its order, with what this device holds.
+        custom: reportCustomOf(node),
+        // Age and upkeep (js/model.js), as of the report's date.
+        upkeep: reportUpkeepOf(node, reportAsOf())
     }));
+}
+// The day a report's ages are worked out to: its own date when that is one,
+// so a report printed again later still says what it said; else today.
+const reportAsOf = () => (state.report && customDate(state.report.date)) || todayISO();
+// "In service since 2019 (about 7 y) · Last serviced 2026-05-14 · Next service 2027-05-14", or ''.
+function reportUpkeepOf(node, asOf) {
+    const age = deviceAge(node, asOf), next = nextServiceDate(node);
+    return [
+        node.inService ? t('In service since {date}', { date: node.inService }) + (age ? ` (${ageText(age)})` : '') : '',
+        node.serviced ? t('Last serviced {date}', { date: node.serviced }) : '',
+        next ? t('Next service {date}', { date: next }) : ''
+    ].filter(Boolean).join(' · ');
+}
+// [{ name, text }] for the custom columns the table shows (a column hidden
+// there is not printed either: hiding it is how it is left out of the
+// report), only those this device holds a value in.
+function reportCustomOf(node) {
+    const cols = reportCustomColumns();
+    return cols.map((c) => {
+        const v = customValueOf(node, c.id);
+        if (v === undefined) return null;
+        return { name: c.name, text: c.kind === 'yesno' ? t(v ? 'Yes' : 'No') : customText(c, v) };
+    }).filter(Boolean);
+}
+function reportCustomColumns() {
+    const view = (state.tableView && state.tableView.devices) || {};
+    const hidden = new Set(view.hidden || []);
+    const rank = new Map((view.order || []).map((k, i) => [k, i]));
+    const key = (c) => `x:${c.id}`;
+    const cols = (state.columns || []).filter((c) => !hidden.has(key(c)));
+    const at = (c) => (rank.has(key(c)) ? rank.get(key(c)) : Infinity);
+    return cols.map((c, i) => ({ c, i })).sort((a, b) => (at(a.c) - at(b.c)) || (a.i - b.i)).map((x) => x.c);
 }
 
 // The groups, in tree order (groupTree): each with its path, its kind, its
@@ -588,7 +620,16 @@ function reportModelNow() {
         meta: siteReportMeta(state.report),
         findings,
         accepted,
+        // Pinned for the next visit (js/diagnostics.js), whatever their
+        // finding's state, and the accepted ones scheduled until a date.
+        visit: reportVisit(),
+        scheduled: accepted.filter((f) => f.accepted.until),
         devices,
+        // The names of the network's own columns the table shows, in its
+        // order: the summary's device list heads its columns with them. Kept
+        // here because a binder's sheets are drawn after its documents are
+        // put back.
+        customColumns: reportCustomColumns().map((c) => c.name),
         groups,
         racks,
         connections,
@@ -839,6 +880,24 @@ function reportStyles() {
     .sev.warn { background: #fef3c7; color: #92400e; }
 
     .clean { border: 1px solid #a7f3d0; background: #ecfdf5; color: #065f46; border-radius: 4px; padding: 10px 12px; }
+    /* The summary for the client: the verdict first, big, in the colour of
+       its answer; then the problems as a numbered list, not a table. */
+    .verdict { border: 1px solid; border-radius: 6px; padding: 14px 16px; margin: 14px 0 6px; page-break-inside: avoid; }
+    .verdict b { display: block; font-size: 20px; line-height: 1.2; }
+    .verdict span { display: block; font-size: 14px; font-weight: 600; margin-top: 2px; }
+    .verdict small { display: block; font-size: 10.5px; color: #475569; margin-top: 6px; }
+    .verdict.ok { border-color: #a7f3d0; background: #ecfdf5; color: #065f46; }
+    .verdict.warn { border-color: #fde68a; background: #fffbeb; color: #92400e; }
+    .verdict.bad { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+    .todo { margin: 6px 0; padding-left: 20px; }
+    .todo li { margin: 0 0 10px; page-break-inside: avoid; }
+    .todo .sev { margin-right: 6px; }
+    .summary-list td { padding: 3px 6px; }
+    .changes { margin: 4px 0; padding-left: 18px; }
+    .planned { margin: 4px 0; padding-left: 18px; }
+    .planned li + li { margin-top: 4px; }
+    .changes li { margin: 0 0 3px; }
+    .who { margin-top: 18px; color: #334155; }
     .figure { margin: 10px 0 4px; text-align: center; page-break-inside: avoid; }
     .figure img { max-width: 100%; border: 1px solid #e2e8f0; border-radius: 4px; }
     .caption { font-size: 10px; color: #64748b; margin-top: 5px; }
@@ -940,8 +999,36 @@ function findingsSection(findings, opts = {}) {
         <tbody>${rows}</tbody></table>`;
 }
 
+// The pins, each as one line: { key, names, check, detail, note }. A pin
+// whose finding is not raised at the moment still prints (somebody asked for
+// it to be looked at), saying so.
+function reportVisit() {
+    return pinnedGroups(topologyFindings()).map((p) => ({
+        key: p.entry.check,
+        names: p.findings.length ? [...new Set(p.findings.map((f) => f.subject).filter(Boolean))].join(', ') : pinnedNames(p.entry),
+        check: findingCheckName(p.entry.check),
+        detail: p.findings.length ? p.findings.map((f) => sentenceCase(f.detail)).join(' ') : t('Not raised at the moment.'),
+        note: p.entry.note || ''
+    }));
+}
+// To check on the next visit: the pins, with what to look at.
+function visitSection(visit) {
+    const rows = visit.map((v, i) => `
+        <tr>
+            <td class="num">${i + 1}</td>
+            <td><b>${escapeHtml(v.names || '—')}</b></td>
+            <td class="muted">${escapeHtml(v.check)}</td>
+            <td>${escapeHtml(v.detail)}</td>
+            <td>${escapeHtml(v.note)}</td>
+        </tr>`).join('');
+    return `<table class="accepted">
+        <thead><tr><th></th><th>${t('Device')}</th><th>${t('Check')}</th><th>${t('Finding')}</th><th>${t('To check')}</th></tr></thead>
+        <tbody>${rows}</tbody></table>`;
+}
+
 // Known / accepted: what was raised and accepted, with who-knows-why written
-// down. The same columns as the findings, the reason in place of a severity.
+// down. The same columns as the findings, the reason in place of a severity;
+// a scheduled one says until when.
 function acceptedSection(accepted) {
     const rows = accepted.map((f, i) => `
         <tr>
@@ -949,7 +1036,7 @@ function acceptedSection(accepted) {
             <td><b>${escapeHtml(f.subject || '—')}</b></td>
             <td class="muted">${escapeHtml(f.check)}</td>
             <td>${escapeHtml(sentenceCase(f.detail))}</td>
-            <td>${escapeHtml(f.accepted.reason)}</td>
+            <td>${escapeHtml(f.accepted.until ? t('Scheduled until {date}: {reason}', { date: f.accepted.until, reason: f.accepted.reason }) : f.accepted.reason)}</td>
         </tr>`).join('');
     return `<p class="muted">${escapeHtml(t('Raised by the checks and accepted as known, for the reason given. They are not counted in the summary.'))}</p>
         <table class="accepted">
@@ -1087,6 +1174,11 @@ function devicesSection(devices, groups) {
         const where = grouped && d.groupId ? d.rackSpan : (d.place !== undefined ? d.place : d.location);
         const asset = [d.assetTag ? `${t('Asset tag')} ${d.assetTag}` : '', d.serial ? `${t('Serial number')} ${d.serial}` : '', where]
             .filter(Boolean).join(' · ');
+        // The network's own columns, one line of "Name: value" under the
+        // asset line: the inventory's columns are Topo's, and a site's own
+        // facts read best beside the device they are about.
+        const mine = (d.custom || []).map((x) => `${x.name}: ${x.text}`).join(' · ');
+        const upkeep = d.upkeep || '';
         const status = d.status && d.status !== 'active' ? ` <span class="muted">(${escapeHtml(statusName(d.status))})</span>` : '';
         // A guest, under its host: stepped in, and saying what it runs on.
         const runs = d.hostId ? `<br><span class="muted">${escapeHtml(t('Runs on {host}', { host: d.host }))}</span>` : '';
@@ -1101,7 +1193,7 @@ function devicesSection(devices, groups) {
                 : `<td colspan="3"><span class="muted">${escapeHtml(t('none recorded'))}</span></td>`;
             if (!first) return `<tr class="cont"><td></td><td></td>${own}${cols.map(() => '<td></td>').join('')}</tr>`;
             return `<tr class="dev${guestCls}">
-            <td>${d.guest ? '<span class="muted">↳ </span>' : ''}<b>${escapeHtml(d.name)}</b>${status}${runs}${asset ? `<br><span class="muted">${escapeHtml(asset)}</span>` : ''}${d.notes ? `<br><span class="muted">${escapeHtml(d.notes)}</span>` : ''}</td>
+            <td>${d.guest ? '<span class="muted">↳ </span>' : ''}<b>${escapeHtml(d.name)}</b>${status}${runs}${asset ? `<br><span class="muted">${escapeHtml(asset)}</span>` : ''}${upkeep ? `<br><span class="muted">${escapeHtml(upkeep)}</span>` : ''}${mine ? `<br><span class="muted">${escapeHtml(mine)}</span>` : ''}${d.notes ? `<br><span class="muted">${escapeHtml(d.notes)}</span>` : ''}</td>
             <td>${escapeHtml(t(d.typeName))}${extra ? `<br><span class="muted">${extra}</span>` : ''}</td>
             ${own}
             ${cols.map((f) => `<td${f.report.mono ? ' class="mono"' : ''}>${escapeHtml(d[f.report.key]) || empty}</td>`).join('\n            ')}
@@ -1317,6 +1409,147 @@ function methodSection(meta) {
 
 const stat = (value, label, cls) => `<div class="stat${cls ? ' ' + cls : ''}"><b>${value}</b><span>${escapeHtml(t(label))}</span></div>`;
 
+// ---- The summary for the client ----
+// One page in plain words for the person who owns the network and will never
+// read a findings table: whether it is all right, what needs attention and
+// why, what they have, what changed, and who looked. Built from the same
+// model as the technical sheet, so the two can never disagree; it only says
+// it differently. Each check has a plain sentence for what is wrong and one
+// for why it matters (PLAIN_FINDINGS); a check without one falls back to its
+// own name. The open findings only: an accepted one is known and explained in
+// the technical pages, and an info note is the editor's, as there.
+const PLAIN_FINDINGS = {
+    'ip-conflict': ['Two devices are set to the same address', 'Only one of them can work at a time; the other keeps losing its connection.'],
+    'mac-conflict': ['Two devices claim the same hardware address', 'The network mixes them up, so either one can lose its connection.'],
+    cabling: ['Devices are cabled together but set up for different networks', 'They are plugged in, but cannot talk to each other over that cable.'],
+    loop: ['The cables form a loop', 'Unless the switches are set up for it, a loop can flood the network and bring it down.'],
+    'cable-label': ['Two cables carry the same label', 'Whoever traces a cable later may unplug the wrong one.'],
+    'asset-tag': ['Two devices carry the same asset tag', 'The inventory cannot tell them apart.'],
+    group: ['The list of places (buildings, rooms, racks) has an error', 'Some devices do not show where they really are.'],
+    rack: ['A device does not fit where the rack drawing puts it', 'The rack drawing does not match what fits in the rack.'],
+    host: ['Something runs on a device that is marked as retired', 'If that device is switched off, what runs on it stops too.'],
+    'wifi-band': ['A wireless device is on a band its access point cannot use', 'It cannot connect the way it is documented.'],
+    'wifi-ssid': ['A wireless device is set to a Wi-Fi network its access point does not offer', 'It cannot connect the way it is documented.'],
+    'wifi-subnet': ['A wireless device has an address that does not belong to its Wi-Fi network', 'It may connect but not reach anything.'],
+    'wifi-overlap': ['Two access points use overlapping channels', 'They slow each other down.'],
+    'wifi-security': ['A Wi-Fi network has weak or no protection', 'People nearby could join it or read what is sent over it.'],
+    'wifi-signal': ['A wireless device has a weak signal', 'Its connection may be slow or drop.'],
+    age: ['A device is older than it is expected to last', 'It is more likely to fail; plan and budget its replacement.'],
+    service: ['A device is overdue for its service', 'Equipment that is not looked after fails sooner, often without warning.'],
+    'service-due': ['A device is due for its service soon', 'Booking it now keeps it from becoming overdue.'],
+    interfaces: ['A device has no valid address recorded', 'It cannot be reached the way it is documented.'],
+    multihoming: ['A device is connected twice to the same network', 'Its connection can become unstable.'],
+    bond: ['Network ports joined together on a device are set up wrongly', 'The backup or extra speed they should give does not work.'],
+    ports: ['The cables and ports of a device do not match up', 'The record of what is plugged in where is incomplete or wrong.'],
+    radio: ['A cable and a wireless connection are mixed up on a device', 'The connection cannot work the way it is documented.'],
+    mac: ['A hardware address on a device looks wrong', 'The device may be hard to identify, or clash with another one.'],
+    gateway: ['A device cannot reach the way out of its network', 'It may not reach the internet or the other networks.'],
+    dns: ['The name server of a device cannot be reached', 'Websites and services may not open by their names.']
+};
+const plainFinding = (f) => {
+    const p = PLAIN_FINDINGS[f.key];
+    return p ? { what: t(p[0]), why: t(p[1]) } : { what: f.check || t('Something needs a look'), why: '' };
+};
+
+// The open findings as problems: one per check and severity, naming every
+// device it is about. What must be fixed first, then what needs attention.
+function summaryProblems(findings) {
+    const by = new Map();
+    (findings || []).filter((f) => f.level === 'bad' || f.level === 'warn').forEach((f) => {
+        const k = `${f.level}\u0000${f.key}`;
+        if (!by.has(k)) by.set(k, Object.assign({ key: f.key, level: f.level, where: [] }, plainFinding(f)));
+        const p = by.get(k);
+        if (f.subject && !p.where.includes(f.subject)) p.where.push(f.subject);
+    });
+    const list = [...by.values()];
+    return list.filter((p) => p.level === 'bad').concat(list.filter((p) => p.level === 'warn'));
+}
+// The one line at the top: { cls: 'ok' | 'warn' | 'bad', title, more }.
+function summaryVerdict(problems) {
+    const bad = problems.filter((p) => p.level === 'bad').length;
+    const warn = problems.length - bad;
+    const attention = (n) => t(n === 1 ? 'One thing needs attention' : '{n} things need attention', { n });
+    if (bad) return { cls: 'bad', title: t(bad === 1 ? 'One problem needs fixing' : '{n} problems need fixing', { n: bad }), more: warn ? attention(warn) : '' };
+    if (warn) return { cls: 'warn', title: attention(warn), more: '' };
+    return { cls: 'ok', title: t('Your network looks fine'), more: '' };
+}
+// Past this many devices the summary lists kinds only: a page, not a register.
+const SUMMARY_LIST_MAX = 60;
+const SUMMARY_WHERE_MAX = 6;
+const SUMMARY_CHANGES_MAX = 8;
+
+// opts as reportSheet's: a binder labels the sheet by site and anchors it.
+function summarySheet(model, opts = {}) {
+    const meta = model.meta || {};
+    const devices = model.devices || [];
+    const problems = summaryProblems(model.findings);
+    const verdict = summaryVerdict(problems);
+    const metaRows = REPORT_FIELDS
+        .filter(({ key, multiline }) => !multiline && meta[key])
+        .map(({ key, label }) => `<div><dt>${escapeHtml(t(label))}</dt><dd>${escapeHtml(meta[key])}</dd></div>`)
+        .join('');
+    const basis = meta.date ? t('Based on the network as it was documented on {date}. Nothing was scanned or logged into.', { date: meta.date })
+        : t('Based on the network as it was documented. Nothing was scanned or logged into.');
+    const where = (list) => {
+        const shownList = list.slice(0, SUMMARY_WHERE_MAX).join(', ');
+        return list.length > SUMMARY_WHERE_MAX ? `${shownList} ${t('…and {n} more.', { n: list.length - SUMMARY_WHERE_MAX })}` : shownList;
+    };
+    const todo = problems.length ? `<h2>${escapeHtml(t('What needs attention'))}</h2>
+    <ol class="todo">${problems.map((p) => `<li class="${p.level}">
+        <span class="sev ${p.level}">${escapeHtml(t(p.level === 'bad' ? 'Fix now' : 'Needs attention'))}</span>
+        <b>${escapeHtml(p.what)}</b>${p.why ? `<br>${escapeHtml(p.why)}` : ''}${p.where.length ? `<br><span class="muted">${escapeHtml(t('Where: {list}', { list: where(p.where) }))}</span>` : ''}
+    </li>`).join('')}</ol>` : `<p>${escapeHtml(t('No problems were found in how the network is set up. Keep this document: it is the record of what you have.'))}</p>`;
+
+    // What is planned: the pins (on the next visit) and the schedules (by a
+    // date), so the client sees what is already in hand.
+    const planned = (model.visit || []).map((v) => `<li><b>${escapeHtml(plainFinding({ key: v.key, check: v.check }).what)}</b> — ${escapeHtml(v.names)}<br><span class="muted">${escapeHtml(v.note ? t('On the next visit: {note}', { note: v.note }) : t('On the next visit.'))}</span></li>`)
+        .concat((model.scheduled || []).map((f) => `<li><b>${escapeHtml(plainFinding(f).what)}</b> — ${escapeHtml(f.subject || '')}<br><span class="muted">${escapeHtml(t('By {date}: {reason}', { date: f.accepted.until, reason: f.accepted.reason }))}</span></li>`));
+    const plan = planned.length ? `<h2>${escapeHtml(t('What is planned'))}</h2>
+    <ul class="planned">${planned.join('')}</ul>` : '';
+
+    // What they have: how many of each kind, then the devices themselves with
+    // where they are and the network's own columns the table shows.
+    const kinds = new Map();
+    devices.forEach((d) => { const k = t(d.typeName); kinds.set(k, (kinds.get(k) || 0) + 1); });
+    const kindStats = [...kinds.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([k, n]) => `<div class="stat"><b>${n}</b><span>${escapeHtml(k)}</span></div>`).join('');
+    const own = model.customColumns || [];
+    const placeOf = (d) => d.place || d.location || '';
+    const anyPlace = devices.some(placeOf);
+    const cell = (d, name) => { const x = (d.custom || []).find((c) => c.name === name); return x ? escapeHtml(x.text) : ''; };
+    const list = devices.length && devices.length <= SUMMARY_LIST_MAX ? `<table class="summary-list">
+        <thead><tr><th>${escapeHtml(t('Device'))}</th><th>${escapeHtml(t('Kind'))}</th>${anyPlace ? `<th>${escapeHtml(t('Where'))}</th>` : ''}${own.map((n) => `<th>${escapeHtml(n)}</th>`).join('')}</tr></thead>
+        <tbody>${devices.map((d) => `<tr><td><b>${escapeHtml(d.name)}</b>${d.status === 'retired' ? ` <span class="muted">(${escapeHtml(statusName('retired'))})</span>` : ''}</td><td>${escapeHtml(t(d.typeName))}</td>${anyPlace ? `<td>${escapeHtml(placeOf(d))}</td>` : ''}${own.map((n) => `<td>${cell(d, n)}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>` : (devices.length ? `<p class="muted">${escapeHtml(t('The full list of devices is in the technical report.'))}</p>` : '');
+
+    // What changed since the last visit, in a few lines.
+    const ch = model.changes;
+    const changes = ch ? `<h2>${escapeHtml(t('What changed since the last visit'))}</h2>
+    <p class="muted">${escapeHtml(baselineSentence(ch))}</p>${ch.rows.length ? `<ul class="changes">${ch.rows.slice(0, SUMMARY_CHANGES_MAX).map((r) => `<li>${escapeHtml(r.op)} · ${escapeHtml(r.what)}${r.name ? ` <b>${escapeHtml(r.name)}</b>` : ''}${r.detail ? ` <span class="muted">— ${escapeHtml(r.detail)}</span>` : ''}</li>`).join('')}${ch.rows.length > SUMMARY_CHANGES_MAX ? `<li class="muted">${escapeHtml(t('…and {n} more.', { n: ch.rows.length - SUMMARY_CHANGES_MAX }))}</li>` : ''}</ul>` : `<p>${escapeHtml(t('Nothing has changed since then.'))}</p>`}` : '';
+
+    const who = meta.engineer ? `<p class="who">${escapeHtml(t('Checked by {name}. Questions about this summary go to them.', { name: meta.engineer }))}</p>` : '';
+    return `<div class="sheet summary"${opts.anchorId ? ` id="${escapeHtml(opts.anchorId)}"` : ''}>
+    <div class="rule"></div>
+    <h1>${escapeHtml(opts.title || t('Network summary'))}</h1>
+    <p class="sub">${escapeHtml(opts.subtitle !== undefined ? opts.subtitle : (meta.site || t('Site not named')))}</p>
+    <dl class="meta">${metaRows}</dl>
+
+    <div class="verdict ${verdict.cls}"><b>${escapeHtml(verdict.title)}</b>${verdict.more ? `<span>${escapeHtml(verdict.more)}</span>` : ''}<small>${escapeHtml(basis)}</small></div>
+    ${todo}
+    ${plan}
+
+    <h2>${escapeHtml(t('What you have'))}</h2>
+    <div class="stats">${kindStats || `<div class="stat"><b>0</b><span>${escapeHtml(t('Devices'))}</span></div>`}</div>
+    ${list}
+    ${changes}
+    ${who}
+    <footer>
+        <span>${escapeHtml(meta.ref || '')}</span>
+        <span>${escapeHtml(t('Generated with Topo · topo.carino.systems'))}</span>
+    </footer>
+</div>`;
+}
+
 // ---- The document shell, and one sheet inside it ----
 // Split so the estate report can put N sheets in one document without a second
 // copy of any of this. The split is the whole anti-drift argument: there is one
@@ -1375,7 +1608,10 @@ function reportSheet(model, image, opts = {}) {
 
     <h2>${escapeHtml(t('Findings'))}</h2>
     ${findingsSection(model.findings, { accepted: accepted.length > 0 })}
-${accepted.length ? `
+${(model.visit || []).length ? `
+    <h2>${escapeHtml(t('To check on the next visit'))}</h2>
+    ${visitSection(model.visit)}
+` : ''}${accepted.length ? `
     <h2>${escapeHtml(t('Known / accepted'))}</h2>
     ${acceptedSection(accepted)}
 ` : ''}
@@ -1419,12 +1655,21 @@ ${appendix ? `
 </div>`;
 }
 
-// The single-site report: one sheet, one document. Signature unchanged.
-function reportHtml(model, image) {
-    const title = model.meta.site
-        ? `${model.meta.site} — ${t('Network documentation report')}`
-        : t('Network documentation report');
-    return reportDocument(title, reportSheet(model, image));
+// What a report holds: the summary for the client, the technical sheet, or
+// both (the summary first). The dialog ticks both by default; a caller that
+// says nothing gets the technical sheet alone, as before the summary existed.
+const reportParts = (parts) => {
+    const p = { summary: !!(parts && parts.summary), technical: !parts || parts.technical !== false };
+    if (!p.summary && !p.technical) p.technical = true;
+    return p;
+};
+const reportTitleWord = (p) => t(p.technical ? 'Network documentation report' : 'Network summary');
+
+// The single-site report: one document of the parts asked for.
+function reportHtml(model, image, parts) {
+    const p = reportParts(parts);
+    const title = model.meta.site ? `${model.meta.site} — ${reportTitleWord(p)}` : reportTitleWord(p);
+    return reportDocument(title, (p.summary ? summarySheet(model) : '') + (p.technical ? reportSheet(model, image) : ''));
 }
 
 // The cover: what the whole engagement adds up to, before any one building.
@@ -1476,10 +1721,13 @@ function binderCoverSheet(binder) {
 // The cover, then every site as the same sheet a single-site report produces.
 // A site's own header rows are printed only where they DIFFER from the cover's,
 // so a binder whose sites all name the same client says it once.
-function binderHtml(binder, images = {}) {
-    const title = binder.meta.site
-        ? `${binder.meta.site} — ${t('Estate documentation report')}`
-        : t('Estate documentation report');
+// With the summary, each site's summary comes before its technical sheet
+// (and takes the anchor the cover's index links to); a summary on its own is
+// one page per site and no cover, which is the estate in the client's words.
+function binderHtml(binder, images = {}, parts) {
+    const p = reportParts(parts);
+    const word = t(p.technical ? 'Estate documentation report' : 'Network summary');
+    const title = binder.meta.site ? `${binder.meta.site} — ${word}` : word;
     const sheets = binder.sites.map((s) => {
         if (!s.model) {
             return `<div class="sheet" id="${escapeHtml(s.anchor)}">
@@ -1519,10 +1767,16 @@ function binderHtml(binder, images = {}) {
             if (recorded && recorded !== binder.meta[key]) sheetMeta[key] = recorded;
         });
         const sheetModel = Object.assign({}, s.model, { meta: sheetMeta });
-        return reportSheet(sheetModel, images[s.id] || null, { title: s.name, subtitle: '', anchorId: s.anchor });
+        // The summary is read on its own, so it carries the whole header:
+        // the cover's, with the site's own where it says something else.
+        const summary = p.summary ? summarySheet(Object.assign({}, s.model, { meta: Object.assign({}, binder.meta, { site: '' }, pickSet(sheetMeta)) }),
+            { title: s.name, subtitle: t('Network summary'), anchorId: s.anchor }) : '';
+        return summary + (p.technical ? reportSheet(sheetModel, images[s.id] || null, { title: s.name, subtitle: '', anchorId: p.summary ? '' : s.anchor }) : '');
     }).join('');
-    return reportDocument(title, binderCoverSheet(binder) + sheets);
+    return reportDocument(title, (p.technical ? binderCoverSheet(binder) : '') + sheets);
 }
+// The fields of a header that say something.
+const pickSet = (meta) => { const out = {}; Object.keys(meta || {}).forEach((k) => { if (meta[k]) out[k] = meta[k]; }); return out; };
 
 // ---- Delivering it ----
 // A new tab is the useful default: the report is read and printed far more often
@@ -1562,16 +1816,21 @@ function deliverReport(html, meta, kind = 'report') {
 // (js/changes.js), and is then its new baseline: the next report says what
 // changed since this one. Worked out before the baseline moves, or every
 // report would say nothing had changed.
-async function generateSiteReport(meta) {
+// parts: { summary, technical } (reportParts); the diagram is drawn only for
+// the technical sheet, the one that prints it.
+async function generateSiteReport(meta, parts) {
+    const p = reportParts(parts);
     const model = reportModel();
     if (meta) model.meta = siteReportMeta(meta);
     const keptId = isKept() ? state.libraryId : null;
     const doc = keptId ? serializeDoc() : null;
     if (keptId) model.changes = reportChanges(keptId, doc);
     let image = null;
-    try { image = await captureCanvasImage('png'); }
-    catch (e) { console.warn('Report: could not rasterise the diagram; continuing without it.', e); }
-    const out = deliverReport(reportHtml(model, image), model.meta);
+    if (p.technical) {
+        try { image = await captureCanvasImage('png'); }
+        catch (e) { console.warn('Report: could not rasterise the diagram; continuing without it.', e); }
+    }
+    const out = deliverReport(reportHtml(model, image, p), model.meta, p.technical ? 'report' : 'summary');
     if (keptId) takeSnapshot(keptId, 'report', doc);
     return out;
 }
@@ -1584,7 +1843,7 @@ async function generateSiteReport(meta) {
 // their canvas to be edited.
 async function withDocRendered(doc, fn) {
     const held = {
-        nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted, annotations: state.annotations, report: state.report,
+        nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report,
         camera: { x: state.camera.x, y: state.camera.y, zoom: state.camera.zoom },
         selection: state.selection,   // the whole set: a getter pair would lose a set of several
     };
@@ -1595,7 +1854,8 @@ async function withDocRendered(doc, fn) {
         renderCanvasOnly();
         return await fn();
     } finally {
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.accepted = held.accepted;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
+        state.columns = held.columns; state.tableView = held.tableView;
         state.annotations = held.annotations; state.report = held.report;
         state.camera = held.camera;
         state.selection = held.selection;
@@ -1634,8 +1894,9 @@ async function generateBinderReport(estateMeta, opts = {}) {
     // Each site's sheet says what changed since that card's baseline, and the
     // estate report is then every card's new one, as a site report is.
     binder.sites.forEach((s) => { if (s.model) s.model.changes = reportChanges(s.id, s.doc); });
-    const images = opts.images === false ? {} : await captureBinderImages(binder.sites, opts.onProgress, opts.capture);
-    const out = deliverReport(binderHtml(binder, images), { site: binder.meta.site || 'estate', date: binder.meta.date, ref: binder.meta.ref });
+    const p = reportParts(opts.parts);
+    const images = opts.images === false || !p.technical ? {} : await captureBinderImages(binder.sites, opts.onProgress, opts.capture);
+    const out = deliverReport(binderHtml(binder, images, p), { site: binder.meta.site || 'estate', date: binder.meta.date, ref: binder.meta.ref }, p.technical ? 'report' : 'summary');
     entries.forEach((e) => takeSnapshot(e.id, 'report', e.doc));
     return out;
 }
@@ -1718,7 +1979,8 @@ function renderReportDialog() {
     // here, before the document is handed to anyone (js/assets.js).
     renderSecretLint(document.getElementById('reportLint'), secretHitsFor(binder ? 'binder-report' : 'doc'), binder ? null : closeReportDialog);
     if (images) {
-        images.classList.toggle('hidden', !binder);
+        // The diagrams are the technical sheets'; a summary has none.
+        images.classList.toggle('hidden', !binder || !readReportParts().technical);
         // On by default up to eight sites. Past that the sweep is slow and the
         // file is enormous, and the estate cover is the part being read anyway.
         const cb = document.getElementById('reportImages');
@@ -1731,6 +1993,8 @@ function openReportDialog(mode) {
     const dialog = document.getElementById('reportDialog');
     if (!dialog) return;
     _reportMode = mode === 'binder' ? 'binder' : 'site';
+    // Both, every time it opens: the hand-over copy is the usual report.
+    ['reportSummary', 'reportTechnical'].forEach((id) => { const cb = document.getElementById(id); if (cb) cb.checked = true; });
     renderReportDialog();
     dialog.classList.remove('hidden');
     document.getElementById('report-site')?.focus();
@@ -1742,6 +2006,24 @@ function openBinderReportDialog() {
 }
 
 const reportMode = () => _reportMode;
+
+// The two ticks as reportParts reads them.
+function readReportParts() {
+    const on = (id) => { const cb = document.getElementById(id); return !cb || cb.checked; };
+    return reportParts({ summary: on('reportSummary'), technical: on('reportTechnical') });
+}
+// At least one stays ticked: unticking the last one ticks the other.
+(function wireReportParts() {
+    const s = document.getElementById('reportSummary'), tech = document.getElementById('reportTechnical');
+    if (!s || !tech) return;
+    const keep = (other) => (e) => {
+        if (!e.target.checked && !other.checked) other.checked = true;
+        const images = document.getElementById('reportImagesRow');
+        if (images) images.classList.toggle('hidden', _reportMode !== 'binder' || !tech.checked);
+    };
+    s.addEventListener('change', keep(tech));
+    tech.addEventListener('change', keep(s));
+})();
 
 function closeReportDialog() {
     document.getElementById('reportDialog')?.classList.add('hidden');

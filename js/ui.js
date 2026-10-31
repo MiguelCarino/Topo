@@ -667,6 +667,8 @@ function drawCanvas() {
     // One findings pass for the whole render: the badges below and the alert
     // panel at the end read the same verdicts (js/diagnostics.js).
     const diag = currentDiagnosis();
+    // The devices pinned for the next visit: a pin under the badge.
+    const pinnedIds = pinnedNodeIds();
     // The search box (js/query.js): what does not match is dimmed, asked
     // afresh on every redraw so an edit or a click never undoes it. A class,
     // not an inline opacity, so the PNG export and the report's diagram
@@ -1053,6 +1055,30 @@ function drawCanvas() {
             badge.appendChild(tip); // needs pointer events for the tooltip; clicks bubble to the node
 
             g.appendChild(badge);
+        }
+
+        // Pinned for the next visit (js/diagnostics.js): a small pin at the
+        // bottom-right corner, clear of the badge and the ✕ above. Explicit
+        // colours and fonts, as the badge's: a PNG export has no stylesheet.
+        if (pinnedIds.has(node.id)) {
+            const pin = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            pin.setAttribute('transform', 'translate(19, 15)');
+            pin.setAttribute('class', 'node-pin');
+            const disc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            disc.setAttribute('r', '7');
+            disc.setAttribute('fill', '#7c3aed'); disc.setAttribute('stroke', '#ffffff'); disc.setAttribute('stroke-width', '1.5');
+            pin.appendChild(disc);
+            // A pushpin: its head, the collar flaring out, and the needle.
+            const head = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            head.setAttribute('d', 'M-2.2 -4.6 H2.2 L1.4 -1.6 L3.3 0.6 H-3.3 L-1.4 -1.6 Z'); head.setAttribute('fill', '#ffffff');
+            pin.appendChild(head);
+            const needle = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            needle.setAttribute('d', 'M0 0.6 L0 4.6'); needle.setAttribute('stroke', '#ffffff'); needle.setAttribute('stroke-width', '1.4'); needle.setAttribute('stroke-linecap', 'round');
+            pin.appendChild(needle);
+            const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            tip.textContent = t('Pinned: to check on the next visit');
+            pin.appendChild(tip);
+            g.appendChild(pin);
         }
 
         // Little ✕ on the selected node — the touch twin of the Delete key and
@@ -2272,4 +2298,38 @@ function select(id, type) {
         document.getElementById('propMedium').onchange = (e) => { link.medium = e.target.value; save(); renderCanvasOnly(); renderLinkPorts(link); linkFacts(); };
     }
     renderCanvasOnly();
+}
+
+// ---- A length and its unit (CABLE_UNITS, js/model.js) ----
+// The pick of the unit in front of a length field, wrapped with the field
+// so the two read as one (.unit-field, css/app.css). The units are written
+// as the file writes them ("m", "ft") in every language. -> the select.
+function makeUnitPick(unit) {
+    const sel = document.createElement('select');
+    sel.className = 'unit-pick';
+    sel.setAttribute('aria-label', t('Unit'));
+    sel.title = t('Unit');
+    CABLE_UNITS.forEach((u) => { const o = document.createElement('option'); o.value = u; o.textContent = u; sel.appendChild(o); });
+    sel.value = CABLE_UNITS.includes(unit) ? unit : CABLE_UNIT_DEFAULT;
+    return sel;
+}
+// Puts `input` in a .unit-field with a unit pick in front of it. -> the select.
+function wrapUnitField(input, unit, extraClass) {
+    const box = document.createElement('div');
+    box.className = 'unit-field' + (extraClass ? ' ' + extraClass : '');
+    const sel = makeUnitPick(unit);
+    input.parentNode.insertBefore(box, input);
+    box.appendChild(sel);
+    box.appendChild(input);
+    return sel;
+}
+// Keeps only what a length can be while it is typed (cableLengthTyped),
+// the caret where it was.
+function filterLengthInput(input) {
+    const kept = cableLengthTyped(input.value);
+    if (kept === input.value) return kept;
+    const at = Math.max(0, (input.selectionStart || 0) - (input.value.length - kept.length));
+    input.value = kept;
+    try { input.setSelectionRange(at, at); } catch (e) { /* not a text field */ }
+    return kept;
 }

@@ -201,12 +201,34 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
     // ---- 5: pointed at, tapped ----
     ptr('pointerover', cable('l5').querySelector('.rk-hit'));
-    ok('a line pointed at: bold, its tags shown, its two devices marked', cable('l5').classList.contains('rk-hot') && shownFlags('l5').length === 2
+    const lit = () => [...view().querySelectorAll('.rk-cable.rk-hot')].map((g) => g.dataset.key).join(',');
+    ok('a line pointed at: it alone lit, bold, its tags shown, its two devices marked', lit() === 'l5' && shownFlags('l5').length === 2
        && box('srv5', 'rear').classList.contains('rk-hot') && box('core', 'front').classList.contains('rk-hot') && view().querySelector('.rk-wiring').classList.contains('rk-hotting'));
     ptr('pointerover', box('srv2', 'front'));
     ok('a device pointed at lights its cables', cable('l2').classList.contains('rk-hot') && cable('m2').classList.contains('rk-hot') && !cable('l5').classList.contains('rk-hot')
        && shownFlags('m2').length === 2);
     ok('the tags of what is lit never cover each other', noOverlap(fr()));
+    // A line where it has no hit stroke (its drop from the port over its
+    // box, its run out under it) lights that one cable, not the box's.
+    // Found from the boxes' rectangles: the rail is over the view here, so
+    // no point is the page's own to ask.
+    const inside = (r, x, y) => x > r.left + 1 && x < r.right - 1 && y > r.top + 1 && y < r.bottom - 1;
+    const overBox = (key) => {
+      const wire = cable(key).querySelector('.rk-wire'), sr = wire.ownerSVGElement.getBoundingClientRect();
+      const boxes = [...view().querySelectorAll('.rk-slots .rk-dev')];
+      const ports = [...view().querySelectorAll('.rk-port, .rk-noport')].map((q) => q.getBoundingClientRect());
+      for (let s = 0; s < wire.getTotalLength(); s += 1) {
+        const p = wire.getPointAtLength(s), x = sr.left + p.x, y = sr.top + p.y;
+        const under = boxes.find((d) => inside(d.getBoundingClientRect(), x, y));
+        if (under && !ports.some((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom)) return { under, x, y };
+      }
+      return null;
+    };
+    const onDrop = overBox('l2');
+    if (onDrop) ptr('pointerover', onDrop.under, { clientX: onDrop.x, clientY: onDrop.y });
+    ok('a line pointed at over its box lights it alone', !!onDrop && lit() === 'l2',
+       onDrop ? lit() : 'no point over a box');
+    ptr('pointerover', box('srv2', 'front'));
     // A flag pointed at keeps its place, and so does every other flag on
     // show: placed afresh, the lit one moved off the pointer and another slid
     // under it, which the pointer then lit, and a click pressed on one flag

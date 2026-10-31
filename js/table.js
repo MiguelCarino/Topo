@@ -223,6 +223,16 @@ function assetColumn(key, opts) {
         set: (target, value) => { if (isBlank(value)) delete target[key]; else target[key] = value; },
         show: (row) => shown(row.data[key]) }, opts));
 }
+// A device's service dates and interval (js/model.js "Age and upkeep"):
+// read by the field's fromText, so "03/2019" is kept as 2019-03; left off
+// the record when emptied.
+function upkeepColumn(key, opts) {
+    const f = tvField(NODE_FIELDS, key);
+    return schemaColumn(NODE_FIELDS, key, 'node', Object.assign({ plain: true, mono: true, sort: 'text', editor: 'text',
+        parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v || v === '—') return { value: undefined }; const r = f.fromText(v); return r === null ? { error: true } : { value: r }; },
+        set: (target, value) => { if (value === undefined || value === null || value === '') delete target[key]; else target[key] = value; },
+        show: (row) => { const n = getNode(row.ref.nodeId); return shown(n && n[key] !== undefined ? String(n[key]) : ''); } }, opts));
+}
 // A status by its key or its name in the page's language; blank is unset.
 function tvStatusParse(text) {
     const v = String(text == null ? '' : text).trim().toLowerCase();
@@ -409,6 +419,37 @@ const TV_COLS = {
             get: (target) => target.status || '',
             edit: (row) => row.data.status || '',
             show: (row) => shown(statusName(row.data.status), row.data.status === 'retired' ? { muted: true } : {}) }),
+        upkeepColumn('inService'),
+        upkeepColumn('serviced'),
+        upkeepColumn('serviceEvery', { sort: 'num' }),
+        // Blank is its type's usual life, shown greyed.
+        upkeepColumn('lifeYears', { sort: 'num',
+            sortKey: (row) => expectedLifeOf(getNode(row.ref.nodeId)),
+            show: (row) => {
+                const n = getNode(row.ref.nodeId);
+                if (n && n.lifeYears !== undefined && n.lifeYears !== '') return shown(String(n.lifeYears));
+                // Its type's in this network: set for it, or Topo's usual.
+                const usual = n ? typeLifeOf(n.type) : null;
+                const own = n && state.expectedLife && state.expectedLife[n.type];
+                return usual ? shown(String(usual), { muted: true, title: t(own ? 'Set for its type in this network' : 'Usual for its type') }) : shown('');
+            } }),
+        // Worked out, never typed: from today's date (js/model.js "Age and upkeep").
+        { key: 'age', label: 'Age', plain: true, rec: 'node', editor: null, sort: 'num', mono: true,
+          sortKey: (row) => { const a = deviceAge(getNode(row.ref.nodeId)); return a ? a.months : null; },
+          show: (row) => {
+              const n = getNode(row.ref.nodeId);
+              const old = upkeepState(n).old;
+              return shown(ageText(deviceAge(n)), old ? { sev: 'warn', title: t('Past its expected life ({n} years)', { n: old.life }) } : {});
+          } },
+        // Coloured as its finding is: overdue (warn), missed twice over (bad).
+        { key: 'nextService', label: 'Next service', plain: true, rec: 'node', editor: null, sort: 'text', mono: true,
+          show: (row) => {
+              const n = getNode(row.ref.nodeId), due = nextServiceDate(n);
+              if (!due) return shown('');
+              const s = upkeepState(n).service;
+              const level = s && (s.level === 'bad' || s.level === 'warn') ? s.level : '';
+              return shown(due, level ? { sev: level, title: t('Overdue') } : {});
+          } },
         schemaColumn(NODE_FIELDS, 'ports', 'node', { mono: true, sort: 'text', show: (row) => shown(row.data.allowedPorts) }),
         // Only a routing device does NAT (the sidebar shows the switch only
         // there), so the cell is a dash anywhere else.
@@ -472,7 +513,14 @@ const TV_COLS = {
             edit: (row) => row.data.mediumKey,
             show: (row) => shown(row.data.medium) }),
         cableColumn('label', { mono: true }),
-        cableColumn('length'),
+        // A number in metres or feet (cableLengthFromText, js/model.js): the
+        // cell is edited as "2.5" beside the pick of its unit, and shows
+        // "2.5 m". Sorted by the length itself, feet and metres together.
+        cableColumn('length', { mono: true, sort: 'num', unit: true,
+            sortKey: (row) => { const l = tvLinkOf(row); return l && !tvNoCable(row) ? cableLengthMetres(cableOf(l, 'length')) : null; },
+            parse: (text, row, unit) => { const v = String(text == null ? '' : text).trim(); if (!v) return { value: '' }; const r = cableLengthFromText(v, typeof unit === 'string' ? unit : undefined); return r === null ? { error: true } : { value: r }; },
+            unitOf: (row) => { const l = tvLinkOf(row); const p = l ? cableLengthParts(cableOf(l, 'length')) : null; return p ? p.unit : CABLE_UNIT_DEFAULT; },
+            edit: (row) => { const l = tvLinkOf(row); const v = l ? cableOf(l, 'length') : ''; const n = cableLengthNumber(v); return n === null ? v : n; } }),
         cableColumn('color'),
         cableColumn('via', { mono: true }),
         { key: 'wifi:ssid', label: 'SSID', rec: 'link', editor: 'select', sort: 'text', same, when: () => wifiOffered(),
@@ -677,9 +725,59 @@ const TV_COLS = {
           show: (row) => shown(row.data.clients.length, { title: row.data.clients.join(', ') }) }
     ]
 };
+// ---- Custom columns (js/model.js "Custom columns") ----
+// The document's own columns, after Topo's on the Devices tab. Their names
+// are the user's words, shown as typed (never translated). A cell is typed
+// into like any other and checked by the column's kind; a yes/no column is a
+// tick, flipped by Enter, Space or a click.
+function customColumn(def) {
+    const yesno = def.kind === 'yesno';
+    return {
+        key: `x:${def.id}`, custom: def.id, label: def.name, rec: 'node',
+        editor: yesno ? 'bool' : 'text', mono: def.kind === 'number' || def.kind === 'date',
+        sort: def.kind === 'number' ? 'num' : 'text',
+        parse: (text) => parseCustomValue(def, text),
+        get: (node) => customValueOf(node, def.id),
+        set: (node, value) => setCustomValue(node, def.id, yesno ? (value ? true : undefined) : value),
+        same: yesno ? (a, b) => !!a === !!b : (a, b) => customText(def, a) === customText(def, b),
+        show: (row) => {
+            const v = customValueOf(getNode(row.ref.nodeId), def.id);
+            return shown(yesno ? (v ? '✓' : '') : customText(def, v));
+        }
+    };
+}
+
+// The Devices tab as the document arranges it (state.tableView.devices):
+// Topo's columns and the custom ones, in the saved order, without the hidden
+// ones. Name always shows, and always first: it is what a row is. A column
+// the saved order does not name (a custom one added since) goes where it
+// would by default, after the ones it names.
+const TV_FIXED_COL = 'name';
+const tvDevicesView = () => (state.tableView && state.tableView.devices) || {};
+// Every column but Name, in the saved order, hidden ones included (the
+// Columns dialog lists them all).
+function tvDevicesOrder() {
+    const all = TV_COLS.devices.concat((state.columns || []).map(customColumn)).filter((c) => c.key !== TV_FIXED_COL);
+    const rank = new Map((tvDevicesView().order || []).map((k, i) => [k, i]));
+    const known = all.filter((c) => rank.has(c.key)).sort((a, b) => rank.get(a.key) - rank.get(b.key));
+    return known.concat(all.filter((c) => !rank.has(c.key)));
+}
+function tvDevicesArranged() {
+    const hidden = new Set(tvDevicesView().hidden || []);
+    return [TV_COLS.devices.find((c) => c.key === TV_FIXED_COL)].concat(tvDevicesOrder().filter((c) => !hidden.has(c.key)));
+}
+// Built once per arrangement: the cells ask for their columns many times a
+// draw, and the custom ones are made from the document's definitions.
+let _tvArranged = { sig: null, cols: null };
+function tvDevicesCols() {
+    const sig = JSON.stringify([state.columns || [], state.tableView || {}]);
+    if (_tvArranged.sig !== sig) _tvArranged = { sig, cols: tvDevicesArranged() };
+    return _tvArranged.cols;
+}
+
 // The columns a tab shows now: a column with `when` only while it applies
 // (the Wi-Fi ones while the network has something wireless).
-const tvCols = (tab) => TV_COLS[tab].filter((c) => !c.when || c.when());
+const tvCols = (tab) => (tab === 'devices' ? tvDevicesCols() : TV_COLS[tab]).filter((c) => !c.when || c.when());
 // Only a declared network has a record to edit.
 TV_COLS.subnets.forEach((c) => { if (c.editor && !c.can) c.can = (row) => !!row.ref.netId; });
 
@@ -687,12 +785,22 @@ TV_COLS.subnets.forEach((c) => { if (c.editor && !c.can) c.can = (row) => !!row.
 // Interfaces tab, laid under the device's (name under Name, the address under
 // Type and Interfaces, the MAC under Gateway and DNS).
 const TV_SUB_COLS = [
-    Object.assign({}, TV_COLS.interfaces[1], { key: 'if:name', span: 1 }),
-    Object.assign({}, TV_COLS.interfaces[2], { key: 'if:ip', span: 2 }),
-    Object.assign({}, TV_COLS.interfaces[3], { key: 'if:mac', span: 2 }),
-    { key: 'if:info', label: 'Cable', plain: true, rec: 'iface', editor: null, span: 0,
+    Object.assign({}, TV_COLS.interfaces[1], { key: 'if:name' }),
+    Object.assign({}, TV_COLS.interfaces[2], { key: 'if:ip' }),
+    Object.assign({}, TV_COLS.interfaces[3], { key: 'if:mac' }),
+    { key: 'if:info', label: 'Cable', plain: true, rec: 'iface', editor: null,
       show: (row) => { const c = cableCell(row); const v = row.data.vendor; return shown([v, c.text].filter(Boolean).join(' · '), { muted: true }); } }
 ];
+
+// How wide an interface row's cells are under `n` device columns: the name
+// one, the address and the MAC two each while there is room, and the rest
+// to the last. With columns hidden there may be fewer than the six the
+// default lays them under; the row still spans the table exactly.
+function tvSubSpan(c, n) {
+    const ip = n >= 4 ? 2 : 1, mac = n >= 6 ? 2 : 1;
+    const w = c.key === 'if:name' ? 1 : c.key === 'if:ip' ? ip : c.key === 'if:mac' ? mac : Math.max(1, n - 1 - ip - mac);
+    return w > 1 ? ` colspan="${w}"` : '';
+}
 
 function macCell(row) {
     const iface = findTarget('iface', row.ref);
@@ -766,6 +874,11 @@ function ipSortKey(text) {
 const SEV_RANK = { bad: 2, warn: 1 };
 function compareRows(col, a, b) {
     if (col.sort === 'sev') return (SEV_RANK[a.data.severity] || 0) - (SEV_RANK[b.data.severity] || 0);
+    if (col.sortKey) {
+        const x = col.sortKey(a), y = col.sortKey(b);
+        if (x === null || y === null) return x === null && y === null ? 0 : (x === null ? 1 : -1) * _tvSortDir;
+        return x - y;
+    }
     const va = col.show(a).text, vb = col.show(b).text;
     if (!va || !vb) return !va && !vb ? 0 : (!va ? 1 : -1) * _tvSortDir;
     if (col.sort === 'ip') {
@@ -896,7 +1009,7 @@ function renderTableView(force) {
         const v = c.show(row);
         const cls = ['tv-cell', c.mono ? 'mono' : '', c.wide ? 'tv-wide' : '', canEdit(row, c) ? 'tv-edit' : '',
             v.muted ? 'tv-muted' : '', v.bad ? 'tv-bad' : '', v.sev ? `tv-sev ${v.sev}` : ''].filter(Boolean).join(' ');
-        const span = c.span === 0 ? ` colspan="${Math.max(1, cols.length - 5)}"` : c.span > 1 ? ` colspan="${c.span}"` : '';
+        const span = row.sub ? tvSubSpan(c, cols.length) : '';
         const cap = row.sub ? ` data-cap="${escapeHtml(tvLabel(c))}"` : '';
         const title = v.title ? ` title="${escapeHtml(v.title)}"` : (v.text.length > 24 ? ` title="${escapeHtml(v.text)}"` : '');
         const body = v.action ? `<span class="tv-action" data-act="${v.action}">${escapeHtml(v.text)}</span>` : escapeHtml(v.text);
@@ -929,6 +1042,7 @@ function renderTableView(force) {
     document.getElementById('tvCount').textContent = ticked
         ? `${t('Rows: {n}', { n: top.length })} · ${t('Selected: {n}', { n: ticked })}` : t('Rows: {n}', { n: top.length });
     document.getElementById('tvPasteBtn').disabled = !rows.length || !!state.readOnly;
+    document.getElementById('tvColsBtn').classList.toggle('hidden', tab !== 'devices');
 
     placeCursor(hadFocus);
     if (typeof updateQueryBar === 'function') updateQueryBar();
@@ -1068,8 +1182,19 @@ function startEdit(td, seed) {
     td.classList.add('tv-editing');
     td.textContent = '';
     td.appendChild(el);
-    _tv.editor = { el, td, rowKey: row.key, colKey: col.key, done: false };
-    el.addEventListener('blur', () => finishEdit('blur'));
+    // A length: its unit picked in front of the number (makeUnitPick,
+    // js/ui.js). Moving between the two is still editing the cell; leaving
+    // both is a blur.
+    let unitEl = null;
+    if (col.unit) {
+        unitEl = wrapUnitField(el, col.unitOf(row), 'tv-unit');
+        filterLengthInput(el);
+        el.addEventListener('input', () => filterLengthInput(el));
+        unitEl.addEventListener('change', () => el.focus());
+        unitEl.addEventListener('blur', (e) => { if (e.relatedTarget !== el) finishEdit('blur'); });
+    }
+    _tv.editor = { el, unitEl, td, rowKey: row.key, colKey: col.key, done: false };
+    el.addEventListener('blur', (e) => { if (!unitEl || e.relatedTarget !== unitEl) finishEdit('blur'); });
     el.focus();
     if (seed === undefined && el.select) el.select();
     else if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length);
@@ -1100,7 +1225,7 @@ function finishEdit(how, move) {
     const col = row && colByKey(row, ed.colKey);
     if (!row || !col) { cancelEdit(); return true; }
     const text = ed.el.value;
-    const res = col.parse(text, row);
+    const res = col.parse(text, row, ed.unitEl ? ed.unitEl.value : undefined);
     if (res.error) {
         if (how !== 'blur') {
             // Stays open, marked, so the value can be corrected.
@@ -1456,7 +1581,7 @@ function onTablePaste(e) {
 // ---- Wiring ----
 function onTableKey(e) {
     const ed = _tv.editor;
-    if (ed && e.target === ed.el) {
+    if (ed && (e.target === ed.el || (ed.unitEl && e.target === ed.unitEl))) {
         // Every key typed into the cell is the cell's; the map's shortcuts
         // never see it.
         e.stopPropagation();
@@ -1531,6 +1656,202 @@ function onTableClick(e) {
     if (again && canEdit(row, col)) { startEdit(td); return; }
     focusRow(row);
 }
+
+// ---- The Columns dialog (Devices tab) ----
+// Which columns show and in what order, and the document's own columns:
+// added, renamed and deleted here. Each change is one batch(): one undo
+// step, saved with the document, so the arrangement travels with the file.
+// It is only a view: the spreadsheet keeps its own order (js/csv.js).
+const colsEl = (id) => document.getElementById(id);
+const CUSTOM_KIND_NAMES = { text: 'Text', number: 'Number', date: 'Date', yesno: 'Yes / no' };
+
+// Why a name cannot be a custom column's, or ''. Another custom column's in
+// any case, or one of Topo's own (its label in English or the page's
+// language, or a heading the spreadsheet import reads as one of its fields):
+// the import must never have to guess which of two columns a heading meant.
+function customNameProblem(name, exceptId) {
+    const v = customName(name);
+    if (!v) return t('A column needs a name.');
+    const low = v.toLowerCase();
+    if ((state.columns || []).some((c) => c.id !== exceptId && c.name.toLowerCase() === low)) return t('There is a column called {name} already.', { name: v });
+    const topo = TV_COLS.devices.some((c) => c.label && (c.label.toLowerCase() === low || tvLabel(c).toLowerCase() === low));
+    if (topo || (typeof csvGuessByHeading === 'function' && csvGuessByHeading(v))) return t('Topo has a column called {name} already.', { name: v });
+    return '';
+}
+
+function tvSetDevicesView(change) {
+    const d = Object.assign({}, tvDevicesView());
+    change(d);
+    state.tableView = normalizeTableView({ devices: d });
+}
+function tvColumnsEdit(fn) {
+    if (readOnlyRefuses()) return;
+    batch(() => { fn(); save(); renderCanvasOnly(); });
+    renderColumnsDialog();
+}
+
+function addCustomColumn(name, kind) {
+    if (readOnlyRefuses()) return null;
+    const why = customNameProblem(name);
+    if (why) { showToast(why, 'err'); return null; }
+    if ((state.columns || []).length >= CUSTOM_MAX) { showToast(t('A network can have at most {n} columns of its own.', { n: CUSTOM_MAX }), 'err'); return null; }
+    const col = { id: nextCustomId(), name: customName(name), kind: asCustomKind(kind) };
+    tvColumnsEdit(() => { state.columns = (state.columns || []).concat(col); });
+    return col;
+}
+function renameCustomColumn(id, name) {
+    const col = customColumnById(id);
+    if (!col || customName(name) === col.name) return true;
+    const why = customNameProblem(name, id);
+    if (why) { showToast(why, 'err'); return false; }
+    tvColumnsEdit(() => { state.columns = state.columns.map((c) => (c.id === id ? Object.assign({}, c, { name: customName(name) }) : c)); });
+    return true;
+}
+// Gone with every device's value for it; a column that holds something asks
+// first, as deleting a group with devices in it does.
+function deleteCustomColumn(id) {
+    const col = customColumnById(id);
+    if (!col || readOnlyRefuses()) return Promise.resolve(false);
+    const n = state.nodes.filter((nd) => customValueOf(nd, id) !== undefined).length;
+    const go = () => {
+        tvColumnsEdit(() => {
+            state.columns = state.columns.filter((c) => c.id !== id);
+            state.nodes.forEach((nd) => setCustomValue(nd, id, undefined));
+            tvSetDevicesView((d) => {
+                d.order = (d.order || []).filter((k) => k !== `x:${id}`);
+                d.hidden = (d.hidden || []).filter((k) => k !== `x:${id}`);
+            });
+        });
+        return true;
+    };
+    if (!n) return Promise.resolve(go());
+    return askConfirm(t(n === 1 ? 'Delete the column {name}? One device loses what it holds.' : 'Delete the column {name}? {n} devices lose what it holds.', { name: col.name, n }),
+        { ok: t('Delete column'), danger: true }).then((yes) => (yes ? go() : false));
+}
+// Another kind: every value is read again as the new kind reads it, from the
+// text it shows now (a yes is "yes", a date its ISO form), so text takes
+// anything and a number column turned to text keeps every number. Values the
+// new kind refuses are lost, and the question says how many first.
+function changeCustomKind(id, kind) {
+    const col = customColumnById(id);
+    if (!col || col.kind === kind || !CUSTOM_KINDS.includes(kind) || readOnlyRefuses()) return Promise.resolve(false);
+    const next = Object.assign({}, col, { kind });
+    const held = state.nodes.filter((nd) => customValueOf(nd, id) !== undefined);
+    const lost = held.filter((nd) => parseCustomValue(next, customText(col, customValueOf(nd, id))).error).length;
+    const go = () => {
+        tvColumnsEdit(() => {
+            held.forEach((nd) => setCustomValue(nd, id, parseCustomValue(next, customText(col, customValueOf(nd, id))).value));
+            state.columns = state.columns.map((c) => (c.id === id ? next : c));
+        });
+        return true;
+    };
+    if (!lost) return Promise.resolve(go());
+    return askConfirm(t(lost === 1 ? 'One device holds a value in {name} that is not a {kind}: it will be lost.' : '{n} devices hold a value in {name} that is not a {kind}: they will be lost.',
+        { name: col.name, kind: t(CUSTOM_KIND_NAMES[kind]).toLowerCase(), n: lost }), { ok: t('Change kind'), danger: true })
+        .then((yes) => { if (yes) return go(); renderColumnsDialog(); return false; });
+}
+function setColumnShown(key, on) {
+    if (key === TV_FIXED_COL) return;
+    tvColumnsEdit(() => tvSetDevicesView((d) => {
+        const hidden = new Set(d.hidden || []);
+        if (on) hidden.delete(key); else hidden.add(key);
+        d.hidden = [...hidden];
+    }));
+}
+// One place along, among every column but Name (hidden ones included, so a
+// hidden column keeps its place for when it is shown again).
+function moveColumn(key, step) {
+    const keys = tvDevicesOrder().map((c) => c.key);
+    const at = keys.indexOf(key), to = at + step;
+    if (at < 0 || to < 0 || to >= keys.length) return;
+    [keys[at], keys[to]] = [keys[to], keys[at]];
+    tvColumnsEdit(() => tvSetDevicesView((d) => { d.order = keys; }));
+}
+function resetColumns() {
+    tvColumnsEdit(() => { state.tableView = {}; });
+}
+
+function renderColumnsDialog() {
+    const list = colsEl('colsList');
+    if (!list || colsEl('colsDialog').hidden) return;
+    const hidden = new Set(tvDevicesView().hidden || []);
+    const order = tvDevicesOrder();
+    const row = (c, i) => {
+        const custom = c.custom ? customColumnById(c.custom) : null;
+        const label = custom ? custom.name : tvLabel(c);
+        const fixed = c.key === TV_FIXED_COL;
+        const nameCell = custom
+            ? `<input type="text" class="input cols-name" data-rename="${escapeHtml(custom.id)}" value="${escapeHtml(custom.name)}" maxlength="${CUSTOM_NAME_MAX}" aria-label="${escapeHtml(t('Column name'))}">
+               <select class="select cols-kind" data-kind="${escapeHtml(custom.id)}" aria-label="${escapeHtml(t('Kind'))}">${CUSTOM_KINDS.map((k) =>
+                   `<option value="${k}"${k === custom.kind ? ' selected' : ''}>${escapeHtml(t(CUSTOM_KIND_NAMES[k]))}</option>`).join('')}</select>`
+            : `<span class="cols-label">${escapeHtml(label)}</span>`;
+        return `<li class="cols-row${custom ? ' cols-custom' : ''}" data-key="${escapeHtml(c.key)}">
+            <input type="checkbox" data-show="${escapeHtml(c.key)}"${fixed || !hidden.has(c.key) ? ' checked' : ''}${fixed ? ' disabled' : ''}
+                aria-label="${escapeHtml(t('Show {name}', { name: label }))}">
+            ${nameCell}
+            <span class="cols-acts">${fixed ? '' : `
+                <button type="button" class="cs-btn cols-mv" data-move="-1" data-key="${escapeHtml(c.key)}"${i === 0 ? ' disabled' : ''} title="${escapeHtml(t('Move up'))}" aria-label="${escapeHtml(t('Move up'))}">↑</button>
+                <button type="button" class="cs-btn cols-mv" data-move="1" data-key="${escapeHtml(c.key)}"${i === order.length - 1 ? ' disabled' : ''} title="${escapeHtml(t('Move down'))}" aria-label="${escapeHtml(t('Move down'))}">↓</button>`}
+                ${custom ? `<button type="button" class="cs-btn cols-del" data-delete="${escapeHtml(custom.id)}" title="${escapeHtml(t('Delete column'))}" aria-label="${escapeHtml(t('Delete column'))}">✕</button>` : ''}
+            </span>
+        </li>`;
+    };
+    list.innerHTML = row(TV_COLS.devices.find((c) => c.key === TV_FIXED_COL), -1) + order.map(row).join('');
+    const full = (state.columns || []).length >= CUSTOM_MAX;
+    colsEl('colsAddBtn').disabled = full || !!state.readOnly;
+    colsEl('colsResetBtn').disabled = !tvDevicesView().order && !tvDevicesView().hidden;
+}
+
+function openColumnsDialog() {
+    if (!tableShown()) return;
+    cancelEdit(true);
+    const scrim = colsEl('colsDialog');
+    colsEl('colsNewName').value = '';
+    colsEl('colsNewKind').value = 'text';
+    if (window.CarinoUI) CarinoUI.modal.open(scrim, { onClose: () => { _tv.keepFocus = true; renderTableView(true); } });
+    else scrim.hidden = false;
+    renderColumnsDialog();
+}
+function closeColumnsDialog() {
+    const scrim = colsEl('colsDialog');
+    if (window.CarinoUI && CarinoUI.modal.isOpen(scrim)) CarinoUI.modal.close(scrim, 'answered');
+    else scrim.hidden = true;
+}
+
+(function wireColumnsDialog() {
+    const scrim = colsEl('colsDialog');
+    if (!scrim) return;
+    colsEl('tvColsBtn').onclick = () => openColumnsDialog();
+    const list = colsEl('colsList');
+    list.addEventListener('change', (e) => {
+        const key = e.target.dataset && e.target.dataset.show;
+        if (key) setColumnShown(key, e.target.checked);
+        const kindOf = e.target.dataset && e.target.dataset.kind;
+        if (kindOf) changeCustomKind(kindOf, e.target.value);
+    });
+    list.addEventListener('click', (e) => {
+        const mv = e.target.closest('[data-move]');
+        if (mv) { moveColumn(mv.dataset.key, Number(mv.dataset.move)); return; }
+        const del = e.target.closest('[data-delete]');
+        if (del) deleteCustomColumn(del.dataset.delete);
+    });
+    // A name is kept when the field is left or Enter is pressed; one that is
+    // refused goes back to what it was.
+    const rename = (input) => { if (!renameCustomColumn(input.dataset.rename, input.value)) renderColumnsDialog(); };
+    list.addEventListener('focusout', (e) => { if (e.target.dataset && e.target.dataset.rename) rename(e.target); });
+    list.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && e.target.dataset && e.target.dataset.rename) { e.preventDefault(); rename(e.target); }
+    });
+    const add = () => {
+        if (addCustomColumn(colsEl('colsNewName').value, colsEl('colsNewKind').value)) {
+            colsEl('colsNewName').value = '';
+            colsEl('colsNewName').focus();
+        }
+    };
+    colsEl('colsAddBtn').addEventListener('click', add);
+    colsEl('colsNewName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    colsEl('colsResetBtn').addEventListener('click', resetColumns);
+})();
 
 (function wireTableView() {
     const view = tvEl();

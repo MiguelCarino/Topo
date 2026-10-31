@@ -528,6 +528,39 @@
                                     </select>
                                 </div>
                                 <p id="statusNote" class="rail-note span2 hidden" data-i18n>Retired: dimmed on the map, and off the network for the checks and the trace.</p>
+                                <!-- Age and upkeep (document v14): the dates as
+                                     much as is known, a year will do. The age and
+                                     the next service under them are worked out,
+                                     never stored. -->
+                                <div>
+                                    <label class="prop-lbl" for="propInService" data-i18n>In service since</label>
+                                    <div class="date-field">
+                                        <input type="text" id="propInService" class="input mono" maxlength="10" autocomplete="off" spellcheck="false" placeholder="2019-03" />
+                                        <button type="button" class="date-pick-btn" data-date-for="propInService" title="Pick from a calendar" aria-label="Pick from a calendar" data-i18n-title data-i18n-aria-label><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2 6.5h12M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+                                        <input type="date" class="date-pick-native" tabindex="-1" aria-hidden="true" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="prop-lbl" for="propServiced" data-i18n>Last serviced</label>
+                                    <div class="date-field">
+                                        <input type="text" id="propServiced" class="input mono" maxlength="10" autocomplete="off" spellcheck="false" placeholder="2026-05-14" />
+                                        <button type="button" class="date-pick-btn" data-date-for="propServiced" title="Pick from a calendar" aria-label="Pick from a calendar" data-i18n-title data-i18n-aria-label><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2 6.5h12M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+                                        <input type="date" class="date-pick-native" tabindex="-1" aria-hidden="true" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="prop-lbl" for="propServiceEvery" data-i18n>Service every (months)</label>
+                                    <input type="text" id="propServiceEvery" class="input mono" maxlength="12" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="12" />
+                                </div>
+                                <div>
+                                    <label class="prop-lbl" for="propLifeYears" data-i18n>Expected life (years)</label>
+                                    <input type="text" id="propLifeYears" class="input mono" maxlength="10" inputmode="numeric" autocomplete="off" spellcheck="false" />
+                                    <button type="button" id="lifeTypesBtn" class="link-btn quiet life-types-link" data-i18n>By type…</button>
+                                </div>
+                                <p id="upkeepNote" class="rail-note span2 hidden"></p>
+                                <!-- Sets Last serviced to today and takes the
+                                     device's service pins and schedules away. -->
+                                <div class="span2 upkeep-acts"><button type="button" id="servicedTodayBtn" class="link-btn hidden" data-i18n>Serviced today</button></div>
                                 <!-- The group it sits in (doc.groups, js/groups.js),
                                      and in a rack where: the lowest unit, how many,
                                      and the face. The path under it is what the
@@ -604,7 +637,13 @@
                             </div>
                             <div>
                                 <label class="prop-lbl" for="propCableLength" data-i18n>Length</label>
-                                <input type="text" id="propCableLength" class="input" autocomplete="off" placeholder="3 m" />
+                                <div class="unit-field">
+                                    <select id="propCableUnit" class="unit-pick" title="Unit" aria-label="Unit" data-i18n-title data-i18n-aria-label>
+                                        <option value="m">m</option>
+                                        <option value="ft">ft</option>
+                                    </select>
+                                    <input type="text" id="propCableLength" class="input mono" inputmode="decimal" autocomplete="off" placeholder="2.5" />
+                                </div>
                             </div>
                             <div>
                                 <label class="prop-lbl" for="propCableColor" data-i18n>Colour</label>
@@ -709,6 +748,12 @@
                      it moves to Accepted and stops counting. Check names are
                      technical vocabulary; the sentences are translated. -->
                 <div id="cfgPanel-findings" data-adv class="cfg-panel hidden">
+                    <!-- Pinned for the next visit (js/diagnostics.js): what the
+                         technician should look at on site, first. -->
+                    <section id="visitBox" class="rail-subsec visit-box hidden">
+                        <p id="visitSummary" class="rail-sub">To check on the next visit</p>
+                        <ul id="visitList" class="ca-list"></ul>
+                    </section>
                     <p id="findingsEmpty" class="rail-empty hidden" data-i18n>No findings: every check passes on the map as drawn.</p>
                     <ul id="conflictMsgList" class="ca-list"></ul>
                     <details id="acceptedBox" class="rail-subsec accepted-box hidden">
@@ -819,6 +864,7 @@
                     <div class="tv-bar">
                         <span id="tvCount" class="tv-count"></span>
                         <button id="tvPasteBtn" type="button" class="cs-btn" data-i18n-title title="Paste a list of values into one column, one per row, with a preview first" data-i18n>Paste a column…</button>
+                        <button id="tvColsBtn" type="button" class="cs-btn" data-i18n-title title="Show, hide and reorder the columns, and add your own" data-i18n>Columns…</button>
                     </div>
                 </div>
                 <p class="tv-hint" data-i18n>Click a row to find it on the map. Enter or a double click edits a cell, Esc cancels. Ctrl+V pastes a list down a column.</p>
@@ -1079,6 +1125,19 @@
                     <h4 id="reportDialogTitle" data-i18n class="dlg-title">Site report</h4>
                     <p id="reportDialogBlurb" data-i18n class="dlg-blurb">The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.</p>
                     <div id="reportFields" class="dlg-fields"></div>
+                    <!-- What goes in: the summary for the client, the technical
+                         sheet, or both (the default). At least one stays ticked. -->
+                    <fieldset id="reportParts" class="dlg-parts">
+                        <legend class="prop-lbl" data-i18n>What goes in</legend>
+                        <label class="dlg-blurb">
+                            <input type="checkbox" id="reportSummary" checked>
+                            <span><span data-i18n>Summary for the client</span><br><span class="dlg-dim" data-i18n>One page in plain words: whether the network is fine, what needs attention and why, and what there is.</span></span>
+                        </label>
+                        <label class="dlg-blurb">
+                            <input type="checkbox" id="reportTechnical" checked>
+                            <span><span data-i18n>Technical details</span><br><span class="dlg-dim" data-i18n>The findings, the inventory, the diagram, racks, ports, cables and addressing.</span></span>
+                        </label>
+                    </fieldset>
                     <div id="reportLint" class="alert warn hidden" role="status"></div>
                     <!-- Binder mode only. Two sibling spans rather than markup nested
                          inside one data-i18n element: applyStaticI18n sets textContent
@@ -1158,6 +1217,13 @@
                             <label id="topoAskPickLabel" for="topoAskPick"></label>
                             <select id="topoAskPick" class="select"></select>
                         </div>
+                        <!-- A prompt that also asks a date (askPromptDate): a
+                             schedule's day, picked from the browser's calendar
+                             or typed. -->
+                        <div id="topoAskDateRow" class="field ask-pick" hidden>
+                            <label id="topoAskDateLabel" for="topoAskDate"></label>
+                            <input id="topoAskDate" type="date" class="input">
+                        </div>
                     </div>
                     <div id="topoAskFoot" class="modal-foot"></div>
                 </div>
@@ -1167,6 +1233,57 @@
                  column, each value checked by the field schema, previewed with
                  what the findings would become, and applied as one undo step.
                  Opened through CarinoUI.modal, like #topoAsk. -->
+            <!-- Columns (js/table.js "The Columns dialog"): which Devices
+                 columns show and in what order, and the document's own
+                 columns. A view only: the spreadsheet keeps its own order. -->
+            <div id="colsDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-cols" role="dialog" aria-modal="true" aria-labelledby="colsTitle">
+                    <div class="modal-head">
+                        <h2 id="colsTitle" class="modal-title" data-i18n>Columns</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="ask-msg paste-blurb" data-i18n>Which columns the Devices table shows, and in what order. It is saved with the network, and your columns that show here are printed in the report. Spreadsheets keep their own order, so a sheet always reads back.</p>
+                        <ul id="colsList" class="cols-list"></ul>
+                        <div class="cols-add">
+                            <h3 class="cols-add-title" data-i18n>Add a column</h3>
+                            <div class="cols-add-row">
+                                <input id="colsNewName" type="text" class="input" maxlength="60" autocomplete="off" data-i18n-placeholder placeholder="Column name" data-i18n-aria-label aria-label="Column name">
+                                <select id="colsNewKind" class="select" data-i18n-aria-label aria-label="Kind">
+                                    <option value="text" data-i18n>Text</option>
+                                    <option value="number" data-i18n>Number</option>
+                                    <option value="date" data-i18n>Date</option>
+                                    <option value="yesno" data-i18n>Yes / no</option>
+                                </select>
+                                <button type="button" id="colsAddBtn" class="btn btn-primary" data-i18n>Add</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" id="colsResetBtn" class="btn" data-i18n>Reset order</button>
+                        <button type="button" class="btn" data-close data-i18n>Close</button>
+                    </div>
+                </div>
+            </div>
+            <!-- How long each type lasts in this network (doc.expectedLife,
+                 js/assets.js "Expected life by type"): blank is Topo's usual,
+                 shown as the hint; a device's own Expected life wins. -->
+            <div id="lifeDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-life" role="dialog" aria-modal="true" aria-labelledby="lifeTitle">
+                    <div class="modal-head">
+                        <h2 id="lifeTitle" class="modal-title" data-i18n>Expected life by type</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="ask-msg paste-blurb" data-i18n>How many years each kind of device lasts in this network before it shows as past its expected life. Blank uses Topo's usual, shown greyed. A device's own Expected life still wins. Saved with the network.</p>
+                        <ul id="lifeList" class="life-list"></ul>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" id="lifeResetBtn" class="btn" data-i18n>Back to Topo's usual</button>
+                        <button type="button" class="btn" data-close data-i18n>Close</button>
+                    </div>
+                </div>
+            </div>
             <div id="pasteDialog" class="modal-scrim" hidden>
                 <div class="modal topo-paste" role="dialog" aria-modal="true" aria-labelledby="pasteTitle">
                     <div class="modal-head">

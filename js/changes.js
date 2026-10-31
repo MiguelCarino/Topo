@@ -225,6 +225,12 @@ const DIFF_SKIP = new Set(['id', 'x', 'y', 'interfaces', 'cable']);
 const sameValue = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
 const changedLabels = (fields, a, b) => fields.filter((f) => !DIFF_SKIP.has(f.key) && !sameValue(a[f.key], b[f.key])).map((f) => f.label);
 
+function customChanges(old, now, cur, base) {
+    const a = old.extra || {}, b = now.extra || {};
+    const name = (id) => { const c = (cur.columns || []).find((x) => x.id === id) || (base.columns || []).find((x) => x.id === id); return c ? c.name : id; };
+    return [...new Set(Object.keys(a).concat(Object.keys(b)))].filter((id) => !sameValue(a[id], b[id])).map(name);
+}
+
 function docChanges(baseDoc, curDoc) {
     const base = canonicalDoc(baseDoc), cur = canonicalDoc(curDoc);
     const byId = (list) => new Map((list || []).map((x) => [x.id, x]));
@@ -248,7 +254,9 @@ function docChanges(baseDoc, curDoc) {
     devices.changed = devices.changed.filter((c) => {
         const old = c.old, now = nodesNow.get(c.id);
         delete c.old;
-        c.fields = changedLabels(NODE_FIELDS, old, now);
+        // The network's own columns by their names, not as one "Custom
+        // columns": a name from the document as it is, else as it was.
+        c.fields = changedLabels(NODE_FIELDS.filter((f) => f.key !== 'extra'), old, now).concat(customChanges(old, now, cur, base));
         if (old.name !== now.name) { c.fields = c.fields.filter((l) => l !== 'Name'); c.renamedFrom = old.name; }
         c.interfaces = interfaceChanges(old.interfaces, now.interfaces);
         if (c.fields.length || c.renamedFrom !== undefined || c.interfaces.length) return true;

@@ -30,9 +30,19 @@ const state = {
     // wifi: the Wi-Fi networks (SSIDs; js/model.js "Wi-Fi"), a list of
     // their own like the networks. Document: serialized, an undo step, carried
     // by files and links. No passphrase is ever kept.
+    // columns, tableView: the custom columns a document defines and the
+    // Devices table's order and hidden columns (js/model.js "Custom
+    // columns"). Document: serialized, an undo step, carried by files and
+    // links.
     // accepted: the findings accepted with a reason ({ check, nodeIds,
-    // linkIds, reason }, js/diagnostics.js "Accepted findings"). Document, so
-    // serialized, an undo step, and carried by files and links.
+    // linkIds, reason, until? }, js/diagnostics.js "Accepted findings").
+    // Document, so serialized, an undo step, and carried by files and links.
+    // pinned: the findings pinned for the next visit ({ check, nodeIds,
+    // linkIds, scope?, note? }, js/diagnostics.js "Pinned for the next
+    // visit"). Document, like accepted.
+    // expectedLife: how many years each type lasts in this network, where it
+    // is not Topo's usual ({ type: years }, js/model.js "Age and upkeep").
+    // Document, like accepted.
     // selection: what is selected, a Set of { type, id } (plan 3.1). Several
     // devices and cables can be selected at once (shift/ctrl-click, a
     // shift-drag box, Ctrl+A, a network's "Select members"); a text note or a
@@ -49,7 +59,7 @@ const state = {
     // query: what the search box over the map and the table holds (plan 3.3,
     // js/query.js). A view, like the trace: never serialized, never an undo
     // step, not kept between visits, and kept when another network is opened.
-    nodes: [], links: [], networks: [], groups: [], wifi: [], accepted: [], annotations: [], report: null, libraryId: null, docId: null, docUpdated: 0, readOnly: null, linkSourceId: null,
+    nodes: [], links: [], networks: [], groups: [], wifi: [], accepted: [], pinned: [], expectedLife: {}, columns: [], tableView: {}, annotations: [], report: null, libraryId: null, docId: null, docUpdated: 0, readOnly: null, linkSourceId: null,
     query: '',
     selection: new Set(),
     get selectedId() { const one = soleSelected(this.selection); return one ? one.id : null; },

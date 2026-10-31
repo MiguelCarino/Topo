@@ -184,11 +184,37 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('and restored', el('assetGroup').open === false);
     el('assetGroup').open = true; el('assetGroup').dispatchEvent(new Event('toggle'));
     select('l0', 'link');
-    ok('a cable\'s panel shows its facts', !gone('linkCableProps') && el('propCableLabel').value === 'UP-1' && el('propCableLength').value === '2 m'
+    ok('a cable\'s panel shows its facts', !gone('linkCableProps') && el('propCableLabel').value === 'UP-1' && el('propCableLength').value === '2'
        && el('propCableColor').value === 'blue' && el('propCableVia').value === 'PP-A:1');
     typeInto(el('propCableVia'), 'PP-A:1 > WJ-3B');
     commitTyping();
     ok('editing one changes that fact only', getLink('l0').cable.via === 'PP-A:1 > WJ-3B' && getLink('l0').cable.label === 'UP-1');
+    // The length: the number alone is typed, the unit picked in front of it.
+    const len = el('propCableLength'), unit = el('propCableUnit');
+    ok('the length shows the number, its unit in the pick in front', len.value === '2' && unit.value === 'm'
+       && unit.parentElement === len.parentElement && unit.parentElement.classList.contains('unit-field'), len.value + ' ' + unit.value);
+    typeInto(len, '3,5m');
+    ok('only digits and one decimal mark can be typed', len.value === '3,5', len.value);
+    commitTyping();
+    ok('a decimal comma is kept, in the unit picked', getLink('l0').cable.length === '3.5 m', getLink('l0').cable.length);
+    typeInto(len, '12.');
+    ok('a number on its way is not marked wrong, nor stored', !len.classList.contains('bad') && getLink('l0').cable.length === '3.5 m');
+    typeInto(len, '12.25');
+    len.dispatchEvent(new Event('blur'));
+    ok('left, it still shows the number alone', len.value === '12.25' && getLink('l0').cable.length === '12.25 m', len.value);
+    unit.value = 'ft'; unit.dispatchEvent(new Event('change'));
+    ok('picking feet relabels the number', getLink('l0').cable.length === '12.25 ft' && unit.value === 'ft', getLink('l0').cable.length);
+    select('l2', 'link'); select('l0', 'link');
+    ok('and the pick shows it when the cable is selected again', el('propCableUnit').value === 'ft' && el('propCableLength').value === '12.25');
+    typeInto(len, '0');
+    ok('nothing long is no length: marked, not stored', len.classList.contains('bad') && getLink('l0').cable.length === '12.25 ft');
+    len.dispatchEvent(new Event('blur'));
+    typeInto(len, '2'); unit.value = 'm'; unit.dispatchEvent(new Event('change'));
+    commitTyping();
+    ok('the length is read the same everywhere', cableLengthFromText('2') === '2 m' && cableLengthFromText('2.50 metros') === '2.5 m'
+       && cableLengthFromText('10 ft') === '10 ft' && cableLengthFromText('10', 'ft') === '10 ft' && cableLengthFromText('10 m', 'ft') === '10 m'
+       && cableLengthFromText('10 yd') === null && cableLengthFromText('1.234') === null && cableLengthFromText('') === null);
+    ok('feet and metres sort together', cableLengthMetres('10 ft') < cableLengthMetres('3.5 m') && cableLengthMetres('about 3') === null);
     select('l2', 'link');
     typeInto(el('propCableLabel'), 'WS-4');
     commitTyping();
@@ -248,6 +274,13 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a status that is not one is refused for all', bulkPlanSet(['pc1', 'pc2'], { status: { text: 'gone' } }).errors.length === 1);
     selectEntries([{ type: 'link', id: 'l1' }, { type: 'link', id: 'l2' }]);
     ok('a set of cables offers length, colour and via, not the label', !!el('bulkF-cable.length') && !!el('bulkF-cable.color') && !!el('bulkF-cable.via') && !el('bulkF-cable.label'));
+    const bulkLen = el('bulkF-cable.length'), bulkUnit = el('bulkU-cable.length');
+    ok('the bulk length has its unit pick in front, metres to start', !!bulkUnit && bulkUnit.value === 'm' && bulkUnit.nextElementSibling === bulkLen);
+    typeInto(bulkLen, '7ft');
+    bulkUnit.value = 'ft'; bulkUnit.dispatchEvent(new Event('change', { bubbles: true }));
+    ok('it takes the number alone, and asks for it in the unit picked', bulkLen.value === '7' && JSON.stringify(readBulkEdits('link')) === JSON.stringify({ 'cable.length': { text: '7 ft' } }),
+       JSON.stringify(readBulkEdits('link')));
+    typeInto(bulkLen, ''); resetBulkDraft();
     const lenPlan = bulkPlanSet(['l1', 'l2'], { 'cable.length': { text: '3 m' } }, 'link');
     bulkWrite(lenPlan, state);
     ok('setting a length on both keeps each one\'s label', getLink('l1').cable.length === '3 m' && getLink('l1').cable.label === 'WS-3B' && getLink('l2').cable.length === '3 m');

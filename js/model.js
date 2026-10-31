@@ -1224,6 +1224,21 @@ const NODE_FIELDS = [
       report: { key: 'location' } },
     { key: 'status', kind: 'raw', read: asStatus, write: asStatus, label: 'Status', csv: 'status', bulk: true, table: 'edit',
       validate: (v) => isBlank(v) || asStatus(v) !== undefined, report: { key: 'status' } },
+    // ---- Age and upkeep (document v14, "Age and upkeep" below) ----
+    // When the box went into service (as much of the date as is known: a
+    // year will do), when it was last serviced, and how often it should be,
+    // in months. The age and the next service are worked out from these and
+    // today's date, never stored. fromText reads what is typed or imported.
+    { key: 'inService', kind: 'raw', read: asLooseDate, write: asLooseDate, label: 'In service since', csv: 'in_service', bulk: true,
+      fromText: looseDateFromText },
+    { key: 'serviced', kind: 'raw', read: asLooseDate, write: asLooseDate, label: 'Last serviced', csv: 'last_serviced', bulk: true,
+      fromText: looseDateFromText },
+    { key: 'serviceEvery', kind: 'raw', read: asServiceMonths, write: asServiceMonths, label: 'Service every (months)', csv: 'service_every_months', bulk: true,
+      fromText: serviceMonthsFromText },
+    // How many years this one is expected to last, when not its type's
+    // (EXPECTED_LIFE_YEARS below): a server bought with a long contract.
+    { key: 'lifeYears', kind: 'raw', read: asLifeYears, write: asLifeYears, label: 'Expected life (years)', csv: 'expected_life_years', bulk: true,
+      fromText: lifeYearsFromText },
     // ---- Groups and racks (document v7, "Groups" below) ----
     // The group a device sits in, by id; its ancestors follow from the
     // group's parent chain, so nothing else is stored. A reference to a group
@@ -1236,6 +1251,12 @@ const NODE_FIELDS = [
     // path back to a group (findGroupByPath below), and makes the ones the
     // map lacks only when the review says so (js/csv.js). The table and the
     // bulk panel show the path too; neither reads this raw field as text.
+    // ---- Custom columns (document v13, "Custom columns" below) ----
+    // A device's values for the columns the document defines (doc.columns),
+    // by column id. Read here as plain values only; which keys are kept and
+    // what each must be is the document's to say (normalizeCustomRefs), as a
+    // device's group is checked against the groups.
+    { key: 'extra', kind: 'raw', label: 'Custom columns', read: asCustomBag, write: asCustomBag },
     { key: 'group', kind: 'raw', label: 'Group', read: asGroupRef, write: asGroupRef, csv: 'group',
       toText: (v) => { const g = groupById(v); return g ? groupPath(g) : ''; } },
     // Where in its rack: the lowest unit it occupies (1-based, counted from
@@ -1280,9 +1301,46 @@ const NODE_FIELDS = [
 // it runs through, as free text ("PP-A:12 > WJ-3B"), because patch panels and
 // wall jacks are not drawn as devices. Nested like a node's interfaces are, and
 // read and written through this table the same way.
+//
+// The length is a number in metres or feet: typed as the number alone ("3",
+// "2.5", "2,5") beside a pick of the unit (metres unless said otherwise),
+// and kept as "2.5 m" or "8 ft", the text it always was, so files from
+// before and builds from before read it unchanged. One written some other
+// way in an older file ("about 3") is kept as it is until it is typed over.
+const CABLE_UNITS = ['m', 'ft'];
+const CABLE_UNIT_DEFAULT = 'm';
+const CABLE_UNIT_WORDS = {
+    m: ['m', 'mt', 'mts', 'meter', 'meters', 'metre', 'metres', 'metro', 'metros', 'м', 'метр', 'метра', 'метров', 'メートル'],
+    ft: ['ft', 'feet', 'foot', "'", 'pie', 'pies', 'pé', 'pés', 'фут', 'фута', 'футов', 'フィート']
+};
+const CABLE_LENGTH_MAX = 10000;
+const cableUnitOf = (word) => CABLE_UNITS.find((u) => CABLE_UNIT_WORDS[u].includes(String(word).toLowerCase())) || null;
+// Typed or imported -> "2.5 m" / "8 ft", or null. A unit written after the
+// number is that unit; with none, `unit` (the one picked beside the field).
+function cableLengthFromText(text, unit = CABLE_UNIT_DEFAULT) {
+    const r = /^(\d{1,5}(?:[.,]\d{1,2})?)\s*(?:([^\d\s.,]+)\.?)?$/.exec(String(text == null ? '' : text).trim());
+    if (!r) return null;
+    const u = r[2] ? cableUnitOf(r[2]) : (CABLE_UNITS.includes(unit) ? unit : null);
+    const n = Number(r[1].replace(',', '.'));
+    return u && n > 0 && n <= CABLE_LENGTH_MAX ? String(n) + ' ' + u : null;
+}
+// A length kept as "2.5 m" or "8 ft" -> { n: '2.5', unit: 'm' }, or null
+// for one written some other way.
+function cableLengthParts(v) {
+    const r = /^(\d+(?:\.\d+)?) (m|ft)$/.exec(String(v == null ? '' : v).trim());
+    return r ? { n: r[1], unit: r[2] } : null;
+}
+const cableLengthNumber = (v) => { const p = cableLengthParts(v); return p ? p.n : null; };
+// For sorting and adding up: the length in metres, or null.
+const cableLengthMetres = (v) => { const p = cableLengthParts(v); return p ? Number(p.n) * (p.unit === 'ft' ? 0.3048 : 1) : null; };
+// What a length field lets through as it is typed: digits and one decimal
+// point or comma, nothing else (the unit is picked, never typed).
+const cableLengthTyped = (text) => String(text == null ? '' : text).replace(/[^\d.,]/g, '')
+    .replace(/^([^.,]*[.,])(.*)$/, (all, head, rest) => head + rest.replace(/[.,]/g, ''));
 const CABLE_FIELDS = [
     { key: 'label', kind: 'text', omit: true, read: asOmittedText, label: 'Cable label', csv: 'cable_label', table: 'edit', validate: fieldOk.tag },
-    { key: 'length', kind: 'text', omit: true, read: asOmittedText, label: 'Length', csv: 'cable_length', bulk: true, table: 'edit' },
+    { key: 'length', kind: 'text', omit: true, read: asOmittedText, label: 'Length', csv: 'cable_length', bulk: true, table: 'edit',
+      fromText: cableLengthFromText },
     { key: 'color', kind: 'text', omit: true, read: asOmittedText, label: 'Colour', csv: 'cable_color', bulk: true, table: 'edit' },
     { key: 'via', kind: 'text', omit: true, read: asOmittedText, label: 'Via', csv: 'cable_via', bulk: true, table: 'edit' }
 ];
@@ -3281,6 +3339,11 @@ function rackShrinkQuestion(rack, height, nodes = state.nodes, groups = state.gr
 //                   "Round 5": the rack view draws ports). Nothing to
 //                   convert: absent is the type's side, which is what every
 //                   device before it had. A v10 build would drop it.
+//   v 13            custom columns ("Custom columns" above): the columns a
+//                   document defines (doc.columns), each device's values for
+//                   them (node.extra), and the Devices table's order and
+//                   hidden columns (doc.tableView). Nothing to convert; a
+//                   v12 build would drop all three on its next save.
 //   v 12            Wi-Fi ("Wi-Fi" above, Review-Packs/Topo-wifi.md): the
 //                   networks (doc.wifi), a wireless interface's radio
 //                   (iface.radio) and an association's SSID, band and
@@ -3290,6 +3353,17 @@ function rackShrinkQuestion(rack, height, nodes = state.nodes, groups = state.gr
 //                   described, which reads as unknown and is never a fault,
 //                   and an entry with no scope matches as before. A v11
 //                   build would drop all four.
+//   v 14            age and upkeep ("Age and upkeep" above): when a device
+//                   went into service, when it was last serviced and how
+//                   often it should be (node.inService, serviced,
+//                   serviceEvery), and how long it is expected to last
+//                   when not its type's usual (node.lifeYears); findings
+//                   pinned for the next visit (doc.pinned) and an accepted
+//                   finding's end date (accepted[].until, a schedule), and
+//                   how long each type lasts in this network when not
+//                   Topo's usual (doc.expectedLife).
+//                   Nothing to convert; a v13 build would drop all of it on
+//                   its next save, and read a schedule as accepted for good.
 //
 // A document with a higher `v` was written by a newer Topo. Its unknown fields
 // cannot be kept — the serializer is an allowlist, and that is a privacy rule,
@@ -3301,14 +3375,334 @@ function rackShrinkQuestion(rack, height, nodes = state.nodes, groups = state.gr
 // DOC_VERSION. A step takes a plain document and returns one, and never
 // mutates its input. Never edit a shipped step: documents in the wild were
 // read by it.
-const DOC_VERSION = 12;
+// ---- Custom columns (document v13) ----
+// The columns a register needs and Topo has no field for: who uses the PC,
+// the warranty date, the cost centre. The document defines them (doc.columns,
+// a list of { id, name, kind }) and each device holds its values under the
+// column's id (node.extra). A column is a document's, not a browser's: it
+// travels in the file, the sealed link and the binder, so the technician who
+// opens the client's file sees the client's columns.
+//
+// Four kinds, each held as the plain value a spreadsheet would hold:
+//   text    a string, kept as typed (trimmed)
+//   number  a finite number ("1,5" is read as 1.5: the decimal comma)
+//   date    an ISO date, YYYY-MM-DD. Typed or imported as D/M/YYYY in every
+//           language but English, which reads M/D/YYYY; written ISO always.
+//   yesno   true or false, read from the same words as any tick (YES_RE)
+// A value its kind refuses is not kept: what a column holds is always
+// something it can show and export.
+//
+// The view of the table (doc.tableView: which Devices columns show, in what
+// order) is the document's too, so the client's arrangement opens the same
+// on the technician's screen. It is only a view: the spreadsheet export and
+// import keep one order whatever it says (Topo's own columns, then the
+// custom ones in the order they were made), so a sheet always reads back.
+const CUSTOM_KINDS = ['text', 'number', 'date', 'yesno'];
+const CUSTOM_MAX = 40;          // columns in one document
+const CUSTOM_NAME_MAX = 60;
+const CUSTOM_TEXT_MAX = 2000;   // one cell; notes are where long text goes
+const asCustomKind = (v) => (CUSTOM_KINDS.includes(v) ? v : 'text');
+const customName = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, CUSTOM_NAME_MAX);
+const CUSTOM_ID_RE = /^c[0-9a-z]{1,12}$/;
+
+// A device's bag of values as plain data: string keys, primitive values.
+// Which keys mean anything is the document's (normalizeCustomRefs).
+function asCustomBag(v) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+    const out = {};
+    Object.keys(v).forEach((k) => {
+        const x = v[k];
+        if (CUSTOM_ID_RE.test(k) && (typeof x === 'string' || typeof x === 'boolean' || Number.isFinite(x))) out[k] = x;
+    });
+    return Object.keys(out).length ? out : undefined;
+}
+
+// The column definitions: an id each (unique), a name each (unique in any
+// case), a kind. A damaged entry is dropped, never guessed at.
+function normalizeCustomColumns(v) {
+    const out = [], ids = new Set(), names = new Set();
+    (Array.isArray(v) ? v : []).forEach((c) => {
+        if (!c || typeof c !== 'object' || out.length >= CUSTOM_MAX) return;
+        const id = typeof c.id === 'string' ? c.id : '';
+        const name = customName(c.name);
+        if (!CUSTOM_ID_RE.test(id) || ids.has(id) || !name || names.has(name.toLowerCase())) return;
+        ids.add(id); names.add(name.toLowerCase());
+        out.push({ id, name, kind: asCustomKind(c.kind) });
+    });
+    return out;
+}
+// No key when there are none; text, the default kind, is not written.
+function serializeCustomColumns(list) {
+    const l = normalizeCustomColumns(list);
+    return l.length ? l.map((c) => ({ id: c.id, name: c.name, kind: c.kind === 'text' ? undefined : c.kind })) : undefined;
+}
+const customColumnById = (id, list = state.columns) => (list || []).find((c) => c.id === id) || null;
+// The next id: c1, c2… past every id the list has, so the same list always
+// mints the same id (an import is planned twice, once to review and once
+// to apply, and both must name the new column alike).
+function nextCustomId(list = state.columns) {
+    let n = 0;
+    (list || []).forEach((c) => { const m = /^c(\d+)$/.exec(c.id); if (m) n = Math.max(n, Number(m[1])); });
+    return `c${n + 1}`;
+}
+
+// A date typed or imported -> 'YYYY-MM-DD', or null. Day-first unless the
+// page is in English (see the header); a date that is not one (31/02) is
+// refused rather than rolled over.
+function customDate(text) {
+    const v = String(text == null ? '' : text).trim();
+    let y, m, d, r;
+    if ((r = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[T\s].*)?$/.exec(v))) { y = +r[1]; m = +r[2]; d = +r[3]; }
+    else if ((r = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(v))) {
+        const monthFirst = !window.CarinoI18N || window.CarinoI18N.current() === 'en';
+        y = +r[3]; m = monthFirst ? +r[1] : +r[2]; d = monthFirst ? +r[2] : +r[1];
+    } else return null;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+    return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+// A number typed or imported: "12", "-3.5", "1,5" (decimal comma), "1 200".
+function customNumber(text) {
+    if (typeof text === 'number') return Number.isFinite(text) ? text : null;
+    const v = String(text == null ? '' : text).trim().replace(/[\s ]/g, '');
+    if (!/^-?\d+(?:[.,]\d+)?$/.test(v)) return null;
+    const n = Number(v.replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+}
+const CUSTOM_YES_RE = /^(1|y|yes|true|on|x|✓|si|sí|sim|да|はい)$/i;
+const CUSTOM_NO_RE = /^(0|n|no|false|off|não|nao|нет|いいえ)$/i;
+
+// What a column holds for a value typed, pasted or imported: { value } (blank
+// is { value: undefined }, nothing kept) or { error: true }.
+function parseCustomValue(col, raw) {
+    if (raw === undefined || raw === null) return { value: undefined };
+    if (typeof raw === 'boolean') return col.kind === 'yesno' ? { value: raw } : { error: true };
+    const text = String(raw);
+    if (!text.trim()) return { value: undefined };
+    if (col.kind === 'number') { const n = customNumber(raw); return n === null ? { error: true } : { value: n }; }
+    if (col.kind === 'date') { const d = customDate(text); return d ? { value: d } : { error: true }; }
+    if (col.kind === 'yesno') {
+        const v = text.trim();
+        return CUSTOM_YES_RE.test(v) ? { value: true } : CUSTOM_NO_RE.test(v) ? { value: false } : { error: true };
+    }
+    return { value: text.trim().slice(0, CUSTOM_TEXT_MAX) };
+}
+// A value as one cell of text: what the table shows and the export writes.
+function customText(col, v) {
+    if (v === undefined || v === null || v === '') return '';
+    if (col.kind === 'yesno') return v ? 'yes' : 'no';
+    return String(v);
+}
+// One device's value for a column, and setting it (undefined clears it).
+const customValueOf = (node, id) => (node && node.extra && Object.prototype.hasOwnProperty.call(node.extra, id) ? node.extra[id] : undefined);
+function setCustomValue(node, id, value) {
+    if (value === undefined || value === null || value === '') {
+        if (node.extra) { delete node.extra[id]; if (!Object.keys(node.extra).length) delete node.extra; }
+        return;
+    }
+    node.extra = Object.assign({}, node.extra, { [id]: value });
+}
+
+// Every device's values against the columns the document defines: a value
+// for a column that is not there, or one its kind refuses, is dropped (a
+// hand-edited file, or a column deleted in another copy). In place.
+function normalizeCustomRefs(nodes, columns) {
+    const byId = new Map((columns || []).map((c) => [c.id, c]));
+    (nodes || []).forEach((n) => {
+        if (!n.extra) return;
+        const out = {};
+        Object.keys(n.extra).forEach((k) => {
+            const col = byId.get(k);
+            if (!col) return;
+            const r = parseCustomValue(col, n.extra[k]);
+            if (!r.error && r.value !== undefined) out[k] = r.value;
+        });
+        if (Object.keys(out).length) n.extra = out; else delete n.extra;
+    });
+}
+
+// ---- Age and upkeep (document v14) ----
+// A device's age is from node.inService to today; its next service is
+// node.serviceEvery months after it was last serviced (node.serviced), or
+// after it went into service when it never was. Both are worked out from
+// the clock of whoever has the file open, and are never stored: the file
+// does not change by itself, and a copy opened next year is a year older.
+//
+// The dates are as much as is known: '2019', '2019-03' or '2019-03-15'.
+// Clients often only know the year. A year alone counts from the middle of
+// it (July 1st) and its age reads "about", a month from its first day.
+const LOOSE_DATE_RE = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/;
+const LOOSE_YEAR_MIN = 1950, LOOSE_YEAR_MAX = 2199;
+const SERVICE_MONTHS_MAX = 240;
+function asLooseDate(v) {
+    const m = LOOSE_DATE_RE.exec(typeof v === 'string' ? v.trim() : '');
+    if (!m || +m[1] < LOOSE_YEAR_MIN || +m[1] > LOOSE_YEAR_MAX) return undefined;
+    if (m[3]) return customDate(m[0]) || undefined;
+    if (m[2] && (+m[2] < 1 || +m[2] > 12)) return undefined;
+    return m[0];
+}
+// Typed or imported -> a loose date, or null: what customDate reads, a year
+// ("2019"), or a month ("2019-03", "03/2019").
+function looseDateFromText(text) {
+    const v = String(text == null ? '' : text).trim();
+    let r;
+    if ((r = /^(\d{4})$/.exec(v))) return asLooseDate(r[1]) || null;
+    if ((r = /^(\d{4})[-/.](\d{1,2})$/.exec(v))) return asLooseDate(`${r[1]}-${r[2].padStart(2, '0')}`) || null;
+    if ((r = /^(\d{1,2})[-/.](\d{4})$/.exec(v))) return asLooseDate(`${r[2]}-${r[1].padStart(2, '0')}`) || null;
+    const d = customDate(v);
+    return d ? asLooseDate(d) || null : null;
+}
+function asServiceMonths(v) {
+    return Number.isInteger(v) && v >= 1 && v <= SERVICE_MONTHS_MAX ? v : undefined;
+}
+// "12", "12 months", "1 year", "2 años" -> months, or null.
+const SERVICE_YEAR_WORDS = /^(y|yr|yrs|year|years|a|año|años|ano|anos|г|год|года|лет|年)$/i;
+const SERVICE_MONTH_WORDS = /^(m|mo|mos|month|months|mes|meses|mês|мес|месяц|месяца|месяцев|か月|ヶ月|ヵ月|月)$/i;
+function serviceMonthsFromText(text) {
+    const r = /^(\d{1,3})\s*([^\d\s.]*)\.?$/.exec(String(text == null ? '' : text).trim());
+    if (!r) return null;
+    const n = +r[1] * (SERVICE_YEAR_WORDS.test(r[2]) ? 12 : 1);
+    if (r[2] && !SERVICE_YEAR_WORDS.test(r[2]) && !SERVICE_MONTH_WORDS.test(r[2])) return null;
+    return asServiceMonths(n) || null;
+}
+
+// Today as 'YYYY-MM-DD', by the LOCAL clock. toISOString() is UTC, so from
+// late afternoon on in Mexico (UTC-6) every report, and its filename, was
+// dated tomorrow. A parameter wherever an age is read, so the tests (and a
+// report, as of its date) can set it.
+function todayISO(now = new Date()) {
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+// A loose date as { y, m, d, approx }: the day it counts from.
+function looseDateParts(v) {
+    const s = asLooseDate(v);
+    if (!s) return null;
+    const [y, m, d] = s.split('-').map(Number);
+    return m ? { y, m, d: d || 1, approx: false } : { y, m: 7, d: 1, approx: true };
+}
+// Whole months from a to b (parts), counting a month only once its day is reached.
+const monthsBetween = (a, b) => (b.y - a.y) * 12 + (b.m - a.m) - (b.d < a.d ? 1 : 0);
+
+// A device's age: { months, approx }, or null when it has no start date or
+// starts after today (a planned device, or a typo the panel shows as is).
+function deviceAge(node, today = todayISO()) {
+    const from = node && looseDateParts(node.inService);
+    if (!from) return null;
+    const months = monthsBetween(from, looseDateParts(today));
+    return months < 0 ? null : { months, approx: from.approx };
+}
+// "6 y 2 m", "about 7 y", "5 m", "under a month".
+function ageText(age) {
+    if (!age) return '';
+    const y = Math.floor(age.months / 12), m = age.months % 12;
+    if (age.approx) return y ? t('about {y} y', { y }) : t('under a year');
+    if (!y) return m ? t('{m} m', { m }) : t('under a month');
+    return m ? t('{y} y {m} m', { y, m }) : t('{y} y', { y });
+}
+// The date the next service falls due ('YYYY-MM-DD'), or null when the
+// device has no interval, or nothing to count it from.
+function nextServiceDate(node) {
+    const every = node && asServiceMonths(node.serviceEvery);
+    const from = every && looseDateParts(node.serviced || node.inService);
+    if (!from) return null;
+    const total = from.y * 12 + (from.m - 1) + every;
+    const y = Math.floor(total / 12), m = total % 12 + 1;
+    // The 31st of a month that has none is its last day.
+    const d = Math.min(from.d, new Date(Date.UTC(y, m, 0)).getUTCDate());
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+// How long a device of each type usually lasts, in years: when one in
+// service longer is worth replacing (the Age finding, js/diagnostics.js).
+// A rule of thumb, not a warranty: node.lifeYears says otherwise for one
+// device. A type not listed (a VM, a container, a cloud, a custom box) has
+// no expected life, so it is never "too old".
+const EXPECTED_LIFE_YEARS = {
+    pc: 5, ap: 5, iot: 5, printer: 6, camera: 6, voip: 7,
+    switch: 8, l3switch: 8, router: 7, edge: 7, firewall: 6, vpn: 6, loadbalancer: 7, server: 7, dicom: 10
+};
+const LIFE_YEARS_MAX = 50;
+function asLifeYears(v) {
+    return Number.isInteger(v) && v >= 1 && v <= LIFE_YEARS_MAX ? v : undefined;
+}
+// "7", "7 years", "7 años" -> 7, or null.
+function lifeYearsFromText(text) {
+    const r = /^(\d{1,2})\s*([^\d\s.]*)\.?$/.exec(String(text == null ? '' : text).trim());
+    if (!r || (r[2] && !SERVICE_YEAR_WORDS.test(r[2]))) return null;
+    return asLifeYears(+r[1]) || null;
+}
+// What this network says a type lasts, where it says otherwise than Topo's
+// usual (doc.expectedLife, { type: years }): a client who replaces every PC
+// at four years. Only the types that have a usual life, each read as
+// lifeYears is; nothing is no key.
+function normalizeExpectedLife(v) {
+    const out = {};
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+        Object.keys(EXPECTED_LIFE_YEARS).forEach((type) => { const y = asLifeYears(v[type]); if (y) out[type] = y; });
+    }
+    return out;
+}
+function serializeExpectedLife(v) {
+    const out = normalizeExpectedLife(v);
+    return Object.keys(out).length ? out : undefined;
+}
+// A type's life in this network: its own setting, else Topo's usual, else null.
+const typeLifeOf = (type) => ((state.expectedLife && asLifeYears(state.expectedLife[type])) || EXPECTED_LIFE_YEARS[type] || null);
+// The device's own, else its type's in this network, else null.
+const expectedLifeOf = (node) => (node && (asLifeYears(node.lifeYears) || typeLifeOf(node.type))) || null;
+
+// Whole days from a to b ('YYYY-MM-DD'); negative when b is before a.
+const isoDayUtc = (s) => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d); };
+const daysBetween = (a, b) => Math.round((isoDayUtc(b) - isoDayUtc(a)) / 86400000);
+const SERVICE_SOON_DAYS = 30;
+// Where a device stands today, for the findings, the table and the panel:
+//   old       { months, life } when it has been in service its expected
+//             life or longer, else null;
+//   service   null (no next date), or { due, days } (days until it is due,
+//             negative once overdue) and `level`: 'bad' when a whole
+//             interval has gone by since it was due (a service missed
+//             twice over), 'warn' when overdue, 'info' when due within
+//             SERVICE_SOON_DAYS, else null.
+// A retired device is past caring, and a planned one not in service yet:
+// neither is old nor due.
+function upkeepState(node, today = todayISO()) {
+    const out = { old: null, service: null };
+    if (!node || isRetired(node) || node.status === 'planned') return out;
+    const age = deviceAge(node, today), life = expectedLifeOf(node);
+    if (age && life && age.months >= life * 12) out.old = { months: age.months, approx: age.approx, life };
+    const due = nextServiceDate(node);
+    if (due) {
+        const days = daysBetween(today, due);
+        const every = asServiceMonths(node.serviceEvery);
+        const missedTwice = days < 0 && monthsBetween(looseDateParts(due), looseDateParts(today)) >= every;
+        out.service = { due, days, level: missedTwice ? 'bad' : days < 0 ? 'warn' : days <= SERVICE_SOON_DAYS ? 'info' : null };
+    }
+    return out;
+}
+
+// The table's view of the Devices tab: { order: [column keys], hidden:
+// [column keys] }, both optional. Only well-formed keys are kept; a key for a
+// column that no longer exists is harmless and is dropped when it is drawn.
+const TABLE_VIEW_KEY_RE = /^[A-Za-z][\w:.-]{0,40}$/;
+function normalizeTableView(v) {
+    const keys = (l) => [...new Set((Array.isArray(l) ? l : []).filter((k) => typeof k === 'string' && TABLE_VIEW_KEY_RE.test(k)))].slice(0, 120);
+    const d = v && typeof v === 'object' && v.devices && typeof v.devices === 'object' ? v.devices : {};
+    const order = keys(d.order), hidden = keys(d.hidden);
+    return order.length || hidden.length ? { devices: { order: order.length ? order : undefined, hidden: hidden.length ? hidden : undefined } } : {};
+}
+function serializeTableView(v) {
+    const n = normalizeTableView(v);
+    return n.devices ? n : undefined;
+}
+
+const DOC_VERSION = 14;
 
 // A document's outline: an object whose lists, where present, are lists. The
 // loader tolerates a missing list (a bare { nodes } file is a document), but a
 // list that is something else is a damaged document, and saying so beats
 // reading it as an empty, finding-free network.
 const isDocShape = (doc) => !!doc && typeof doc === 'object' && !Array.isArray(doc)
-    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
+    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations', 'columns', 'pinned'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
 
 const docVersionOf = (doc) => (doc && Number.isInteger(doc.v) && doc.v >= 1 ? doc.v : 1);
 
@@ -3431,7 +3825,11 @@ const MIGRATIONS = [
     // A device's ports face is a new key, not a new shape.
     { from: 10, to: 11, run: (doc) => ({ ...doc, v: 11 }) },
     // Wi-Fi networks, radios and associations are new keys, not a new shape.
-    { from: 11, to: 12, run: (doc) => ({ ...doc, v: 12 }) }
+    { from: 11, to: 12, run: (doc) => ({ ...doc, v: 12 }) },
+    // Custom columns and the table's view are new keys, not a new shape.
+    { from: 12, to: 13, run: (doc) => ({ ...doc, v: 13 }) },
+    // A device's service dates and interval are new keys, not a new shape.
+    { from: 13, to: 14, run: (doc) => ({ ...doc, v: 14 }) }
 ];
 
 // The v2 interface zone flags of `src`, put back on the same node as written.

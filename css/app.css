@@ -259,6 +259,41 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .tpl-examples[open] > summary { margin-bottom: 8px; }
 .rail-sub { font-family: var(--mono); font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin: 0 0 6px; }
 .rail-note { font-size: var(--fs-micro); color: var(--text-muted); line-height: 1.35; margin: 4px 0 8px; }
+/* A date typed, or picked from the browser's own calendar (js/assets.js,
+   "Age and upkeep"): the button opens the hidden date input's picker, which
+   sits under the field so the calendar opens below it. */
+.date-field { position: relative; display: flex; align-items: stretch; gap: 4px; }
+.date-field .input { flex: 1; min-width: 0; }
+.date-pick-btn { flex: none; width: 30px; display: grid; place-items: center; padding: 0; background: transparent; color: var(--text-sec);
+    border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.date-pick-btn:hover, .date-pick-btn:focus-visible { color: var(--accent); border-color: var(--accent); }
+.date-pick-btn svg { width: 15px; height: 15px; }
+.date-pick-native { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; color-scheme: dark; }
+[data-carino-theme="color"] .date-pick-native { color-scheme: light dark; }
+/* The age and next service under the fields, coloured as their finding. */
+#upkeepNote.upkeep-warn { color: var(--warn); }
+#upkeepNote.upkeep-bad { color: var(--err); }
+/* A field the panel cannot read (a date, a length): marked, not stored. */
+.topo-rail .input.bad { border-color: color-mix(in srgb, var(--err) 70%, transparent); background: color-mix(in srgb, var(--err) 12%, transparent); }
+/* A length and its unit (makeUnitPick, js/ui.js): one field to look at, the
+   unit's pick in front, a line between them. The frame is the wrapper's, so
+   the two read as one cell; it lights as a whole when either has the focus. */
+.unit-field { display: flex; align-items: stretch; min-width: 0; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; transition: 0.15s; }
+.unit-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-faint); }
+.unit-field .unit-pick { flex: none; appearance: none; -webkit-appearance: none; margin: 0; padding: 0 18px 0 9px; min-width: 2.6em;
+    /* A small caret, so it reads as something to pick from. */
+    background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23888'/%3E%3C/svg%3E") no-repeat right 6px center;
+    color: var(--text-sec); border: 0; border-right: 1px solid var(--border); border-radius: 5px 0 0 5px;
+    font-family: var(--mono); font-size: inherit; cursor: pointer; }
+.unit-field .unit-pick:hover, .unit-field .unit-pick:focus { color: var(--accent); outline: none; }
+.unit-field .unit-pick option { background: #111; color: var(--text); }
+.unit-field > .input, .unit-field > .tv-in { flex: 1; min-width: 0; border: 0; border-radius: 0 5px 5px 0; background: transparent; box-shadow: none; }
+.unit-field > .input:focus, .unit-field > .tv-in:focus { box-shadow: none; }
+.unit-field:has(> .bad) { border-color: color-mix(in srgb, var(--err) 70%, transparent); background: color-mix(in srgb, var(--err) 12%, transparent); }
+.unit-field > .input.bad { background: transparent; }
+/* In a table cell: the cell editor's own accent frame, on the pair. */
+.unit-field.tv-unit { border-color: var(--accent); border-radius: 4px; min-width: 9rem; font: inherit; }
+.unit-field.tv-unit > .tv-in { padding: 3px 6px; }
 .rail-title { font-family: var(--mono); font-size: var(--fs-label); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin: 0 0 8px; }
 .rail-empty { text-align: center; padding: 32px 0; font-size: var(--fs-label); font-style: italic; color: var(--text-muted); }
 .cfg-tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
@@ -592,6 +627,25 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .ca-line:hover:not(:disabled), .ca-line:focus-visible { background: var(--accent-faint); color: var(--accent); }
 .ca-line:disabled { cursor: default; color: var(--text-muted); }
 .ca-accept, .ca-reopen { flex: none; }
+/* Accept…, Schedule…, Pin on a line; Serviced today, Unpin on the visit list. */
+.ca-acts { flex: none; display: inline-flex; gap: 8px; }
+.ca-pin[aria-pressed="true"] { color: var(--accent); }
+.ca-pinned { font-size: 0.9em; }
+/* To check on the next visit: above the findings, framed, so it is the
+   first thing a technician on site reads. */
+.visit-box { margin: 0 0 10px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
+.visit-box .ca-item { padding: 4px 0; }
+.visit-box .ca-item + .ca-item { border-top: 1px dashed var(--border); }
+.visit-box .ca-item.gone .ca-line { color: var(--text-muted); }
+.upkeep-acts:has(> .hidden) { display: none; }
+.life-types-link { margin-top: 3px; font-size: var(--fs-micro); }
+/* Expected life by type: one row per type, its count here, the years. */
+.life-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.life-row { display: grid; grid-template-columns: 1fr auto 5.5rem auto; align-items: center; gap: 8px; }
+.life-row .life-n { color: var(--text-muted); font-family: var(--mono); font-size: var(--fs-micro); }
+.life-row .input { padding: 5px 8px; text-align: right; }
+.life-row .input.bad { border-color: var(--err); }
+.life-row .life-unit { color: var(--text-sec); font-size: var(--fs-sm); }
 .accepted-box > summary { cursor: pointer; }
 .accepted-box[open] > summary { margin-bottom: 4px; }
 .accepted-box .ca-item { padding: 4px 0; border-top: 1px dashed var(--border); }
@@ -1433,6 +1487,20 @@ body.rack-view #conflictPill { display: none !important; }
 
 /* Paste a column: the fleet's .modal, wide enough for a preview of rows. */
 .modal.topo-paste { max-width: 40rem; }
+/* Columns: one row per column, Name first and fixed; the user's own columns
+   carry a name field and their kind. */
+.cols-list { list-style: none; margin: 0 0 12px; padding: 0; max-height: min(18rem, 40dvh); overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+.cols-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border); min-height: 2.25rem; }
+.cols-row:last-child { border-bottom: 0; }
+.cols-label { flex: 1; min-width: 0; }
+.cols-row .cols-name { flex: 1; min-width: 0; padding: 3px 6px; font-size: var(--fs-sm); }
+.cols-row .cols-kind { flex: 0 0 auto; width: auto; min-width: 6.5rem; padding: 2px 6px; font-size: var(--fs-label); }
+.cols-acts { display: flex; gap: 4px; margin-left: auto; }
+.cols-add-title { margin: 0 0 6px; font-size: var(--fs-label); color: var(--text-sec); font-weight: 600; }
+.cols-add-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cols-add-row .input { flex: 1 1 12rem; width: auto; min-width: 0; }
+.cols-add-row .select { flex: 0 0 auto; width: auto; }
+.cols-add-row .btn { flex: 0 0 auto; }
 .paste-blurb { margin-bottom: 6px; }
 .paste-target { margin: 0 0 12px; font-size: var(--fs-label); color: var(--text-muted); }
 .paste-field { margin-bottom: 10px; }
@@ -1542,6 +1610,8 @@ body.rack-view #conflictPill { display: none !important; }
 .ask-pick { margin-top: 12px; }
 .ask-pick[hidden] { display: none; }
 .ask-pick .select { width: 100%; }
+#topoAskDate { color-scheme: dark; }
+[data-carino-theme="color"] #topoAskDate { color-scheme: light dark; }
 .topo-ask .modal-head[hidden] { display: none; }
 .topo-ask .modal-foot { flex-wrap: wrap; }
 .btn.ask-danger { border-color: var(--err); color: var(--err); }
@@ -1555,6 +1625,10 @@ body.rack-view #conflictPill { display: none !important; }
 .dlg-blurb { margin: 0 0 12px; font-size: var(--fs-label); color: var(--text-muted); }
 .dlg-blurb.strong { color: var(--text); margin-bottom: 8px; }
 .dlg-dim { opacity: 0.7; }
+.dlg-parts { border: 0; padding: 0; margin: 0 0 12px; min-width: 0; }
+.dlg-parts legend { padding: 0; margin-bottom: 6px; }
+.dlg-parts label { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+.dlg-parts input { margin-top: 2px; flex: 0 0 auto; }
 .dlg-list { display: flex; flex-direction: column; gap: 8px; }
 .dlg-fields { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
 .dlg-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }

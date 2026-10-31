@@ -10,6 +10,9 @@
 //      link-local, a Windows "Interface:" heading) and counts, and an entry
 //      seen twice kept once; a netmask beside the address gives its prefix;
 //      an ISC lease block and MikroTik's continuation lines are one entry;
+//      a network scan (nmap's output and XML) is one host per report, a host
+//      up without a MAC kept and counted; arp-scan's and netdiscover's maker
+//      is never a name; the GUI scanners' CSV exports map as sheets;
 //   3. the import dialog reads pasted ARP output as addresses seen on its
 //      own, keeps a real sheet a sheet, and Read as switches either way;
 //   4. the review: a known address gains its MAC, a new one is added under
@@ -124,7 +127,68 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('the same address with two MACs is two observations', seenExtract('10.0.0.5 aa:bb:cc:dd:ee:05\n10.0.0.5 aa:bb:cc:dd:ee:06').rows.length === 2);
     ok('a second sighting lends its name to the first', seenExtract('10.0.0.5 aa:bb:cc:dd:ee:05\npc9 (10.0.0.5) at aa:bb:cc:dd:ee:05 on eth0').rows[0].host === 'pc9');
     ok('the documentation ranges are networks like any other', seenExtract('192.0.2.5 aa:bb:cc:dd:ee:05').rows.length === 1);
-    ok('a plain spreadsheet line without a MAC yields nothing', seenExtract('Hostname,IP Address\nPC-1,10.0.0.11').rows.length === 0);
+    // ---- Network scans: nmap (normal and XML), arp-scan, netdiscover ----
+    const nm = seenExtract([
+      'Starting Nmap 7.94 ( https://nmap.org ) at 2026-10-30 10:00 CST',
+      'Nmap scan report for router.lan (10.0.0.1)',
+      'Host is up (0.0010s latency).',
+      'MAC Address: AA:BB:CC:DD:EE:01 (Routerboard.com)',
+      'Nmap scan report for 10.0.0.5',
+      'Host is up (0.0020s latency).',
+      'Not shown: 998 closed tcp ports (reset)',
+      'PORT   STATE SERVICE',
+      '22/tcp open  ssh',
+      '80/tcp open  http',
+      'MAC Address: AA:BB:CC:DD:EE:05 (Raspberry Pi Trading)',
+      'Nmap scan report for 10.0.0.9 [host down]',
+      'Nmap scan report for me.lan (10.0.0.10)',
+      'Host is up.',
+      'Nmap done: 256 IP addresses (3 hosts up) scanned in 2.10 seconds'
+    ].join('\n'));
+    ok('nmap: a report and the MAC lines under it are one host, its name from "name (address)"', nm.rows.length === 3
+       && same(nm.rows[0], '10.0.0.1', 'aa:bb:cc:dd:ee:01', 'router') && nm.rows[0].line === 2
+       && same(nm.rows[1], '10.0.0.5', 'aa:bb:cc:dd:ee:05', ''), show(nm.rows));
+    ok('nmap: a host down is not counted, one up without a MAC is kept and counted', !nm.rows.some((r) => r.ip === '10.0.0.9')
+       && same(nm.rows[2], '10.0.0.10', '', 'me') && nm.noMac === 1 && nm.skipped === 0, show(nm));
+    const nx = seenExtract([
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<nmaprun scanner="nmap" args="nmap -sn -oX - 10.0.0.0/24">',
+      '<hosthint><status state="up" reason="unknown-response"/><address addr="10.0.0.20" addrtype="ipv4"/></hosthint>',
+      '<host starttime="1"><status state="up" reason="arp-response"/>',
+      '<address addr="10.0.0.20" addrtype="ipv4"/>',
+      '<address addr="AA:BB:CC:DD:EE:20" addrtype="mac" vendor="Hikvision"/>',
+      '<hostnames><hostname name="cam-20.lan" type="PTR"/><hostname name="lobby-cam" type="user"/></hostnames>',
+      '</host>',
+      "<host><status state='down' reason='no-response'/><address addr='10.0.0.21' addrtype='ipv4'/></host>",
+      '<host><status state="up"/><address addr="FF:FF:FF:FF:FF:FF" addrtype="mac"/><address addr="10.0.0.22" addrtype="ipv4"/></host>',
+      '<host><status state="up"/><address addr="2001:db8::23" addrtype="ipv6"/><hostnames><hostname name="nas.example.com" type="PTR"/></hostnames></host>',
+      '</nmaprun>'
+    ].join('\n'));
+    ok('nmap XML: a <host> once (not its <hosthint>), the user\'s name before the PTR one, on the line it starts', nx.rows.length === 2
+       && same(nx.rows[0], '10.0.0.20', 'aa:bb:cc:dd:ee:20', 'lobby-cam') && nx.rows[0].line === 4, show(nx.rows));
+    ok('nmap XML: a host down is not counted, a broadcast MAC is left out, an IPv6 host with no MAC is kept', nx.skipped === 1
+       && same(nx.rows[1], '2001:db8::23', '', 'nas') && nx.noMac === 1, show(nx));
+    const as = seenExtract([
+      'Interface: eth0, type: EN10MB, MAC: aa:bb:cc:dd:ee:10, IPv4: 10.0.0.10',
+      'Starting arp-scan 1.10.0 with 256 hosts (https://github.com/royhills/arp-scan)',
+      '10.0.0.1\taa:bb:cc:dd:ee:01\tRouterboard.com',
+      '10.0.0.5\taa:bb:cc:dd:ee:05\tRaspberry Pi Trading Ltd',
+      '10.0.0.6\taa:bb:cc:dd:ee:06\t(Unknown: locally administered)',
+      '',
+      'Ending arp-scan 1.10.0: 256 hosts scanned in 1.9 seconds (134.74 hosts/sec). 3 responded'
+    ].join('\n'));
+    ok('arp-scan: the maker after the MAC is never a name', as.rows.length === 4 && as.rows.every((r) => r.host === ''), show(as.rows));
+    ok('arp-scan body lines without the banner: a maker with spaces is not a name', one('10.0.0.5\taa:bb:cc:dd:ee:05\tRaspberry Pi Trading Ltd').host === '');
+    const nd = seenExtract([
+      ' Currently scanning: Finished!   |   Screen View: Unique Hosts',
+      '   IP            At MAC Address     Count     Len  MAC Vendor / Hostname',
+      ' -----------------------------------------------------------------------------',
+      ' 10.0.0.1        aa:bb:cc:dd:ee:01      1      60  Routerboard.com',
+      ' 10.0.0.5        aa:bb:cc:dd:ee:05      3     180  Raspberry Pi Trading Ltd'
+    ].join('\n'));
+    ok('netdiscover: the vendor column is never a name', nd.rows.length === 2 && nd.rows.every((r) => r.host === ''), show(nd.rows));
+
+    ok('a plain spreadsheet line without a MAC yields nothing',seenExtract('Hostname,IP Address\nPC-1,10.0.0.11').rows.length === 0);
 
     // ---- 3 & 4: the import dialog ----
     const lab = () => ({ v: DOC_VERSION,
@@ -199,6 +263,45 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a spreadsheet row is still found by its name', !_csv.plan.observed && _csv.plan.rows[0].nodeId === 'pc2' && _csv.plan.rows[0].status === 'change', show(_csv.plan.rows[0]));
     el('csvBackBtn').click();
     closeCsvDialog();
+
+    // An nmap scan goes through the same review; a host found without its
+    // MAC is found by its address, or added with none.
+    replaceDocument(lab(), { origin: 'file' }); initHistory();
+    openCsvDialog('import');
+    el('csvText').value = [
+      'Nmap scan report for 10.0.0.11', 'Host is up (0.0010s latency).', 'MAC Address: AA:BB:CC:00:00:11 (Dell)',
+      'Nmap scan report for pc-2.lan (10.0.0.12)', 'Host is up.',
+      'Nmap scan report for scanner.lan (10.0.0.70)', 'Host is up.'
+    ].join('\n');
+    _csv.headings = null; _csv.mode = null; _csv.chosen.clear();
+    csvReparse(); renderCsvDialog();
+    ok('nmap output is read as addresses seen, and says how many came without a MAC', csvMode() === 'seen'
+       && /Addresses seen with their MAC: 3, with a name: 2\./.test(el('csvKind').textContent) && /without their MAC[^:]*: 2\./.test(el('csvKind').textContent), el('csvKind').textContent);
+    el('csvReviewBtn').click();
+    const np = _csv.plan, nAt = (i) => np.rows.find((r) => r.index === i);
+    ok('nmap: a known address gains its MAC', nAt(0).status === 'change' && nAt(0).nodeId === 'pc1', show(nAt(0)));
+    ok('nmap: a host without a MAC is found by its address and keeps the MAC it has', nAt(1).status === 'same' && nAt(1).nodeId === 'pc2', show(nAt(1)));
+    ok('nmap: a new host without a MAC is added under its name', nAt(2).status === 'add' && nAt(2).name === 'scanner', show(nAt(2)));
+    el('csvApplyBtn').click();
+    const sc = nodeByName('scanner');
+    ok('nmap: the new device has its address and no MAC; the old one keeps its MAC', sc && sc.interfaces[0].ip === '10.0.0.70/24' && !sc.interfaces[0].mac
+       && normMac(getNode('pc2').interfaces[0].mac) === 'AABBCC000012', sc && show(sc.interfaces));
+    undo();
+
+    // The GUI scanners export spreadsheets: their columns map as a sheet's.
+    const scanSheets = [
+      ['Advanced IP Scanner', 'Status,Name,IP,Manufacturer,MAC address,Comments\nOn,KIOSK-1,10.0.0.50,Dell Inc.,AA:BB:CC:00:00:50,'],
+      ['Angry IP Scanner', '"IP","Ping","Hostname","Ports [3+]","MAC Address"\n"10.0.0.50","2 ms","kiosk-1.lan","[n/a]","AA:BB:CC:00:00:50"']
+    ];
+    scanSheets.forEach(([what, text]) => {
+      openCsvDialog('import');
+      el('csvText').value = text;
+      _csv.headings = null; _csv.mode = null; _csv.chosen.clear();
+      csvReparse(); renderCsvDialog();
+      ok(`${what} export maps its address, MAC and name, and is one kind of sheet`, csvMode() === 'sheet' && _csv.mapping.includes('if:ip') && _csv.mapping.includes('if:mac') && _csv.mapping.includes('name')
+         && !/^mixed/.test(csvSheetKind(_csv.mapping)), JSON.stringify(_csv.mapping));
+      closeCsvDialog();
+    });
 
     // A sheet with an address column stays a sheet; Read as overrides.
     openCsvDialog('import');

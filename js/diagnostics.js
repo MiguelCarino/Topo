@@ -1109,6 +1109,7 @@ function runDiagnosis() {
     cablingFindings().forEach(add);
     loopFindings().forEach(add);
     labelFindings().forEach(add);
+    upkeepFindings().forEach(add);
     placeFindings().forEach(add);
     hostFindings().forEach(add);
     wifiFindings().forEach(add);
@@ -1118,7 +1119,10 @@ function runDiagnosis() {
     // removes), or null while it is open.
     findings.forEach((f) => {
         const entry = acceptedEntryFor(accepted, f.key, f.nodeIds, f.linkIds, f.scope);
-        f.accepted = entry ? { reason: entry.reason, index: accepted.indexOf(entry) } : null;
+        f.accepted = entry ? { reason: entry.reason, index: accepted.indexOf(entry), until: entry.until || '' } : null;
+        // Open again because its schedule ran out: what was planned, and when.
+        const lapsed = entry ? null : lapsedEntryFor(accepted, f.key, f.nodeIds, f.linkIds, f.scope);
+        f.lapsed = lapsed ? { reason: lapsed.reason, until: lapsed.until } : null;
     });
     return { findings, nodes };
 }
@@ -1151,14 +1155,32 @@ function runDiagnosis() {
 // an overlap (accepting two APs sharing 2.4 GHz is not accepting them on
 // 5 GHz). No scope matches only no scope, so every older entry reads as it
 // did.
+//
+// Scheduled (v14): an entry with `until` (a date) is accepted up to and
+// including that day, and from the next one it no longer matches, so the
+// finding counts again by itself: "the client replaces it in March" needs
+// nobody to remember it. The lapsed entry stays in the document (the file
+// does not change by itself); the finding it covered says it was scheduled,
+// and when, and scheduling or accepting it again replaces it.
 const ACCEPT_REASON_MAX = 300;
 const ACCEPT_SCOPE_MAX = 64;
 const acceptedList = () => (Array.isArray(state.accepted) ? state.accepted : []);
+// The entry and the finding name the same check, scope and things.
+const entryCovers = (a, key, nodeIds, linkIds, scope) => a.check === key && (a.scope || '') === (scope || '')
+    && (nodeIds || []).every((id) => a.nodeIds.includes(id))
+    && (linkIds || []).every((id) => a.linkIds.includes(id));
+const entryLapsed = (a, today = todayISO()) => !!a.until && a.until < today;
 function acceptedEntryFor(accepted, key, nodeIds, linkIds, scope) {
     if (!accepted.length || !((nodeIds || []).length + (linkIds || []).length)) return null;
-    return accepted.find((a) => a.check === key && (a.scope || '') === (scope || '')
-        && (nodeIds || []).every((id) => a.nodeIds.includes(id))
-        && (linkIds || []).every((id) => a.linkIds.includes(id))) || null;
+    const today = todayISO();
+    return accepted.find((a) => !entryLapsed(a, today) && entryCovers(a, key, nodeIds, linkIds, scope)) || null;
+}
+// The schedule that lapsed on a finding now open again, or null.
+function lapsedEntryFor(accepted, key, nodeIds, linkIds, scope) {
+    if (!accepted.length || !((nodeIds || []).length + (linkIds || []).length)) return null;
+    const today = todayISO();
+    return accepted.filter((a) => entryLapsed(a, today) && entryCovers(a, key, nodeIds, linkIds, scope))
+        .sort((a, b) => (a.until < b.until ? 1 : -1))[0] || null;
 }
 const isOpenFinding = (f) => !f.accepted;
 // What the counts count: an open finding that says something is wrong. An
@@ -1177,6 +1199,8 @@ function normalizeAccepted(list) {
         const out = { check: a.check, nodeIds: ids(a.nodeIds), linkIds: ids(a.linkIds), reason };
         const scope = typeof a.scope === 'string' ? a.scope.trim().slice(0, ACCEPT_SCOPE_MAX) : '';
         if (scope) out.scope = scope;
+        const until = typeof a.until === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.until) ? customDate(a.until) : null;
+        if (until) out.until = until;
         return reason && (out.nodeIds.length || out.linkIds.length) ? out : null;
     }).filter(Boolean);
 }
@@ -1189,7 +1213,7 @@ function serializeAccepted(list) {
     const out = [];
     normalizeAccepted(list).forEach((a) => {
         const n = a.nodeIds.filter((id) => nodeIds.has(id)), l = a.linkIds.filter((id) => linkIds.has(id));
-        if (n.length || l.length) out.push({ check: a.check, scope: a.scope, nodeIds: n.length ? n : undefined, linkIds: l.length ? l : undefined, reason: a.reason });
+        if (n.length || l.length) out.push({ check: a.check, scope: a.scope, nodeIds: n.length ? n : undefined, linkIds: l.length ? l : undefined, reason: a.reason, until: a.until });
     });
     return out.length ? out : undefined;
 }
@@ -1197,7 +1221,7 @@ function serializeAccepted(list) {
 // The name a check goes by in the tab and the report, for an accepted entry
 // that matches nothing at the moment (there is no finding to borrow it from).
 const FINDING_CHECK_NAMES = { 'ip-conflict': 'IP Conflict', 'mac-conflict': 'MAC Conflict', cabling: 'Cabling', loop: 'L2 loop',
-    'cable-label': 'Cable label', 'asset-tag': 'Asset tag', group: 'Groups', rack: 'Rack', 'rack-tag': 'Cable tags', host: 'Runs on',
+    'cable-label': 'Cable label', 'asset-tag': 'Asset tag', group: 'Groups', rack: 'Rack', 'rack-tag': 'Cable tags', host: 'Runs on', age: 'Age', service: 'Service', 'service-due': 'Service due',
     'wifi-band': 'Wi-Fi band', 'wifi-ssid': 'SSID', 'wifi-subnet': 'Wi-Fi subnet', 'wifi-overlap': 'Channel overlap', 'wifi-plan': 'Channel plan',
     'wifi-security': 'Wi-Fi security', 'wifi-signal': 'Signal' };
 const findingCheckName = (key) => t(FINDING_CHECK_NAMES[key] || (NODE_CHECKS_BY_KEY[key] && NODE_CHECKS_BY_KEY[key].label) || key);
@@ -1206,20 +1230,26 @@ const findingCheckName = (key) => t(FINDING_CHECK_NAMES[key] || (NODE_CHECKS_BY_
 // one or more devices), accepted together under one reason. One entry per
 // scope among them (almost always one), so no entry covers a scope that was
 // not on the line.
-function acceptFindings(findings, reason) {
+// until: a date ('YYYY-MM-DD') schedules them instead: accepted up to and
+// including that day. A schedule that lapsed on any of them goes.
+function acceptFindings(findings, reason, until) {
     const text = String(reason || '').trim().slice(0, ACCEPT_REASON_MAX);
     const list = (findings || []).filter((f) => f && !f.accepted);
-    if (!text || !list.length || readOnlyRefuses()) return false;
+    const day = until ? customDate(until) : null;
+    if (!text || !list.length || (until && !day) || readOnlyRefuses()) return false;
     const union = (fs, key) => [...new Set(fs.flatMap((f) => f[key] || []))];
     const scopes = [...new Set(list.map((f) => f.scope || ''))];
     const entries = scopes.map((scope) => {
         const fs = list.filter((f) => (f.scope || '') === scope);
         const entry = { check: list[0].key, nodeIds: union(fs, 'nodeIds'), linkIds: union(fs, 'linkIds'), reason: text };
         if (scope) entry.scope = scope;
+        if (day) entry.until = day;
         return entry;
     });
+    const today = todayISO();
+    const stale = (a) => entryLapsed(a, today) && list.some((f) => entryCovers(a, f.key, f.nodeIds, f.linkIds, f.scope));
     batch(() => {
-        state.accepted = acceptedList().concat(entries);
+        state.accepted = acceptedList().filter((a) => !stale(a)).concat(entries);
         save(); renderCanvasOnly();
     });
     refreshSelectedNodeDiagnostics();
@@ -1231,6 +1261,103 @@ function reopenAccepted(index) {
     if (!list[index] || readOnlyRefuses()) return false;
     batch(() => {
         state.accepted = list.filter((a, i) => i !== index);
+        save(); renderCanvasOnly();
+    });
+    refreshSelectedNodeDiagnostics();
+    return true;
+}
+
+// ---- Pinned for the next visit ----
+// A finding pinned is one somebody wants looked at on site: the technician
+// opens the network and the Findings tab starts with "To check on the next
+// visit", the map marks the devices, and the client's summary lists it as
+// planned. Pinning changes no count (a pinned finding is still open, or
+// accepted, as it was); it is a note on the record, so it is stored in the
+// document (state.pinned, serialized as `pinned`) and travels with the file,
+// as an accept's reason does. Each entry is { check, nodeIds, linkIds,
+// scope?, note? }, matched to findings as an accepted entry is
+// (entryCovers): a service pinned is that service (its scope is the date
+// due), and recording it (Serviced today) takes the pin away.
+const PIN_NOTE_MAX = 300;
+const pinnedList = () => (Array.isArray(state.pinned) ? state.pinned : []);
+function normalizePinned(list) {
+    const ids = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === 'string' && x))] : []);
+    return (Array.isArray(list) ? list : []).map((a) => {
+        if (!a || typeof a !== 'object' || typeof a.check !== 'string' || !a.check) return null;
+        const out = { check: a.check, nodeIds: ids(a.nodeIds), linkIds: ids(a.linkIds) };
+        const scope = typeof a.scope === 'string' ? a.scope.trim().slice(0, ACCEPT_SCOPE_MAX) : '';
+        if (scope) out.scope = scope;
+        const note = typeof a.note === 'string' ? a.note.trim().slice(0, PIN_NOTE_MAX) : '';
+        if (note) out.note = note;
+        return out.nodeIds.length || out.linkIds.length ? out : null;
+    }).filter(Boolean);
+}
+// As serializeAccepted: what is gone is left out, and nothing is no key.
+function serializePinned(list) {
+    const nodeIds = new Set(state.nodes.map((n) => n.id));
+    const linkIds = new Set(state.links.map((l) => l.id));
+    const out = [];
+    normalizePinned(list).forEach((a) => {
+        const n = a.nodeIds.filter((id) => nodeIds.has(id)), l = a.linkIds.filter((id) => linkIds.has(id));
+        if (n.length || l.length) out.push({ check: a.check, scope: a.scope, nodeIds: n.length ? n : undefined, linkIds: l.length ? l : undefined, note: a.note });
+    });
+    return out.length ? out : undefined;
+}
+const pinEntryFor = (f) => pinnedList().find((a) => entryCovers(a, f.key, f.nodeIds, f.linkIds, f.scope)) || null;
+// The pins, each with the findings it covers now (none: fixed, or not
+// raised at the moment, which the list says rather than hiding the pin).
+function pinnedGroups(findings) {
+    return pinnedList().map((entry, index) => ({ index, entry,
+        findings: findings.filter((f) => entryCovers(entry, f.key, f.nodeIds, f.linkIds, f.scope)) }));
+}
+// The devices a pin names: the map marks them.
+function pinnedNodeIds() {
+    return new Set(pinnedList().flatMap((a) => a.nodeIds));
+}
+// One undo step: the findings of one line, pinned together, with what to
+// look at (optional). One entry per scope among them, as an accept.
+function pinFindings(findings, note) {
+    const list = (findings || []).filter((f) => f && !pinEntryFor(f));
+    if (!list.length || readOnlyRefuses()) return false;
+    const text = String(note || '').trim().slice(0, PIN_NOTE_MAX);
+    const union = (fs, key) => [...new Set(fs.flatMap((f) => f[key] || []))];
+    const entries = [...new Set(list.map((f) => f.scope || ''))].map((scope) => {
+        const fs = list.filter((f) => (f.scope || '') === scope);
+        const entry = { check: list[0].key, nodeIds: union(fs, 'nodeIds'), linkIds: union(fs, 'linkIds') };
+        if (scope) entry.scope = scope;
+        if (text) entry.note = text;
+        return entry;
+    });
+    batch(() => {
+        state.pinned = pinnedList().concat(entries);
+        save(); renderCanvasOnly();
+    });
+    return true;
+}
+function unpin(index) {
+    const list = pinnedList();
+    if (!list[index] || readOnlyRefuses()) return false;
+    batch(() => {
+        state.pinned = list.filter((a, i) => i !== index);
+        save(); renderCanvasOnly();
+    });
+    return true;
+}
+// Serviced today: the device's last service is today, so the service it was
+// due is done. Its pins, accepts and schedules for a service are about that
+// service: the device leaves them (an entry naming nobody else goes). One
+// undo step.
+const SERVICE_CHECKS = ['service', 'service-due'];
+function servicedToday(nodeId) {
+    const node = getNode(nodeId);
+    if (!node || readOnlyRefuses()) return false;
+    const leave = (list) => list.map((a) => (SERVICE_CHECKS.includes(a.check) && a.nodeIds.includes(nodeId)
+        ? Object.assign({}, a, { nodeIds: a.nodeIds.filter((id) => id !== nodeId) }) : a))
+        .filter((a) => a.nodeIds.length || a.linkIds.length);
+    batch(() => {
+        node.serviced = todayISO();
+        state.pinned = leave(pinnedList());
+        state.accepted = leave(acceptedList());
         save(); renderCanvasOnly();
     });
     refreshSelectedNodeDiagnostics();
@@ -1359,6 +1486,45 @@ function labelFindings() {
         const detail = t('Asset tag {tag} is on {n} devices: {names}.', { tag: g.text, n: g.items.length, names });
         out.push({ key: 'asset-tag', level: 'warn', check: t('Asset tag'), subject: names, detail,
             line: `${t('Asset tag')}: ${detail}`, nodeIds: g.items.map((n) => n.id) });
+    });
+    return out;
+}
+
+// ---- Age and upkeep (js/model.js "Age and upkeep") ----
+// age: in service as long as its type usually lasts, or longer (its own
+// expected life, when it has one). Advisory: it works, but it is the next
+// thing to fail and the next thing to budget for.
+// service: its service was due and has not been recorded. Advisory, and
+// critical once a whole interval has gone by since (missed twice over).
+// service-due: due within SERVICE_SOON_DAYS. A note, not counted, so the
+// technician sees it coming.
+// The service findings are scoped to the date due: accepting one ("the
+// vendor comes on the 12th") covers that service only, and the next one,
+// once this is recorded, is a finding again. Worked out from today's date
+// (upkeepState), so the same file says more as it gets older.
+function upkeepFindings(today = todayISO()) {
+    const out = [];
+    const ago = (days) => (days < 60 ? t('{n} days ago', { n: days })
+        : days < 730 ? t('about {n} months ago', { n: Math.round(days / 30.4) }) : t('about {n} years ago', { n: Math.round(days / 365.25) }));
+    state.nodes.forEach((node) => {
+        const st = upkeepState(node, today);
+        const name = node.name || node.id;
+        if (st.old) {
+            out.push({ key: 'age', level: 'warn', check: t('Age'), subject: name, nodeIds: [node.id],
+                detail: t('In service for {age}, and expected to last {life} years. Plan its replacement.', { age: ageText(st.old), life: st.old.life }) });
+        }
+        const s = st.service;
+        if (!s || !s.level) return;
+        if (s.level === 'info') {
+            out.push({ key: 'service-due', level: 'info', check: t('Service due'), subject: name, nodeIds: [node.id], scope: s.due,
+                detail: s.days === 0 ? t('Due for service today.', { name })
+                    : t('Due for service on {date}, in {n} days.', { name, date: s.due, n: s.days }) });
+            return;
+        }
+        out.push({ key: 'service', level: s.level, check: t('Service'), subject: name, nodeIds: [node.id], scope: s.due,
+            detail: s.level === 'bad'
+                ? t('Was due for service on {date}, {ago}. A whole interval has gone by since, so the next one is due as well.', { name, date: s.due, ago: ago(-s.days) })
+                : t('Was due for service on {date}, {ago}.', { name, date: s.due, ago: ago(-s.days) }) });
     });
     return out;
 }
@@ -1755,7 +1921,9 @@ function currentDiagnosisNow() {
     const lang = window.CarinoI18N ? window.CarinoI18N.current() : '';
     // state.wifi too: the Wi-Fi checks read a network's security, subnet and
     // bands, so editing only a Wi-Fi network must not give the old findings.
-    const key = `${lang}\u0000${JSON.stringify(state.nodes, omitPosition)}\u0000${JSON.stringify(state.links)}\u0000${JSON.stringify(state.networks)}\u0000${JSON.stringify(state.groups || [])}\u0000${JSON.stringify(state.accepted || [])}\u0000${JSON.stringify(state.wifi || [])}`;
+    // Today's date too: the age and service findings change with it.
+    // And the network's own expected lives: they decide which device is old.
+    const key = `${lang}\u0000${todayISO()}\u0000${JSON.stringify(state.expectedLife || {})}\u0000${JSON.stringify(state.nodes, omitPosition)}\u0000${JSON.stringify(state.links)}\u0000${JSON.stringify(state.networks)}\u0000${JSON.stringify(state.groups || [])}\u0000${JSON.stringify(state.accepted || [])}\u0000${JSON.stringify(state.wifi || [])}`;
     if (diagnosisMemo && diagnosisMemo.key === key) {
         // Same network, but maybe not the same objects: undo, redo and
         // Back/Forward rebuild every node from the stored document, and a move
@@ -1878,13 +2046,23 @@ function savePanelOpen() {
 const panelCursor = new Map();
 let panelGroups = [];
 let panelAccepted = [];   // [{ index, entry, findings }], as the Accepted list shows them
+let panelPinned = [];     // [{ index, entry, findings }], as the visit list shows them
+// The devices and cables a pin names, by name: for a pin whose finding is not raised now.
+const pinnedNames = (entry) => entry.nodeIds.map((id) => { const n = getNode(id); return n ? n.name || n.id : id; })
+    .concat(entry.linkIds.map((id) => {
+        const l = getLink(id), a = l && getNode(l.source), b = l && getNode(l.target);
+        return l ? `${a ? a.name || a.id : l.source} ↔ ${b ? b.name || b.id : l.target}` : id;
+    })).join(', ');
 
 // The accepted entries, each with the findings it covers now. An entry that
 // covers nothing at the moment (the fault was fixed, or not raised yet) is
 // still listed, so a reason nobody can see never decides what counts.
+// A schedule that ran out is not listed: its finding is open again and says so.
 function acceptedGroups(findings) {
+    const today = todayISO();
     return acceptedList().map((entry, index) => ({ index, entry,
-        findings: findings.filter((f) => f.accepted && f.accepted.index === index) }));
+        findings: findings.filter((f) => f.accepted && f.accepted.index === index) }))
+        .filter((a) => !entryLapsed(a.entry, today));
 }
 
 function validateTopology(diag) {
@@ -1897,6 +2075,7 @@ function validateTopology(diag) {
         msgList.dataset.wired = '1';
         msgList.addEventListener('click', onFindingClick);
         document.getElementById('acceptedList').addEventListener('click', onAcceptedClick);
+        document.getElementById('visitList').addEventListener('click', onVisitClick);
     }
 
     panelGroups = groupFindings(findings);
@@ -1912,9 +2091,17 @@ function validateTopology(diag) {
         const open = panelOpen.has(g.key) ? panelOpen.get(g.key) : (small || g.level === 'bad' || g.items.length <= 3);
         const items = g.items.map((item, ii) => {
             const many = findingTargets(item).length > 1;
-            return `<li class="ca-item ${item.level}"><button type="button" class="ca-line" data-g="${gi}" data-i="${ii}"
-                title="${escapeHtml(t(many ? 'Show on the map (click again for the next one)' : 'Show on the map'))}">${escapeHtml(findingItemText(item))}</button>${canAccept
-                ? `<button type="button" class="link-btn quiet ca-accept" data-g="${gi}" data-i="${ii}" title="${escapeHtml(t('Keep this finding as known, with a reason. It stays listed but no longer counts.'))}">${escapeHtml(t('Accept…'))}</button>` : ''}</li>`;
+            const pinned = item.findings.every((f) => pinEntryFor(f));
+            const lapsed = item.findings.map((f) => f.lapsed).find(Boolean);
+            const at = `data-g="${gi}" data-i="${ii}"`;
+            const actions = canAccept ? `<span class="ca-acts">
+                <button type="button" class="link-btn quiet ca-accept" ${at} title="${escapeHtml(t('Keep this finding as known, with a reason. It stays listed but no longer counts.'))}">${escapeHtml(t('Accept…'))}</button>
+                <button type="button" class="link-btn quiet ca-schedule" ${at} title="${escapeHtml(t('Set it aside until a date, with what is planned. It comes back by itself the day after.'))}">${escapeHtml(t('Schedule…'))}</button>
+                <button type="button" class="link-btn quiet ca-pin" ${at} aria-pressed="${pinned}" title="${escapeHtml(t(pinned ? 'Take it off the list for the next visit' : 'Add it to the list to check on the next visit'))}">${escapeHtml(t(pinned ? 'Unpin' : 'Pin'))}</button>
+            </span>` : '';
+            return `<li class="ca-item ${item.level}"><button type="button" class="ca-line" ${at}
+                title="${escapeHtml(t(many ? 'Show on the map (click again for the next one)' : 'Show on the map'))}">${pinned ? '<span class="ca-pinned" aria-hidden="true">📌</span> ' : ''}${escapeHtml(findingItemText(item))}</button>${actions}${lapsed
+                ? `<p class="ca-reason">${escapeHtml(t('Was scheduled until {date}: {reason}', { date: lapsed.until, reason: lapsed.reason }))}</p>` : ''}</li>`;
         }).join('');
         return `<li class="ca-group ${g.level}">
             <button type="button" class="ca-group-head" data-g="${gi}" aria-expanded="${open}">
@@ -1936,8 +2123,26 @@ function validateTopology(diag) {
             : [`${findingCheckName(a.entry.check)}: ${t('Not raised at the moment.')}`];
         return `<li class="ca-item accepted">
             <button type="button" class="ca-line" data-a="${ai}" title="${escapeHtml(t('Show on the map'))}"${a.findings.length ? '' : ' disabled'}>${lines.map(escapeHtml).join('<br>')}</button>
-            <p class="ca-reason">${escapeHtml(t('Reason: {reason}', { reason: a.entry.reason }))}</p>
+            <p class="ca-reason">${escapeHtml(a.entry.until ? t('Scheduled until {date}: {reason}', { date: a.entry.until, reason: a.entry.reason }) : t('Reason: {reason}', { reason: a.entry.reason }))}</p>
             ${canAccept ? `<button type="button" class="link-btn quiet ca-reopen" data-a="${ai}">${escapeHtml(t('Reopen'))}</button>` : ''}
+        </li>`;
+    }).join('');
+
+    // To check on the next visit: every pin, whatever its finding's state
+    // (open, accepted, scheduled, or not raised at the moment).
+    panelPinned = pinnedGroups(all);
+    document.getElementById('visitBox').classList.toggle('hidden', !panelPinned.length);
+    document.getElementById('visitSummary').textContent = t('To check on the next visit: {n}', { n: panelPinned.length });
+    document.getElementById('visitList').innerHTML = panelPinned.map((p, pi) => {
+        const lines = p.findings.length
+            ? groupFindings(p.findings).flatMap((g) => g.items.map((item) => `${g.check}: ${findingItemText(item)}`))
+            : [`${findingCheckName(p.entry.check)}: ${pinnedNames(p.entry)} · ${t('Not raised at the moment.')}`];
+        const serviceNode = SERVICE_CHECKS.includes(p.entry.check) && p.entry.nodeIds.length === 1 ? p.entry.nodeIds[0] : null;
+        return `<li class="ca-item visit ${p.findings.length ? p.findings[0].level : 'gone'}">
+            <button type="button" class="ca-line" data-p="${pi}" title="${escapeHtml(t('Show on the map'))}">${lines.map(escapeHtml).join('<br>')}</button>
+            ${p.entry.note ? `<p class="ca-reason">${escapeHtml(t('To check: {note}', { note: p.entry.note }))}</p>` : ''}
+            ${canAccept ? `<span class="ca-acts">${serviceNode ? `<button type="button" class="link-btn quiet ca-serviced" data-p="${pi}" title="${escapeHtml(t('Record that it was serviced today'))}">${escapeHtml(t('Serviced today'))}</button>` : ''}
+                <button type="button" class="link-btn quiet ca-unpin" data-p="${pi}">${escapeHtml(t('Unpin'))}</button></span>` : ''}
         </li>`;
     }).join('');
 
@@ -1997,6 +2202,20 @@ async function onFindingClick(e) {
         head.nextElementSibling.hidden = !open;
         return;
     }
+    const schedule = e.target.closest('.ca-schedule');
+    if (schedule) {
+        const g = panelGroups[Number(schedule.dataset.g)];
+        const item = g && g.items[Number(schedule.dataset.i)];
+        if (item) await askSchedule(item);
+        return;
+    }
+    const pin = e.target.closest('.ca-pin');
+    if (pin) {
+        const g = panelGroups[Number(pin.dataset.g)];
+        const item = g && g.items[Number(pin.dataset.i)];
+        if (item) await togglePin(item);
+        return;
+    }
     const accept = e.target.closest('.ca-accept');
     if (accept) {
         const g = panelGroups[Number(accept.dataset.g)];
@@ -2029,6 +2248,55 @@ async function askAcceptReason(item) {
     const done = acceptFindings(item.findings, reason);
     if (done) showToast(t('Accepted. It stays listed under Accepted and no longer counts.'), 'ok');
     return done;
+}
+
+// Scheduled: accepted until a date, with what is planned (both needed: a
+// date with no plan is a finding put off, and a plan with no date is an
+// accept). The date is today or later; the finding is back the day after.
+async function askSchedule(item) {
+    const what = findingItemText(item);
+    const today = todayISO();
+    const answer = await askPromptDate(t('What is planned, and until when should it wait? It stops counting until that day and comes back by itself the day after.\n\n{finding}', { finding: what }),
+        { title: t('Schedule a finding'), ok: t('Schedule'),
+          date: { label: t('Until'), value: todayISO(new Date(Date.now() + 30 * 86400000)), min: today } });
+    if (answer === null) return false;
+    if (!answer.value.trim()) { showToast(t('Nothing was scheduled: say what is planned.')); return false; }
+    const day = customDate(answer.date);
+    if (!day || day < today) { showToast(t('Nothing was scheduled: pick a day from today on.')); return false; }
+    const done = acceptFindings(item.findings, answer.value, day);
+    if (done) showToast(t('Scheduled until {date}. It comes back by itself the day after.', { date: day }), 'ok');
+    return done;
+}
+// Pin with what to look at (optional), or unpin when every finding of the
+// line is pinned already.
+async function togglePin(item) {
+    if (item.findings.every((f) => pinEntryFor(f))) {
+        const drop = new Set(item.findings.map(pinEntryFor));
+        const list = pinnedList();
+        if (readOnlyRefuses()) return false;
+        batch(() => { state.pinned = list.filter((a) => !drop.has(a)); save(); renderCanvasOnly(); });
+        showToast(t('Taken off the list for the next visit.'), 'ok');
+        return true;
+    }
+    const note = await askPrompt(t('What should be checked on the next visit? (optional)\n\n{finding}', { finding: findingItemText(item) }),
+        { title: t('Pin for the next visit'), ok: t('Pin') });
+    if (note === null) return false;
+    const done = pinFindings(item.findings, note);
+    if (done) showToast(t('Pinned: it is on the list to check on the next visit.'), 'ok');
+    return done;
+}
+function onVisitClick(e) {
+    const btn = e.target.closest('.ca-unpin, .ca-serviced, .ca-line');
+    const p = btn && panelPinned[Number(btn.dataset.p)];
+    if (!p) return;
+    if (btn.classList.contains('ca-unpin')) { if (unpin(p.index)) showToast(t('Taken off the list for the next visit.'), 'ok'); return; }
+    if (btn.classList.contains('ca-serviced')) {
+        if (servicedToday(p.entry.nodeIds[0])) showToast(t('Serviced today: recorded, and off the list.'), 'ok');
+        return;
+    }
+    const targets = p.findings.length ? findingTargets({ findings: p.findings })
+        : p.entry.nodeIds.filter(getNode).map((id) => ({ type: 'node', id })).concat(p.entry.linkIds.filter(getLink).map((id) => ({ type: 'link', id })));
+    stepThrough(`pinned\u0000${p.index}`, targets);
 }
 
 function onAcceptedClick(e) {

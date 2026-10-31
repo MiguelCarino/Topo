@@ -82,6 +82,7 @@ const _bulk = {
 const bulkEl = (id) => document.getElementById(id);
 const bulkDraft = () => _bulk.draft || (_bulk.draft = {
     set: {},              // field key -> the text typed (only fields touched)
+    unit: {},             // a length field's key -> the unit picked for it (CABLE_UNITS)
     clear: new Set(),     // fields to empty on every device
     rename: { find: '', pattern: '', order: 'name', start: '1' },
     move: { net: '' },
@@ -129,7 +130,13 @@ const BULK_FIELD_OPTS = {
     // The Asset group (js/assets.js): plain words, so translated. A status is
     // a pick of three, and has no Clear: unset and active read the same.
     location: { plain: true },
-    status: { editor: 'status', plain: true, get: (node) => node.status || '' }
+    status: { editor: 'status', plain: true, get: (node) => node.status || '' },
+    // Age and upkeep (js/model.js): a set bought, or serviced, together.
+    // Read by the field's fromText, so "03/2019" is set as 2019-03.
+    inService: { plain: true, get: (node) => (node.inService == null ? '' : node.inService) },
+    serviced: { plain: true, get: (node) => (node.serviced == null ? '' : node.serviced) },
+    serviceEvery: { plain: true, get: (node) => (node.serviceEvery == null ? '' : node.serviceEvery) },
+    lifeYears: { plain: true, get: (node) => (node.lifeYears == null ? '' : node.lifeYears) }
 };
 // A cable's medium is a pick of the five the canvas draws. It is compared as
 // drawn (effectiveMedium), as the table's Medium column does: a cable never
@@ -141,13 +148,24 @@ const BULK_LINK_FIELD_OPTS = {
 // A cable's own facts that a run of cables shares (CABLE_FIELDS' bulk rows:
 // length, colour, via; never the label, which names one cable). They live in
 // link.cable, so they are read and written through it (cableKey).
+// The length is typed as a number beside the pick of its unit (unit: true),
+// as in the side panel and the table.
 const bulkCableFields = () => CABLE_FIELDS.filter((f) => f.bulk).map((f) => ({
-    key: `cable.${f.key}`, cableKey: f.key, field: f, label: f.label, editor: 'text', plain: true, get: (link) => cableOf(link, f.key)
+    key: `cable.${f.key}`, cableKey: f.key, field: f, label: f.label, editor: 'text', plain: true, get: (link) => cableOf(link, f.key),
+    unit: f.key === 'length'
+}));
+// The network's own columns (js/model.js "Custom columns"), after Topo's: a
+// yes/no column is a Yes/No pick, the rest a text field read by the column's
+// kind. Compared and shown as the table shows them (customText), so "1,5" in a
+// number column is 1.5 and the same as the 1.5 a device holds already.
+const bulkCustomFields = () => (state.columns || []).map((def) => ({
+    key: `x:${def.id}`, custom: def, label: def.name, editor: def.kind === 'yesno' ? 'bool' : 'text',
+    get: (node) => { const v = customValueOf(node, def.id); return def.kind === 'yesno' ? !!v : customText(def, v); }
 }));
 function bulkFields(kind = 'node') {
     const [fields, opts] = kind === 'link' ? [LINK_FIELDS, BULK_LINK_FIELD_OPTS] : [NODE_FIELDS, BULK_FIELD_OPTS];
     const rows = fields.filter((f) => f.bulk).map((f) => Object.assign({ key: f.key, field: f, label: f.label, editor: 'text' }, opts[f.key] || {}));
-    return kind === 'link' ? rows.concat(bulkCableFields()) : rows;
+    return kind === 'link' ? rows.concat(bulkCableFields()) : rows.concat(bulkCustomFields());
 }
 const bulkFieldLabel = (bf) => (bf.plain ? t(bf.label) : bf.label);
 const bulkCan = (bf, node) => !bf.can || bf.can(node);
@@ -190,6 +208,8 @@ function bulkParse(bf, text) {
     if (bf.editor === 'type') return paletteDefs.some((p) => p.type === text) ? { value: text } : { error: true };
     if (bf.editor === 'medium') return Object.prototype.hasOwnProperty.call(FLOW_CLASS, text) ? { value: text } : { error: true };
     if (bf.editor === 'status') return asStatus(text) ? { value: asStatus(text) } : { error: true };
+    if (bf.custom) { const r = parseCustomValue(bf.custom, text); return r.error ? r : { value: customText(bf.custom, r.value) }; }
+    if (bf.field && bf.field.fromText) { const v = bf.field.fromText(text); return v === null ? { error: true } : { value: v }; }
     const v = bf.keepSpace ? String(text) : String(text).trim();
     if (bf.field.validate && !bf.field.validate(v.trim())) return { error: true };
     return { value: v };
@@ -732,7 +752,15 @@ function bulkWrite(plan, doc) {
         }
         const node = doc.nodes.find((n) => n.id === op.nodeId);
         if (!node) return;
-        Object.assign(node, op.set || {});
+        Object.keys(op.set || {}).forEach((k) => {
+            if (!/^x:/.test(k)) { node[k] = op.set[k]; return; }
+            // A custom column's value, written as the column holds it (the
+            // plan carries it as shown); No and blank are no value kept.
+            const def = customColumnById(k.slice(2));
+            if (!def) return;
+            const v = op.set[k];
+            setCustomValue(node, def.id, def.kind === 'yesno' ? (v ? true : undefined) : parseCustomValue(def, v).value);
+        });
         (op.drop || []).forEach((k) => { delete node[k]; });
         if (op.iface) {
             const iface = (node.interfaces || []).find((i) => i.id === op.iface.id);
@@ -956,7 +984,16 @@ function renderBulkFields(nodes, draft, force, kind = 'node') {
             input.type = 'text'; input.className = 'input bulk-in';
             if (bf.key === 'gw' || bf.key === 'dns' || bf.key === 'ports') input.classList.add('mono');
             input.autocomplete = 'off'; input.spellcheck = false;
-            const initial = common.mixed ? '' : common.value;
+            let initial = common.mixed ? '' : common.value;
+            if (bf.unit) {
+                // The number alone in the field; the unit in the pick in front.
+                const parts = cableLengthParts(initial);
+                input.dataset.stored = initial;
+                input.dataset.length = '1';
+                input.inputMode = 'decimal';
+                input.classList.add('mono');
+                if (parts) initial = parts.n;
+            }
             input.dataset.initial = initial;
             input.value = cleared ? '' : (touched ? draft.set[bf.key] : initial);
             input.placeholder = cleared ? t('will be cleared') : (common.mixed ? t('mixed') : '');
@@ -984,6 +1021,13 @@ function renderBulkFields(nodes, draft, force, kind = 'node') {
         input.dataset.key = bf.key;
         row.appendChild(head);
         row.appendChild(input);
+        if (bf.unit) {
+            const parts = cableLengthParts(common.mixed ? '' : common.value);
+            const unit = wrapUnitField(input, draft.unit[bf.key] || (parts ? parts.unit : CABLE_UNIT_DEFAULT));
+            unit.id = `bulkU-${bf.key}`;
+            unit.dataset.unitFor = bf.key;
+            unit.disabled = cleared;
+        }
         if (bf.can) {
             const on = nodes.filter((n) => bulkCan(bf, n)).length;
             if (on < nodes.length) {
@@ -1011,6 +1055,14 @@ function readBulkEdits(kind = bulkKind() || 'node') {
         const el = bulkEl(`bulkF-${bf.key}`);
         if (!el) return;
         const v = el.value;
+        if (bf.unit && String(v).trim()) {
+            // The number and the unit picked, unless together they are what
+            // every one of them holds already.
+            const unit = bulkEl(`bulkU-${bf.key}`);
+            const text = `${v} ${unit ? unit.value : CABLE_UNIT_DEFAULT}`;
+            if (cableLengthFromText(text) !== el.dataset.stored) edits[bf.key] = { text };
+            return;
+        }
         if (!String(v).trim() || v === el.dataset.initial) return;
         edits[bf.key] = { text: v };
     });
@@ -1140,10 +1192,13 @@ function deleteSelectionAsked() {
     bulkEl('bulkFields').addEventListener('input', (e) => {
         const key = e.target.dataset && e.target.dataset.key;
         if (!key) return;
+        if (e.target.dataset.length) filterLengthInput(e.target);
         bulkDraft().set[key] = e.target.value;
         updateBulkGo();
     });
     bulkEl('bulkFields').addEventListener('change', (e) => {
+        const unitFor = e.target.dataset && e.target.dataset.unitFor;
+        if (unitFor) { bulkDraft().unit[unitFor] = e.target.value; updateBulkGo(); return; }
         const key = e.target.dataset && e.target.dataset.key;
         if (key) { bulkDraft().set[key] = e.target.value; updateBulkGo(); }
     });

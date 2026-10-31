@@ -722,8 +722,10 @@ function serializeDoc() {
     // a reason, js/diagnostics.js): allowlisted to its four fields, and the
     // ids of devices and cables that are gone left out. And `groups` (v7):
     // allowlisted through GROUP_FIELDS, no key when there are none. And
-    // `wifi` (v12): the Wi-Fi networks, through WIFI_FIELDS, likewise.
-    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), accepted: serializeAccepted(state.accepted), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report) };
+    // `wifi` (v12): the Wi-Fi networks, through WIFI_FIELDS, likewise. And
+    // `columns` and `tableView` (v13): the custom columns and the Devices
+    // table's arrangement (js/model.js "Custom columns").
+    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView) };
 }
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
@@ -1299,6 +1301,8 @@ function applyDoc(json) {
     renderSelection();
     renderCanvasOnly();
     updateUndoButtons();
+    // The Expected life by type dialog, if open, shows the step's values.
+    if (typeof refreshLifeDialog === 'function') refreshLifeDialog();
 }
 
 // A field still being typed into is the newest step, so it is filed first
@@ -1373,6 +1377,12 @@ function loadDocState(doc) {
     // its group is its host's (js/model.js "Hosts").
     repairHosts(state.nodes);
     state.accepted = normalizeAccepted(d.accepted);
+    state.pinned = normalizePinned(d.pinned);
+    state.expectedLife = normalizeExpectedLife(d.expectedLife);
+    // The custom columns, and every device's values checked against them.
+    state.columns = normalizeCustomColumns(d.columns);
+    normalizeCustomRefs(state.nodes, state.columns);
+    state.tableView = normalizeTableView(d.tableView);
     state.annotations = list(d.annotations).filter((a) => a && typeof a === 'object').map(normalizeLoadedAnnotation);
     // Left exactly as stored. normalizeReportMeta() defaults the date to today,
     // so normalising here would give every untouched diagram a report header to
@@ -2837,9 +2847,10 @@ document.getElementById('reportBuildBtn').onclick = async () => {
     const binder = reportMode() === 'binder';
     const meta = binder ? readReportFields() : commitReportMeta();
     const images = binder ? document.getElementById('reportImages').checked : false;
+    const parts = readReportParts();
     closeReportDialog();
     btn.disabled = true;
-    try { await (binder ? generateBinderReport(meta, { images }) : generateSiteReport(meta)); }
+    try { await (binder ? generateBinderReport(meta, { images, parts }) : generateSiteReport(meta, parts)); }
     catch (err) { console.warn('Could not build the report:', err); showToast(t('Could not build the report.'), 'err'); }
     finally { btn.disabled = false; }
 };

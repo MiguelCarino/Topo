@@ -898,7 +898,7 @@ const RV_CABLES = ['all', 'sel', 'one'];
 const RV_CABLES_KEY = 'topo.rackCables';
 const RV_TRACK_PX = 4;     // between two tracks in a channel, at the least
 const RV_TRACK_MAX = 18;   // and at the most, while there is room
-const RV_DROP_PX = 5;      // between two cables' runs out under one box
+const RV_DROP_PX = 7;      // between two cables' runs out under one box
 const RV_FLAG_H = 15;      // a flag's height (css/app.css .rk-flag)
 const RV_FLAG_GAP = 2;     // between two flags
 const RV_FLAG_MAX = 132;   // a flag's widest; its words are cut past it
@@ -1131,8 +1131,8 @@ function rvDrawCables() {
     }));
     leaving.forEach((ends) => {
         ends.sort((p, q) => (p.face === 'front' ? q.x - p.x : p.x - q.x));
-        const step = ends.length > 1 ? Math.min(RV_DROP_PX, (unitPx - 8) / (ends.length - 1)) : 0;
-        ends.forEach((e, j) => { e.gy += 3 + j * Math.max(2, step); });
+        const step = ends.length > 1 ? Math.min(RV_DROP_PX, (unitPx - 6) / (ends.length - 1)) : 0;
+        ends.forEach((e, j) => { e.gy += 3 + j * Math.max(3, step); });
     });
 
     // Tracks, a channel at a time: as many as fit, the shortest runs nearest
@@ -1370,7 +1370,9 @@ function rvSetHot(hot) {
     view.querySelectorAll('.rk-dev.rk-hot').forEach((el) => el.classList.remove('rk-hot'));
     const w = _rv.wired;
     const flags = w && w.layer === layer ? w.flags : [];
-    const match = (key, ends) => !!hot && ((hot.key && key === hot.key) || (hot.node && String(ends || '').split(' ').includes(hot.node)));
+    // A boolean, always: toggle() given undefined flips the class, which lit
+    // every other line whenever one was pointed at.
+    const match = (key, ends) => !!hot && (!!hot.key && key === hot.key || !!hot.node && String(ends || '').split(' ').includes(hot.node));
     const lines = [...layer.querySelectorAll('.rk-cable')];
     let any = false;
     lines.forEach((g) => { const on = match(g.dataset.key, g.dataset.ends); g.classList.toggle('rk-hot', on); any = any || on; });
@@ -1384,8 +1386,15 @@ function rvSetHot(hot) {
 }
 // What a pointer or the focus is on, as rvSetHot takes it: a line or a flag,
 // or a device box. null for anything else.
-function rvHotOf(target) {
+// A pointer's event (e) also finds a line drawn where it has no hit stroke,
+// its drop from a port over its box and its run out under it: pointed at,
+// that is the one cable, not the box's (which lit them all).
+function rvHotOf(target, e) {
     const el = target && target.closest ? target.closest('.rk-hit, .rk-flag, .rk-dev') : null;
+    if (e && !(el && !el.classList.contains('rk-dev')) && !target.closest('.rk-port, .rk-noport')) {
+        const key = rvWireAt(e);
+        if (key) return { key };
+    }
     if (!el || !rackViewEl().contains(el)) return null;
     if (el.classList.contains('rk-dev')) return { node: el.dataset.node };
     return el.dataset.key ? { key: el.dataset.key } : null;
@@ -1413,6 +1422,22 @@ function rvNearestHit(hit, e) {
         if (at.length) return at[at.length - 1];
     }
     return near[near.length - 1];
+}
+// The key of the drawn line under a pointer, the nearest of them, by
+// widening the lines' strokes a pixel at a time (up to 6px, about the hit
+// stroke's reach). null off every line.
+function rvWireAt(e) {
+    const svg = rackViewEl().querySelector('.rk-wires');
+    if (!svg || typeof DOMPoint !== 'function' || !e || (!e.clientX && !e.clientY)) return null;
+    const wires = [...svg.querySelectorAll('.rk-wire')];
+    if (!wires.length || typeof wires[0].isPointInStroke !== 'function') return null;
+    const r = svg.getBoundingClientRect();
+    const pt = new DOMPoint(e.clientX - r.left, e.clientY - r.top);
+    for (let w = 2; w <= 6; w++) {
+        const at = wires.filter((p) => { p.style.strokeWidth = w + 'px'; const yes = p.isPointInStroke(pt); p.style.strokeWidth = ''; return yes; });
+        if (at.length) return at[at.length - 1].closest('.rk-cable').dataset.key || null;
+    }
+    return null;
 }
 const rvSameHot = (a, b) => (!a && !b) || (!!a && !!b && a.key === b.key && a.node === b.node);
 // One cable, for its tooltip: "eth0 ↔ Gi0/2 · C-12 · blue · 3 m · via PP-1:4".
@@ -3029,7 +3054,7 @@ function pickInPlaceDialog(pick) {
     // selects, and the selection lights them.
     view.addEventListener('pointerover', (e) => {
         if (e.pointerType === 'touch' || _rv.drag) return;
-        const hot = rvHotOf(e.target);
+        const hot = rvHotOf(e.target, e);
         if (!rvSameHot(hot, _rv.hot)) rvSetHot(hot);
         // A port pointed at shows its tip; off it, a pointer's tip goes (a
         // tapped one stays until a tap elsewhere).
@@ -3045,7 +3070,22 @@ function pickInPlaceDialog(pick) {
             }
         } else if (tip && tip.how === 'hover' && !(e.target.closest && e.target.closest('.rk-ptip'))) rvHidePortTip();
     });
+    // On and off a line over a box is no new element pointed at: the move
+    // says which, once a frame.
+    let moved = null;
+    view.addEventListener('pointermove', (e) => {
+        if (e.pointerType === 'touch' || _rv.drag) return;
+        if (!moved) requestAnimationFrame(() => {
+            const m = moved;
+            moved = null;
+            if (!m || _rv.drag || !m.target.isConnected) return;
+            const hot = rvHotOf(m.target, m);
+            if (!rvSameHot(hot, _rv.hot)) rvSetHot(hot);
+        });
+        moved = { target: e.target, clientX: e.clientX, clientY: e.clientY };
+    });
     view.addEventListener('pointerleave', () => {
+        moved = null;
         if (_rv.hot) rvSetHot(null);
         if (_rv.portTip && _rv.portTip.how === 'hover') rvHidePortTip();
     });

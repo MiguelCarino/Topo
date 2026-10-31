@@ -126,7 +126,7 @@ window.addEventListener('load', () => { setTimeout(() => {
     // ---- 4: the document ----
     replaceDocument(site(), { origin: 'file' });
     const saved = serializeDoc();
-    ok('the document is v12 and carries its Wi-Fi networks', DOC_VERSION === 12 && saved.v === 12 && json(saved.wifi.map((w) => w.ssid)) === '["Staff","Guest","IoT"]');
+    ok('the document is v12 or later and carries its Wi-Fi networks', DOC_VERSION >= 12 && saved.v === DOC_VERSION && json(saved.wifi.map((w) => w.ssid)) === '["Staff","Guest","IoT"]');
     ok('a network keeps what it said, and every band is not stored', json(saved.wifi[0]) === '{"id":"wS","ssid":"Staff","security":"wpa3","network":"nS"}'
        && json(saved.wifi[1].bands) === '["2.4","5"]' && saved.wifi[2].hidden === true, json(saved.wifi[0]));
     const sap1 = saved.nodes.find((n) => n.id === 'ap1').interfaces[0];
@@ -165,7 +165,7 @@ window.addEventListener('load', () => { setTimeout(() => {
 
     const plain = { v: 11, nodes: [{ id: 'a', type: 'ap', name: 'A', x: 0, y: 0, interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] }], links: [] };
     const m = migrateDoc(plain);
-    ok('a v11 document migrates with nothing converted', m.doc.v === 12 && m.from === 11 && !m.newer && json(m.doc.nodes) === json(plain.nodes));
+    ok('a v11 document migrates with nothing converted', m.doc.v === DOC_VERSION && m.from === 11 && !m.newer && json(m.doc.nodes) === json(plain.nodes));
     replaceDocument(plain, { origin: 'file' });
     ok('one with no Wi-Fi writes no key for it, and its AP no radio', !('wifi' in JSON.parse(json(serializeDoc()))) && !('radio' in JSON.parse(json(serializeDoc())).nodes[0].interfaces[0]));
     ok('a wifi list that is not a list is a damaged document', !isDocShape({ nodes: [], wifi: {} }) && isDocShape({ nodes: [], wifi: [] }));
