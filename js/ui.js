@@ -180,6 +180,38 @@ function removeNoteLink(selId) {
     if (a && a.targets) a.targets = a.targets.filter((t) => t !== tid);
 }
 
+// A small disc with a glyph on the map: the ✕ on a selected device, cable,
+// note and note leader, and a note's A− / A+. Explicit colours and fonts
+// because the PNG export carries no stylesheet (it leaves .node-delete out
+// anyway). A press on it never starts a drag of what it sits on, and a click
+// goes no further than it. `at` places it; without it the parent's own
+// corner is the place.
+function canvasDiscButton({ glyph, tip, onClick, at, fill = '#dc2626', fontSize = '9', y = '3' }) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const g = document.createElementNS(NS, 'g');
+    if (at) g.setAttribute('transform', `translate(${at.x}, ${at.y})`);
+    g.setAttribute('class', 'node-delete');
+    const disc = document.createElementNS(NS, 'circle');
+    disc.setAttribute('r', '7.5');
+    disc.setAttribute('fill', fill); disc.setAttribute('stroke', '#ffffff'); disc.setAttribute('stroke-width', '1.5');
+    g.appendChild(disc);
+    const mark = document.createElementNS(NS, 'text');
+    mark.setAttribute('text-anchor', 'middle'); mark.setAttribute('y', y);
+    mark.setAttribute('font-size', fontSize); mark.setAttribute('font-weight', '900'); mark.setAttribute('fill', '#ffffff');
+    mark.setAttribute('font-family', 'sans-serif');
+    mark.textContent = glyph; mark.style.pointerEvents = 'none';
+    g.appendChild(mark);
+    const title = document.createElementNS(NS, 'title');
+    title.textContent = tip;
+    g.appendChild(title);
+    g.addEventListener('mousedown', (e) => e.stopPropagation());   // no drag from the disc
+    g.addEventListener('click', (e) => { e.stopPropagation(); onClick(e); });
+    return g;
+}
+// The ✕ that deletes the selection (deleteSelected, js/app.js, looked up at
+// click time: app.js loads after this file).
+const canvasDeleteMark = (tip, at) => canvasDiscButton({ glyph: '✕', tip, at, onClick: () => deleteSelected() });
+
 function renderAnnotation(a) {
     const NS = 'http://www.w3.org/2000/svg';
 
@@ -224,24 +256,7 @@ function renderAnnotation(a) {
 
     // Selected: the same little ✕ nodes get (top-left, suppressed in link mode).
     if (selected && !state.linkSourceId) {
-        const del = document.createElementNS(NS, 'g');
-        del.setAttribute('class', 'node-delete');
-        const disc = document.createElementNS(NS, 'circle');
-        disc.setAttribute('r', '7.5');
-        disc.setAttribute('fill', '#dc2626'); disc.setAttribute('stroke', '#ffffff'); disc.setAttribute('stroke-width', '1.5');
-        del.appendChild(disc);
-        const mark = document.createElementNS(NS, 'text');
-        mark.setAttribute('text-anchor', 'middle'); mark.setAttribute('y', '3');
-        mark.setAttribute('font-size', '9'); mark.setAttribute('font-weight', '900'); mark.setAttribute('fill', '#ffffff');
-        mark.setAttribute('font-family', 'sans-serif');
-        mark.textContent = '✕'; mark.style.pointerEvents = 'none';
-        del.appendChild(mark);
-        const tip = document.createElementNS(NS, 'title');
-        tip.textContent = t('Delete note');
-        del.appendChild(tip);
-        del.addEventListener('mousedown', (e) => e.stopPropagation()); // no drag from the ✕
-        del.addEventListener('click', (e) => { e.stopPropagation(); deleteSelected(); });
-        g.appendChild(del);
+        g.appendChild(canvasDeleteMark(t('Delete note')));
 
         // Size controls, top-right: A− / A+ discs mirror the ✕'s look. They
         // adjust the note's font size in 2px steps (10–36) and the card
@@ -256,30 +271,11 @@ function renderAnnotation(a) {
             { glyph: 'A−', dx: -18, step: -2, tipTxt: t('Smaller text') },
             { glyph: 'A+', dx: 0,  step: 2,  tipTxt: t('Larger text') },
         ].forEach((b) => {
-            const ctl = document.createElementNS(NS, 'g');
-            ctl.setAttribute('transform', `translate(${b.dx}, 0)`);
-            ctl.setAttribute('class', 'node-delete');
-            const disc2 = document.createElementNS(NS, 'circle');
-            disc2.setAttribute('r', '7.5');
-            disc2.setAttribute('fill', '#334155'); disc2.setAttribute('stroke', '#ffffff'); disc2.setAttribute('stroke-width', '1.5');
-            ctl.appendChild(disc2);
-            const lbl = document.createElementNS(NS, 'text');
-            lbl.setAttribute('text-anchor', 'middle'); lbl.setAttribute('y', '2.5');
-            lbl.setAttribute('font-size', '7'); lbl.setAttribute('font-weight', '900'); lbl.setAttribute('fill', '#ffffff');
-            lbl.setAttribute('font-family', 'sans-serif');
-            lbl.textContent = b.glyph; lbl.style.pointerEvents = 'none';
-            ctl.appendChild(lbl);
-            const tip2 = document.createElementNS(NS, 'title');
-            tip2.textContent = b.tipTxt;
-            ctl.appendChild(tip2);
-            ctl.addEventListener('mousedown', (e) => e.stopPropagation()); // no drag from the controls
-            ctl.addEventListener('click', (e) => {
-                e.stopPropagation();
+            ctlWrap.appendChild(canvasDiscButton({ glyph: b.glyph, tip: b.tipTxt, at: { x: b.dx, y: 0 }, fill: '#334155', fontSize: '7', y: '2.5', onClick: () => {
                 if (a._ctlPin === undefined) a._ctlPin = ctlX;   // freeze where the buttons are now
                 a.size = Math.min(36, Math.max(10, (a.size || 12) + b.step));
                 save(); renderCanvasOnly();
-            });
-            ctlWrap.appendChild(ctl);
+            } }));
         });
         // Pointer left the pair → let them snap to the card's new corner.
         ctlWrap.addEventListener('mouseleave', () => {
@@ -418,25 +414,7 @@ function renderNoteLeaders() {
             grp.appendChild(hit);
             // selected → a midpoint ✕, same affordance as everywhere else
             if (isSel && geo) {
-                const del = document.createElementNS(NS, 'g');
-                del.setAttribute('transform', `translate(${(geo.sx + geo.ex) / 2}, ${(geo.sy + geo.ey) / 2})`);
-                del.setAttribute('class', 'node-delete');
-                const disc = document.createElementNS(NS, 'circle');
-                disc.setAttribute('r', '7.5');
-                disc.setAttribute('fill', '#dc2626'); disc.setAttribute('stroke', '#ffffff'); disc.setAttribute('stroke-width', '1.5');
-                del.appendChild(disc);
-                const mark = document.createElementNS(NS, 'text');
-                mark.setAttribute('text-anchor', 'middle'); mark.setAttribute('y', '3');
-                mark.setAttribute('font-size', '9'); mark.setAttribute('font-weight', '900'); mark.setAttribute('fill', '#ffffff');
-                mark.setAttribute('font-family', 'sans-serif');
-                mark.textContent = '✕'; mark.style.pointerEvents = 'none';
-                del.appendChild(mark);
-                const tip = document.createElementNS(NS, 'title');
-                tip.textContent = t('Delete note link');
-                del.appendChild(tip);
-                del.addEventListener('mousedown', (e) => e.stopPropagation());
-                del.addEventListener('click', (e) => { e.stopPropagation(); deleteSelected(); });
-                grp.appendChild(del);
+                grp.appendChild(canvasDeleteMark(t('Delete note link'), { x: (geo.sx + geo.ex) / 2, y: (geo.sy + geo.ey) / 2 }));
             }
         });
     });
@@ -614,6 +592,31 @@ function wifiMapColours() {
     };
 }
 
+// The at-rest ink of a link: colour, dash and width by medium, then a 6 GHz
+// band and a passthrough attachment. One table for the canvas (drawCanvas's
+// links), the folded group lines (js/groupmap.js) and so the exports, which
+// serialise both. A wireless link's colour is the --topo-wifi token, so it
+// comes from wifiInk; the band and the attachment are the caller's to know.
+// 6 GHz is drawn in a finer dash of the same purple (WIFI_6G_DASH), so a 6E/7
+// association reads apart from 2.4 and 5 GHz at a glance and in a PNG.
+const LINK_INK = {
+    utp: { colour: '#94a3b8', dash: null, width: 2 },
+    fiber: { colour: '#06b6d4', dash: null, width: 2 },
+    wireless: { colour: null, dash: '4 4', width: 2 },
+    powerline: { colour: '#eab308', dash: '8 4 2 4', width: 2 },
+    vpn: { colour: '#14b8a6', dash: '10 6', width: 2.5 }   // secure overlay tunnel
+};
+function linkInk(medium, { band = null, passthrough = false } = {}, wifiInk = wifiMapColours()) {
+    const base = LINK_INK[medium] || LINK_INK.utp;
+    const ink = {
+        colour: base.colour || wifiInk.line,
+        dash: medium === 'wireless' && band === '6' ? WIFI_6G_DASH : base.dash,
+        width: base.width
+    };
+    if (passthrough) { ink.colour = '#a855f7'; ink.dash = '4 4'; }
+    return ink;
+}
+
 // Where a wireless link's band chip goes: ON its own line (so nobody has to
 // guess which of an AP's fanned-out links it belongs to), toward the client
 // end first (links leaving one AP are furthest apart there), and off the
@@ -759,23 +762,13 @@ function drawCanvas() {
         const isSelected = inSelection('link', link.id);
         const medium = effectiveMedium(link, src, tgt);
 
-        let defaultColor = '#94a3b8'; // utp
-        let dashArray = null;
-        let baseWidth = 2;
-
         // A wireless link's band (link.wifi, else the inference the link panel
         // shows: js/model.js "Wi-Fi"), for its label below and its look: 6 GHz
-        // is drawn in a finer dash of the same purple (WIFI_6G_DASH) with a
-        // filled chip, so a 6E/7 association reads apart from 2.4 and 5 GHz at
-        // a glance and in a PNG. The purple is the --topo-wifi token.
+        // is drawn in a finer dash (linkInk) with a filled chip.
         const wifiBand = medium === 'wireless' ? linkWifiBand(link) : null;
 
-        if (medium === 'fiber') defaultColor = '#06b6d4';
-        else if (medium === 'wireless') { defaultColor = wifiInk.line; dashArray = wifiBand === '6' ? WIFI_6G_DASH : '4 4'; }
-        else if (medium === 'powerline') { defaultColor = '#eab308'; dashArray = '8 4 2 4'; }
-        else if (medium === 'vpn') { defaultColor = '#14b8a6'; dashArray = '10 6'; baseWidth = 2.5; } // secure overlay tunnel
-
-        if (link.attachment === 'passthrough') { defaultColor = '#a855f7'; dashArray = '4 4'; }
+        const ink = linkInk(medium, { band: wifiBand, passthrough: link.attachment === 'passthrough' }, wifiInk);
+        const defaultColor = ink.colour, dashArray = ink.dash, baseWidth = ink.width;
 
         if (reach && reach.reachableLinks.has(link.id)) {
             // Amber still means "reachable"; the flow pattern keeps the medium
@@ -978,26 +971,7 @@ function drawCanvas() {
             });
 
             // Midpoint ✕ — same affordance as nodes and note leaders
-            const mid = geo.pointAt(0.5);
-            const del = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            del.setAttribute('transform', `translate(${mid.x}, ${mid.y})`);
-            del.setAttribute('class', 'node-delete');
-            const disc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            disc.setAttribute('r', '7.5');
-            disc.setAttribute('fill', '#dc2626'); disc.setAttribute('stroke', '#ffffff'); disc.setAttribute('stroke-width', '1.5');
-            del.appendChild(disc);
-            const mark = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            mark.setAttribute('text-anchor', 'middle'); mark.setAttribute('y', '3');
-            mark.setAttribute('font-size', '9'); mark.setAttribute('font-weight', '900'); mark.setAttribute('fill', '#ffffff');
-            mark.setAttribute('font-family', 'sans-serif');
-            mark.textContent = '✕'; mark.style.pointerEvents = 'none';
-            del.appendChild(mark);
-            const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-            tip.textContent = t('Delete link');
-            del.appendChild(tip);
-            del.addEventListener('mousedown', (e) => e.stopPropagation());
-            del.addEventListener('click', (e) => { e.stopPropagation(); deleteSelected(); });
-            lLinks.appendChild(del);
+            lLinks.appendChild(canvasDeleteMark(t('Delete link'), geo.pointAt(0.5)));
         }
     });
 
@@ -1144,29 +1118,7 @@ function drawCanvas() {
         // deletes the selection, and on one device of a set it would take
         // them all (the rail's Delete and the Del key say so plainly).
         if (isSelected && state.selection.size === 1 && !state.linkSourceId) {
-            const del = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            del.setAttribute('transform', 'translate(-19, -19)');
-            del.setAttribute('class', 'node-delete');
-
-            const disc = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            disc.setAttribute('r', '7.5');
-            disc.setAttribute('fill', '#dc2626'); disc.setAttribute('stroke', '#ffffff'); disc.setAttribute('stroke-width', '1.5');
-            del.appendChild(disc);
-
-            const mark = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            mark.setAttribute('text-anchor', 'middle'); mark.setAttribute('y', '3');
-            mark.setAttribute('font-size', '9'); mark.setAttribute('font-weight', '900'); mark.setAttribute('fill', '#ffffff');
-            mark.setAttribute('font-family', 'sans-serif');
-            mark.textContent = '✕'; mark.style.pointerEvents = 'none';
-            del.appendChild(mark);
-
-            const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-            tip.textContent = t('Delete node');
-            del.appendChild(tip);
-
-            del.addEventListener('mousedown', (e) => e.stopPropagation()); // no drag from the ✕
-            del.addEventListener('click', (e) => { e.stopPropagation(); deleteSelected(); });
-            g.appendChild(del);
+            g.appendChild(canvasDeleteMark(t('Delete node'), { x: -19, y: -19 }));
         }
 
         if (isLinkSource) {
@@ -1574,6 +1526,20 @@ function openPortAttr(node, portId) {
     if (input) { input.focus(); line.scrollIntoView({ block: 'nearest' }); }
 }
 
+// The ✖ at the end of a row: an interface, a MAC, a bond member here, a
+// library card (libraryItem, js/app.js). Named by its title, not the glyph,
+// so a screen reader says what it removes.
+function rowDeleteButton(title, onClick, className = 'if-del') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = className;
+    btn.textContent = '✖';
+    btn.title = title;
+    btn.setAttribute('aria-label', title);
+    btn.onclick = onClick;
+    return btn;
+}
+
 function renderSidebarData(node) {
     const ifCont = document.getElementById('ifaceListContainer'); ifCont.innerHTML = '';
     node.interfaces = node.interfaces || [];
@@ -1663,9 +1629,7 @@ function renderSidebarData(node) {
                 renderTyped();
             });
 
-            const del = document.createElement('button'); del.innerHTML = '✖'; del.className = 'if-del';
-            del.title = isBond(iface) ? `Unbond ${iface.name} (members keep their cables)` : `Delete ${iface.name || 'interface'} and any cable in it`;
-            del.onclick = () => {
+            const del = rowDeleteButton(isBond(iface) ? `Unbond ${iface.name} (members keep their cables)` : `Delete ${iface.name || 'interface'} and any cable in it`, () => {
                 // Unbonding is not deletion: the members outlive it, so the
                 // address has to be handed back rather than dropped.
                 if (isBond(iface)) removeBond(node, iface.id);
@@ -1674,7 +1638,7 @@ function renderSidebarData(node) {
                 const d = renderCanvasOnly();
                 renderSidebarData(node);
                 renderNodeDiagnostics(node, drawnDiag(d));
-            };
+            });
 
             // Show what is plugged into this interface, so the ARP-flux warning
             // can be traced back to a specific cable without hunting the canvas.
@@ -1731,11 +1695,6 @@ function renderSidebarData(node) {
 // table says: the universal/local bit is the one that matters on a network map,
 // because a locally-administered address is randomised and any inventory keyed
 // on it is fiction. The vendor is a nice-to-have on top of that.
-function fmtColonSafe(v) {
-    const hex = (window.CarinoOUI ? window.CarinoOUI.normalizeMac(v) : String(v || ''));
-    return hex.length === 12 ? hex.match(/.{2}/g).join(':') : String(v || '');
-}
-
 function renderMacLine(node, iface) {
     const row = document.createElement('div');
     row.className = 'if-mac';
@@ -1766,7 +1725,7 @@ function renderMacLine(node, iface) {
         if (!raw) { out.innerHTML = ''; return; }
         const api = window.CarinoOUI;
         if (!api) { out.innerHTML = ''; return; }
-        const d = api.decodeMac(raw);
+        const d = api.decodeMac(normMac(raw));
         if (d.error) {
             inp.classList.add('bad');
             out.innerHTML = `<span class="bad">${escapeHtml(d.error)}</span>`;
@@ -1792,7 +1751,7 @@ function renderMacLine(node, iface) {
         // A duplicate is the reason this field exists at all: the flapping
         // diagnostic could only ever guess at it from IP co-location.
         const dupes = (typeof duplicateMacs === 'function' ? duplicateMacs(state.nodes) : [])
-            .find((x) => x.hex === api.normalizeMac(raw));
+            .find((x) => x.hex === normMac(raw));
         // "Is this holder me?" is a question about node AND interface: an
         // interface id is only unique inside its node (every spawned device
         // starts with i1, every AP with w1), so comparing ids alone dropped the
@@ -1821,8 +1780,7 @@ function renderMacLine(node, iface) {
     // Leaving the field is when a half-typed address becomes a stored one, so
     // that is where it gets tidied into one canonical form.
     inp.addEventListener('blur', () => {
-        const api = window.CarinoOUI;
-        if (api && api.normalizeMac(inp.value).length === 12) {
+        if (normMac(inp.value).length === 12) {
             iface.mac = fmtColonSafe(inp.value);
             inp.value = iface.mac;
             // Still the typing's step: blur runs before the focusout that
@@ -1831,14 +1789,10 @@ function renderMacLine(node, iface) {
         }
     });
 
-    const clear = document.createElement('button');
-    clear.innerHTML = '✖';
-    clear.className = 'if-del';
-    clear.title = 'Clear this address';
-    clear.onclick = () => {
+    const clear = rowDeleteButton('Clear this address', () => {
         iface.mac = '';
         save(); renderSidebarData(node); renderNodeDiagnostics(node);
-    };
+    });
 
     top.appendChild(tick); top.appendChild(label); top.appendChild(inp); top.appendChild(clear);
     row.appendChild(top); row.appendChild(out);
@@ -1947,10 +1901,7 @@ function renderBondMember(node, member, bond, container) {
     wire.title = peer ? `Linked to ${peer.name}` : 'Not linked';
     if (link) wire.onclick = () => select(link.id, 'link');
 
-    const pull = document.createElement('button');
-    pull.innerHTML = '✖'; pull.className = 'if-del';
-    pull.title = `Remove ${member.name} from ${bond.name}`;
-    pull.onclick = () => {
+    const pull = rowDeleteButton(`Remove ${member.name} from ${bond.name}`, () => {
         const remaining = (bond.bond.members || []).filter((id) => id !== member.id);
         if (remaining.length) {
             bond.bond.members = remaining;
@@ -1960,7 +1911,7 @@ function renderBondMember(node, member, bond, container) {
             removeBond(node, bond.id);
         }
         save(); const d = renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node, drawnDiag(d));
-    };
+    });
 
     row.appendChild(tick); row.appendChild(nameInp); row.appendChild(note);
     row.appendChild(wire); row.appendChild(pull);

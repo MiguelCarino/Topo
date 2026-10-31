@@ -99,6 +99,20 @@ const ifaceIsWireless = (iface) => !iface ? false
 // Date.now() alone collides when a node + link + iface are created in one tick.
 let idSeq = 0;
 const nextId = (prefix) => `${prefix}_${Date.now().toString(36)}${(idSeq++).toString(36)}`;
+// For ids that must not collide across machines (a library card, a history
+// entry), where a per-tab counter is not enough: 64 random bits, base 36.
+const randomToken = () => Array.from(crypto.getRandomValues(new Uint32Array(2)), (n) => n.toString(36)).join('');
+
+// Two records under one id (a merged or hand-edited file): every lookup finds
+// the first, so the second could never be cabled, selected or edited. The
+// first holder keeps the id and each later one gets an id of its own, which
+// joins the ids seen so a record further on cannot take it too; the cables
+// and references naming the id stay with the first. In place; returns items.
+function keepIdsUnique(items, prefix) {
+    const seen = new Set();
+    items.forEach((x) => { if (seen.has(x.id)) x.id = nextId(prefix); seen.add(x.id); });
+    return items;
+}
 
 // Every interface on a node: materialized ones, plus the implicit faceplate
 // ports for switches/APs. Implicit entries are flagged so the editor knows
@@ -291,8 +305,40 @@ function createIfaceFor(node, opts = {}) {
 // interface can now hold the real address, which makes two things checkable
 // that inference never could: who the vendor is, and whether the same address
 // appears twice on the drawing.
-const normMac = (v) => String(v || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+//
+// normMac is the one reader every MAC goes through: twelve hex digits, upper
+// case, or fewer when the value is not an address. macOS and the BSDs drop an
+// octet's leading zero ('0:1b:2c:3d:4e:5f'), so a value split by one
+// consistent separator has each group padded first; the Seen import always
+// read it that way, and the CSV, the table and the field check refused it.
+// Mixed separators are not padded: '0:1b-2c...' is no format anything prints.
+function normMac(v) {
+    const s = String(v || '').trim();
+    if (/^[0-9a-f]{1,2}([:-])[0-9a-f]{1,2}(?:\1[0-9a-f]{1,2}){4}$/i.test(s)) {
+        return s.split(/[:-]/).map((p) => p.padStart(2, '0')).join('').toUpperCase();
+    }
+    return s.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+}
 const hasMac = (iface) => normMac(iface && iface.mac).length === 12;
+// The colon form every view shows, or the value as typed when it is not an
+// address (a half-typed MAC stays what the person wrote).
+function fmtColonSafe(v) {
+    const hex = normMac(v);
+    return hex.length === 12 ? hex.match(/.{2}/g).join(':') : String(v || '');
+}
+// The two bits of the first octet that say what kind of address this is:
+// I/G (a group, i.e. broadcast or multicast) and U/L (locally administered,
+// i.e. randomised or hand-set). A value that is not hex reads as neither.
+const macFirstOctet = (v) => parseInt(normMac(v).slice(0, 2), 16);
+const macIsGroup = (v) => !!(macFirstOctet(v) & 0x01);
+const macIsLocal = (v) => !!(macFirstOctet(v) & 0x02);
+// A word written as a MAC in one of the formats devices print: six pairs with
+// one optional separator, or Cisco's three dotted quads. Stricter than
+// normMac's length, which any word with twelve hex digits in it passes.
+function macShaped(s) {
+    const v = String(s == null ? '' : s).trim();
+    return /^[0-9a-f]{2}([:\-.]?[0-9a-f]{2}){5}$|^[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}$/i.test(v);
+}
 
 // Every (node, iface) holding a given address. A duplicate is a fact about the
 // whole map, not about either interface, so this is keyed across all nodes.
@@ -313,7 +359,7 @@ function duplicateMacs(nodes) {
     const out = [];
     macIndex(nodes).forEach((holders, hex) => {
         if (holders.length < 2) return;
-        if (parseInt(hex.slice(0, 2), 16) & 0x01) return;
+        if (macIsGroup(hex)) return;
         out.push({ hex, holders });
     });
     return out;
@@ -1258,7 +1304,7 @@ const IFACE_FIELDS = [
 ];
 
 const NODE_FIELDS = [
-    { key: 'id', kind: 'raw', read: (v) => v || `n_${Date.now()}_${Math.random().toString(16).slice(2)}`, label: 'ID', csv: 'id' },
+    { key: 'id', kind: 'raw', read: (v) => v || nextId('n'), label: 'ID', csv: 'id' },
     { key: 'type', kind: 'raw', read: (v) => asOptionalText(v) || 'custom', label: 'Type', csv: 'type', bulk: true, table: 'show' },
     { key: 'name', kind: 'raw', read: (v) => asText(v) || 'Unnamed Node', label: 'Name', csv: 'name', table: 'edit' },
     { key: 'x', kind: 'coord', label: 'X', csv: 'x' },
@@ -1442,7 +1488,22 @@ function cableLengthParts(v) {
     const r = /^(\d+(?:\.\d+)?) (m|ft)$/.exec(String(v == null ? '' : v).trim());
     return r ? { n: r[1], unit: r[2] } : null;
 }
-const cableLengthNumber = (v) => { const p = cableLengthParts(v); return p ? p.n : null; };
+// A length as its field opens on it: the number alone and its unit, or an
+// old free-text one ("15 feet", "about 3") as it is written, the pick on
+// metres. `legacy` says it is one of those, so leaving it as it opened can
+// be told from typing it over (the table, bulk Set).
+function cableLengthShown(v) {
+    const s = String(v == null ? '' : v);
+    const p = cableLengthParts(s);
+    return { text: p ? p.n : s, unit: p ? p.unit : CABLE_UNIT_DEFAULT, legacy: !p && s.trim() !== '' };
+}
+// A reader that returns null for "cannot read" (a schema row's fromText,
+// cableLengthFromText) as a parser's result: { value } or { error: true }.
+// Extra arguments go to the reader (a cable length's unit).
+function fromTextResult(read, text, ...args) {
+    const v = read(text, ...args);
+    return v === null || v === undefined ? { error: true } : { value: v };
+}
 // For sorting and adding up: the length in metres, or null.
 const cableLengthMetres = (v) => { const p = cableLengthParts(v); return p ? Number(p.n) * (p.unit === 'ft' ? 0.3048 : 1) : null; };
 // What a length field lets through as it is typed: digits and one decimal
@@ -1538,7 +1599,9 @@ function normalizeNodeInterfaces(node) {
     // Every entry is coerced, including the strings: this list used to be
     // passed through unchecked, and an `ip` that was a number reached
     // `iface.ip.trim()` in the sidebar.
-    return list.filter((i) => i && typeof i === 'object').map((i) => readFields(IFACE_FIELDS, i));
+    // One interface per id, too: removing or cabling 'i1' acts on every
+    // interface holding it, so a second one could never be told apart.
+    return keepIdsUnique(list.filter((i) => i && typeof i === 'object').map((i) => readFields(IFACE_FIELDS, i)), 'i');
 }
 
 // The schema rows that become columns of the report's inventory table, in
@@ -1620,17 +1683,17 @@ const NETWORK_FIELDS = [
 // for a CIDR already declared is dropped (containment could not tell the two
 // apart), and a repeated id is reminted rather than left to alias.
 function normalizeNetworks(list) {
-    const cidrs = new Set(), ids = new Set();
-    return (Array.isArray(list) ? list : [])
+    const cidrs = new Set();
+    // The CIDR filter first, so a record dropped for its CIDR never claims an id.
+    const kept = (Array.isArray(list) ? list : [])
         .filter((n) => n && typeof n === 'object')
         .map((n) => readFields(NETWORK_FIELDS, n))
         .filter((n) => {
             if (!n.cidr || cidrs.has(n.cidr)) return false;
             cidrs.add(n.cidr);
-            if (ids.has(n.id)) n.id = nextId('net');
-            ids.add(n.id);
             return true;
         });
+    return keepIdsUnique(kept, 'net');
 }
 // Save: left out altogether when there are none, so a document that never
 // declared a network serializes as it did before networks existed.
@@ -2391,11 +2454,9 @@ const WIFI_FIELDS = [
 // Load: coerced through the table, one record per id (a repeated id is
 // reminted, as a network's is). Mutates nothing it is given.
 function normalizeWifi(list) {
-    const ids = new Set();
-    return (Array.isArray(list) ? list : [])
+    return keepIdsUnique((Array.isArray(list) ? list : [])
         .filter((w) => w && typeof w === 'object' && !Array.isArray(w))
-        .map((w) => readFields(WIFI_FIELDS, w))
-        .map((w) => { if (ids.has(w.id)) w.id = nextId('wf'); ids.add(w.id); return w; });
+        .map((w) => readFields(WIFI_FIELDS, w)), 'wf');
 }
 // Save: no key at all when there are none, so a document that never had a
 // Wi-Fi network serializes as it did before they existed.
@@ -2701,11 +2762,9 @@ const GROUP_FIELDS = [
 // order so the same document always comes out the same. Mutates nothing
 // it is given.
 function normalizeGroups(list) {
-    const ids = new Set();
-    const out = (Array.isArray(list) ? list : [])
+    const out = keepIdsUnique((Array.isArray(list) ? list : [])
         .filter((g) => g && typeof g === 'object' && !Array.isArray(g))
-        .map((g) => readFields(GROUP_FIELDS, g))
-        .map((g) => { if (ids.has(g.id)) g.id = nextId('g'); ids.add(g.id); return g; });
+        .map((g) => readFields(GROUP_FIELDS, g)), 'g');
     return repairGroupParents(out);
 }
 // The parent rule on its own, in place: no parent that is not in `groups`,

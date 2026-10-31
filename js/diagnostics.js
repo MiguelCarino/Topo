@@ -481,7 +481,7 @@ function evaluateMac(node, ctx) {
 
     // An interface configured with a group address cannot source a frame from
     // it; that is a fault on this node, before any question of duplicates.
-    const group = own.filter((i) => parseInt(normMac(i.mac).slice(0, 2), 16) & 0x01);
+    const group = own.filter((i) => macIsGroup(i.mac));
     if (group.length) {
         return { level: 'bad', code: 'group', text: t('{names} carries a broadcast or multicast address. An interface cannot source frames from a group address — that value belongs in a destination, not on a NIC.', { names: group.map((i) => i.name).join(', ') }) };
     }
@@ -493,10 +493,10 @@ function evaluateMac(node, ctx) {
         // A comma, not ' and ': the sentence around it is translated, and an
         // English conjunction in the middle of it was not.
         const where = first.holders.map((h) => `${h.node.name} / ${h.iface.name}`).join(', ');
-        return { level: 'bad', code: 'duplicate', text: t('{mac} is on {where}. Two interfaces in one broadcast domain cannot hold the same address — the switch rewrites its CAM table on every frame, which is the flapping this tool reports from the other direction. Clone, restored backup or a hand-typed address are the usual causes.', { mac: api ? api.fmtColon(first.hex) : first.hex, where }) };
+        return { level: 'bad', code: 'duplicate', text: t('{mac} is on {where}. Two interfaces in one broadcast domain cannot hold the same address — the switch rewrites its CAM table on every frame, which is the flapping this tool reports from the other direction. Clone, restored backup or a hand-typed address are the usual causes.', { mac: fmtColonSafe(first.hex), where }) };
     }
 
-    const local = own.filter((i) => parseInt(normMac(i.mac).slice(0, 2), 16) & 0x02);
+    const local = own.filter((i) => macIsLocal(i.mac));
     if (local.length === own.length) {
         return { level: 'warn', text: t('Every address here is locally administered ({names}). That is correct for a VM, a bond or a randomising client, and wrong for an inventory — the vendor prefix on these is made up.', { names: own.map((i) => i.name).join(', ') }) };
     }
@@ -508,7 +508,7 @@ function evaluateMac(node, ctx) {
     }
 
     const vendors = own.map((i) => {
-        const d = api ? api.decodeMac(i.mac) : null;
+        const d = api ? api.decodeMac(normMac(i.mac)) : null;
         return d && d.vendor && d.vendor.vendor ? d.vendor.vendor : null;
     }).filter(Boolean);
     const uniq = Array.from(new Set(vendors));
@@ -1177,14 +1177,18 @@ const entryCovers = (a, key, nodeIds, linkIds, scope) => a.check === key && (a.s
     && (nodeIds || []).every((id) => a.nodeIds.includes(id))
     && (linkIds || []).every((id) => a.linkIds.includes(id));
 const entryLapsed = (a, today = checksDay()) => !!a.until && a.until < today;
+// A finding that names no device and no cable is covered by nothing: every
+// entry names something, and "every one of none" would be any entry of the
+// check.
+const namesSomething = (nodeIds, linkIds) => (nodeIds || []).length + (linkIds || []).length > 0;
 function acceptedEntryFor(accepted, key, nodeIds, linkIds, scope) {
-    if (!accepted.length || !((nodeIds || []).length + (linkIds || []).length)) return null;
+    if (!accepted.length || !namesSomething(nodeIds, linkIds)) return null;
     const today = checksDay();
     return accepted.find((a) => !entryLapsed(a, today) && entryCovers(a, key, nodeIds, linkIds, scope)) || null;
 }
 // The schedule that lapsed on a finding now open again, or null.
 function lapsedEntryFor(accepted, key, nodeIds, linkIds, scope) {
-    if (!accepted.length || !((nodeIds || []).length + (linkIds || []).length)) return null;
+    if (!accepted.length || !namesSomething(nodeIds, linkIds)) return null;
     const today = checksDay();
     return accepted.filter((a) => entryLapsed(a, today) && entryCovers(a, key, nodeIds, linkIds, scope))
         .sort((a, b) => (a.until < b.until ? 1 : -1))[0] || null;
@@ -1210,16 +1214,19 @@ function findingCounts(findings) {
     return c;
 }
 
+// What an accepted entry and a pin read the same way from a document: ids as
+// strings, each once, and a scope that is text.
+const noteIds = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === 'string' && x))] : []);
+const noteScope = (a) => (typeof a.scope === 'string' ? a.scope.trim().slice(0, ACCEPT_SCOPE_MAX) : '');
 // Read from a document: only the four fields (and a scope that is text), ids
 // as strings, a reason that is text and not empty. Anything else is dropped, as the serializer's
 // allowlist drops an unknown key.
 function normalizeAccepted(list) {
-    const ids = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === 'string' && x))] : []);
     return (Array.isArray(list) ? list : []).map((a) => {
         if (!a || typeof a !== 'object' || typeof a.check !== 'string' || !a.check) return null;
         const reason = typeof a.reason === 'string' ? a.reason.trim().slice(0, ACCEPT_REASON_MAX) : '';
-        const out = { check: a.check, nodeIds: ids(a.nodeIds), linkIds: ids(a.linkIds), reason };
-        const scope = typeof a.scope === 'string' ? a.scope.trim().slice(0, ACCEPT_SCOPE_MAX) : '';
+        const out = { check: a.check, nodeIds: noteIds(a.nodeIds), linkIds: noteIds(a.linkIds), reason };
+        const scope = noteScope(a);
         if (scope) out.scope = scope;
         const until = typeof a.until === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.until) ? customDate(a.until) : null;
         if (until) out.until = until;
@@ -1228,16 +1235,42 @@ function normalizeAccepted(list) {
 }
 // Written with the devices and cables that are gone left out (a deleted
 // device cannot be accepted any more), and an entry naming nothing left
-// dropped. Nothing to write is no key, like the networks.
-function serializeAccepted(list) {
+// dropped. Nothing to write is no key, like the networks. The list is
+// normalized already; extra(entry) is what the kind writes after the ids.
+function serializeFindingNotes(list, extra) {
     const nodeIds = new Set(state.nodes.map((n) => n.id));
     const linkIds = new Set(state.links.map((l) => l.id));
     const out = [];
-    normalizeAccepted(list).forEach((a) => {
+    list.forEach((a) => {
         const n = a.nodeIds.filter((id) => nodeIds.has(id)), l = a.linkIds.filter((id) => linkIds.has(id));
-        if (n.length || l.length) out.push({ check: a.check, scope: a.scope, nodeIds: n.length ? n : undefined, linkIds: l.length ? l : undefined, reason: a.reason, until: a.until });
+        if (n.length || l.length) out.push(Object.assign({ check: a.check, scope: a.scope, nodeIds: n.length ? n : undefined, linkIds: l.length ? l : undefined }, extra(a)));
     });
     return out.length ? out : undefined;
+}
+function serializeAccepted(list) {
+    return serializeFindingNotes(normalizeAccepted(list), (a) => ({ reason: a.reason, until: a.until }));
+}
+
+// The entries for one line of the tab: one per scope among its findings,
+// naming every device and cable they name. extra(scope) is what the kind
+// writes after the ids.
+function findingEntries(list, extra) {
+    const union = (fs, key) => [...new Set(fs.flatMap((f) => f[key] || []))];
+    return [...new Set(list.map((f) => f.scope || ''))].map((scope) => {
+        const fs = list.filter((f) => (f.scope || '') === scope);
+        return Object.assign({ check: list[0].key, nodeIds: union(fs, 'nodeIds'), linkIds: union(fs, 'linkIds') }, extra(scope));
+    });
+}
+// Take entries off state.accepted or state.pinned, as one undo step.
+// refresh: the selected device's panel reads the list (accepts do; pins not).
+function dropFindingNotes(kind, drop, refresh) {
+    if (readOnlyRefuses()) return false;
+    batch(() => {
+        state[kind] = (Array.isArray(state[kind]) ? state[kind] : []).filter((a, i) => !drop(a, i));
+        save(); renderCanvasOnly();
+    });
+    if (refresh) refreshSelectedNodeDiagnostics();
+    return true;
 }
 
 // The name a check goes by in the tab and the report, for an accepted entry
@@ -1256,17 +1289,14 @@ const findingCheckName = (key) => t(FINDING_CHECK_NAMES[key] || (NODE_CHECKS_BY_
 // including that day. A schedule that lapsed on any of them goes.
 function acceptFindings(findings, reason, until) {
     const text = String(reason || '').trim().slice(0, ACCEPT_REASON_MAX);
-    const list = (findings || []).filter((f) => f && !f.accepted);
+    const list = (findings || []).filter((f) => f && !f.accepted && namesSomething(f.nodeIds, f.linkIds));
     const day = until ? customDate(until) : null;
     if (!text || !list.length || (until && !day) || readOnlyRefuses()) return false;
-    const union = (fs, key) => [...new Set(fs.flatMap((f) => f[key] || []))];
-    const scopes = [...new Set(list.map((f) => f.scope || ''))];
-    const entries = scopes.map((scope) => {
-        const fs = list.filter((f) => (f.scope || '') === scope);
-        const entry = { check: list[0].key, nodeIds: union(fs, 'nodeIds'), linkIds: union(fs, 'linkIds'), reason: text };
-        if (scope) entry.scope = scope;
-        if (day) entry.until = day;
-        return entry;
+    const entries = findingEntries(list, (scope) => {
+        const more = { reason: text };
+        if (scope) more.scope = scope;
+        if (day) more.until = day;
+        return more;
     });
     const today = todayISO();
     const stale = (a) => entryLapsed(a, today) && list.some((f) => entryCovers(a, f.key, f.nodeIds, f.linkIds, f.scope));
@@ -1279,14 +1309,8 @@ function acceptFindings(findings, reason, until) {
 }
 // Reopen: the entry goes, and whatever it covered counts again. One step.
 function reopenAccepted(index) {
-    const list = acceptedList();
-    if (!list[index] || readOnlyRefuses()) return false;
-    batch(() => {
-        state.accepted = list.filter((a, i) => i !== index);
-        save(); renderCanvasOnly();
-    });
-    refreshSelectedNodeDiagnostics();
-    return true;
+    if (!acceptedList()[index]) return false;
+    return dropFindingNotes('accepted', (a, i) => i === index, true);
 }
 
 // ---- Pinned for the next visit ----
@@ -1303,11 +1327,10 @@ function reopenAccepted(index) {
 const PIN_NOTE_MAX = 300;
 const pinnedList = () => (Array.isArray(state.pinned) ? state.pinned : []);
 function normalizePinned(list) {
-    const ids = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === 'string' && x))] : []);
     return (Array.isArray(list) ? list : []).map((a) => {
         if (!a || typeof a !== 'object' || typeof a.check !== 'string' || !a.check) return null;
-        const out = { check: a.check, nodeIds: ids(a.nodeIds), linkIds: ids(a.linkIds) };
-        const scope = typeof a.scope === 'string' ? a.scope.trim().slice(0, ACCEPT_SCOPE_MAX) : '';
+        const out = { check: a.check, nodeIds: noteIds(a.nodeIds), linkIds: noteIds(a.linkIds) };
+        const scope = noteScope(a);
         if (scope) out.scope = scope;
         const note = typeof a.note === 'string' ? a.note.trim().slice(0, PIN_NOTE_MAX) : '';
         if (note) out.note = note;
@@ -1316,39 +1339,41 @@ function normalizePinned(list) {
 }
 // As serializeAccepted: what is gone is left out, and nothing is no key.
 function serializePinned(list) {
-    const nodeIds = new Set(state.nodes.map((n) => n.id));
-    const linkIds = new Set(state.links.map((l) => l.id));
-    const out = [];
-    normalizePinned(list).forEach((a) => {
-        const n = a.nodeIds.filter((id) => nodeIds.has(id)), l = a.linkIds.filter((id) => linkIds.has(id));
-        if (n.length || l.length) out.push({ check: a.check, scope: a.scope, nodeIds: n.length ? n : undefined, linkIds: l.length ? l : undefined, note: a.note });
-    });
-    return out.length ? out : undefined;
+    return serializeFindingNotes(normalizePinned(list), (a) => ({ note: a.note }));
 }
-const pinEntryFor = (f) => pinnedList().find((a) => entryCovers(a, f.key, f.nodeIds, f.linkIds, f.scope)) || null;
+// As acceptedEntryFor: a finding naming nothing is pinned by nothing.
+const pinEntryFor = (f) => (namesSomething(f.nodeIds, f.linkIds)
+    && pinnedList().find((a) => entryCovers(a, f.key, f.nodeIds, f.linkIds, f.scope))) || null;
+// A line reads as pinned when every finding on it that names something is:
+// one naming nothing can never be pinned, so it must not keep the line
+// unpinned for good.
+function linePinned(item) {
+    const named = item.findings.filter((f) => namesSomething(f.nodeIds, f.linkIds));
+    return named.length > 0 && named.every((f) => pinEntryFor(f));
+}
 // The pins, each with the findings it covers now (none: fixed, or not
 // raised at the moment, which the list says rather than hiding the pin).
 function pinnedGroups(findings) {
     return pinnedList().map((entry, index) => ({ index, entry,
-        findings: findings.filter((f) => entryCovers(entry, f.key, f.nodeIds, f.linkIds, f.scope)) }));
+        findings: findings.filter((f) => namesSomething(f.nodeIds, f.linkIds) && entryCovers(entry, f.key, f.nodeIds, f.linkIds, f.scope)) }));
 }
 // The devices a pin names: the map marks them.
 function pinnedNodeIds() {
     return new Set(pinnedList().flatMap((a) => a.nodeIds));
 }
 // One undo step: the findings of one line, pinned together, with what to
-// look at (optional). One entry per scope among them, as an accept.
+// look at (optional). One entry per scope among them, as an accept. A
+// finding that names nothing is refused: its entry would name nobody, so
+// it would never read as pinned and would be dropped on save.
 function pinFindings(findings, note) {
-    const list = (findings || []).filter((f) => f && !pinEntryFor(f));
+    const list = (findings || []).filter((f) => f && namesSomething(f.nodeIds, f.linkIds) && !pinEntryFor(f));
     if (!list.length || readOnlyRefuses()) return false;
     const text = String(note || '').trim().slice(0, PIN_NOTE_MAX);
-    const union = (fs, key) => [...new Set(fs.flatMap((f) => f[key] || []))];
-    const entries = [...new Set(list.map((f) => f.scope || ''))].map((scope) => {
-        const fs = list.filter((f) => (f.scope || '') === scope);
-        const entry = { check: list[0].key, nodeIds: union(fs, 'nodeIds'), linkIds: union(fs, 'linkIds') };
-        if (scope) entry.scope = scope;
-        if (text) entry.note = text;
-        return entry;
+    const entries = findingEntries(list, (scope) => {
+        const more = {};
+        if (scope) more.scope = scope;
+        if (text) more.note = text;
+        return more;
     });
     batch(() => {
         state.pinned = pinnedList().concat(entries);
@@ -1357,13 +1382,8 @@ function pinFindings(findings, note) {
     return true;
 }
 function unpin(index) {
-    const list = pinnedList();
-    if (!list[index] || readOnlyRefuses()) return false;
-    batch(() => {
-        state.pinned = list.filter((a, i) => i !== index);
-        save(); renderCanvasOnly();
-    });
-    return true;
+    if (!pinnedList()[index]) return false;
+    return dropFindingNotes('pinned', (a, i) => i === index, false);
 }
 // Serviced today: the device's last service is today, so the service it was
 // due is done. Its pins, accepts and schedules for a service are about that
@@ -1496,12 +1516,11 @@ function ipConflictFindings() {
 // it takes two devices: one device repeating its own address (bond members
 // often do) is not a conflict on the segment.
 function macConflictFindings(ctx) {
-    const api = window.CarinoOUI;
     const out = [];
     ctx.macDupes().forEach((d) => {
         const ids = [...new Set(d.holders.map((h) => h.node.id))];
         if (ids.length < 2) return;
-        const mac = api ? api.fmtColon(d.hex) : d.hex;
+        const mac = fmtColonSafe(d.hex);
         const where = d.holders.map((h) => `${h.node.name} / ${h.iface.name}`).join(', ');
         const detail = t('{mac} shared by {where}.', { mac, where });
         out.push({ key: 'mac-conflict', level: 'bad', check: t('MAC Conflict'),
@@ -2190,7 +2209,7 @@ function validateTopology(diag) {
         const open = panelOpen.has(g.key) ? panelOpen.get(g.key) : (small || g.level === 'bad' || g.items.length <= 3);
         const items = g.items.map((item, ii) => {
             const many = findingTargets(item).length > 1;
-            const pinned = item.findings.every((f) => pinEntryFor(f));
+            const pinned = linePinned(item);
             const lapsed = item.findings.map((f) => f.lapsed).find(Boolean);
             const at = `data-g="${gi}" data-i="${ii}"`;
             const actions = canAccept ? `<span class="ca-acts">
@@ -2368,13 +2387,14 @@ async function askSchedule(item) {
     return done;
 }
 // Pin with what to look at (optional), or unpin when every finding of the
-// line is pinned already.
+// line is pinned already. Unpin takes every pin that covers the line, not
+// the first one each finding meets: two pins can cover the same finding (a
+// conflict pinned, then pinned again when a third device joined it), and
+// leaving the second kept the line pinned after Unpin.
 async function togglePin(item) {
-    if (item.findings.every((f) => pinEntryFor(f))) {
-        const drop = new Set(item.findings.map(pinEntryFor));
-        const list = pinnedList();
-        if (readOnlyRefuses()) return false;
-        batch(() => { state.pinned = list.filter((a) => !drop.has(a)); save(); renderCanvasOnly(); });
+    if (!item.findings.some((f) => namesSomething(f.nodeIds, f.linkIds))) return false;
+    if (linePinned(item)) {
+        if (!dropFindingNotes('pinned', (a) => item.findings.some((f) => entryCovers(a, f.key, f.nodeIds, f.linkIds, f.scope)))) return false;
         showToast(t('Taken off the list for the next visit.'), 'ok');
         return true;
     }

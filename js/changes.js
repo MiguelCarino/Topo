@@ -218,7 +218,7 @@ function dropSnapshot(id) {
 // -> { devices: { added, removed, changed, moved }, cables: { added, removed, changed },
 //      subnets: { added, removed, changed }, groups: { added, removed, changed },
 //      wifi: { added, removed, changed }, notes: { added, removed, changed },
-//      accepted: { added, reopened }, header: [labels], total }
+//      accepted: { added, reopened }, pinned: { added, removed }, header: [labels], total }
 // Every list holds { id, name, ... }; `changed` adds what changed, as field
 // labels from the schema (js/model.js), the one list every other view reads.
 const DIFF_SKIP = new Set(['id', 'x', 'y', 'interfaces', 'cable']);
@@ -315,10 +315,16 @@ function docChanges(baseDoc, curDoc) {
     // Text notes are counted, not listed: their text is the whole of them.
     const notes = pair(base.annotations, cur.annotations, (a) => ({ id: a.id }));
 
-    // An accepted finding is the check and what it was accepted on.
-    const acceptKey = (a) => JSON.stringify([a.check, a.scope || '', [...(a.nodeIds || [])].sort(), [...(a.linkIds || [])].sort(), a.reason]);
-    const accWas = new Set((base.accepted || []).map(acceptKey)), accNow = new Set((cur.accepted || []).map(acceptKey));
-    const accepted = { added: [...accNow].filter((k) => !accWas.has(k)).length, reopened: [...accWas].filter((k) => !accNow.has(k)).length };
+    // An accepted finding is the check and what it was accepted on; a pin the
+    // check and what it was pinned on, with what to look at.
+    const noteKey = (a, field) => JSON.stringify([a.check, a.scope || '', [...(a.nodeIds || [])].sort(), [...(a.linkIds || [])].sort(), a[field]]);
+    const notesDiff = (was, now, field) => {
+        const a = new Set((was || []).map((x) => noteKey(x, field))), b = new Set((now || []).map((x) => noteKey(x, field)));
+        return { added: [...b].filter((k) => !a.has(k)).length, removed: [...a].filter((k) => !b.has(k)).length };
+    };
+    const acc = notesDiff(base.accepted, cur.accepted, 'reason');
+    const accepted = { added: acc.added, reopened: acc.removed };
+    const pinned = notesDiff(base.pinned, cur.pinned, 'note');
 
     // The report header by field name, never by value: the values (who
     // signed it) are printed on the report already, and are not history.
@@ -332,8 +338,8 @@ function docChanges(baseDoc, curDoc) {
 
     const count = (g) => g.added.length + g.removed.length + g.changed.length;
     const total = count(devices) + devices.moved.length + count(cables) + count(subnets) + count(wifi) + count(groups) + count(notes)
-        + accepted.added + accepted.reopened + (header.length ? 1 : 0);
-    return { devices, cables, subnets, wifi, groups, notes, accepted, header, total };
+        + accepted.added + accepted.reopened + pinned.added + pinned.removed + (header.length ? 1 : 0);
+    return { devices, cables, subnets, wifi, groups, notes, accepted, pinned, header, total };
 }
 
 // A device's interfaces, matched by id: added, removed, or what changed on one.
@@ -407,6 +413,10 @@ function changeRows(ch) {
     if (ch.accepted.added + ch.accepted.reopened) {
         rows.push({ op: t('Changed'), what: t('Accepted findings'), name: '',
             detail: t('{added} accepted, {reopened} reopened', ch.accepted) });
+    }
+    if (ch.pinned && ch.pinned.added + ch.pinned.removed) {
+        rows.push({ op: t('Changed'), what: t('Pinned findings'), name: '',
+            detail: t('{added} pinned, {removed} unpinned', ch.pinned) });
     }
     if (ch.header.length) rows.push({ op: t('Changed'), what: t('Report header'), name: '', detail: labels(ch.header) });
     return rows;

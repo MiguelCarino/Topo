@@ -968,7 +968,7 @@ let _liveTimer = 0;
 let _liveFailing = false;  // warn once per run of failures, not once a second
 const _liveParked = new Map();   // eid -> { json, meta }: writes for entries Back/Forward left
 const liveEid = () => { const s = window.history.state; return s && typeof s.eid === 'string' ? s.eid : null; };
-const newEid = () => Array.from(crypto.getRandomValues(new Uint32Array(2)), (n) => n.toString(36)).join('');
+const newEid = randomToken;
 function liveTokens() {
     const now = Date.now();
     _liveTokens = Math.min(LIVE_BURST, _liveTokens + (now - _liveTokensAt) / LIVE_REFILL_MS);
@@ -1404,7 +1404,7 @@ function normalizeLoadedLink(link) {
 function normalizeLoadedAnnotation(a) {
     // dangling targets (deleted nodes) are skipped at render time, not here —
     // load order aside, that also self-heals docs edited by older builds.
-    return { id: a.id || `t_${Date.now()}_${Math.random().toString(16).slice(2)}`, x: Number.isFinite(a.x) ? a.x : 200, y: Number.isFinite(a.y) ? a.y : 200, text: typeof a.text === 'string' ? a.text : '', style: a.style === 'note' ? 'note' : 'plain', size: Number.isFinite(a.size) ? Math.min(36, Math.max(10, a.size)) : 12, targets: Array.isArray(a.targets) ? a.targets.filter((t) => typeof t === 'string') : [] };
+    return { id: a.id || nextId('t'), x: Number.isFinite(a.x) ? a.x : 200, y: Number.isFinite(a.y) ? a.y : 200, text: typeof a.text === 'string' ? a.text : '', style: a.style === 'note' ? 'note' : 'plain', size: Number.isFinite(a.size) ? Math.min(36, Math.max(10, a.size)) : 12, targets: Array.isArray(a.targets) ? a.targets.filter((t) => typeof t === 'string') : [] };
 }
 // ---- Reading a document into state ----
 // The one place a stored document becomes state.nodes / links / annotations /
@@ -1421,13 +1421,8 @@ function loadDocState(doc) {
     // every lookup finds the first, so the second could never be cabled or
     // selected. The later one gets an id of its own, as a subnet does
     // (normalizeNetworks); the cables naming the id stay with the first.
-    const ownIds = (items, prefix) => {
-        const seen = new Set();
-        items.forEach((x) => { if (seen.has(x.id)) x.id = nextId(prefix); seen.add(x.id); });
-        return items;
-    };
-    state.nodes = ownIds(list(d.nodes).map(normalizeLoadedNode), 'n');
-    state.links = ownIds(list(d.links).map(normalizeLoadedLink), 'l').filter((l) => getNode(l.source) && getNode(l.target));
+    state.nodes = keepIdsUnique(list(d.nodes).map(normalizeLoadedNode), 'n');
+    state.links = keepIdsUnique(list(d.links).map(normalizeLoadedLink), 'l').filter((l) => getNode(l.source) && getNode(l.target));
     state.networks = normalizeNetworks(d.networks);
     // Groups after the devices: a device's group must be one of them.
     state.groups = normalizeGroups(d.groups);
@@ -1452,7 +1447,9 @@ function loadDocState(doc) {
     state.columns = normalizeCustomColumns(d.columns);
     normalizeCustomRefs(state.nodes, state.columns);
     state.tableView = normalizeTableView(d.tableView);
-    state.annotations = list(d.annotations).filter((a) => a && typeof a === 'object').map(normalizeLoadedAnnotation);
+    // A note too: deleting the second of two notes under one id deleted both,
+    // and the second could never be edited.
+    state.annotations = keepIdsUnique(list(d.annotations).filter((a) => a && typeof a === 'object').map(normalizeLoadedAnnotation), 't');
     // Left exactly as stored. normalizeReportMeta() defaults the date to today,
     // so normalising here would give every untouched diagram a report header to
     // serialize. Assigned unconditionally, including to null: leaving it alone
@@ -2395,12 +2392,7 @@ function libraryItem({ icon, name, blurb }, onPick, onDelete) {
     btn.innerHTML = `<span class="lib-item-icon">${icon}</span><span style="min-width:0"><span class="lib-item-name">${escapeHtml(name)}</span><span class="lib-item-blurb">${escapeHtml(blurb)}</span></span>`;
     btn.onclick = onPick;
     row.appendChild(btn);
-    if (onDelete) {
-        const del = document.createElement('button');
-        del.className = 'lib-item-del shrink-0'; del.textContent = '✖'; del.title = t('Delete "{name}"', { name });
-        del.onclick = (e) => { e.stopPropagation(); onDelete(); };
-        row.appendChild(del);
-    }
+    if (onDelete) row.appendChild(rowDeleteButton(t('Delete "{name}"', { name }), (e) => { e.stopPropagation(); onDelete(); }, 'lib-item-del shrink-0'));
     return row;
 }
 

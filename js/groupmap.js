@@ -997,24 +997,29 @@ function drawGroupEdges(view, ctx) {
     const folds = new Map(view.folds.map((b) => [b.group.id, b]));
     const { reach, qm } = ctx;
     const selLinks = new Set(selectedOf('link'));   // once per call, not a walk of the selection per edge
+    const wifiInk = wifiMapColours();   // the --topo-wifi token (js/ui.js), read once per call
     view.edges.forEach((edge) => {
         const a = gmEnd(edge.a, folds), b = gmEnd(edge.b, folds);
         if (!a || !b) return;
         const n = edge.links.length;
-        // One medium for all of them keeps its colour; a mix is a plain line.
-        const media = new Set(edge.links.map((l) => effectiveMedium(l, getNode(l.source), getNode(l.target))));
-        const medium = media.size === 1 ? [...media][0] : 'utp';
-        const colour = medium === 'wireless' ? wifiMapColours().line   // the --topo-wifi token (js/ui.js)
-            : { fiber: '#06b6d4', powerline: '#eab308', vpn: '#14b8a6' }[medium] || '#94a3b8';
+        // Each cable's own look, as the canvas draws it (linkInk, js/ui.js):
+        // one look for all keeps it; one medium in different looks is that
+        // medium plain; a mix is a plain line.
+        const media = edge.links.map((l) => effectiveMedium(l, getNode(l.source), getNode(l.target)));
+        const inks = edge.links.map((l, i) => linkInk(media[i], { band: media[i] === 'wireless' ? linkWifiBand(l) : null, passthrough: l.attachment === 'passthrough' }, wifiInk));
+        const sameInk = inks.every((k) => k.colour === inks[0].colour && k.dash === inks[0].dash && k.width === inks[0].width);
+        const oneMedium = media.every((m) => m === media[0]);
+        const ink = sameInk ? inks[0] : linkInk(oneMedium ? media[0] : 'utp', {}, wifiInk);
+        const bonus = Math.min(2, Math.log2(n));
         const selected = edge.links.some((l) => selLinks.has(l.id));
         const lit = reach && edge.links.some((l) => reach.reachableLinks.has(l.id));
         const line = gmEl('path', { d: `M ${a.x} ${a.y} L ${b.x} ${b.y}`, fill: 'none',
-            stroke: lit ? '#f59e0b' : selected ? '#eab308' : colour,
-            'stroke-width': (selected || lit ? 3 : 2) + Math.min(2, Math.log2(n)),
+            stroke: lit ? '#f59e0b' : selected ? '#eab308' : ink.colour,
+            'stroke-width': (selected || lit ? 3 : ink.width) + bonus,
             class: `grp-drawn grp-edge cursor-pointer${reach && !lit ? ' fade-inactive' : ''}`,
             'data-links': edge.links.map((l) => l.id).join(' ') });
-        if (medium === 'wireless') line.setAttribute('stroke-dasharray', '4 4');
-        if (selected && !lit) restLook(line, { stroke: colour, 'stroke-width': String(2 + Math.min(2, Math.log2(n))) });   // the export draws it unselected (js/ui.js)
+        if (ink.dash) line.setAttribute('stroke-dasharray', ink.dash);
+        if (selected && !lit) restLook(line, { stroke: ink.colour, 'stroke-width': String(ink.width + bonus) });   // the export draws it unselected (js/ui.js)
         if (qm && !edge.links.some((l) => qm.links.has(l.id))) line.classList.add('q-dim');
         const tip = gmEl('title');
         tip.textContent = t(n === 1 ? '{n} cable' : '{n} cables', { n });

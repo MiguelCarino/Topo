@@ -308,9 +308,8 @@ function renderRackView(force, diag) {
         if (s < 0) body.scrollTop += s;
     }
     if (box) {
-        const main = body.querySelector('.rk-main');
-        const b = box.getBoundingClientRect(), m = main.getBoundingClientRect();
-        if (b.top < m.top || b.bottom > m.bottom) main.scrollTop += b.top - m.top - Math.max(0, (m.height - b.height) / 2);
+        const b = box.getBoundingClientRect();
+        rvRevealIn(body.querySelector('.rk-main'), b.top, b.bottom);
     }
     // A cable a schedule row traced, brought into the elevation's sight; the
     // row of one selected on the elevation, into the list's.
@@ -1722,8 +1721,7 @@ function rvRevealSchedule(body) {
         }).filter(Boolean);
         if (rects.length) {
             const top = Math.min(...rects.map((r) => r.top)), bot = Math.max(...rects.map((r) => r.bottom));
-            const m = main.getBoundingClientRect();
-            if (top < m.top || bot > m.bottom) main.scrollTop += bot - top <= m.height ? top - m.top - (m.height - (bot - top)) / 2 : top - m.top - 8;
+            rvRevealIn(main, top, bot, { pad: 8 });
         }
     }
     const one = soleSelected(state.selection);
@@ -1732,9 +1730,9 @@ function rvRevealSchedule(body) {
         const box = body.querySelector('.rk-sscroll');
         const row = box && box.querySelector(`.rk-srow[data-link="${CSS.escape(sel)}"]`);
         if (row && box.scrollHeight > box.clientHeight + 1) {
-            const b = box.getBoundingClientRect(), r = row.getBoundingClientRect();
+            const r = row.getBoundingClientRect();
             const headH = (box.querySelector('thead') || row).getBoundingClientRect().height;
-            if (r.top < b.top + headH || r.bottom > b.bottom) box.scrollTop += r.top - b.top - headH - Math.max(0, (b.height - headH - r.height) / 2);
+            rvRevealIn(box, r.top, r.bottom, { inset: headH });
         }
     }
     _rv.schedSel = sel;
@@ -2270,6 +2268,38 @@ function rvMoveAt(d, rack, x, y) {
 // The units' pane, which scrolls (a 42U rack is taller than most windows).
 const rvPane = () => rackViewEl().querySelector('.rk-main');
 
+// How a drag near the pane's top or bottom scrolls it: the band just inside
+// the edge, the step each move (or each tick of rvMoveScroll) takes, and how
+// far a cable or a port drag goes before it scrolls at all.
+const RV_EDGE_BAND = 28, RV_EDGE_STEP = 14, RV_EDGE_START = 24;
+
+// The units' pane scrolled a step toward the edge the pointer is near:
+// within RV_EDGE_BAND inside it, or up to `above`/`below` px past it; only
+// within its columns when inX. True if it moved (false at the end already).
+function rvEdgeScroll(x, y, { inX = true, above = 40, below = 0 } = {}) {
+    const pane = rvPane();
+    if (!pane) return false;
+    const r = pane.getBoundingClientRect();
+    if (inX && (x < r.left || x > r.right)) return false;
+    const dy = y < r.top + RV_EDGE_BAND && y > r.top - above ? -RV_EDGE_STEP
+        : y > r.bottom - RV_EDGE_BAND && y <= r.bottom + below ? RV_EDGE_STEP : 0;
+    if (!dy) return false;
+    const before = pane.scrollTop;
+    pane.scrollTop += dy;
+    return pane.scrollTop !== before;
+}
+
+// Scrolls `scroller` so [top, bottom] (client px) is in sight below `inset`
+// (a sticky header): centred where it fits, else its top at the inset plus
+// `pad`. Nothing when it is in sight already, so a rebuild leaves a pane
+// the user scrolled alone when what it shows is still there.
+function rvRevealIn(scroller, top, bottom, { inset = 0, pad = 0 } = {}) {
+    if (!scroller) return;
+    const v = scroller.getBoundingClientRect(), lo = v.top + inset, h = v.height - inset, span = bottom - top;
+    if (top >= lo && bottom <= v.bottom) return;
+    scroller.scrollTop += span <= h ? top - lo - (h - span) / 2 : top - lo - pad;
+}
+
 // A box moved or resized near the top or the bottom of the pane scrolls it,
 // and keeps scrolling while the pointer is held there, so units out of sight
 // can be reached without letting go: before, only a row brought in and a
@@ -2286,15 +2316,7 @@ function rvMoveScroll(d, redo = rvMoveAt) {
         const pane = rvPane(), rack = currentRack();
         if (_rv.drag !== d || !pane || !rack) { clearInterval(d.scroller); d.scroller = null; return; }
         if (d.zone || d.host || d.px === undefined) return;   // over a target, or a host lit for a chip
-        const r = pane.getBoundingClientRect();
-        if (d.px < r.left || d.px > r.right) return;
-        let dy = 0;
-        if (d.py < r.top + 28 && d.py > r.top - 40) dy = -14;
-        else if (d.py > r.bottom - 28 && d.py <= r.bottom) dy = 14;
-        if (!dy) return;
-        const before = pane.scrollTop;
-        pane.scrollTop += dy;
-        if (pane.scrollTop !== before) redo(d, rack, d.px, d.py);
+        if (rvEdgeScroll(d.px, d.py)) redo(d, rack, d.px, d.py);
     }, 40);
 }
 
@@ -2424,14 +2446,7 @@ function rvDragDone(d) {
 function rvBringDrag(d, rack, x, y) {
     const node = getNode(d.id);
     if (!node) return;
-    const main = rackViewEl().querySelector('.rk-main');
-    if (main) {
-        const r = main.getBoundingClientRect();
-        if (x >= r.left && x <= r.right) {
-            if (y < r.top + 28 && y > r.top - 40) main.scrollTop -= 14;
-            else if (y > r.bottom - 28 && y < r.bottom + 40) main.scrollTop += 14;
-        }
-    }
+    rvEdgeScroll(x, y, { below: 40 });
     if (!d.chip) d.chip = rvDragChip(node);
     d.chip.style.left = `${x + 12}px`;
     d.chip.style.top = `${y + 12}px`;
@@ -2572,13 +2587,12 @@ function rvZoneAt(dock, x, y) {
 // The cable being drawn: a line from the plug to the pointer, over the
 // whole page (the other device can be on the other face or further down),
 // and the device under the pointer marked as the one it would go to. Near
-// the top or the bottom of the units' pane, the pane scrolls.
+// the top or the bottom of the units' pane, the pane scrolls, once the
+// pointer has left the plug, as a cable from a port does (rvPortDrag): a
+// plug near the pane's edge used to scroll away under the pointer on the
+// first few pixels of the drag.
 function rvCableDrag(d, x, y) {
-    const main = rackViewEl().querySelector('.rk-main');
-    if (main) {
-        const r = main.getBoundingClientRect();
-        if (y < r.top + 28) main.scrollTop -= 14; else if (y > r.bottom - 28) main.scrollTop += 14;
-    }
+    if (Math.hypot(x - d.x0, y - d.y0) > RV_EDGE_START) rvEdgeScroll(x, y, { inX: false, above: Infinity, below: Infinity });
     if (!d.line) {
         d.line = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         d.line.setAttribute('class', 'rk-cabling');
@@ -2650,11 +2664,7 @@ function rvPortTargetAt(d, x, y) {
 // pointer is still by the port it started from (a port near the pane's edge
 // would scroll away under the pointer before the drag had gone anywhere).
 function rvPortDrag(d, x, y) {
-    const main = rvPane();
-    if (main && Math.hypot(x - d.x0, y - d.y0) > 24) {
-        const r = main.getBoundingClientRect();
-        if (y < r.top + 28) main.scrollTop -= 14; else if (y > r.bottom - 28) main.scrollTop += 14;
-    }
+    if (Math.hypot(x - d.x0, y - d.y0) > RV_EDGE_START) rvEdgeScroll(x, y, { inX: false, above: Infinity, below: Infinity });
     if (!d.line) {
         d.line = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         d.line.setAttribute('class', 'rk-cabling');

@@ -37,8 +37,7 @@ const LIBRARY_KEY = 'nettopo_library';
 // templates migrated in the same millisecond) from ever sharing one. The old
 // 1296-way suffix was enough for one person clicking Save, not for a loop.
 function mintLibraryId() {
-    const rand = Array.from(crypto.getRandomValues(new Uint32Array(2)), (n) => n.toString(36)).join('');
-    return `n${Date.now().toString(36)}${rand}`;
+    return `n${Date.now().toString(36)}${randomToken()}`;
 }
 
 // ---- Where the library is kept ----
@@ -1690,7 +1689,9 @@ async function askAboutKnownCopy(incoming, entry, opts = {}) {
 }
 
 // How many devices, cables and notes differ between two documents, matched by
-// id, plus one for a changed report header: the "(n changes)" on Update. Both
+// id, plus one for a changed report header, one for the accepted findings and
+// one for the pins: the "(n changes)" on Update. A copy that differed only by
+// a pin was "the same", and the pin was not taken. Both
 // sides go through the serializer first, so a key order or a default filled
 // in on load is not counted as somebody's change.
 function docChangeCount(a, b) {
@@ -1705,6 +1706,7 @@ function docChangeCount(a, b) {
     diff(ca.nodes, cb.nodes); diff(ca.links, cb.links); diff(ca.annotations, cb.annotations);
     if (JSON.stringify(ca.report || null) !== JSON.stringify(cb.report || null)) n++;
     if (JSON.stringify(ca.accepted || null) !== JSON.stringify(cb.accepted || null)) n++;   // the accepted findings, as one
+    if (JSON.stringify(ca.pinned || null) !== JSON.stringify(cb.pinned || null)) n++;   // the pins, as one
     return n;
 }
 

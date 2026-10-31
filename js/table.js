@@ -229,7 +229,7 @@ function assetColumn(key, opts) {
 function upkeepColumn(key, opts) {
     const f = tvField(NODE_FIELDS, key);
     return schemaColumn(NODE_FIELDS, key, 'node', Object.assign({ plain: true, mono: true, sort: 'text', editor: 'text',
-        parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v || v === '—') return { value: undefined }; const r = f.fromText(v); return r === null ? { error: true } : { value: r }; },
+        parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v || v === '—') return { value: undefined }; return fromTextResult(f.fromText, v); },
         set: (target, value) => { if (value === undefined || value === null || value === '') delete target[key]; else target[key] = value; },
         show: (row) => { const n = getNode(row.ref.nodeId); return shown(n && n[key] !== undefined ? String(n[key]) : ''); } }, opts));
 }
@@ -518,9 +518,9 @@ const TV_COLS = {
         // "2.5 m". Sorted by the length itself, feet and metres together.
         cableColumn('length', { mono: true, sort: 'num', unit: true,
             sortKey: (row) => { const l = tvLinkOf(row); return l && !tvNoCable(row) ? cableLengthMetres(cableOf(l, 'length')) : null; },
-            parse: (text, row, unit) => { const v = String(text == null ? '' : text).trim(); if (!v) return { value: '' }; const r = cableLengthFromText(v, typeof unit === 'string' ? unit : undefined); return r === null ? { error: true } : { value: r }; },
-            unitOf: (row) => { const l = tvLinkOf(row); const p = l ? cableLengthParts(cableOf(l, 'length')) : null; return p ? p.unit : CABLE_UNIT_DEFAULT; },
-            edit: (row) => { const l = tvLinkOf(row); const v = l ? cableOf(l, 'length') : ''; const n = cableLengthNumber(v); return n === null ? v : n; } }),
+            parse: (text, row, unit) => { const v = String(text == null ? '' : text).trim(); if (!v) return { value: '' }; return fromTextResult(cableLengthFromText, v, typeof unit === 'string' ? unit : undefined); },
+            unitOf: (row) => { const l = tvLinkOf(row); return cableLengthShown(l ? cableOf(l, 'length') : '').unit; },
+            edit: (row) => { const l = tvLinkOf(row); return cableLengthShown(l ? cableOf(l, 'length') : '').text; } }),
         cableColumn('color'),
         cableColumn('via', { mono: true }),
         { key: 'wifi:ssid', label: 'SSID', rec: 'link', editor: 'select', sort: 'text', same, when: () => wifiOffered(),
@@ -1219,7 +1219,7 @@ function startEdit(td, seed) {
     let legacy;
     if (col.unit) {
         const stored = target ? col.get(target) : '';
-        if (seed === undefined && String(stored == null ? '' : stored).trim() && !cableLengthParts(stored)) legacy = el.value;
+        if (seed === undefined && cableLengthShown(stored).legacy) legacy = el.value;
         unitEl = wrapUnitField(el, col.unitOf(row), 'tv-unit');
         if (legacy === undefined) filterLengthInput(el);
         el.addEventListener('input', () => filterLengthInput(el));

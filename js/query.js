@@ -84,7 +84,11 @@
 const qText = (v) => (typeof v === 'string' ? v : (typeof v === 'number' ? String(v) : ''));
 const qLower = (v) => qText(v).toLowerCase();
 const qHas = (hay, needle) => !!needle && qLower(hay).includes(needle);
-const qHex = (v) => qLower(v).replace(/[^0-9a-f]/g, '');
+const qHex = (v) => normMac(qText(v));
+// A MAC fragment is found in the padded address or in the value as typed: a
+// stored '3c:7:54:11:22:33' reads '3C0754112233' padded, and a prefix typed
+// the same unpadded way ('3c:7:54') is only in the hex as typed.
+const qMacHas = (mac, hex) => qHex(mac).includes(hex) || qText(mac).replace(/[^0-9a-f]/gi, '').toUpperCase().includes(hex);
 const qIfaces = (node) => (node && Array.isArray(node.interfaces) ? node.interfaces.filter((i) => i && typeof i === 'object') : []);
 // The address an interface holds, with or without its prefix length.
 function qAddrOf(ipText) {
@@ -128,7 +132,7 @@ const qNodeOwnText = (node, q) => qNodeFieldText(node, q)
 const qPortText = (p, q) => qHas(portAttrOf(p.node, p.portId).label, q.v) || qHas(ifaceLabel(p.node, p.portId), q.v);
 function qIfaceText(iface, q) {
     if (qFieldsHave(IFACE_FIELDS, iface, q.v)) return true;
-    return !!q.hex && qHex(iface.mac).includes(q.hex);
+    return !!q.hex && qMacHas(iface.mac, q.hex);
 }
 const Q_PLAIN = {
     node: (n, q) => qNodeOwnText(n, q) || qIfaces(n).some((i) => qIfaceText(i, q)),
@@ -239,10 +243,10 @@ function qMacPrep(v) {
     return /^[0-9a-f:.\-\s]+$/i.test(v) && hex ? { hex } : { vendor: v };
 }
 function qMacMatch(iface, q) {
-    if (q.hex) return qHex(iface.mac).includes(q.hex);
+    if (q.hex) return qMacHas(iface.mac, q.hex);
     const api = window.CarinoOUI;
     if (!api || !hasMac(iface)) return false;
-    const d = api.decodeMac(iface.mac);
+    const d = api.decodeMac(normMac(iface.mac));
     return !!(d && d.vendor && qHas(d.vendor.vendor, q.vendor));
 }
 

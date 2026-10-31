@@ -693,8 +693,7 @@ function csvDateColumn(values) {
 
 // A field read by its schema row's fromText (the service dates, the interval).
 function csvFromText(key, text) {
-    const v = NODE_FIELDS.find((f) => f.key === key).fromText(text);
-    return v === null ? { error: true } : { value: v };
+    return fromTextResult(NODE_FIELDS.find((f) => f.key === key).fromText, text);
 }
 // Per field, where the schema row's own validator is not the whole story.
 const CSV_PARSERS = {
@@ -724,7 +723,7 @@ const CSV_PARSERS = {
     // language; a word that is none of them is refused, not blanked.
     status: (text) => { const r = tvStatusParse(text); return r.value === undefined ? { error: true } : r; },
     // Metres: "2.5", "2,5" or "2.5 m" (cableLengthFromText, js/model.js).
-    'lk:cable.length': (text) => { const v = cableLengthFromText(text); return v === null ? { error: true } : { value: v }; },
+    'lk:cable.length': (text) => fromTextResult(cableLengthFromText, text),
     inService: (text) => csvFromText('inService', text),
     serviced: (text) => csvFromText('serviced', text),
     serviceEvery: (text) => csvFromText('serviceEvery', text),
@@ -791,7 +790,7 @@ const CSV_PARSERS = {
     'if:mac': (text) => { const r = csvTextParse(csvIfaceField('mac'))(text); return r.error ? r : { value: fmtColonSafe(r.value) }; },
     'if:wireless': (text) => tvBoolParse(text),
     // "802.3ad n1 n2": a mode Topo knows, then at least one member.
-    'if:bond': (text) => { const b = csvIfaceField('bond').fromText(text); return b ? { value: b } : { error: true }; },
+    'if:bond': (text) => fromTextResult(csvIfaceField('bond').fromText, text),
     'lk:medium': (text) => tvMediumParse(text),
     // The two the link's property panel offers; blank is the default.
     'lk:attachment': (text) => { const v = csvLower(text); return v === 'bridged' || v === 'passthrough' ? { value: v } : { error: true }; },
@@ -1002,7 +1001,7 @@ function csvGuessByValues(values) {
     const vals = values.map((v) => String(v).trim()).filter(Boolean);
     if (!vals.length) return '';
     const most = (test) => vals.filter(test).length >= Math.ceil(vals.length * 0.8);
-    if (most((v) => normMac(v).length === 12 && /^[0-9a-f]{2}([:\-.]?[0-9a-f]{2}){5}$|^[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}$/i.test(v))) return 'if:mac';
+    if (most(macShaped)) return 'if:mac';
     if (most((v) => !!parseValidCIDR(v) || !!parseIpText(v))) return 'if:ip';
     return '';
 }
@@ -1365,7 +1364,7 @@ function csvPlanDevices(rows, plan) {
     const byNameRows = new Map();   // lower name -> the rows joined under it
     const differs = (rows, v, key) => !isBlank(v[key]) && rows.some((o) => !isBlank(o.values[key]) && csvLower(o.values[key]) !== csvLower(v[key]));
     const apartKeys = ['assetTag', 'serial', 'type', 'os', 'location', 'group'];
-    const randomMac = (v) => !isBlank(v['if:mac']) && !!(parseInt(normMac(v['if:mac']).slice(0, 2), 16) & 0x02);
+    const randomMac = (v) => macIsLocal(v['if:mac']);
     const nameCount = new Map();
     parsed.forEach((r) => {
         if (r.blank || r.match || r.values.id || !r.values.name) return;
@@ -2131,14 +2130,17 @@ function csvPlanCables(rows, plan) {
             const out = { index, name: '', status: 'same', changes: [], notes: [], why: '' };
             const conflict = (why) => { results.push(Object.assign(out, { status: 'conflict', why })); };
             const values = {}, errors = [];
-            let lengthAsIs;   // a length the parser refuses, held until the cable is known
+            // The length cell as written, and whether the parser refused it,
+            // held until the cable is known.
+            let lengthText, lengthBad = false;
             Object.keys(vals).forEach((key) => {
                 const tg = csvTarget(key);
                 if (tg.group !== 'cable') return;
                 if (key === 'lk:source' || key === 'lk:target' || key === 'lk:sourceIface' || key === 'lk:targetIface' || key === 'lk:id') { values[key] = String(vals[key]).trim(); return; }
                 const res = tg.parse(vals[key]);
-                if (res.error && key === 'lk:cable.length') lengthAsIs = String(vals[key]).trim();
-                else if (res.error) errors.push(t('{value} is not a valid {field}.', { value: String(vals[key]).trim(), field: csvTargetLabel(tg) }));
+                if (key === 'lk:cable.length') { lengthText = String(vals[key]).trim(); lengthBad = !!res.error; }
+                if (res.error && key === 'lk:cable.length') return;   // judged below, once the cable is known
+                if (res.error) errors.push(t('{value} is not a valid {field}.', { value: String(vals[key]).trim(), field: csvTargetLabel(tg) }));
                 else values[key] = res.value;
             });
             if (errors.length) return conflict(errors.join(' '));
@@ -2178,13 +2180,20 @@ function csvPlanCables(rows, plan) {
                 } else link = between[0] || null;
             }
             // A cable typed before lengths were metres or feet keeps its words
-            // ("about 3"), and cables.csv writes them out as they are. Read back,
-            // the same words on the same cable are no change: refused, they made
-            // the whole row a conflict, so a sheet exported, relabelled in Excel
-            // and imported again lost every edit on those cables. Words that are
-            // not what the cable holds are still refused.
-            if (lengthAsIs !== undefined && !(link && cableOf(link, 'length').trim() === lengthAsIs)) {
-                return conflict(t('{value} is not a valid {field}.', { value: lengthAsIs, field: csvTargetLabel(csvTarget('lk:cable.length')) }));
+            // ("about 3", "15 feet", "2,5 m"), and cables.csv writes them out as
+            // they are. Read back, the same words on the same cable are no
+            // change, whether or not they parse: refused, they made the whole
+            // row a conflict, so a sheet exported, relabelled in Excel and
+            // imported again lost every edit on those cables; parsed, "15 feet"
+            // came back a change to "15 ft" nobody asked for. So an export then
+            // an import never rewrites an old length, as the table and bulk Set
+            // never do. Words the parser refuses that are not what the cable
+            // holds are still refused. The row keeps the cable's own words
+            // rather than dropping the cell, so another row that sets this
+            // cable's length to something else is still a conflict.
+            if (lengthText !== undefined) {
+                if (link && cableOf(link, 'length').trim() === lengthText) values['lk:cable.length'] = cableOf(link, 'length');
+                else if (lengthBad) return conflict(t('{value} is not a valid {field}.', { value: lengthText, field: csvTargetLabel(csvTarget('lk:cable.length')) }));
             }
             if (link) {
                 const src = getNode(link.source), tgt = getNode(link.target);
@@ -3018,7 +3027,7 @@ function seenMac(word) {
     if (/^[0-9a-f]{12}$/i.test(w) && /[a-f]/i.test(w)) return { mac: w.toUpperCase() };
     return null;
 }
-const seenMacUsable = (hex) => hex.length === 12 && hex !== 'FFFFFFFFFFFF' && hex !== '000000000000' && !(parseInt(hex.slice(0, 2), 16) & 1);
+const seenMacUsable = (hex) => hex.length === 12 && hex !== 'FFFFFFFFFFFF' && hex !== '000000000000' && !macIsGroup(hex);
 // A word as an address: { ip, prefix? } | { mask: prefix } | null.
 function seenIp(word) {
     const m = /^([0-9a-f:.]+?)(?:\/(\d{1,3}))?$/i.exec(String(word || ''));

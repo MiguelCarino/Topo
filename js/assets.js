@@ -67,11 +67,12 @@ const SECRET_PAIR = /(?:^|[^\p{L}\p{N}])(?:admin(?:istrator)?|root|user(?:name)?
 // host names use), or a long run of letters and digits with no dot in it
 // (an API key such as sk_live_4eC3…). A host name, an address, a MAC, a URL
 // or a path is none of these. Brackets, quotes and commas around a word are
-// the sentence's, not the word's.
+// the sentence's, not the word's; so is a full stop or colon after a MAC
+// ("the new NIC is 3c:07:54:AB:CD:EF.").
 function looksLikeKey(raw) {
     const word = raw.replace(/^[("'«“\[]+|[)"'»”\],;]+$/g, '');
     if (word.length < 10 || /^[a-z]+:\/\//i.test(word) || /[\\/]/.test(word)) return false;
-    if (normMac(word).length === 12 || parseValidCIDR(word) || parseIpText(word)) return false;
+    if (macShaped(word.replace(/[.:]+$/, '')) || parseValidCIDR(word) || parseIpText(word)) return false;
     const lower = /[a-z]/.test(word), upper = /[A-Z]/.test(word), digit = /[0-9]/.test(word);
     if (lower && upper && digit && /[^A-Za-z0-9._-]/.test(word)) return true;
     return word.length >= 24 && !word.includes('.') && digit && (lower || upper) && [lower, upper, digit].filter(Boolean).length >= 3;
@@ -427,10 +428,9 @@ const selectedLinkForEdit = () => (state.selectedId && state.selectedType === 'l
 // decimal point or comma can be typed, never the unit. A length an older
 // file wrote some other way ("about 3") shows as it is until typed over.
 function renderCableLength(link) {
-    const v = link ? cableOf(link, 'length') : '';
-    const parts = cableLengthParts(v);
-    assetEl('propCableLength').value = parts ? parts.n : v;
-    assetEl('propCableUnit').value = parts ? parts.unit : CABLE_UNIT_DEFAULT;
+    const s = cableLengthShown(link ? cableOf(link, 'length') : '');
+    assetEl('propCableLength').value = s.text;
+    assetEl('propCableUnit').value = s.unit;
     markUpkeep(assetEl('propCableLength'), false);
 }
 // What the field and the pick say, written to the cable: true when stored.
@@ -460,6 +460,9 @@ assetEl('propCableUnit').addEventListener('change', () => {
     if (isBlank(assetEl('propCableLength').value) || !storeCableLength()) return;
     save();
     renderCanvasOnly();
+    // What was stored, shown: an old "15 metres" with the pick moved to ft
+    // is kept as 15 m (the unit it names wins), so the pick goes back to m.
+    renderCableLength(selectedLinkForEdit());
 });
 CABLE_INPUTS.filter(({ key }) => key !== 'length').forEach(({ key, id }) => {
     assetEl(id).addEventListener('input', (e) => {

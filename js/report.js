@@ -111,7 +111,7 @@ function portUsage(node) {
 
 function reportInterface(node, iface) {
     const api = window.CarinoOUI;
-    const decoded = hasMac(iface) && api ? api.decodeMac(iface.mac) : null;
+    const decoded = hasMac(iface) && api ? api.decodeMac(normMac(iface.mac)) : null;
     return {
         // The interface's id, so a view built on these rows (the table,
         // js/table.js) can find the interface it is about. Unique only inside
@@ -119,7 +119,7 @@ function reportInterface(node, iface) {
         id: iface.id,
         name: iface.name || iface.id,
         ip: iface.ip || '',
-        mac: decoded && !decoded.error ? api.fmtColon(decoded.hex) : '',
+        mac: decoded && !decoded.error ? fmtColonSafe(iface.mac) : '',
         vendor: decoded && decoded.vendor && decoded.vendor.vendor ? decoded.vendor.vendor : '',
         wireless: ifaceIsWireless(iface),
         bond: isBond(iface) ? (BOND_MODES[iface.bond.mode] || iface.bond.mode) : '',

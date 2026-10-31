@@ -141,6 +141,24 @@
 #layer-nodes > g[id^="ui-node-"] { touch-action: none; }
 .host-badge { cursor: pointer; }
 .host-badge:hover > rect:not(.grp-toggle-hit) { stroke: var(--accent); }
+/* What the pointer is over on the map lights up, so it is plain what a click
+   will pick. Only a look: nothing is selected, the panel does not open and the
+   map is not redrawn. A stylesheet rule, so the PNG/SVG export (no stylesheet)
+   never carries it, and only for a mouse: a finger's tap would leave it stuck.
+   Blue, never the accent: in the Gold theme that is the selection's gold, and
+   a highlight that looks like a selection is the confusion this is meant to
+   end. A fixed blue, since the map's cards are white in either theme. */
+@media (hover: hover) and (pointer: fine) {
+    #networkCanvas { --map-hover: #3b82f6; }
+    #layer-nodes > g[id^="ui-node-"]:hover,
+    #layer-nodes > g.grp-node:hover,
+    #layer-annotations > g[id^="ui-ann-"]:hover { filter: drop-shadow(0 0 4px var(--map-hover)); }
+    #layer-links > path[id^="ui-link-"]:hover { stroke-width: 4px; filter: drop-shadow(0 0 2px var(--map-hover)); }
+    #layer-links > path.grp-edge:hover { filter: drop-shadow(0 0 3px var(--map-hover)); }   /* already drawn thicker per cable */
+    #layer-nodes > g.fade-inactive:hover,
+    #layer-links > path.fade-inactive:hover { filter: grayscale(100%) drop-shadow(0 0 4px var(--map-hover)); }
+    .grp-tab:hover > .grp-tab-pill { stroke: var(--map-hover); }
+}
 
 /* Tokens come from carino-ui.css. --tall is the landing's own measure:
    how much taller this viewport is than the point where the landing stops

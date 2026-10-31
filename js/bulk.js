@@ -209,7 +209,7 @@ function bulkParse(bf, text) {
     if (bf.editor === 'medium') return Object.prototype.hasOwnProperty.call(FLOW_CLASS, text) ? { value: text } : { error: true };
     if (bf.editor === 'status') return asStatus(text) ? { value: asStatus(text) } : { error: true };
     if (bf.custom) { const r = parseCustomValue(bf.custom, text); return r.error ? r : { value: customText(bf.custom, r.value) }; }
-    if (bf.field && bf.field.fromText) { const v = bf.field.fromText(text); return v === null ? { error: true } : { value: v }; }
+    if (bf.field && bf.field.fromText) return fromTextResult(bf.field.fromText, text);
     const v = bf.keepSpace ? String(text) : String(text).trim();
     if (bf.field.validate && !bf.field.validate(v.trim())) return { error: true };
     return { value: v };
@@ -996,12 +996,14 @@ function renderBulkFields(nodes, draft, force, kind = 'node') {
             let initial = common.mixed ? '' : common.value;
             if (bf.unit) {
                 // The number alone in the field; the unit in the pick in front.
-                const parts = cableLengthParts(initial);
+                // What they hold is kept on the field, to tell an untouched
+                // one from an edit (readBulkEdits).
+                const shown = cableLengthShown(initial);
                 input.dataset.stored = initial;
                 input.dataset.length = '1';
                 input.inputMode = 'decimal';
                 input.classList.add('mono');
-                if (parts) initial = parts.n;
+                initial = shown.text;
             }
             input.dataset.initial = initial;
             input.value = cleared ? '' : (touched ? draft.set[bf.key] : initial);
@@ -1031,13 +1033,9 @@ function renderBulkFields(nodes, draft, force, kind = 'node') {
         row.appendChild(head);
         row.appendChild(input);
         if (bf.unit) {
-            const parts = cableLengthParts(common.mixed ? '' : common.value);
-            const unit = wrapUnitField(input, draft.unit[bf.key] || (parts ? parts.unit : CABLE_UNIT_DEFAULT));
+            const unit = wrapUnitField(input, draft.unit[bf.key] || cableLengthShown(input.dataset.stored).unit);
             unit.id = `bulkU-${bf.key}`;
             unit.dataset.unitFor = bf.key;
-            // The unit they are kept in, to tell an untouched field from an
-            // edit (readBulkEdits); not the draft's pick.
-            unit.dataset.initial = parts ? parts.unit : CABLE_UNIT_DEFAULT;
             unit.disabled = cleared;
         }
         if (bf.can) {
@@ -1072,16 +1070,19 @@ function readBulkEdits(kind = bulkKind() || 'node') {
             // every one of them holds already.
             const unit = bulkEl(`bulkU-${bf.key}`);
             const picked = unit ? unit.value : CABLE_UNIT_DEFAULT;
-            // Nor does a field nobody touched. An old free-text length they
-            // all share ("about 3") opens as it is written, and read as an
-            // edit it came out "about 3 m": not a valid Length, so every Set
-            // on those cables, a colour as much as anything, was refused.
-            if (v === el.dataset.initial && picked === ((unit && unit.dataset.initial) || CABLE_UNIT_DEFAULT)) return;
+            // Nor does a field nobody touched: the number and the unit it
+            // opened on (cableLengthShown, js/model.js), not the draft's pick.
+            // An old free-text length they all share ("about 3") opens as it
+            // is written, and read as an edit it came out "about 3 m": not a
+            // valid Length, so every Set on those cables, a colour as much as
+            // anything, was refused.
+            const was = cableLengthShown(el.dataset.stored);
+            if (v === was.text && picked === was.unit) return;
             // That old text with only the unit pick moved is read in the unit
             // picked, as the table reads it (finishEdit): "15 feet" moved to
             // ft is 15 ft, not "15 feet ft". One that is no length at all
             // ("about 3") goes as it is written, and is refused as it reads.
-            const legacy = v === el.dataset.initial && !cableLengthParts(el.dataset.stored);
+            const legacy = was.legacy && v === was.text;
             const text = legacy ? (cableLengthFromText(v, picked) || v) : `${v} ${picked}`;
             if (cableLengthFromText(text) !== el.dataset.stored) edits[bf.key] = { text };
             return;
