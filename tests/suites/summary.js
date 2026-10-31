@@ -62,9 +62,13 @@ window.addEventListener('load', () => { setTimeout(() => {
     const f = topologyFindings().find((x) => x.key === 'ip-conflict');
     acc.accepted = [{ check: f.key, nodeIds: f.nodeIds, linkIds: f.linkIds || [], reason: 'Lab bench, swapped by hand.' }];
     ok('an accepted finding is not counted', /Your network looks fine/.test(summarySheet(model(acc))));
-    const one = summaryVerdict([{ level: 'warn' }]), mixed = summaryVerdict([{ level: 'bad' }, { level: 'bad' }, { level: 'warn' }]);
+    const one = summaryVerdict({ critical: 0, advisory: 1 }), mixed = summaryVerdict({ critical: 2, advisory: 1 });
     ok('advisories only: needs attention; both: the problems, then the rest', one.cls === 'warn' && one.title === 'One thing needs attention'
        && mixed.cls === 'bad' && mixed.title === '2 problems need fixing' && mixed.more === 'One thing needs attention', show([one, mixed]));
+    const spread = [summaryVerdict({ critical: 3 }, { kinds: 1, devices: 3 }), summaryVerdict({ critical: 4 }, { kinds: 2, devices: 4 }),
+        summaryVerdict({ critical: 2 }, { kinds: 2, devices: 3 }), summaryVerdict({ critical: 2 }, { kinds: 1, devices: 1 })];
+    ok('fewer kinds than problems: the kinds, on how many devices; else the problems', show(spread.map((v) => v.title)) === show([
+        'One kind of problem needs fixing, on 3 devices', '2 kinds of problem need fixing, on 4 devices', '2 problems need fixing', '2 problems need fixing']), show(spread));
     ok('problems come one per check, faults first, devices named once', (() => {
       const p = summaryProblems([{ key: 'dns', level: 'warn', subject: 'A' }, { key: 'ip-conflict', level: 'bad', subject: 'B, C' }, { key: 'dns', level: 'warn', subject: 'A' }, { key: 'dns', level: 'warn', subject: 'D' }, { key: 'rack-tag', level: 'info', subject: 'R' }]);
       return p.length === 2 && p[0].key === 'ip-conflict' && show(p[1].where) === show(['A', 'D']);

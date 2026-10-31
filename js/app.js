@@ -2772,7 +2772,9 @@ function captureCanvasImage(format, scale) {
 // not touched, and nothing needs putting back.
 //
 // The drawing only. The ✕ on a selected device or cable is a control of the
-// editor, not part of the network, so it is left out of the picture.
+// editor, not part of the network, so it is left out of the picture; so is the
+// selection itself (the copy is drawn as if nothing were picked), and so is
+// what a reduced view hides, since the file carries no stylesheet to hide it.
 function canvasSvgMarkup(scale = 1) {
     flushTypedRender();   // an export never reads a drawing a frame behind the typing
     if (!state.nodes.length) return null;
@@ -2812,6 +2814,24 @@ function canvasSvgMarkup(scale = 1) {
     // controls too; its frame and tab are drawing. So is a host badge's
     // chevron and tap target; its count of guests is drawing.
     svg.querySelectorAll('.node-delete, .grp-toggle, .grp-rack-open, .host-fold-chev, .host-badge > .grp-toggle-hit').forEach((el) => el.remove());
+    // A selection is the editor's, not the network's: the copy is drawn as if
+    // nothing were picked (restLook, js/ui.js), and what only a selection shows goes.
+    svg.querySelectorAll('[data-sel-only]').forEach((el) => el.remove());
+    svg.querySelectorAll('[data-rest]').forEach((el) => {
+        let rest; try { rest = JSON.parse(el.getAttribute('data-rest')); } catch (e) { rest = null; }
+        if (rest) Object.keys(rest).forEach((k) => (rest[k] == null ? el.removeAttribute(k) : el.setAttribute(k, String(rest[k]))));
+        el.removeAttribute('data-rest');
+    });
+    // The same for text: a tooltip naming the selection reads as at rest.
+    svg.querySelectorAll('[data-rest-text]').forEach((el) => {
+        el.textContent = el.getAttribute('data-rest-text');
+        el.removeAttribute('data-rest-text');
+    });
+    // What a reduced view hides is hidden by the page's stylesheet
+    // (body.simple-mode [data-adv], css/app.css), which the file does not
+    // carry: the picture holds what the person exporting it sees. The class,
+    // not isReduced(), because the class is what the rule keys on.
+    if (document.body.classList.contains('simple-mode')) svg.querySelectorAll('[data-adv]').forEach((el) => el.remove());
     // With the ▾ gone, its seat at the tab's left end would be an empty gap.
     svg.querySelectorAll('.grp-frame .grp-tab').forEach((tab) => {
         const pill = tab.querySelector('.grp-tab-pill'), icon = tab.querySelector('.grp-tab-icon'), text = tab.querySelector('.grp-tab-text');
@@ -2975,11 +2995,20 @@ document.getElementById('importFileInput').onchange = (event) => {
 // deliberately leaves the canvas alone, and resetting the timeline for a
 // document still being edited threw away every undo step with nothing to show
 // for it.
+//
+// A handler can outlive its entry: load() waits on the unlock dialog for an
+// 'e~' link, and Back/Forward meanwhile starts another handler. Only the
+// latest one goes on to draw and fit.
+let _popRun = 0;
 window.addEventListener('popstate', async () => {
+    abandonUnlock();   // a sealed link still asking was for the entry just left
     parkPendingSaves();   // they were for the entry that was just left
     unparkLiveDoc();      // and this one may have had its own parked on the way out
+    const nav = ++_popRun;
     const before = JSON.stringify(serializeDoc());
-    await load(); renderCanvasOnly();
+    await load();
+    if (nav !== _popRun) return;   // a newer Back/Forward has taken over
+    renderCanvasOnly();
     if (JSON.stringify(serializeDoc()) !== before) { fitToView(); initHistory(); }
     applyArrivalFocus();   // an '#asset/<tag>' typed over the page: centre on it after the fit
 });

@@ -1014,6 +1014,7 @@ function drawGroupEdges(view, ctx) {
             class: `grp-drawn grp-edge cursor-pointer${reach && !lit ? ' fade-inactive' : ''}`,
             'data-links': edge.links.map((l) => l.id).join(' ') });
         if (medium === 'wireless') line.setAttribute('stroke-dasharray', '4 4');
+        if (selected && !lit) restLook(line, { stroke: colour, 'stroke-width': String(2 + Math.min(2, Math.log2(n))) });   // the export draws it unselected (js/ui.js)
         if (qm && !edge.links.some((l) => qm.links.has(l.id))) line.classList.add('q-dim');
         const tip = gmEl('title');
         tip.textContent = t(n === 1 ? '{n} cable' : '{n} cables', { n });
@@ -1041,13 +1042,14 @@ function drawGroupEdges(view, ctx) {
 // The findings of the devices folded into a group: the worst and how many.
 // Every open finding that names one of them counts, its own (a port, a
 // gateway) and the ones it shares (an address two devices hold), once each;
-// an accepted one does not, as it does not on the pill or a device's badge.
+// an accepted one or an info one does not, as neither does on the pill or a
+// device's badge.
 // Read from the same diagnosis the badges read; a drag step reuses the last.
 function groupRollup(members, diag) {
     const ids = new Set(members.map((n) => n.id));
     let worst = null, count = 0;
     (diag.findings || []).forEach((f) => {
-        if (f.accepted || !(f.nodeIds || []).some((id) => ids.has(id))) return;
+        if (!isCountedFinding(f) || !(f.nodeIds || []).some((id) => ids.has(id))) return;
         count++;
         if (f.level === 'bad') worst = 'bad'; else if (!worst) worst = 'warn';
     });
@@ -1084,15 +1086,24 @@ function drawGroupFolds(view, ctx) {
         if (members.every(isRetired)) { g.setAttribute('opacity', '0.4'); g.setAttribute('data-status', 'retired'); }
         // A second card behind the first: several devices, folded.
         g.appendChild(gmEl('rect', { x: -24, y: -30, width: 56, height: 48, rx: 7, fill: '#f1f5f9', stroke: '#94a3b8', 'stroke-width': 1.25 }));
-        const [fill, stroke, width] = selected ? ['#fefce8', '#eab308', 2]
-            : source ? ['#fef3c7', '#f59e0b', 3]
-            : picked ? ['#ffffff', '#eab308', 2]
-            : lit ? ['#fffbeb', '#fcd34d', 2.5]
+        // At rest (traced through, a finding, plain), then what a selection
+        // lays over it; the export puts the rest back (restLook, js/ui.js).
+        const rest = lit ? ['#fffbeb', '#fcd34d', 2.5]
             : roll.worst === 'bad' ? ['#fef2f2', '#dc2626', 2]
             : roll.worst === 'warn' ? ['#fffbeb', '#d97706', 2]
             : ['#ffffff', '#64748b', 1.5];
+        const [fill, stroke, width] = selected ? ['#fefce8', '#eab308', 2]
+            : source ? ['#fef3c7', '#f59e0b', 3]
+            : picked ? ['#ffffff', '#eab308', 2]
+            : rest;
         const card = gmEl('rect', { x: -28, y: -24, width: 56, height: 48, rx: 7, fill, stroke, 'stroke-width': width });
-        if (picked && !selected && !source) card.setAttribute('stroke-dasharray', '5 3');   // some of it
+        const someOf = picked && !selected && !source;
+        if (someOf) card.setAttribute('stroke-dasharray', '5 3');   // some of it
+        if (selected || source || picked) {
+            const look = { fill: rest[0], stroke: rest[1], 'stroke-width': String(rest[2]) };
+            if (someOf) look['stroke-dasharray'] = null;
+            restLook(card, look);
+        }
         g.appendChild(card);
         const icon = gmEl('g', { transform: 'translate(-12, -14)' });
         icon.appendChild(gmIcon(group.kind, 24, '#334155'));
@@ -1115,11 +1126,15 @@ function drawGroupFolds(view, ctx) {
             g.appendChild(badge);
         }
         const tip = gmEl('title');
-        tip.textContent = [groupPath(group), devicesText(members.length),
+        const tipLines = (withPicked) => [groupPath(group), devicesText(members.length),
             roll.count ? t(roll.count === 1 ? '{n} finding' : '{n} findings', { n: roll.count }) : '',
             hits ? t(hits === 1 ? '{n} of them matches the search' : '{n} of them match the search', { n: hits }) : '',
-            picked && !selected ? t(picked === 1 ? '{n} of them is selected' : '{n} of them are selected', { n: picked }) : '',
+            withPicked && picked && !selected ? t(picked === 1 ? '{n} of them is selected' : '{n} of them are selected', { n: picked }) : '',
             t('Click to expand. Shift-click selects its devices.')].filter(Boolean).join('\n');
+        tip.textContent = tipLines(true);
+        // The selected line is the editor's: the SVG export keeps titles, so
+        // it puts this text back in (canvasSvgMarkup, js/app.js).
+        if (picked && !selected) tip.setAttribute('data-rest-text', tipLines(false));
         g.appendChild(tip);
         // A tap expands, a drag moves (pressFold); the release decides, in
         // the window's mouseup (js/app.js), as it does for a device's drag.

@@ -220,6 +220,7 @@ function renderAnnotation(a) {
         rect.setAttribute('fill', '#fef9c3');
         rect.setAttribute('stroke', selected ? '#ca8a04' : '#eab308');
     }
+    if (selected) restLook(rect, a.style === 'plain' ? { 'stroke-width': '1', stroke: 'transparent' } : { 'stroke-width': '1', stroke: '#eab308' });
 
     // Selected: the same little ✕ nodes get (top-left, suppressed in link mode).
     if (selected && !state.linkSourceId) {
@@ -393,15 +394,17 @@ function renderNoteLeaders() {
     lAnn.insertBefore(grp, lAnn.firstChild);
     state.annotations.forEach((a) => {
         (a.targets || []).forEach((tid) => {
-            const t = noteLinkTarget(tid); if (!t) return;   // dangling: skip, self-heals
+            // Not named t: that is the translator, which the ✕'s tip below calls.
+            const target = noteLinkTarget(tid); if (!target) return;   // dangling: skip, self-heals
             const selId = `nl:${a.id}:${tid}`;
             const isSel = inSelection('notelink', selId);
-            const geo = noteLinkGeometry(a, t);
+            const geo = noteLinkGeometry(a, target);
             const line = document.createElementNS(NS, 'line');
             line.setAttribute('id', `ui-annlink-${a.id}-${tid}`);
             line.setAttribute('stroke', '#ef4444');
             line.setAttribute('stroke-width', isSel ? '2.5' : '1.5');
             line.setAttribute('opacity', isSel ? '1' : '0.85');
+            if (isSel) restLook(line, { 'stroke-width': '1.5', opacity: '0.85' });
             line.style.pointerEvents = 'none';
             applyNoteLinkGeometry(line, geo);
             grp.appendChild(line);
@@ -634,6 +637,13 @@ function wifiChipPlace(geo, fromAp, w, h, avoid) {
     return first;
 }
 
+// The look an element has when nothing is selected, kept on it so the export
+// (canvasSvgMarkup, js/app.js) draws the map unselected from its copy, with no
+// redraw. rest: attribute -> value; null = not set at rest. Set only where the
+// drawn look differs; what exists only for a selection or link mode carries
+// data-sel-only instead, and the export drops it.
+function restLook(el, rest) { el.setAttribute('data-rest', JSON.stringify(rest)); }
+
 function drawCanvas() {
     lZones.innerHTML = ''; lLinks.innerHTML = ''; lNodes.innerHTML = ''; lAnn.innerHTML = '';
     state.annotations.forEach(renderAnnotation);
@@ -777,6 +787,7 @@ function drawCanvas() {
         } else {
             line.setAttribute('stroke', isSelected ? '#eab308' : defaultColor);
             line.setAttribute('stroke-width', isSelected ? '3' : baseWidth);
+            if (isSelected) restLook(line, { stroke: defaultColor, 'stroke-width': String(baseWidth) });
             line.setAttribute('class', reach ? 'fade-inactive cursor-pointer' : 'cursor-pointer transition-colors');
             if (dashArray) line.setAttribute('stroke-dasharray', dashArray);
         }
@@ -950,6 +961,7 @@ function drawCanvas() {
                 const at = geo.pointAt(t);
                 const portLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 portLabel.setAttribute('class', 'port-label'); portLabel.setAttribute('data-adv', ''); // hidden in the reduced views (css/app.css)
+                portLabel.setAttribute('data-sel-only', '');   // drawn for the selected cable only, so never exported
                 portLabel.setAttribute('x', String(at.x + pnx * 10 * side));
                 portLabel.setAttribute('y', String(at.y + pny * 10 * side + 2.5));
                 portLabel.setAttribute('text-anchor', 'middle');
@@ -1026,16 +1038,23 @@ function drawCanvas() {
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('x', '-24'); rect.setAttribute('y', '-24'); rect.setAttribute('width', '48'); rect.setAttribute('height', '48'); rect.setAttribute('rx', '6');
 
-        if (isLinkSource) { rect.setAttribute('fill', '#fefce8'); rect.setAttribute('stroke', '#ca8a04'); rect.setAttribute('stroke-width', '2'); } 
-        else if (isSelected) { rect.setAttribute('fill', '#fefce8'); rect.setAttribute('stroke', '#eab308'); rect.setAttribute('stroke-width', '2'); } 
-        else if (isReachable) { rect.setAttribute('fill', '#fffbeb'); rect.setAttribute('stroke', '#fcd34d'); rect.setAttribute('stroke-width', '2.5'); }
-        else if (severity === 'bad') { rect.setAttribute('fill', '#fef2f2'); rect.setAttribute('stroke', '#dc2626'); rect.setAttribute('stroke-width', '2'); }
-        else if (severity === 'warn') { rect.setAttribute('fill', '#fffbeb'); rect.setAttribute('stroke', '#d97706'); rect.setAttribute('stroke-width', '2'); }
-        else { rect.setAttribute('fill', '#ffffff'); rect.setAttribute('stroke', '#cbd5e1'); rect.setAttribute('stroke-width', '1.5'); }
-
-        if (isVirtualType(node.type)) rect.setAttribute('stroke-dasharray', '4 3');
+        // The look at rest first (traced, a finding, plain), then what the
+        // link mode or a selection lays over it; the export puts the rest
+        // back (restLook).
+        const [restFill, restStroke, restWidth] = isReachable ? ['#fffbeb', '#fcd34d', '2.5']
+            : severity === 'bad' ? ['#fef2f2', '#dc2626', '2']
+            : severity === 'warn' ? ['#fffbeb', '#d97706', '2']
+            : ['#ffffff', '#cbd5e1', '1.5'];
+        const restDash = isVirtualType(node.type) ? '4 3' : null;
+        const [fill, stroke, width] = isLinkSource ? ['#fefce8', '#ca8a04', '2']
+            : isSelected ? ['#fefce8', '#eab308', '2']
+            : [restFill, restStroke, restWidth];
+        rect.setAttribute('fill', fill); rect.setAttribute('stroke', stroke); rect.setAttribute('stroke-width', width);
+        if (restDash) rect.setAttribute('stroke-dasharray', restDash);
         // Some of what is folded into it is selected (a table row, a finding).
-        if (foldPicked && !isLinkSource) { rect.setAttribute('stroke', '#eab308'); rect.setAttribute('stroke-width', '2'); rect.setAttribute('stroke-dasharray', '5 3'); }
+        const foldLook = foldPicked && !isLinkSource;
+        if (foldLook) { rect.setAttribute('stroke', '#eab308'); rect.setAttribute('stroke-width', '2'); rect.setAttribute('stroke-dasharray', '5 3'); }
+        if (isLinkSource || isSelected || foldLook) restLook(rect, { fill: restFill, stroke: restStroke, 'stroke-width': restWidth, 'stroke-dasharray': restDash });
         rect.style.transition = 'all 0.1s ease'; g.appendChild(rect);
 
         const iconG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -1153,7 +1172,7 @@ function drawCanvas() {
         if (isLinkSource) {
             const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             hint.setAttribute('text-anchor', 'middle'); hint.setAttribute('y', '-34'); hint.setAttribute('font-size', '9');
-            hint.setAttribute('font-family', 'sans-serif');
+            hint.setAttribute('font-family', 'sans-serif'); hint.setAttribute('data-sel-only', '');
             hint.setAttribute('font-weight', '700'); hint.setAttribute('fill', '#ca8a04'); hint.textContent = t('LINK TARGET...'); hint.style.pointerEvents = 'none';
             g.appendChild(hint);
         }

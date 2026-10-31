@@ -16,6 +16,7 @@
 
 let _shareMode = 'doc';          // 'doc' (Copy link) | 'binder' (Copy binder link)
 let _shareBusy = false;
+let _shareGen = 0;   // a result is shown only for the choices it was made from
 // Notes that look like they hold a password (secretHitsFor, js/assets.js),
 // found once when the dialog opens: the passphrase field redraws the dialog
 // on every keystroke, and the network cannot change under a modal.
@@ -44,6 +45,7 @@ function openShareDialog(mode) {
 }
 
 function closeShareDialog() {
+    ++_shareGen;
     _shareEl('shareDialog')?.classList.add('hidden');
 }
 
@@ -78,6 +80,7 @@ function renderShareDialog() {
 // A link that no longer matches what is on screen is worse than none, so any
 // change to the choices takes the last result away.
 function resetShareResult() {
+    ++_shareGen;
     _shareEl('shareResult').classList.add('hidden');
     _shareEl('shareLink').value = '';
     _shareEl('sharePassCopyBtn').classList.add('hidden');
@@ -117,11 +120,17 @@ async function copyShareLink() {
             return;
         }
     } else if (state.readOnly) { closeShareDialog(); openShareDialog('doc'); return; }
+    // Sealing takes a moment and the dialog stays live meanwhile: a new
+    // passphrase, the seal unticked, or the dialog closed and reopened all
+    // bump the generation (resetShareResult), and the link made from the old
+    // choices is then dropped rather than shown beside the new passphrase.
+    const gen = _shareGen;
     _shareBusy = true; renderShareDialog();
     let url;
     try { url = await buildShareLink(_shareMode, sealed, pass); }
     catch (e) { console.warn('Share: could not build the link', e); url = undefined; }
     finally { _shareBusy = false; renderShareDialog(); }
+    if (gen !== _shareGen) return;   // the choices changed while it was locking: that link matches nothing on screen
 
     if (url === null) {
         const n = binderFile().sites.length;
@@ -136,6 +145,7 @@ async function copyShareLink() {
     box.value = url;
     let copied = false;
     try { await navigator.clipboard.writeText(url); copied = true; } catch (e) { /* shown for manual copy below */ }
+    if (gen !== _shareGen) return;
     done.textContent = copied
         ? (sealed ? t('Locked link copied. Now send the passphrase separately.') : t('Plain link copied.'))
         : t('Copy the link below.');
@@ -163,6 +173,7 @@ _shareEl('shareDialog').addEventListener('keydown', (e) => { if (e.key === 'Esca
 // error line says why the last attempt failed. `blocked` hides Open, for a
 // browser that could never succeed.
 let _unlockResolve = null;
+let _unlockRun = 0;   // bumped by each openSealedLink and by abandonUnlock: a run that is no longer the latest touches nothing
 function askPassphrase(error, blocked) {
     const dialog = _shareEl('unlockDialog'), field = _shareEl('unlockPass');
     _shareEl('unlockError').textContent = error || '';
@@ -182,6 +193,8 @@ function closeUnlockDialog() {
     _shareEl('unlockDialog').classList.add('hidden');
     _shareEl('unlockPass').value = '';
 }
+// Back/Forward while a sealed link is being opened: the entry it was for is gone, so the run is dropped where it stands, never let it write into the entry navigation brought back (popstate, js/app.js).
+function abandonUnlock() { _unlockRun++; _answerUnlock(null); closeUnlockDialog(); }
 const unlockDialogOpen = () => !_shareEl('unlockDialog').classList.contains('hidden');
 
 _shareEl('unlockForm').addEventListener('submit', (e) => {
@@ -197,13 +210,18 @@ _shareEl('unlockCancelBtn').onclick = () => _answerUnlock(null);
 _shareEl('unlockDialog').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); _answerUnlock(null); } });
 
 async function openSealedLink(frag) {
+    // A stale run returns without closing the dialog or saying why: a newer
+    // run may have opened it again already, for the entry now current.
+    const run = ++_unlockRun; const stale = () => run !== _unlockRun;
     const blocked = !canSeal();
     let error = blocked ? t('This browser cannot open locked links. It needs a secure (https) page.') : '';
     for (;;) {
         const pass = await askPassphrase(error, blocked);
+        if (stale()) return;   // before the decline below: abandonUnlock answers null too
         if (pass === null) break;
         try {
             const { kind, json } = await unsealFragment(frag, pass);
+            if (stale()) return;
             closeUnlockDialog();
             if (kind === SEAL_KIND.binder) {
                 openBinderPayload(json);
@@ -213,6 +231,7 @@ async function openSealedLink(frag) {
             }
             return;
         } catch (e) {
+            if (stale()) return;
             error = e.code === 'passphrase' ? t('That passphrase does not open this link.')
                 : e.code === 'unsupported' ? t('This browser cannot open locked links. It needs a secure (https) page.')
                 : t('This link is damaged. Ask for it to be sent again.');

@@ -161,13 +161,16 @@ function reportDevices() {
         // The network's own columns (js/model.js "Custom columns") that the
         // Devices table shows, in its order, with what this device holds.
         custom: reportCustomOf(node),
-        // Age and upkeep (js/model.js), as of the report's date.
-        upkeep: reportUpkeepOf(node, reportAsOf())
+        // Age and upkeep (js/model.js), as of the report's date: the day
+        // reportModel() counts the checks to (onChecksDay), so the inventory
+        // and the findings say one age. Outside a report it is today.
+        upkeep: reportUpkeepOf(node, checksDay())
     }));
 }
-// The day a report's ages are worked out to: its own date when that is one,
-// so a report printed again later still says what it said; else today.
-const reportAsOf = () => (state.report && customDate(state.report.date)) || todayISO();
+// The day a report counts to: its own date when that is one, so a report
+// printed again later still says what it said; else today. meta: the header
+// the dialog hands over, which a read-only document never stores.
+const reportAsOf = (meta = state.report) => (meta && customDate(meta.date)) || todayISO();
 // "In service since 2019 (about 7 y) · Last serviced 2026-05-14 · Next service 2027-05-14", or ''.
 function reportUpkeepOf(node, asOf) {
     const age = deviceAge(node, asOf), next = nextServiceDate(node);
@@ -592,7 +595,10 @@ const REPORT_DIAGRAM_INLINE_MAX = 40;
 // its addresses, and the pass answers each from one index instead of a scan
 // or a whole-document key per device. withDoc() (binderSiteModels below)
 // swaps the document in first, so the pass indexes the site being reported.
-function reportModel() { return withLookupPass(reportModelNow); }
+// Every date-relative check (ages, services due, schedules) counts to the
+// report's date (onChecksDay, js/model.js), and so do the counts and the
+// verdict built from them. meta: the dialog's header, else state.report.
+function reportModel(meta) { return onChecksDay(reportAsOf(meta || state.report), () => withLookupPass(reportModelNow)); }
 function reportModelNow() {
     // Severity order, then the order the checks ran in. topologyFindings() walks
     // nodes before links, so ties keep the reading order of the Findings tab
@@ -607,6 +613,7 @@ function reportModelNow() {
         .sort((a, b) => (a.level === b.level ? a.seq - b.seq : (a.level === 'bad' ? -1 : 1)));
     const findings = all.filter((f) => !f.accepted);
     const accepted = all.filter((f) => f.accepted);
+    const tally = findingCounts(all);
 
     const devices = reportDevices();
     const connections = reportConnections();
@@ -621,9 +628,10 @@ function reportModelNow() {
         findings,
         accepted,
         // Pinned for the next visit (js/diagnostics.js), whatever their
-        // finding's state, and the accepted ones scheduled until a date.
+        // finding's state, and the accepted ones scheduled until a date. A
+        // pinned schedule is carried on its pin's row, so it is not here too.
         visit: reportVisit(),
-        scheduled: accepted.filter((f) => f.accepted.until),
+        scheduled: accepted.filter((f) => f.accepted.until && !pinEntryFor(f)),
         devices,
         // The names of the network's own columns the table shows, in its
         // order: the summary's device list heads its columns with them. Kept
@@ -640,9 +648,9 @@ function reportModelNow() {
             devices: devices.length,
             connections: connections.length,
             subnets: subnets.length,
-            critical: findings.filter((f) => f.level === 'bad').length,
-            advisory: findings.filter((f) => f.level === 'warn').length,
-            accepted: accepted.length
+            critical: tally.critical,
+            advisory: tally.advisory,
+            accepted: tally.accepted
         }
     };
 }
@@ -999,19 +1007,28 @@ function findingsSection(findings, opts = {}) {
         <tbody>${rows}</tbody></table>`;
 }
 
-// The pins, each as one line: { key, names, check, detail, note }. A pin
-// whose finding is not raised at the moment still prints (somebody asked for
-// it to be looked at), saying so.
+// The pins, each as one line: { key, names, check, detail, note, scheduled }.
+// A pin whose finding is not raised at the moment still prints (somebody asked
+// for it to be looked at), saying so. scheduled: the schedules its findings
+// are under, [{ until, reason }] once each, so a finding both pinned and
+// scheduled is one line saying both, not two.
 function reportVisit() {
-    return pinnedGroups(topologyFindings()).map((p) => ({
-        key: p.entry.check,
-        names: p.findings.length ? [...new Set(p.findings.map((f) => f.subject).filter(Boolean))].join(', ') : pinnedNames(p.entry),
-        check: findingCheckName(p.entry.check),
-        detail: p.findings.length ? p.findings.map((f) => sentenceCase(f.detail)).join(' ') : t('Not raised at the moment.'),
-        note: p.entry.note || ''
-    }));
+    return pinnedGroups(topologyFindings()).map((p) => {
+        // Not an info finding's: the report leaves those out (reportModelNow),
+        // so its schedule is planned nowhere, pinned or not.
+        const sched = p.findings.filter((f) => f.level !== 'info' && f.accepted && f.accepted.until);
+        return {
+            key: p.entry.check,
+            names: p.findings.length ? [...new Set(p.findings.map((f) => f.subject).filter(Boolean))].join(', ') : pinnedNames(p.entry),
+            check: findingCheckName(p.entry.check),
+            detail: p.findings.length ? p.findings.map((f) => sentenceCase(f.detail)).join(' ') : t('Not raised at the moment.'),
+            note: p.entry.note || '',
+            scheduled: [...new Map(sched.map((f) => [f.accepted.until + '\u0000' + f.accepted.reason, { until: f.accepted.until, reason: f.accepted.reason }])).values()]
+        };
+    });
 }
-// To check on the next visit: the pins, with what to look at.
+// To check on the next visit: the pins, with what to look at and what is
+// already scheduled for them.
 function visitSection(visit) {
     const rows = visit.map((v, i) => `
         <tr>
@@ -1019,7 +1036,7 @@ function visitSection(visit) {
             <td><b>${escapeHtml(v.names || '—')}</b></td>
             <td class="muted">${escapeHtml(v.check)}</td>
             <td>${escapeHtml(v.detail)}</td>
-            <td>${escapeHtml(v.note)}</td>
+            <td>${[v.note].concat((v.scheduled || []).map((s) => t('By {date}: {reason}', { date: s.until, reason: s.reason }))).filter(Boolean).map(escapeHtml).join('<br>')}</td>
         </tr>`).join('');
     return `<table class="accepted">
         <thead><tr><th></th><th>${t('Device')}</th><th>${t('Check')}</th><th>${t('Finding')}</th><th>${t('To check')}</th></tr></thead>
@@ -1453,6 +1470,8 @@ const plainFinding = (f) => {
 
 // The open findings as problems: one per check and severity, naming every
 // device it is about. What must be fixed first, then what needs attention.
+// The rows are grouped, but the headline (summaryVerdict) counts findings, as
+// the Findings tab and the technical sheet do.
 function summaryProblems(findings) {
     const by = new Map();
     (findings || []).filter((f) => f.level === 'bad' || f.level === 'warn').forEach((f) => {
@@ -1464,12 +1483,19 @@ function summaryProblems(findings) {
     const list = [...by.values()];
     return list.filter((p) => p.level === 'bad').concat(list.filter((p) => p.level === 'warn'));
 }
-// The one line at the top: { cls: 'ok' | 'warn' | 'bad', title, more }.
-function summaryVerdict(problems) {
-    const bad = problems.filter((p) => p.level === 'bad').length;
-    const warn = problems.length - bad;
+// The one line at the top: { cls: 'ok' | 'warn' | 'bad', title, more }, from
+// findingCounts(): five devices on a wrong gateway are five problems in one row.
+// spread ({ kinds, devices }, the critical rows and the devices they name) says
+// so when the problems are fewer kinds than findings: "One kind of problem
+// needs fixing, on 5 devices" over that one row, not "5 problems".
+function summaryVerdict({ critical, advisory }, spread = {}) {
+    const bad = critical || 0, warn = advisory || 0;
     const attention = (n) => t(n === 1 ? 'One thing needs attention' : '{n} things need attention', { n });
-    if (bad) return { cls: 'bad', title: t(bad === 1 ? 'One problem needs fixing' : '{n} problems need fixing', { n: bad }), more: warn ? attention(warn) : '' };
+    const kinds = spread.kinds || 0, devices = spread.devices || 0;
+    const fix = kinds && kinds < bad && devices > 1
+        ? t(kinds === 1 ? 'One kind of problem needs fixing, on {n} devices' : '{k} kinds of problem need fixing, on {n} devices', { k: kinds, n: devices })
+        : t(bad === 1 ? 'One problem needs fixing' : '{n} problems need fixing', { n: bad });
+    if (bad) return { cls: 'bad', title: fix, more: warn ? attention(warn) : '' };
     if (warn) return { cls: 'warn', title: attention(warn), more: '' };
     return { cls: 'ok', title: t('Your network looks fine'), more: '' };
 }
@@ -1483,7 +1509,11 @@ function summarySheet(model, opts = {}) {
     const meta = model.meta || {};
     const devices = model.devices || [];
     const problems = summaryProblems(model.findings);
-    const verdict = summaryVerdict(problems);
+    const critical = (model.findings || []).filter((f) => f.level === 'bad' && !f.accepted);
+    const verdict = summaryVerdict(findingCounts(model.findings), {
+        kinds: problems.filter((p) => p.level === 'bad').length,
+        devices: new Set(critical.flatMap((f) => f.nodeIds || [])).size
+    });
     const metaRows = REPORT_FIELDS
         .filter(({ key, multiline }) => !multiline && meta[key])
         .map(({ key, label }) => `<div><dt>${escapeHtml(t(label))}</dt><dd>${escapeHtml(meta[key])}</dd></div>`)
@@ -1501,8 +1531,9 @@ function summarySheet(model, opts = {}) {
     </li>`).join('')}</ol>` : `<p>${escapeHtml(t('No problems were found in how the network is set up. Keep this document: it is the record of what you have.'))}</p>`;
 
     // What is planned: the pins (on the next visit) and the schedules (by a
-    // date), so the client sees what is already in hand.
-    const planned = (model.visit || []).map((v) => `<li><b>${escapeHtml(plainFinding({ key: v.key, check: v.check }).what)}</b> — ${escapeHtml(v.names)}<br><span class="muted">${escapeHtml(v.note ? t('On the next visit: {note}', { note: v.note }) : t('On the next visit.'))}</span></li>`)
+    // date), so the client sees what is already in hand. A pinned finding that
+    // is also scheduled is one line saying both.
+    const planned = (model.visit || []).map((v) => `<li><b>${escapeHtml(plainFinding({ key: v.key, check: v.check }).what)}</b> — ${escapeHtml(v.names)}<br><span class="muted">${[v.note ? t('On the next visit: {note}', { note: v.note }) : t('On the next visit.')].concat((v.scheduled || []).map((s) => t('By {date}: {reason}', { date: s.until, reason: s.reason }))).map(escapeHtml).join('<br>')}</span></li>`)
         .concat((model.scheduled || []).map((f) => `<li><b>${escapeHtml(plainFinding(f).what)}</b> — ${escapeHtml(f.subject || '')}<br><span class="muted">${escapeHtml(t('By {date}: {reason}', { date: f.accepted.until, reason: f.accepted.reason }))}</span></li>`));
     const plan = planned.length ? `<h2>${escapeHtml(t('What is planned'))}</h2>
     <ul class="planned">${planned.join('')}</ul>` : '';
@@ -1820,14 +1851,16 @@ function deliverReport(html, meta, kind = 'report') {
 // the technical sheet, the one that prints it.
 async function generateSiteReport(meta, parts) {
     const p = reportParts(parts);
-    const model = reportModel();
+    // The dialog's date, not only the stored one: a read-only document never
+    // stores what was typed, and the model would count to another day.
+    const model = reportModel(meta);
     if (meta) model.meta = siteReportMeta(meta);
     const keptId = isKept() ? state.libraryId : null;
     const doc = keptId ? serializeDoc() : null;
     if (keptId) model.changes = reportChanges(keptId, doc);
     let image = null;
     if (p.technical) {
-        try { image = await captureCanvasImage('png'); }
+        try { image = await captureReportDiagram(reportAsOf(meta || state.report)); }
         catch (e) { console.warn('Report: could not rasterise the diagram; continuing without it.', e); }
     }
     const out = deliverReport(reportHtml(model, image, p), model.meta, p.technical ? 'report' : 'summary');
@@ -1841,6 +1874,21 @@ async function generateSiteReport(meta, parts) {
 // captureCanvasImage measures when it crops. Never calls save(), so the URL
 // and the undo timeline are untouched: the user asked for a report, not for
 // their canvas to be edited.
+// The diagram as of the report's day, as its findings are: a folded group's
+// card (groupRollup, js/groupmap.js) counts every open finding, the age and
+// service ones and a lapsed schedule among them. onChecksDay is synchronous
+// only, so the canvas is drawn for that day and copied inside it
+// (captureCanvasImage clones the canvas before its first await), then drawn
+// for today again. Only the drawing: the panels never show the report's day.
+// A pending typing redraw is flushed first, or the copy would draw it for
+// that day through all of renderCanvasOnly.
+function captureReportDiagram(day, scale) {
+    if (!day || day === todayISO()) return captureCanvasImage('png', scale);
+    flushTypedRender();
+    try { return onChecksDay(day, () => { withLookupPass(drawCanvas); return captureCanvasImage('png', scale); }); }
+    finally { withLookupPass(drawCanvas); }
+}
+
 async function withDocRendered(doc, fn) {
     const held = {
         nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report,
@@ -1869,7 +1917,9 @@ async function withDocRendered(doc, fn) {
 // at 2x. A site that will not rasterise is skipped rather than failing the
 // document — a report with one picture missing beats no report.
 async function captureBinderImages(sites, onProgress, capture) {
-    const grab = capture || ((doc) => withDocRendered(doc, () => captureCanvasImage('png', 2)));
+    // Each site's diagram counts to that site's own date, as its sheet does:
+    // inside withDocRendered, state.report is the site's.
+    const grab = capture || ((doc) => withDocRendered(doc, () => captureReportDiagram(reportAsOf(), 2)));
     const images = {};
     for (let i = 0; i < sites.length; i++) {
         const s = sites[i];

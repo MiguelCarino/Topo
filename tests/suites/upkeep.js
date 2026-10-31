@@ -182,11 +182,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 7: the report ----
     open();
     state.report = Object.assign({}, state.report, { date: '2026-10-31' });
-    const dev = reportDevices().find((d) => d.id === 'sw');
+    const dev = reportModel().devices.find((d) => d.id === 'sw');
     ok('the inventory says it, as of the report\'s date', dev.upkeep === 'In service since 2019 (about 7 y) · Last serviced 2026-01-31 · Next service 2027-01-31', dev.upkeep);
     state.report = Object.assign({}, state.report, { date: '2030-10-31' });
-    ok('a report dated later is older by as much', /about 11 y/.test(reportDevices().find((d) => d.id === 'sw').upkeep));
-    ok('a device with none has no line', reportDevices().find((d) => d.id === 'pc2').upkeep === '');
+    ok('a report dated later is older by as much', /about 11 y/.test(reportModel().devices.find((d) => d.id === 'sw').upkeep));
+    ok('a device with none has no line', reportModel().devices.find((d) => d.id === 'pc2').upkeep === '');
 
     // ---- 7b: the alerts (js/diagnostics.js upkeepFindings) ----
     // Dates relative to today, so the suite means the same any day it runs.

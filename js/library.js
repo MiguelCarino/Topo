@@ -1048,12 +1048,12 @@ function librarySummary(doc, raw) {
         const out = withDoc(doc, () => withLookupPass(() => {
             // What is open: a finding accepted with a reason is not counted
             // on the card, as it is not in the tab or the report's totals.
-            const findings = topologyFindings().filter(isOpenFinding);
+            const c = findingCounts(topologyFindings());
             return {
                 devices: state.nodes.length,
                 subnets: reportSubnets().length,
-                critical: findings.filter((f) => f.level === 'bad').length,
-                advisory: findings.filter((f) => f.level === 'warn').length
+                critical: c.critical,
+                advisory: c.advisory
             };
         }));
         if (key !== null) {

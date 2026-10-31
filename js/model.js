@@ -3709,6 +3709,26 @@ function serviceMonthsFromText(text) {
 function todayISO(now = new Date()) {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
+// The day the date-relative checks (age, service, schedules) count to: today,
+// or, inside onChecksDay(), a report's own date, so a report printed again
+// later says what it said in its findings as well as in its inventory.
+// Synchronous only, like withLookupPass: never wrap an await in it.
+let _checksDay = null;
+const checksDay = () => _checksDay || todayISO();
+const checksDayIsToday = () => !_checksDay || _checksDay === todayISO();
+// A lookup pass already open keeps its diagnosis on lookupPass.diag, worked
+// out for the outer day; withLookupPass would reuse it on the same refs. So
+// when the day changes the pass is set aside too, and the caller's
+// withLookupPass builds one whose diagnosis is this day's. The finally puts
+// both back, a throw included.
+function onChecksDay(day, fn) {
+    const outerDay = _checksDay, outerPass = lookupPass;
+    const next = day || null;
+    const moved = (next || todayISO()) !== checksDay();
+    _checksDay = next;
+    if (moved) lookupPass = null;
+    try { return fn(); } finally { _checksDay = outerDay; lookupPass = outerPass; }
+}
 // A loose date as { y, m, d, approx }: the day it counts from.
 function looseDateParts(v) {
     const s = asLooseDate(v);

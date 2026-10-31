@@ -1176,16 +1176,16 @@ const acceptedList = () => (Array.isArray(state.accepted) ? state.accepted : [])
 const entryCovers = (a, key, nodeIds, linkIds, scope) => a.check === key && (a.scope || '') === (scope || '')
     && (nodeIds || []).every((id) => a.nodeIds.includes(id))
     && (linkIds || []).every((id) => a.linkIds.includes(id));
-const entryLapsed = (a, today = todayISO()) => !!a.until && a.until < today;
+const entryLapsed = (a, today = checksDay()) => !!a.until && a.until < today;
 function acceptedEntryFor(accepted, key, nodeIds, linkIds, scope) {
     if (!accepted.length || !((nodeIds || []).length + (linkIds || []).length)) return null;
-    const today = todayISO();
+    const today = checksDay();
     return accepted.find((a) => !entryLapsed(a, today) && entryCovers(a, key, nodeIds, linkIds, scope)) || null;
 }
 // The schedule that lapsed on a finding now open again, or null.
 function lapsedEntryFor(accepted, key, nodeIds, linkIds, scope) {
     if (!accepted.length || !((nodeIds || []).length + (linkIds || []).length)) return null;
-    const today = todayISO();
+    const today = checksDay();
     return accepted.filter((a) => entryLapsed(a, today) && entryCovers(a, key, nodeIds, linkIds, scope))
         .sort((a, b) => (a.until < b.until ? 1 : -1))[0] || null;
 }
@@ -1194,6 +1194,21 @@ const isOpenFinding = (f) => !f.accepted;
 // info one (a rack's untagged cables) is listed in the Findings tab and the
 // spreadsheet, but it is no fault: it raises no pill, no badge, no total.
 const isCountedFinding = (f) => isOpenFinding(f) && f.level !== 'info';
+// What every count counts: findings, one each, never checks or entries (the
+// tab, the pill, the summary's verdict, a library card, the report's totals,
+// the Accepted label). An info finding is no fault and counts nowhere; an
+// accepted one counts only as accepted.
+function findingCounts(findings) {
+    const c = { critical: 0, advisory: 0, accepted: 0, open: 0 };
+    (findings || []).forEach((f) => {
+        if (!f || f.level === 'info') return;
+        if (f.accepted) c.accepted++;
+        else if (f.level === 'bad') c.critical++;
+        else if (f.level === 'warn') c.advisory++;
+    });
+    c.open = c.critical + c.advisory;
+    return c;
+}
 
 // Read from a document: only the four fields (and a scope that is text), ids
 // as strings, a reason that is text and not empty. Anything else is dropped, as the serializer's
@@ -1581,7 +1596,7 @@ function labelFindings() {
 // vendor comes on the 12th") covers that service only, and the next one,
 // once this is recorded, is a finding again. Worked out from today's date
 // (upkeepState), so the same file says more as it gets older.
-function upkeepFindings(today = todayISO()) {
+function upkeepFindings(today = checksDay()) {
     const out = [];
     const ago = (days) => (days < 60 ? t('{n} days ago', { n: days })
         : days < 730 ? t('about {n} months ago', { n: Math.round(days / 30.4) }) : t('about {n} years ago', { n: Math.round(days / 365.25) }));
@@ -1997,12 +2012,16 @@ function currentDiagnosis() {
     return currentDiagnosisNow();
 }
 function currentDiagnosisNow() {
+    // A report counting to another day (onChecksDay, js/model.js) neither
+    // reads nor writes the memo, so it never evicts today's: the report is
+    // built in one lookup pass, which keeps its diagnosis for the whole build.
+    if (!checksDayIsToday()) return diagnoseDoc(null);
     const lang = window.CarinoI18N ? window.CarinoI18N.current() : '';
     // state.wifi too: the Wi-Fi checks read a network's security, subnet and
     // bands, so editing only a Wi-Fi network must not give the old findings.
     // Today's date too: the age and service findings change with it.
     // And the network's own expected lives: they decide which device is old.
-    const key = `${lang}\u0000${todayISO()}\u0000${JSON.stringify(state.expectedLife || {})}\u0000${JSON.stringify(state.nodes, omitPosition)}\u0000${JSON.stringify(state.links)}\u0000${JSON.stringify(state.networks)}\u0000${JSON.stringify(state.groups || [])}\u0000${JSON.stringify(state.accepted || [])}\u0000${JSON.stringify(state.wifi || [])}`;
+    const key = `${lang}\u0000${checksDay()}\u0000${JSON.stringify(state.expectedLife || {})}\u0000${JSON.stringify(state.nodes, omitPosition)}\u0000${JSON.stringify(state.links)}\u0000${JSON.stringify(state.networks)}\u0000${JSON.stringify(state.groups || [])}\u0000${JSON.stringify(state.accepted || [])}\u0000${JSON.stringify(state.wifi || [])}`;
     if (diagnosisMemo && diagnosisMemo.key === key) {
         // Same network, but maybe not the same objects: undo, redo and
         // Back/Forward rebuild every node from the stored document, and a move
@@ -2149,6 +2168,7 @@ function validateTopology(diag) {
     if (!msgList) return;
     const all = (diag || currentDiagnosis()).findings;
     const findings = all.filter(isOpenFinding);
+    const counts = findingCounts(all);
 
     if (!msgList.dataset.wired) {
         msgList.dataset.wired = '1';
@@ -2194,8 +2214,10 @@ function validateTopology(diag) {
 
     panelAccepted = acceptedGroups(all);
     const acceptedBox = document.getElementById('acceptedBox');
+    // The box shows while there is an entry, even one that covers nothing at
+    // the moment (it says so); the label counts findings, as the report does.
     acceptedBox.classList.toggle('hidden', !panelAccepted.length);
-    document.getElementById('acceptedSummary').textContent = t('Accepted: {n}', { n: panelAccepted.reduce((n, a) => n + Math.max(1, a.findings.length), 0) });
+    document.getElementById('acceptedSummary').textContent = t('Accepted: {n}', { n: counts.accepted });
     document.getElementById('acceptedList').innerHTML = panelAccepted.map((a, ai) => {
         const lines = a.findings.length
             ? groupFindings(a.findings).flatMap((g) => g.items.map((item) => `${g.check}: ${findingItemText(item)}`))
@@ -2227,14 +2249,13 @@ function validateTopology(diag) {
 
     document.getElementById('findingsEmpty').classList.toggle('hidden', findings.length > 0);
     // Counted: what is wrong. An info finding is in the list, not the count.
-    const counted = findings.filter(isCountedFinding);
-    const worst = counted.some((f) => f.level === 'bad') ? 'bad' : counted.length ? 'warn' : '';
+    const worst = counts.critical ? 'bad' : counts.open ? 'warn' : '';
     const count = document.getElementById('findTabCount');
-    count.textContent = counted.length ? String(counted.length) : '';
-    count.className = `cfg-count ${worst}${counted.length ? '' : ' hidden'}`;
-    document.getElementById('conflictPillCount').textContent = String(counted.length);
+    count.textContent = counts.open ? String(counts.open) : '';
+    count.className = `cfg-count ${worst}${counts.open ? '' : ' hidden'}`;
+    document.getElementById('conflictPillCount').textContent = String(counts.open);
     const pill = document.getElementById('conflictPill');
-    pill.classList.toggle('hidden', !counted.length);
+    pill.classList.toggle('hidden', !counts.open);
     pill.classList.toggle('bad', worst === 'bad');
 }
 

@@ -266,9 +266,18 @@ UPKEEP_INPUTS.forEach(({ key, id }) => {
         if (!blank && v === null) return;
         if (blank) delete node[key]; else node[key] = v;
         saveTyping();
+        // The findings, the device's badge and the table's Age and Next
+        // service read these too: drawn like any typed field.
+        renderTyped();
         renderUpkeepNote(node);
     });
-    assetEl(id).addEventListener('change', () => { const node = selectedNodeForEdit(); if (node) renderUpkeepFields(getNode(node.id) || node); });
+    // A commit (leaving the field, Enter, a picked day) draws at once rather
+    // than when the typing's window closes.
+    assetEl(id).addEventListener('change', () => {
+        flushTypedRender();
+        const node = selectedNodeForEdit();
+        if (node) renderUpkeepFields(getNode(node.id) || node);
+    });
 });
 
 // Records the service as done today (servicedToday, js/diagnostics.js).
