@@ -5,6 +5,10 @@ window.addEventListener('load', () => {
   const out = [];
   const ok = (name, cond, extra) => out.push(`${cond ? 'PASS' : 'FAIL'} :: ${name}${extra ? ' :: ' + extra : ''}`);
 
+  // The test machine's two NICs carry two addresses, and a bond holds one:
+  // createBond asks which to keep rather than drop the other silently.
+  const KEEP = '192.168.1.10/24';
+
   function reset(nodes, links) {
     state.nodes = nodes.map(normalizeLoadedNode);
     state.links = links.map(normalizeLoadedLink);
@@ -26,7 +30,7 @@ window.addEventListener('load', () => {
   ok('unbonded PACS still flags MAC flapping', nodeSeverity(getNode('pacs')) === 'bad');
 
   const pacs = getNode('pacs');
-  const bond = createBond(pacs);
+  const bond = createBond(pacs, { keep: KEEP });
   ok('createBond folds both NICs in', bond && bond.bond.members.length === 2, bond && bond.bond.members.join('+'));
   ok('the bond takes the address', bond && bond.ip === '192.168.1.10/24', bond && bond.ip);
   ok('members give theirs up', pacs.interfaces.filter((i) => !isBond(i)).every((i) => !i.ip),
@@ -42,7 +46,7 @@ window.addEventListener('load', () => {
   // ---- 2: a bond that kept the address on its members fixes nothing ----
   pacsScenario();
   const p2 = getNode('pacs');
-  const b2 = createBond(p2);
+  const b2 = createBond(p2, { keep: KEEP });
   p2.interfaces.find((i) => i.name === 'eno1').ip = '192.168.1.10/24'; // the classic half-migration
   ok('address left on a member is flagged', evaluateBond(p2).level === 'bad', evaluateBond(p2).text.slice(0, 70));
   ok('and the node stays badged', nodeSeverity(p2) === 'bad');
@@ -51,7 +55,7 @@ window.addEventListener('load', () => {
   reset([{ id: 'h', type: 'server', name: 'Host', x: 0, y: 0,
            interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.5/24' }, { id: 'i2', name: 'eth1', ip: '' }] }], []);
   const h = getNode('h');
-  const b3 = createBond(h);
+  const b3 = createBond(h, { keep: KEEP });
   b3.bond.members = [b3.bond.members[0]];
   ok('a single-member bond warns', evaluateBond(h).level === 'warn', evaluateBond(h).text.slice(0, 55));
 
@@ -67,7 +71,7 @@ window.addEventListener('load', () => {
       { id: 'l2', source: 'srv', target: 'swB' }
     ]);
     const n = getNode('srv');
-    const b = createBond(n, { mode });
+    const b = createBond(n, { mode, keep: KEEP });
     return { n, b };
   };
 
@@ -81,14 +85,14 @@ window.addEventListener('load', () => {
   // ...but LACP into a single switch is exactly right.
   pacsScenario();
   const p4 = getNode('pacs');
-  createBond(p4, { mode: '802.3ad' });
+  createBond(p4, { mode: '802.3ad', keep: KEEP });
   ok('LACP into one switch is fine', evaluateBond(p4).level === 'good', evaluateBond(p4).text.slice(0, 60));
 
   // ---- 5: a radio cannot be a bond member ----
   reset([{ id: 'lap', type: 'pc', name: 'Laptop', x: 0, y: 0,
            interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.1.20/24' }, { id: 'i2', name: 'wlan0', ip: '' }] }], []);
   const lap = getNode('lap');
-  const b5 = createBond(lap);
+  const b5 = createBond(lap, { keep: KEEP });
   ok('createBond leaves the radio out', !b5 || !b5.bond.members.includes('i2'), b5 ? b5.bond.members.join(',') : 'no bond');
   if (b5) {
     b5.bond.members.push('i2'); // force it, as a hand-edited diagram might
@@ -99,7 +103,7 @@ window.addEventListener('load', () => {
 
   // ---- 6: bonds survive the URL hash ----
   pacsScenario();
-  createBond(getNode('pacs'), { mode: '802.3ad' });
+  createBond(getNode('pacs'), { mode: '802.3ad', keep: KEEP });
   save(); load();
   const reloaded = getNode('pacs');
   const rb = (reloaded.interfaces || []).find(isBond);
@@ -111,7 +115,7 @@ window.addEventListener('load', () => {
   // ---- 7: unbonding hands the address back ----
   pacsScenario();
   const p7 = getNode('pacs');
-  const b7 = createBond(p7);
+  const b7 = createBond(p7, { keep: KEEP });
   removeBond(p7, b7.id);
   ok('unbond returns the address to a member', (p7.interfaces[0] || {}).ip === '192.168.1.10/24',
      p7.interfaces.map((i) => `${i.name}=${i.ip || '-'}`).join(' '));
@@ -122,7 +126,7 @@ window.addEventListener('load', () => {
   // so it has to end the same way: somebody still holds the IP.
   pacsScenario();
   const p7b = getNode('pacs');
-  const b7b = createBond(p7b);
+  const b7b = createBond(p7b, { keep: KEEP });
   const members7b = [...b7b.bond.members];
   b7b.bond.members = b7b.bond.members.filter((id) => id !== members7b[0]);
   ok('pulling one member leaves the bond holding the address', (p7b.interfaces.find(isBond) || {}).ip === '192.168.1.10/24');
@@ -147,7 +151,7 @@ window.addEventListener('load', () => {
   // Deleting a bonded member pulls it out of the bond too.
   pacsScenario();
   const p9 = getNode('pacs');
-  const b9 = createBond(p9);
+  const b9 = createBond(p9, { keep: KEEP });
   deleteIface(p9, b9.bond.members[1]);
   ok('deleting a member removes it from the bond', b9.bond.members.length === 1, b9.bond.members.join(','));
 

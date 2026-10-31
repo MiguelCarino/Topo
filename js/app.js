@@ -1084,7 +1084,7 @@ function bridgeIntent(node) {
         const gwStr = gw;
         gwOwner = real.find((i) => {
             const parsed = parseValidCIDR(i.ip);
-            try { return parsed && ipaddr.parse(gwStr).match(parsed.cidrObj); } catch (e) { return false; }
+            try { return parsed && parseIpOrThrow(gwStr).match(parsed.cidrObj); } catch (e) { return false; }
         }) || real.find((i) => i.ip) || real[0] || null;
     }
 
@@ -1150,6 +1150,7 @@ function save() {
         // document as it now is.
         repairHosts(state.nodes);
         pruneHostFolds();   // a host whose last guest just went folds nothing (js/groupmap.js)
+        pruneFindingNotes();   // and an accept or a pin leaves the devices and cables that went (js/diagnostics.js)
         const doc = serializeDoc();
         const json = JSON.stringify(doc);
         // A field still being typed into is part of this document already (the
@@ -1380,8 +1381,17 @@ function normalizeLoadedAnnotation(a) {
 function loadDocState(doc) {
     const { doc: d, newer } = migrateDoc(doc);
     const list = (v) => (Array.isArray(v) ? v : []);
-    state.nodes = list(d.nodes).map(normalizeLoadedNode);
-    state.links = list(d.links).map(normalizeLoadedLink).filter((l) => getNode(l.source) && getNode(l.target));
+    // Two devices or two cables under one id (a merged or hand-edited file):
+    // every lookup finds the first, so the second could never be cabled or
+    // selected. The later one gets an id of its own, as a subnet does
+    // (normalizeNetworks); the cables naming the id stay with the first.
+    const ownIds = (items, prefix) => {
+        const seen = new Set();
+        items.forEach((x) => { if (seen.has(x.id)) x.id = nextId(prefix); seen.add(x.id); });
+        return items;
+    };
+    state.nodes = ownIds(list(d.nodes).map(normalizeLoadedNode), 'n');
+    state.links = ownIds(list(d.links).map(normalizeLoadedLink), 'l').filter((l) => getNode(l.source) && getNode(l.target));
     state.networks = normalizeNetworks(d.networks);
     // Groups after the devices: a device's group must be one of them.
     state.groups = normalizeGroups(d.groups);
@@ -1395,6 +1405,12 @@ function loadDocState(doc) {
     repairHosts(state.nodes);
     state.accepted = normalizeAccepted(d.accepted);
     state.pinned = normalizePinned(d.pinned);
+    // After the devices and cables they name: an id the file does not hold
+    // goes, and an IP or MAC conflict accepted before conflicts had a scope
+    // is given its address (js/diagnostics.js scopeLegacyConflicts).
+    pruneFindingNotes();
+    state.accepted = scopeLegacyConflicts(state.accepted);
+    state.pinned = scopeLegacyConflicts(state.pinned);
     state.expectedLife = normalizeExpectedLife(d.expectedLife);
     // The custom columns, and every device's values checked against them.
     state.columns = normalizeCustomColumns(d.columns);
@@ -1729,6 +1745,8 @@ function deleteSelected(opts = {}) {
             state.nodes = state.nodes.filter((n) => !nodes.has(n.id));
             state.links = state.links.filter((l) => !links.has(l.id) && !nodes.has(l.source) && !nodes.has(l.target));
             dropTargets(nodes);
+            // The accepts and pins leave them in the save() below, in this
+            // same step (pruneFindingNotes, js/diagnostics.js).
         }
         select(null, null); save();
         renderCanvasOnly();

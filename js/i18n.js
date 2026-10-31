@@ -1797,6 +1797,20 @@ const MESSAGES = {
         'Location': 'Ubicación',
         'Status': 'Estado',
         // Age and upkeep (js/model.js, js/assets.js).
+        // The CSV import: how a file and a date column were read, and rows that
+        // name one new device (js/csv.js).
+        'The file is not UTF-8, so it was read as {encoding}, as Excel saves "CSV (Comma delimited)". If a letter looks wrong, save it from Excel as "CSV UTF-8" and open it again.': 'El archivo no es UTF-8, así que se leyó como {encoding}, como Excel guarda "CSV (delimitado por comas)". Si una letra se ve mal, guárdalo desde Excel como "CSV UTF-8" y ábrelo de nuevo.',
+        'Dates in {column} are written both day first and month first: check them before applying.': 'Las fechas de {column} están escritas con el día primero y con el mes primero: revísalas antes de aplicar.',
+        'Dates in {column} read as month/day: nothing in the column says which comes first.': 'Las fechas de {column} se leyeron como mes/día: nada en la columna dice qué va primero.',
+        'Dates in {column} read as day/month: nothing in the column says which comes first.': 'Las fechas de {column} se leyeron como día/mes: nada en la columna dice qué va primero.',
+        'Another row is also called {name}, with another {fields}: added as a device of its own.': 'Otra fila también se llama {name}, con otro {fields}: se añade como un dispositivo aparte.',
+        'Another row names {name} too: read as one device.': 'Otra fila también nombra a {name}: se lee como un solo dispositivo.',
+        'Another row is also called {name}, but this MAC is randomised (locally administered): added as a device of its own.': 'Otra fila también se llama {name}, pero esta MAC es aleatoria (de administración local): se añade como un dispositivo aparte.',
+        'Rows that share a name are read as one device each: {names}.': 'Las filas que comparten nombre se leen como un solo dispositivo cada una: {names}.',
+        // Bonding NICs that carry different addresses (js/model.js createBond, js/ui.js).
+        'These NICs carry {n} different addresses, and a bond holds one. Pick the one it keeps; the others are cleared.': 'Estas NIC tienen {n} direcciones distintas, y un bond guarda una sola. Elige la que conserva; las demás se borran.',
+        'Bond, keeping {ip}': 'Crear el bond con {ip}',
+        'Now on {names}': 'Ahora en {names}',
         'By type…': 'Por tipo…',
         'Expected life by type': 'Vida útil por tipo',
         'How many years each kind of device lasts in this network before it shows as past its expected life. Blank uses Topo\'s usual, shown greyed. A device\'s own Expected life still wins. Saved with the network.': 'Cuántos años dura cada tipo de equipo en esta red antes de aparecer como fuera de su vida útil. En blanco usa lo habitual de Topo, en gris. La vida útil propia de un equipo sigue mandando. Se guarda con la red.',
@@ -3131,6 +3145,20 @@ const MESSAGES = {
         'Location': 'Localização',
         'Status': 'Status',
         // Age and upkeep (js/model.js, js/assets.js).
+        // The CSV import: how a file and a date column were read, and rows that
+        // name one new device (js/csv.js).
+        'The file is not UTF-8, so it was read as {encoding}, as Excel saves "CSV (Comma delimited)". If a letter looks wrong, save it from Excel as "CSV UTF-8" and open it again.': 'O arquivo não é UTF-8, então foi lido como {encoding}, como o Excel salva "CSV (separado por vírgulas)". Se uma letra parecer errada, salve-o no Excel como "CSV UTF-8" e abra-o de novo.',
+        'Dates in {column} are written both day first and month first: check them before applying.': 'As datas em {column} estão escritas com o dia primeiro e com o mês primeiro: confira-as antes de aplicar.',
+        'Dates in {column} read as month/day: nothing in the column says which comes first.': 'As datas em {column} foram lidas como mês/dia: nada na coluna diz o que vem primeiro.',
+        'Dates in {column} read as day/month: nothing in the column says which comes first.': 'As datas em {column} foram lidas como dia/mês: nada na coluna diz o que vem primeiro.',
+        'Another row is also called {name}, with another {fields}: added as a device of its own.': 'Outra linha também se chama {name}, com outro {fields}: adicionada como um dispositivo à parte.',
+        'Another row names {name} too: read as one device.': 'Outra linha também nomeia {name}: lida como um só dispositivo.',
+        'Another row is also called {name}, but this MAC is randomised (locally administered): added as a device of its own.': 'Outra linha também se chama {name}, mas este MAC é aleatório (de administração local): adicionada como um dispositivo à parte.',
+        'Rows that share a name are read as one device each: {names}.': 'Linhas que compartilham um nome são lidas como um só dispositivo cada: {names}.',
+        // Bonding NICs that carry different addresses (js/model.js createBond, js/ui.js).
+        'These NICs carry {n} different addresses, and a bond holds one. Pick the one it keeps; the others are cleared.': 'Estas NICs têm {n} endereços diferentes, e um bond guarda um só. Escolha o que ele mantém; os outros são apagados.',
+        'Bond, keeping {ip}': 'Criar o bond com {ip}',
+        'Now on {names}': 'Agora em {names}',
         'By type…': 'Por tipo…',
         'Expected life by type': 'Vida útil por tipo',
         'How many years each kind of device lasts in this network before it shows as past its expected life. Blank uses Topo\'s usual, shown greyed. A device\'s own Expected life still wins. Saved with the network.': 'Quantos anos cada tipo de equipamento dura nesta rede antes de aparecer como fora da vida útil. Em branco usa o usual do Topo, em cinza. A vida útil própria de um equipamento continua valendo. Salvo com a rede.',
@@ -4466,6 +4494,20 @@ const MESSAGES = {
         'Location': 'Местоположение',
         'Status': 'Статус',
         // Age and upkeep (js/model.js, js/assets.js).
+        // The CSV import: how a file and a date column were read, and rows that
+        // name one new device (js/csv.js).
+        'The file is not UTF-8, so it was read as {encoding}, as Excel saves "CSV (Comma delimited)". If a letter looks wrong, save it from Excel as "CSV UTF-8" and open it again.': 'Файл не в UTF-8, поэтому он прочитан как {encoding} — так Excel сохраняет «CSV (разделители — запятые)». Если буквы выглядят неверно, сохраните файл в Excel как «CSV UTF-8» и откройте его снова.',
+        'Dates in {column} are written both day first and month first: check them before applying.': 'Даты в столбце {column} записаны и с днём впереди, и с месяцем впереди: проверьте их перед применением.',
+        'Dates in {column} read as month/day: nothing in the column says which comes first.': 'Даты в столбце {column} прочитаны как месяц/день: ничто в столбце не указывает, что идёт первым.',
+        'Dates in {column} read as day/month: nothing in the column says which comes first.': 'Даты в столбце {column} прочитаны как день/месяц: ничто в столбце не указывает, что идёт первым.',
+        'Another row is also called {name}, with another {fields}: added as a device of its own.': 'Другая строка тоже называется {name}, но с другим значением {fields}: добавлено как отдельное устройство.',
+        'Another row names {name} too: read as one device.': 'Другая строка тоже называет {name}: прочитано как одно устройство.',
+        'Another row is also called {name}, but this MAC is randomised (locally administered): added as a device of its own.': 'Другая строка тоже называется {name}, но этот MAC-адрес случайный (локально администрируемый): добавлено как отдельное устройство.',
+        'Rows that share a name are read as one device each: {names}.': 'Строки с одинаковым именем прочитаны как одно устройство на каждое имя: {names}.',
+        // Bonding NICs that carry different addresses (js/model.js createBond, js/ui.js).
+        'These NICs carry {n} different addresses, and a bond holds one. Pick the one it keeps; the others are cleared.': 'У этих NIC разные адреса ({n}), а у bond может быть только один. Выберите, какой он сохранит; остальные будут очищены.',
+        'Bond, keeping {ip}': 'Создать bond с адресом {ip}',
+        'Now on {names}': 'Сейчас на {names}',
         'By type…': 'По типам…',
         'Expected life by type': 'Срок службы по типам',
         'How many years each kind of device lasts in this network before it shows as past its expected life. Blank uses Topo\'s usual, shown greyed. A device\'s own Expected life still wins. Saved with the network.': 'Сколько лет служит каждый тип устройства в этой сети, прежде чем считается отслужившим. Пустое поле — обычное значение Topo (серым). Собственный срок службы устройства по-прежнему важнее. Сохраняется вместе с сетью.',
@@ -5793,6 +5835,20 @@ const MESSAGES = {
         'Location': '設置場所',
         'Status': 'ステータス',
         // Age and upkeep (js/model.js, js/assets.js).
+        // The CSV import: how a file and a date column were read, and rows that
+        // name one new device (js/csv.js).
+        'The file is not UTF-8, so it was read as {encoding}, as Excel saves "CSV (Comma delimited)". If a letter looks wrong, save it from Excel as "CSV UTF-8" and open it again.': 'このファイルは UTF-8 ではないため、Excel が「CSV (コンマ区切り)」で保存する {encoding} として読み込みました。文字がおかしい場合は、Excel で「CSV UTF-8」として保存し直してから開いてください。',
+        'Dates in {column} are written both day first and month first: check them before applying.': '{column} の日付は、日が先のものと月が先のものが混在しています。適用する前に確認してください。',
+        'Dates in {column} read as month/day: nothing in the column says which comes first.': '{column} の日付は月/日として読み込みました。列のどこにも、どちらが先かを示すものがありません。',
+        'Dates in {column} read as day/month: nothing in the column says which comes first.': '{column} の日付は日/月として読み込みました。列のどこにも、どちらが先かを示すものがありません。',
+        'Another row is also called {name}, with another {fields}: added as a device of its own.': '別の行も {name} という名前ですが、{fields} が異なります。別のデバイスとして追加します。',
+        'Another row names {name} too: read as one device.': '別の行も {name} を指しています。1 台のデバイスとして読み込みます。',
+        'Another row is also called {name}, but this MAC is randomised (locally administered): added as a device of its own.': '別の行も {name} という名前ですが、この MAC はランダム (ローカル管理) です。別のデバイスとして追加します。',
+        'Rows that share a name are read as one device each: {names}.': '同じ名前の行は、名前ごとに 1 台のデバイスとして読み込みます: {names}。',
+        // Bonding NICs that carry different addresses (js/model.js createBond, js/ui.js).
+        'These NICs carry {n} different addresses, and a bond holds one. Pick the one it keeps; the others are cleared.': 'これらの NIC には {n} 個の異なるアドレスがありますが、ボンドが持てるのは 1 つだけです。残すアドレスを選んでください。ほかのアドレスは消去されます。',
+        'Bond, keeping {ip}': '{ip} を残してボンドを作成',
+        'Now on {names}': '現在の NIC: {names}',
         'By type…': '種類別…',
         'Expected life by type': '種類別の耐用年数',
         'How many years each kind of device lasts in this network before it shows as past its expected life. Blank uses Topo\'s usual, shown greyed. A device\'s own Expected life still wins. Saved with the network.': 'このネットワークで、各種類の機器が耐用年数超過と表示されるまでの年数です。空欄はTopoの標準（灰色）を使います。機器ごとの耐用年数が優先されます。ネットワークと一緒に保存されます。',

@@ -1528,9 +1528,25 @@ function renderSidebarData(node) {
     // The bond button only makes sense with two wired NICs to fold together.
     const bondBtn = document.getElementById('bondIfaceBtn');
     if (bondBtn) {
-        const bondable = getInterfaces(node).filter(
-            (i) => !i.implicit && !isBond(i) && !isBondMember(node, i.id) && !ifaceIsWireless(i));
+        const bondable = bondCandidates(node);
         bondBtn.classList.toggle('hidden', bondable.length < 2);
+        // When the NICs carry different addresses, createBond() refuses to
+        // pick which one the bond keeps (js/model.js), so the button opens
+        // that choice instead. A listener of its own, beside app.js's
+        // onclick: that one bonds when there is nothing to choose, and does
+        // nothing when there is.
+        if (!bondBtn.dataset.choiceWired) {
+            bondBtn.dataset.choiceWired = '1';
+            bondBtn.addEventListener('click', () => {
+                const sel = state.selectedType === 'node' ? getNode(state.selectedId) : null;
+                if (!sel || bondAddresses(sel).length < 2) return;
+                bondChoiceFor = sel.id;
+                renderSidebarData(sel);
+            });
+        }
+        const addresses = bondable.length < 2 ? [] : bondAddresses(node);
+        if (bondChoiceFor === node.id && addresses.length > 1) renderBondChoice(node, addresses, ifCont);
+        else bondChoiceFor = null;
     }
 
     if (!node.interfaces.length) {
@@ -1776,6 +1792,49 @@ function renderMacLine(node, iface) {
     row.appendChild(top); row.appendChild(out);
     paint();
     return row;
+}
+
+// Which node's sidebar has the bond's address choice open. Sidebar state, not
+// document state: it is never saved, and selecting another device closes it.
+let bondChoiceFor = null;
+
+// The NICs about to be bonded carry different addresses, and a bond holds one.
+// Clearing the others used to happen silently (a NAS bonded from .10 and .11
+// came out as .10, and whatever pointed at .11 broke without a word), so the
+// person picks the one to keep, seeing which NIC has each.
+function renderBondChoice(node, addresses, container) {
+    const box = document.createElement('div');
+    box.className = 'rail-note';
+    box.id = 'bondChoice';
+
+    const why = document.createElement('div');
+    why.textContent = t('These NICs carry {n} different addresses, and a bond holds one. Pick the one it keeps; the others are cleared.', { n: addresses.length });
+    box.appendChild(why);
+
+    addresses.forEach((a) => {
+        const keep = document.createElement('button');
+        keep.className = 'link-btn';
+        keep.textContent = t('Bond, keeping {ip}', { ip: a.ip });
+        keep.title = t('Now on {names}', { names: a.names.join(', ') });
+        keep.onclick = () => {
+            if (!createBond(node, { keep: a.ip })) return;
+            bondChoiceFor = null;
+            save(); renderCanvasOnly(); renderSidebarData(node); renderNodeDiagnostics(node);
+        };
+        const line = document.createElement('div');
+        line.appendChild(keep);
+        box.appendChild(line);
+    });
+
+    const cancel = document.createElement('button');
+    cancel.className = 'link-btn quiet';
+    cancel.textContent = t('Cancel');
+    cancel.onclick = () => { bondChoiceFor = null; renderSidebarData(node); };
+    const last = document.createElement('div');
+    last.appendChild(cancel);
+    box.appendChild(last);
+
+    container.appendChild(box);
 }
 
 function renderBondMode(node, bond) {

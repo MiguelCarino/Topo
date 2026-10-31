@@ -1186,14 +1186,22 @@ function startEdit(td, seed) {
     // js/ui.js). Moving between the two is still editing the cell; leaving
     // both is a blur.
     let unitEl = null;
+    // A length kept from an older file as free text ("15 feet", "about 3")
+    // opens as it is written, not filtered down to its digits: filtered, and
+    // with the unit pick on m, an Enter or a blur would have rewritten it to
+    // "15 m" without anyone asking. What is typed is filtered as ever, and
+    // the text left as it was is no edit at all (finishEdit).
+    let legacy;
     if (col.unit) {
+        const stored = target ? col.get(target) : '';
+        if (seed === undefined && String(stored == null ? '' : stored).trim() && !cableLengthParts(stored)) legacy = el.value;
         unitEl = wrapUnitField(el, col.unitOf(row), 'tv-unit');
-        filterLengthInput(el);
+        if (legacy === undefined) filterLengthInput(el);
         el.addEventListener('input', () => filterLengthInput(el));
         unitEl.addEventListener('change', () => el.focus());
         unitEl.addEventListener('blur', (e) => { if (e.relatedTarget !== el) finishEdit('blur'); });
     }
-    _tv.editor = { el, unitEl, td, rowKey: row.key, colKey: col.key, done: false };
+    _tv.editor = { el, unitEl, td, rowKey: row.key, colKey: col.key, done: false, legacy, legacyUnit: unitEl ? unitEl.value : undefined };
     el.addEventListener('blur', (e) => { if (!unitEl || e.relatedTarget !== unitEl) finishEdit('blur'); });
     el.focus();
     if (seed === undefined && el.select) el.select();
@@ -1225,6 +1233,16 @@ function finishEdit(how, move) {
     const col = row && colByKey(row, ed.colKey);
     if (!row || !col) { cancelEdit(); return true; }
     const text = ed.el.value;
+    // An old free-text length left as it opened, its unit pick not moved
+    // either, asks for nothing. Parsed, "15 feet" would come back "15 ft"
+    // and "about 3" would be refused, neither of which anyone asked for.
+    if (ed.legacy !== undefined && text === ed.legacy && (!ed.unitEl || ed.unitEl.value === ed.legacyUnit)) {
+        ed.done = true; _tv.editor = null;
+        if (move) { const next = moveFrom(ed.td, move, true); if (next) { _tv.cursor = { row: next.parentElement.dataset.row, col: next.dataset.col }; _tv.cursorChosen = true; } }
+        _tv.keepFocus = how !== 'blur';
+        renderTableView(how !== 'blur');
+        return true;
+    }
     const res = col.parse(text, row, ed.unitEl ? ed.unitEl.value : undefined);
     if (res.error) {
         if (how !== 'blur') {
@@ -1396,7 +1414,9 @@ function planPaste(colKey, text, targets = pasteTargets(), tab = _tv.tab) {
         const target = col && findTarget(col.rec, row.ref);
         const now = col ? col.show(row).text : '';
         if (!col || !line.trim() || !canEdit(row, col) || !target) { cells.push({ row, status: 'skip', now, text: line }); return; }
-        const res = col.parse(line, row, work);
+        // A length pasted as a bare number is in the unit the cable is kept
+        // in: "25" over an 8 ft cable is 25 ft, not 25 m.
+        const res = col.parse(line, row, work !== undefined ? work : col.unit ? col.unitOf(row) : undefined);
         if (res.error) { cells.push({ row, status: 'bad', now, text: line, why: tvInvalid(col, line) }); return; }
         if (work) col.chain.apply(work, row, res.value);
         const cell = { row, status: col.same(col.get(target), res.value) ? 'same' : 'change', now, text: line, value: res.value };
@@ -1569,7 +1589,9 @@ function onTablePaste(e) {
     if (lines.length <= 1 && pasteTicked().length < 2) {
         if (!canEdit(row, col) || col.editor === 'bool' && !lines.length) return;
         if (readOnlyRefuses()) return;
-        const res = col.parse(lines[0] || '', row);
+        // A bare number pasted as a length takes the cable's own unit, as in
+        // the preview (planPaste).
+        const res = col.parse(lines[0] || '', row, col.unit ? col.unitOf(row) : undefined);
         if (res.error) { showToast(tvInvalid(col, lines[0] || '')); return; }
         _tv.keepFocus = true;
         commitValue(row, col, res.value, true);

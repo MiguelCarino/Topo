@@ -136,7 +136,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const doc = serializeDoc();
     // v5 brought the list; later versions (v6: port names and labels) keep it.
     ok('the document is v5 or later and carries the list', doc.v === DOC_VERSION && DOC_VERSION >= 5 && Array.isArray(doc.accepted) && doc.accepted.length === 2);
-    ok('written as check, node ids and reason (no empty cable list)', JSON.stringify(doc.accepted[0]) === JSON.stringify({ check: 'ip-conflict', nodeIds: ['pa', 'pb'], reason: 'Two lab images behind the bench NAT; never on the LAN together.' }),
+    ok('written as check, the address, node ids and reason (no empty cable list)', JSON.stringify(doc.accepted[0]) === JSON.stringify({ check: 'ip-conflict', scope: '10.0.0.10', nodeIds: ['pa', 'pb'], reason: 'Two lab images behind the bench NAT; never on the LAN together.' }),
        JSON.stringify(doc.accepted[0]));
     ok('a v4 document is opened by the chain and reads as accepting nothing', migrateDoc({ v: 4, nodes: [], links: [] }).doc.v === DOC_VERSION
        && MIGRATIONS.some((m) => m.from === 4 && m.to === 5));

@@ -47,15 +47,35 @@ const hasPortGrid = (node) => !!node && (node.type === 'switch' || node.type ===
 // and the rack view's and the report's port rings (rackPortsOf's `doubled`)
 // ask this one question, so a port is never ringed red where Findings is clean.
 const isSocketPort = (node, ifaceId) => hasPortGrid(node) ? /^p\d+$/.test(ifaceId) : !isRoutingDevice(node && node.type);
-const hasExplicitPortCount = (node) => Number.isFinite(node?.portCount);
+// A count is a whole number of sockets, and no switch has more than a few
+// hundred: the cap is the CSV importer's (js/csv.js), not the faceplate
+// field's 96, so a stack documented from a sheet still loads. Without it a
+// file or shared link holding "portCount": 1e9 hung the tab on its first
+// render, because getInterfaces() and faceplatePortIds() walk every port.
+// Anything else (negative, fractional, a string) is no count, so the switch
+// falls back to its implicit size.
+const PORT_COUNT_MAX = 4096;
+const asPortCount = (v) => (Number.isInteger(v) && v >= 0 && v <= PORT_COUNT_MAX ? v : undefined);
+// Asked of the value itself, not only trusted from the loader: a count that
+// slipped in some other way still cannot make the loops below run away.
+const hasExplicitPortCount = (node) => asPortCount(node?.portCount) !== undefined;
 const portCountOf = (node) => hasExplicitPortCount(node) ? node.portCount
     : Math.max(DEFAULT_PORT_COUNT[node?.type] ?? 0, hasPortGrid(node) ? highestPortInUse(node) : 0);
 
 // The highest faceplate port anything sits on: a cable bound to pN, or a port
 // materialized into node.interfaces because it was given a name or an address.
+//
+// Capped at PORT_COUNT_MAX like an explicit count, since this is what the
+// faceplate grows to when there is none: the ids are raw text on load, so a
+// file or link naming "p1000000000" would otherwise hang getInterfaces() just
+// as "portCount": 1e9 did. A port past the cap is not lost; getInterfaces()
+// lists it after the faceplate with the other extras.
 function highestPortInUse(node) {
     let max = 0;
-    const take = (id) => { const m = /^p(\d+)$/.exec(id || ''); if (m) max = Math.max(max, Number(m[1])); };
+    const take = (id) => {
+        const m = PORT_ID_RE.exec(id || '');
+        if (m && Number(m[1]) <= PORT_COUNT_MAX) max = Math.max(max, Number(m[1]));
+    };
     (node.interfaces || []).forEach((i) => take(i.id));
     (lookupPass ? linksAtNode(node.id) : (state.links || [])).forEach((l) => {
         if (l.source === node.id) take(l.sourceIface);
@@ -256,7 +276,7 @@ function createIfaceFor(node, opts = {}) {
     }
     if (opts.grow && hasPortGrid(node)) {
         const next = Math.max(portCountOf(node), highestPortInUse(node)) + 1;
-        if (hasExplicitPortCount(node) && opts.user) node.portCount = next;
+        if (hasExplicitPortCount(node) && opts.user && next <= PORT_COUNT_MAX) node.portCount = next;
         return { id: `p${next}`, name: portNameOf(node, next), ip: '', implicit: true };
     }
     const iface = { id: nextId('i'), name: nextName('eth'), ip: '', mac: '' };
@@ -318,20 +338,54 @@ const bondMembers = (node, bond) => (bond?.bond?.members || []).map((id) => ifac
 // to its bond, everything else speaks for itself.
 const l3IfaceFor = (node, ifaceId) => bondOf(node, ifaceId) || ifaceOn(node, ifaceId);
 
+// The NICs createBond() would fold together: every free wired one.
+const bondCandidates = (node) => getInterfaces(node).filter(
+    (i) => !i.implicit && !isBond(i) && !isBondMember(node, i.id) && !ifaceIsWireless(i));
+// One entry per distinct address the candidates carry, with the NICs that
+// carry it: [{ ip, names }]. Two spellings of one address are one entry, and
+// text that does not parse is an entry of its own, because it is still what
+// somebody typed and clearing it would lose it just the same.
+function bondAddresses(node) {
+    const byKey = new Map();
+    bondCandidates(node).forEach((i) => {
+        const text = String(i.ip || '').trim();
+        if (!text) return;
+        const p = parseValidCIDR(text);
+        const key = p ? `${p.ip.toString()}/${p.prefix}` : text;
+        const had = byKey.get(key);
+        if (had) had.names.push(i.name || i.id);
+        else byKey.set(key, { ip: text, names: [i.name || i.id] });
+    });
+    return [...byKey.values()];
+}
+
 // Fold every free wired NIC on `node` into one bond. This is the remedy the
 // MAC-flapping diagnostic names, so it has to move the address off the members
 // and onto the bond — leaving it behind is the misconfiguration, not the fix.
+//
+// A bond holds one address, and an interface here holds one too, so when the
+// members carry two different ones (a NAS with .10 and .11) one of them has to
+// go. That used to be decided silently, the first one kept and the rest
+// cleared. Now the caller says which with opts.keep (the address text), and
+// without it the bond is refused: the sidebar asks the person (bondAddresses()
+// lists the choice), since only they know which one the clients point at.
 function createBond(node, opts = {}) {
     if (!node) return null;
-    const candidates = getInterfaces(node).filter(
-        (i) => !i.implicit && !isBond(i) && !isBondMember(node, i.id) && !ifaceIsWireless(i));
+    const candidates = bondCandidates(node);
     if (candidates.length < 2) return null;
 
-    const donor = candidates.find((i) => parseValidCIDR(i.ip)) || candidates[0];
+    const addresses = bondAddresses(node);
+    let kept = addresses.length === 1 ? addresses[0].ip : '';
+    if (addresses.length > 1) {
+        const want = String(opts.keep == null ? '' : opts.keep).trim();
+        const chosen = addresses.find((a) => a.ip === want);
+        if (!chosen) return null;
+        kept = chosen.ip;
+    }
     const bond = {
         id: nextId('b'),
         name: opts.name || `bond${(node.interfaces || []).filter(isBond).length}`,
-        ip: donor.ip || '',
+        ip: kept,
         bond: { mode: opts.mode || 'active-backup', members: candidates.map((i) => i.id) }
     };
     candidates.forEach((i) => {
@@ -712,8 +766,13 @@ function findNodeByIp(ipString) {
     const clean = String(ipString || '').trim();
     if (!clean) return null;
 
+    // parseIpText(), not ipaddr.parse(): the lenient parser reads "10.1" as
+    // 10.0.0.1 and "010.0.0.1" as 8.0.0.1, so a gateway typed that way found a
+    // device while the field's own check called the text invalid.
+    const target = parseIpText(clean);
+    if (!target) return null;
     try {
-        const targetIp = ipaddr.parse(clean).toString();
+        const targetIp = target.toString();
         const holders = state.nodes.filter((node) =>
             getValidIps(node).some((ipData) => ipData.ip.toString() === targetIp));
         // A retired device hands its address back (STATUS_VALUES): when its
@@ -756,20 +815,32 @@ function parseValidCIDR(cidrStr) {
     }
     return parseCIDRNow(cidrStr);
 }
+// Strict on purpose. This used ipaddr.parse() and parseInt(), which read
+// "192.168.1.010/24" as .8, "010.0.0.1/24" as a public 8.0.0.1, "10.1/24" as
+// 10.0.0.1 and "3232235777/24" as 192.168.1.1, and took "10.0.0.5/24abc" and
+// "/24/9" as well: the sidebar showed one address while the conflict, subnet
+// and zone checks used another. An address is four plain decimals or a valid
+// IPv6 one (the same rule as isIpText), and the prefix is digits and nothing
+// else. A document that already holds such text gets the usual "Invalid CIDR"
+// finding, which is the honest reading of it.
 function parseCIDRNow(cidrStr) {
     try {
-        if (!cidrStr || !cidrStr.includes('/')) return null;
-        const [ipStr, prefixStr] = cidrStr.split('/');
-        const prefix = Number.parseInt(prefixStr, 10);
-        const ip = ipaddr.parse(ipStr.trim());
-        if (Number.isNaN(prefix)) return null;
-        if (ip.kind() === 'ipv4' && (prefix < 0 || prefix > 32)) return null;
-        if (ip.kind() === 'ipv6' && (prefix < 0 || prefix > 128)) return null;
-        // The family is known by now, so its own parser: ipaddr.parseCIDR()
+        if (typeof cidrStr !== 'string') return null;
+        const parts = cidrStr.trim().split('/');
+        if (parts.length !== 2) return null;
+        const ipStr = parts[0].trim(), prefixStr = parts[1].trim();
+        if (!/^\d{1,3}$/.test(prefixStr)) return null;
+        const prefix = Number(prefixStr);
+        // The family is decided here, so its own parser: ipaddr.parseCIDR()
         // tries IPv6 first and catches the throw, and for every IPv4 address
         // that throw was most of the cost of reading one (a fifth of a
         // 300-device report).
-        const cidrObj = (ip.kind() === 'ipv6' ? ipaddr.IPv6 : ipaddr.IPv4).parseCIDR(`${ip.toString()}/${prefix}`);
+        const v4 = ipaddr.IPv4.isValidFourPartDecimal(ipStr);
+        if (!v4 && !ipaddr.IPv6.isValid(ipStr)) return null;
+        if (prefix > (v4 ? 32 : 128)) return null;
+        const family = v4 ? ipaddr.IPv4 : ipaddr.IPv6;
+        const ip = family.parse(ipStr);
+        const cidrObj = family.parseCIDR(`${ip.toString()}/${prefix}`);
         // The masked network, in both families. IPv6 used to keep the host
         // address here ("2001:db8::5/64"), so two hosts on one /64 never
         // compared equal: every IPv6 cable was a subnet mismatch and every
@@ -998,6 +1069,9 @@ const FIELD_KINDS = {
 
 // Four dotted decimals, not ipaddr.isValid(): that also accepts "10" and
 // "10.1" as IPv4 shorthands, which nobody means in a gateway field.
+// isValidFourPartDecimal() also refuses a leading zero, which ipaddr.parse()
+// reads as octal ("010" is 8). parseCIDRNow() holds interface addresses to
+// the same rule, so a gateway and an address are judged alike.
 const isIpText = (s) => ipaddr.IPv4.isValidFourPartDecimal(s) || ipaddr.IPv6.isValid(s);
 const fieldOk = {
     any: () => true,
@@ -1180,7 +1254,7 @@ const NODE_FIELDS = [
     { key: 'siteRef', kind: 'raw', label: 'Stands for another site',
       read: (v, src) => (src.type === 'cloud' && normalizeSiteRef(v)) || undefined,
       write: (v) => (v ? { id: v.id, name: v.name } : undefined) },
-    { key: 'portCount', kind: 'count', label: 'Ports', csv: 'port_count' },
+    { key: 'portCount', kind: 'count', read: asPortCount, write: asPortCount, label: 'Ports', csv: 'port_count' },
     // Document v6 (see "Port names, labels and access VLANs" above). Only a
     // device with a faceplate has numbered ports, so only one keeps these.
     // The scheme is one spreadsheet cell, the name of port 1 ("Gi1/0/1"):
@@ -1450,12 +1524,24 @@ const reportColumns = () => NODE_FIELDS.filter((f) => f.report && f.report.colum
 // so an override and an inherited value cannot be read two different ways.
 
 // Held canonical, the masked network ("10.0.1.0/24", not "10.0.1.7/24"), so two
-// spellings of one subnet are one network and containment is a comparison. A
-// row whose cidr does not parse is not a network, and normalizeNetworks() drops
-// it.
+// spellings of one subnet are one network and containment is a comparison.
+// This is also the check a typed or imported cidr has to pass (the Subnets
+// tab, the CSV importer), so text that does not parse is undefined here.
 const canonicalCidr = (v) => {
     const p = typeof v === 'string' && v.includes('/') ? parseValidCIDR(v.trim()) : null;
     return p ? p.networkStr : undefined;
+};
+// Loading is gentler. A row with no cidr at all, or text with no prefix, is
+// not a network, and normalizeNetworks() drops it. But a row written with a
+// prefix that no longer parses ("192.168.010.0/24", "10.1/16": parseCIDRNow()
+// stopped guessing at those) keeps its text, and with it its name, VLAN,
+// gateway and the Wi-Fi that points at it. Dropping it would have lost all
+// of that on the next save with nothing on screen to say so. Nothing reads
+// it as an address (every lookup parses first), and fieldOk.cidr calls it
+// invalid wherever it is shown.
+const readNetworkCidr = (v) => {
+    const text = typeof v === 'string' ? v.trim() : '';
+    return canonicalCidr(text) || (text.includes('/') ? text : undefined);
 };
 // 802.1Q's usable range. A string of digits (a hand-edited file, a typed
 // field) is read as its number; anything else is no VLAN rather than a guess.
@@ -1468,6 +1554,8 @@ const parseIpText = (s) => {
     if (!text || !isIpText(text)) return null;
     try { return ipaddr.parse(text); } catch (e) { return null; }
 };
+// The same, for a try block that reads a throw as "not an address".
+const parseIpOrThrow = (s) => { const ip = parseIpText(s); if (!ip) throw new Error(`not an address: ${s}`); return ip; };
 const sameIp = (a, b) => { const x = parseIpText(a), y = parseIpText(b); return !!(x && y && x.kind() === y.kind() && x.toString() === y.toString()); };
 const dnsKey = (v) => parseDnsList(v).map((s) => (parseIpText(s) || { toString: () => s }).toString()).join(',');
 
@@ -1475,7 +1563,7 @@ const dnsKey = (v) => parseDnsList(v).map((s) => (parseIpText(s) || { toString: 
 // network that never said its VLAN does not carry `vlan` at all.
 const NETWORK_FIELDS = [
     { key: 'id', kind: 'raw', read: (v) => asOptionalText(v) || nextId('net'), label: 'ID', csv: 'network_id' },
-    { key: 'cidr', kind: 'raw', read: canonicalCidr, label: 'CIDR', csv: 'cidr', table: 'show', validate: fieldOk.cidr },
+    { key: 'cidr', kind: 'raw', read: readNetworkCidr, label: 'CIDR', csv: 'cidr', table: 'show', validate: fieldOk.cidr },
     { key: 'name', kind: 'text', omit: true, label: 'Name', csv: 'name', table: 'edit' },
     { key: 'vlan', kind: 'count', read: asVlan, write: asVlan, label: 'VLAN', csv: 'vlan', table: 'edit',
       validate: (v) => v === undefined || isBlank(String(v)) || asVlan(v) !== undefined },
@@ -3700,11 +3788,19 @@ const DOC_VERSION = 14;
 // A document's outline: an object whose lists, where present, are lists. The
 // loader tolerates a missing list (a bare { nodes } file is a document), but a
 // list that is something else is a damaged document, and saying so beats
-// reading it as an empty, finding-free network.
+// reading it as an empty, finding-free network. So is a version that is not
+// a version: read as v1, it would rerun every migration over a current
+// document (v7→v8 alone turns every half-depth device full).
+const DOC_VERSION_RE = /^\s*[1-9]\d*\s*$/;
 const isDocShape = (doc) => !!doc && typeof doc === 'object' && !Array.isArray(doc)
-    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations', 'columns', 'pinned'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
+    && (doc.v === undefined || (Number.isInteger(doc.v) && doc.v >= 1) || (typeof doc.v === 'string' && DOC_VERSION_RE.test(doc.v)))
+    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations', 'columns', 'pinned', 'accepted'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
 
-const docVersionOf = (doc) => (doc && Number.isInteger(doc.v) && doc.v >= 1 ? doc.v : 1);
+// A version written as text ("14", a hand-edited file) is that version.
+const docVersionOf = (doc) => {
+    const v = doc && typeof doc.v === 'string' && DOC_VERSION_RE.test(doc.v) ? Number(doc.v) : doc && doc.v;
+    return Number.isInteger(v) && v >= 1 ? v : 1;
+};
 
 // The two node-level shapes older builds wrote. `ips` (a bare list of
 // addresses) replaced whatever interface list sat beside it, as the old
@@ -3848,7 +3944,17 @@ function migrateDoc(doc) {
     if (!doc || typeof doc !== 'object') return { doc: { nodes: [], links: [] }, from: DOC_VERSION, newer: false };
     const from = docVersionOf(doc);
     if (from > DOC_VERSION) return { doc, from, newer: true };
+    // A device or cable that is not an object is no device or cable: read
+    // through the fields it would come back as an "Unnamed Node" at 200,200
+    // with an id of its own, counted in the findings and the inventory.
+    const isItem = (x) => x && typeof x === 'object' && !Array.isArray(x);
+    const junk = (list) => Array.isArray(list) && !list.every(isItem);
     let out = doc, v = from;
+    if (junk(doc.nodes) || junk(doc.links)) {
+        out = { ...doc };
+        if (junk(doc.nodes)) out.nodes = doc.nodes.filter(isItem);
+        if (junk(doc.links)) out.links = doc.links.filter(isItem);
+    }
     MIGRATIONS.forEach((m) => { if (m.from === v) { out = m.run(out); v = m.to; } });
     return { doc: out, from, newer: false };
 }

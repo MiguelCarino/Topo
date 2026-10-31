@@ -58,7 +58,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const m = migrateDoc(v7);
     ok('a v7 document is taken to the current version', DOC_VERSION >= 8 && m.doc.v === DOC_VERSION && m.from === 7 && !m.newer);
     ok('its full and its nothing both become nothing: full depth', m.doc.nodes.slice(0, 3).every((n) => !('rackDepth' in n)), json(m.doc.nodes));
-    ok('the rest of each device as it was, junk passed through', m.doc.nodes[0].rackU === 10 && m.doc.nodes[2].rackFace === 'rear' && m.doc.nodes[3] === null
+    ok('the rest of each device as it was, junk dropped', m.doc.nodes[0].rackU === 10 && m.doc.nodes[2].rackFace === 'rear' && m.doc.nodes.length === 3
        && m.doc.nodes[1] === v7.nodes[1]);
     ok('the input is not touched', json(v7) === v7copy);
     ok('a v8 step does nothing to a v8 document', json(migrateDoc({ v: 8, nodes: [N('a', 'pc', { rackDepth: 'half' })], links: [] }).doc.nodes[0].rackDepth) === '"half"');

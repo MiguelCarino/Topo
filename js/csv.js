@@ -646,6 +646,51 @@ function csvCountParse(text) {
     return Number.isInteger(n) && n >= 1 && n <= 4096 ? { value: n } : { error: true };
 }
 
+// ---- Dates, a column at a time ----
+// customDate (js/model.js) reads 03/04/2019 month first in English and day
+// first otherwise, one cell at a time. A sheet is written one way all down a
+// column, and the column often says which: 25/12/2019 can only be day first,
+// 12/25/2019 only month first. Read cell by cell, a Mexican clinic's sheet
+// opened in English kept its 25/12 rows as errors and took its 03/04 rows as
+// March 4th, with nothing said. So a date column's order is decided from the
+// whole column before any cell is read, and its d/m/yyyy cells are handed on
+// as yyyy-mm-dd, which every reader takes one way.
+const CSV_DMY_RE = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/;
+// customDate's own rule, for a column that does not say.
+const csvMonthFirst = () => !window.CarinoI18N || window.CarinoI18N.current() === 'en';
+// A column a date is read from: the service dates, and the network's own
+// columns of dates (one about to be made included).
+function csvIsDateKey(key) {
+    const tg = key ? csvTarget(key) : null;
+    return !!tg && ((tg.field && tg.field.fromText === looseDateFromText) || (tg.def && tg.def.kind === 'date'));
+}
+// -> { cells, order: 'dmy' | 'mdy' | '', mixed, ambiguous }. cells is the
+// column with its d/m/yyyy dates rewritten when the order is known; a cell
+// that is no date that way is left as it was, for its own error. mixed: the
+// column says both (it is left to the cells); ambiguous: it says neither,
+// and has a date that reads two ways (the page's language decides).
+function csvDateColumn(values) {
+    let dayFirst = false, monthFirst = false, either = false;
+    values.forEach((v) => {
+        const r = CSV_DMY_RE.exec(String(v == null ? '' : v).trim());
+        if (!r) return;
+        const a = +r[1], b = +r[2];
+        if (a > 12 && b > 12) return;   // no date either way: its own cell's error
+        if (a > 12) dayFirst = true;
+        else if (b > 12) monthFirst = true;
+        else if (a !== b) either = true;
+    });
+    const order = dayFirst === monthFirst ? '' : dayFirst ? 'dmy' : 'mdy';
+    const cells = !order ? values : values.map((v) => {
+        const r = CSV_DMY_RE.exec(String(v == null ? '' : v).trim());
+        if (!r) return v;
+        const d = order === 'dmy' ? r[1] : r[2], m = order === 'dmy' ? r[2] : r[1];
+        const iso = `${r[3]}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        return customDate(iso) ? iso : v;
+    });
+    return { cells, order, mixed: dayFirst && monthFirst, ambiguous: !dayFirst && !monthFirst && either };
+}
+
 // A field read by its schema row's fromText (the service dates, the interval).
 function csvFromText(key, text) {
     const v = NODE_FIELDS.find((f) => f.key === key).fromText(text);
@@ -908,7 +953,9 @@ function csvNewColumns(sheet, mapping) {
         const why = !name ? t('A column needs a name.') : typeof customNameProblem === 'function' ? customNameProblem(name) : '';
         if (why) { errors.push(why); return ''; }
         if (list.length >= CUSTOM_MAX) { errors.push(t('A network can have at most {n} columns of its own.', { n: CUSTOM_MAX })); return ''; }
-        const def = { id: nextCustomId(list), name, kind: csvGuessKind(sheet.rows.map((r) => r[col])) };
+        // Its dates as the column's order reads them, so a column of 25/12
+        // and 03/04 is one of dates in any language, not text.
+        const def = { id: nextCustomId(list), name, kind: csvGuessKind(csvDateColumn(sheet.rows.map((r) => r[col])).cells) };
         list.push(def); defs.push(def);
         return `x:${def.id}`;
     });
@@ -1190,13 +1237,26 @@ function csvPlanMapped(sheet, mapping, opts = {}) {
     // question to rackDepth's parser, which reads a yes as full depth: its
     // yes and no are turned round here, where the heading is still known.
     const halfCols = new Set(mapping.map((key, col) => (key === 'rackDepth' && sheet.hasHeadings && csvIsHalfHeading(sheet.headers[col]) ? col : -1)).filter((c) => c >= 0));
+    // A date column's cells as its order reads them (csvDateColumn), and
+    // what the review says of a column that did not settle it.
+    empty.notes = [];
+    const dateCols = new Map();
+    mapping.forEach((key, col) => {
+        if (!csvIsDateKey(key)) return;
+        const read = csvDateColumn(sheet.rows.map((r) => r[col]));
+        const column = sheet.hasHeadings ? sheet.headers[col] : csvTargetLabel(csvTarget(key));
+        if (read.order) dateCols.set(col, read.cells);
+        else if (read.mixed) empty.notes.push(t('Dates in {column} are written both day first and month first: check them before applying.', { column }));
+        else if (read.ambiguous) empty.notes.push(t(csvMonthFirst() ? 'Dates in {column} read as month/day: nothing in the column says which comes first.' : 'Dates in {column} read as day/month: nothing in the column says which comes first.', { column }));
+    });
     // Each row as { key: text } over its mapped, non-blank cells, and the
     // mapped columns it leaves blank (blanks), which only a new device reads.
     const rows = sheet.rows.map((cells, index) => {
         const vals = {}, blanks = [];
         mapping.forEach((key, col) => {
             if (!key) return;
-            let raw = cells[col] == null ? '' : String(cells[col]);
+            const cell = dateCols.has(col) ? dateCols.get(col)[index] : cells[col];
+            let raw = cell == null ? '' : String(cell);
             if (key === 'rackDepth' && halfCols.has(col)) raw = csvHalfAnswer(raw);
             if (raw.trim()) vals[key] = raw; else blanks.push(key);
         });
@@ -1291,11 +1351,49 @@ function csvPlanDevices(rows, plan) {
         return r;
     });
 
+    // A row with no id is one device per name: an IPAM export lists "srv1"
+    // once per NIC, and each row made a device of its own, so the sheet made
+    // two srv1 and a cable to srv1 then "named more than one device". The
+    // rows meet as a device on the map found by its name does, each NIC its
+    // own interface. Unless they say they are two boxes: another serial,
+    // asset tag, type, model, location or group (what two NICs of one box
+    // never disagree on) keeps a row its own device, and the review says so.
+    // Names seen on the wire (plan.observed) never join rows: DHCP clients
+    // repeat theirs. Nor does a row whose MAC is locally administered, for
+    // the same reason in a client list saved with headings: a phone's
+    // randomised Wi-Fi address is no sign of a second NIC on one box.
+    const byNameRows = new Map();   // lower name -> the rows joined under it
+    const differs = (rows, v, key) => !isBlank(v[key]) && rows.some((o) => !isBlank(o.values[key]) && csvLower(o.values[key]) !== csvLower(v[key]));
+    const apartKeys = ['assetTag', 'serial', 'type', 'os', 'location', 'group'];
+    const randomMac = (v) => !isBlank(v['if:mac']) && !!(parseInt(normMac(v['if:mac']).slice(0, 2), 16) & 0x02);
+    const nameCount = new Map();
+    parsed.forEach((r) => {
+        if (r.blank || r.match || r.values.id || !r.values.name) return;
+        const k = csvLower(r.values.name);
+        nameCount.set(k, (nameCount.get(k) || 0) + 1);
+    });
     // The new devices the sheet names, before any is planned, so a device can
     // be cabled to a switch further down the same sheet.
     parsed.forEach((r) => {
         if (r.blank || r.match) return;
-        const group = r.values.id ? `id:${r.values.id}` : `row:${r.index}`;
+        let group = r.values.id ? `id:${r.values.id}` : `row:${r.index}`;
+        let nameKey = !r.values.id && !plan.observed && r.values.name ? csvLower(r.values.name) : '';
+        if (nameKey && randomMac(r.values)) {
+            if (nameCount.get(nameKey) > 1) r.notes.push(t('Another row is also called {name}, but this MAC is randomised (locally administered): added as a device of its own.', { name: String(r.values.name).trim() }));
+            nameKey = '';
+        }
+        if (nameKey) {
+            const held = byNameRows.get(nameKey);
+            if (!held) byNameRows.set(nameKey, [r]);
+            const other = held ? apartKeys.filter((key) => differs(held, r.values, key)) : [];
+            if (other.length) {
+                r.notes.push(t('Another row is also called {name}, with another {fields}: added as a device of its own.', { name: String(r.values.name).trim(), fields: other.map((key) => csvTargetLabel(csvTarget(key))).join(', ') }));
+            } else {
+                if (held) { held.push(r); r.notes.push(t('Another row names {name} too: read as one device.', { name: String(r.values.name).trim() })); }
+                group = `name:${nameKey}`;
+                r.byName = true;
+            }
+        }
         r.group = group;
         if (r.values.name) {
             const k = csvLower(r.values.name);
@@ -1305,6 +1403,13 @@ function csvPlanDevices(rows, plan) {
         }
     });
     const groupIds = new Set(parsed.filter((r) => r.group).map((r) => r.group));
+    // Said for the whole plan as well as on each row, since joining rows
+    // changes how many devices the sheet adds.
+    const joined = [...byNameRows.values()].filter((list) => list.length > 1);
+    if (joined.length) {
+        (plan.notes = plan.notes || []).push(t('Rows that share a name are read as one device each: {names}.',
+            { names: joined.map((list) => `${String(list[0].values.name).trim()} (${list.length})`).join(', ') }));
+    }
 
     // An anchor (the switch column) is a device on the map or a new one in
     // the sheet: by id, then by name; two of either is ambiguous.
@@ -1521,6 +1626,8 @@ function csvPlanDeviceRow(r, anchor, ctx) {
         // Matched by its name: the name is the key, and a sheet that spells
         // it in another case is not asking for a rename.
         if (key === 'name' && existing && r.match.by.key === 'name') continue;
+        // Likewise a new device whose rows were joined by their name.
+        if (key === 'name' && !existing && r.byName && Object.prototype.hasOwnProperty.call(said, 'name')) continue;
         // A name seen on the wire is what the device calls itself, not what
         // the register calls it: said, never written over (see "Paste
         // anything" below).
@@ -1562,7 +1669,7 @@ function csvPlanDeviceRow(r, anchor, ctx) {
         // A new device whose rows name its interfaces has those, not its
         // type's: interfaces.csv rows for it rebuild it as it was.
         const ownList = !existing && (v['if:id'] || named);
-        let iface = null, key;
+        let iface = null, key, madeName = '';
         const pool = ownList && !group.ownIfaces ? [] : list;
         const byName = named ? pool.filter((i) => csvLower(i.name) === csvLower(named)) : [];
         if (v['if:id']) {
@@ -1589,6 +1696,21 @@ function csvPlanDeviceRow(r, anchor, ctx) {
             if (on.split) return conflict(t('{mac} and {ip} are on different interfaces of {name}: add the interface to say which.', { mac: fmtColonSafe(v['if:mac']), ip: String(v['if:ip']), name: record.name || record.id }));
             iface = on.iface || list[0] || null;
             key = iface ? `id:${iface.id}` : 'first';
+            // Another row of a new device joined by its name (srv1's second
+            // NIC): the first interface it says nothing against, else one of
+            // its own, rather than the first one's MAC written over.
+            if (!existing && r.byName && group.rows.length && !on.iface) {
+                iface = list.find((i) => ifaceVals.every((k) => {
+                    const before = csvIfaceValue(i, k.slice(3));
+                    return before === undefined || isBlank(String(before)) || csvSame(k, before, v[k]);
+                })) || null;
+                key = iface ? `id:${iface.id}` : `row:${r.index}`;
+                if (!iface) {
+                    let n = list.length;
+                    while (list.some((i) => csvLower(i.name) === `eth${n}`)) n++;
+                    madeName = `eth${n}`;
+                }
+            }
         }
         // One key per interface of a device on the map, however the rows
         // name it, so two rows about one port meet in one op.
@@ -1596,7 +1718,7 @@ function csvPlanDeviceRow(r, anchor, ctx) {
         const nodeKey = existing ? existing.id : `new:${r.group}`;
         const held = ctx.ifaceOps.get(`${nodeKey}\u0000${key}`) || (iface && ctx.ifaceOps.get(`${nodeKey}\u0000id:${iface.id}`));
         ifaceDraft = { nodeId: existing ? existing.id : record.id, id: iface ? iface.id : (held ? held.id : (v['if:id'] ? String(v['if:id']).trim() : nextId('i'))),
-            name: iface ? iface.name : (named || (held && held.name) || 'eth0'), create: !iface && !held, set: {}, key: `${nodeKey}\u0000${key}`, ownList };
+            name: iface ? iface.name : (named || (held && held.name) || madeName || 'eth0'), create: !iface && !held, set: {}, key: `${nodeKey}\u0000${key}`, ownList };
         if (held) { ifaceDraft.create = held.create; ifaceDraft.id = held.id; }
         const ifLabel = ifaceDraft.name;
         for (const k of ifaceVals) {
@@ -2004,12 +2126,14 @@ function csvPlanCables(rows, plan) {
         const out = { index, name: '', status: 'same', changes: [], notes: [], why: '' };
         const conflict = (why) => { results.push(Object.assign(out, { status: 'conflict', why })); };
         const values = {}, errors = [];
+        let lengthAsIs;   // a length the parser refuses, held until the cable is known
         Object.keys(vals).forEach((key) => {
             const tg = csvTarget(key);
             if (tg.group !== 'cable') return;
             if (key === 'lk:source' || key === 'lk:target' || key === 'lk:sourceIface' || key === 'lk:targetIface' || key === 'lk:id') { values[key] = String(vals[key]).trim(); return; }
             const res = tg.parse(vals[key]);
-            if (res.error) errors.push(t('{value} is not a valid {field}.', { value: String(vals[key]).trim(), field: csvTargetLabel(tg) }));
+            if (res.error && key === 'lk:cable.length') lengthAsIs = String(vals[key]).trim();
+            else if (res.error) errors.push(t('{value} is not a valid {field}.', { value: String(vals[key]).trim(), field: csvTargetLabel(tg) }));
             else values[key] = res.value;
         });
         if (errors.length) return conflict(errors.join(' '));
@@ -2047,6 +2171,15 @@ function csvPlanCables(rows, plan) {
                 // two switch ports), not that one moved.
                 link = null;
             } else link = between[0] || null;
+        }
+        // A cable typed before lengths were metres or feet keeps its words
+        // ("about 3"), and cables.csv writes them out as they are. Read back,
+        // the same words on the same cable are no change: refused, they made
+        // the whole row a conflict, so a sheet exported, relabelled in Excel
+        // and imported again lost every edit on those cables. Words that are
+        // not what the cable holds are still refused.
+        if (lengthAsIs !== undefined && !(link && cableOf(link, 'length').trim() === lengthAsIs)) {
+            return conflict(t('{value} is not a valid {field}.', { value: lengthAsIs, field: csvTargetLabel(csvTarget('lk:cable.length')) }));
         }
         if (link) {
             const src = getNode(link.source), tgt = getNode(link.target);
@@ -3094,7 +3227,8 @@ const _csv = {
     seen: null,          // seenExtract() of the text: the addresses it shows
     mode: null,          // what the user picked to read it as, or null for the guess
     autoMode: 'sheet',   // the guess: 'sheet' (spreadsheet rows) or 'seen'
-    createGroups: false  // the review's "make the groups the sheet names" tick
+    createGroups: false, // the review's "make the groups the sheet names" tick
+    ansi: false          // the code page a file that was not UTF-8 was read in ('Windows-1252'; csvDecode), or false
 };
 // What the text is read as: the user's pick, else the guess (csvReparse).
 const csvMode = () => (_csv.mode || _csv.autoMode);
@@ -3254,6 +3388,9 @@ function renderCsvReview() {
     if (!plan.errors.length && (plan.newColumns || []).length) {
         msgs.push(`<div class="alert info">${escapeHtml(t('Makes the columns: {names}', { names: plan.newColumns.map((c) => `${c.name} (${t(CUSTOM_KIND_NAMES[c.kind])})`).join(' · ') }))}</div>`);
     }
+    // How the file and the sheet's dates were read, where a guess was made.
+    if (_csv.ansi) msgs.push(`<div class="alert info">${escapeHtml(t(CSV_ANSI_NOTE, { encoding: _csv.ansi }))}</div>`);
+    (plan.notes || []).forEach((m) => msgs.push(`<div class="alert info">${escapeHtml(m)}</div>`));
     csvEl('csvMsgs').innerHTML = msgs.join('');
     csvEl('csvMsgs').classList.toggle('hidden', !msgs.length);
     // Groups the sheet names that the map does not have: made only when
@@ -3321,16 +3458,51 @@ function csvApplyDialog() {
     _csv.step = 'map';
 }
 
+// A file's bytes -> { text, encoding }. UTF-8 when the bytes are UTF-8 (a
+// BOM or not), UTF-16 when a BOM says so (Excel's "Unicode Text"), else the
+// ANSI code page of the page's language (csvAnsiCodePage): Excel on Windows
+// saves "CSV (Comma delimited)" in the machine's ANSI code page, and read as
+// UTF-8 "Ubicación" came in as "Ubicaci�n", the Spanish headings found
+// nothing and the text was stored garbled with nothing said. A fatal decoder
+// is what tells them apart: any byte that is not UTF-8 throws, where the
+// forgiving one writes U+FFFD.
+function csvDecode(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const strip = (s) => (s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s);
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return { text: strip(new TextDecoder('utf-16le').decode(bytes)), encoding: 'utf-16le' };
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return { text: strip(new TextDecoder('utf-16be').decode(bytes)), encoding: 'utf-16be' };
+    try {
+        return { text: strip(new TextDecoder('utf-8', { fatal: true }).decode(bytes)), encoding: 'utf-8' };
+    } catch (e) {
+        const encoding = csvAnsiCodePage();
+        return { text: strip(new TextDecoder(encoding).decode(bytes)), encoding };
+    }
+}
+// The code page a Windows machine in the page's language saves "CSV (Comma
+// delimited)" in: a Russian Excel writes Windows-1251 and a Japanese one
+// Shift_JIS (CP932), and either read as Windows-1252 is Latin junk.
+const CSV_ANSI_PAGES = { ru: 'windows-1251', ja: 'shift_jis' };
+const csvAnsiCodePage = () => CSV_ANSI_PAGES[window.CarinoI18N ? window.CarinoI18N.current() : 'en'] || 'windows-1252';
+// The code page as the note names it (TextDecoder's label is lower case).
+const CSV_ANSI_NAMES = { 'windows-1252': 'Windows-1252', 'windows-1251': 'Windows-1251', shift_jis: 'Shift_JIS' };
+// Said in the review when the last guess was used.
+const CSV_ANSI_NOTE = 'The file is not UTF-8, so it was read as {encoding}, as Excel saves "CSV (Comma delimited)". If a letter looks wrong, save it from Excel as "CSV UTF-8" and open it again.';
+
+// The one way a file comes in (the Open button; the box takes pasted text,
+// which the browser has already decoded).
 function csvLoadFile(file) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-        csvEl('csvText').value = String(reader.result || '');
+        const read = csvDecode(reader.result);
+        csvEl('csvText').value = read.text;
+        // Said in the review, since a guess about the bytes is still a guess.
+        _csv.ansi = CSV_ANSI_NAMES[read.encoding] || false;
         _csv.headings = null; _csv.mode = null; _csv.step = 'map'; _csv.chosen.clear();
         csvReparse(); renderCsvDialog();
     };
     reader.onerror = () => showToast(t('Could not read that file.'), 'err');
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
 }
 
 // ---- Wiring ----
@@ -3350,7 +3522,17 @@ function csvLoadFile(file) {
         const cp = e.target.closest('[data-csv-copy]');
         if (cp) copyTsv(cp.dataset.csvCopy);
     });
+    // Pasted over the whole box, or into an empty one, the text is the
+    // clipboard's, which the browser has decoded: the file's code page is no
+    // longer what the review should talk about. A paste into the file's text
+    // (a row added) still leaves the file's.
+    csvEl('csvText').addEventListener('paste', () => {
+        const box = csvEl('csvText');
+        if (!box.value.trim() || (box.selectionStart === 0 && box.selectionEnd === box.value.length)) _csv.ansi = false;
+    });
     csvEl('csvText').addEventListener('input', () => {
+        // An emptied box holds no file: what it holds next is pasted.
+        if (!csvEl('csvText').value.trim()) _csv.ansi = false;
         clearTimeout(_csv.timer);
         _csv.timer = setTimeout(() => { _csv.headings = null; _csv.mode = null; csvReparse(); renderCsvImport(); renderCsvFoot(); }, 200);
     });

@@ -230,16 +230,22 @@ function planAddDevices(req) {
     const ctx = addContext(target);
     const wants = (d) => !staysL2(d.type) && (initialDataDefaults[d.type]?.interfaces || [{}]).length;
     const onWifiNet = (d) => d.wireless && !!plan.wifiCidr;
+    // The addresses handed out by cable, which the radio ones must not be
+    // handed again: an SSID on the target's own LAN (or a subnet inside it)
+    // draws from the same pool, and each call only knows what the map holds,
+    // so the firewall and the first PC of one add came out on one address.
+    const given = new Set();
     if (ctx && ctx.prefix < 31) {
         const want = devices.filter((d) => wants(d) && !onWifiNet(d));
         const ips = freeAddresses(ctx.networkStr, want.length);
+        ips.forEach((ip) => given.add(ip));
         want.forEach((d, i) => { if (ips[i]) d.ip = `${ips[i]}/${ctx.prefix}`; });
         plan.noAddress = want.length - ips.length;
         Object.assign(plan, { cidr: ctx.networkStr, prefix: ctx.prefix, network: ctx.network || networkOfIp(ctx.networkStr.split('/')[0]) });
     }
     if (plan.wifiCidr) {
         const want = devices.filter((d) => wants(d) && onWifiNet(d));
-        const ips = freeAddresses(plan.wifiCidr, want.length);
+        const ips = freeAddresses(plan.wifiCidr, want.length + given.size).filter((ip) => !given.has(ip)).slice(0, want.length);
         want.forEach((d, i) => { if (ips[i]) d.ip = `${ips[i]}/${plan.wifiPrefix}`; });
         plan.noAddress += want.length - ips.length;
     }

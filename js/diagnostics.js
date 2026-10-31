@@ -109,7 +109,7 @@ function reachContext() {
                     if (!had || (isRetired(had) && !isRetired(n))) byIp.set(k, n);
                 }));
             }
-            try { return byIp.get(ipaddr.parse(String(ipString || '').trim()).toString()) || null; } catch (e) { return null; }
+            try { return byIp.get(parseIpOrThrow(String(ipString || '').trim()).toString()) || null; } catch (e) { return null; }
         },
         // A retired device is off the network (STATUS_VALUES, js/model.js),
         // so its hardware address no longer shares a segment with anyone.
@@ -564,7 +564,7 @@ function evaluateGateway(node, ctx) {
 
     let gwIp;
     try {
-        gwIp = ipaddr.parse(gw);
+        gwIp = parseIpOrThrow(gw);
     } catch (e) {
         return bad(t('Invalid gateway IP: {gw}', { gw }));
     }
@@ -623,7 +623,7 @@ function evaluateDns(node, ctx) {
         let parsed;
 
         try {
-            parsed = ipaddr.parse(dnsIp);
+            parsed = parseIpOrThrow(dnsIp);
         } catch (e) {
             return {
                 level: 'bad',
@@ -796,7 +796,7 @@ function natInfo(node, cache) {
         const ips = getValidIps(node).filter(i => i.kind === 'ipv4');
         let gwNet = null;
         const ownGw = effectiveGw(node);
-        if (ownGw) { try { const g = ipaddr.parse(ownGw).toString(); ips.forEach(i => { const c = parseValidCIDR(g + '/' + i.prefix); if (c && c.networkStr === i.networkStr) gwNet = i.networkStr; }); } catch (e) {} }
+        if (ownGw) { try { const g = parseIpOrThrow(ownGw).toString(); ips.forEach(i => { const c = parseValidCIDR(g + '/' + i.prefix); if (c && c.networkStr === i.networkStr) gwNet = i.networkStr; }); } catch (e) {} }
         ips.forEach(i => { if (!i.isPrivate) info.outside.add(i.networkStr); else info.inside.add(i.networkStr); });
         if (gwNet) { info.outside.add(gwNet); info.inside.delete(gwNet); }
         if (info.outside.size === 0 && ips.length) { const o = gwNet || ips[0].networkStr; info.outside.add(o); info.inside.delete(o); }
@@ -810,7 +810,7 @@ function isGatewayOf(client, possibleGateway) {
     const gw = effectiveGw(client);
     if (!gw) return false;
     try {
-        const gwIp = ipaddr.parse(gw);
+        const gwIp = parseIpOrThrow(gw);
         return getValidIps(possibleGateway).some((ib) => ib.ip.toString() === gwIp.toString());
     } catch (e) { return false; }
 }
@@ -1154,7 +1154,11 @@ function runDiagnosis() {
 // accepting Staff's WEP must not accept Guest turning open), and the band of
 // an overlap (accepting two APs sharing 2.4 GHz is not accepting them on
 // 5 GHz). No scope matches only no scope, so every older entry reads as it
-// did.
+// did. An IP or a MAC conflict is scoped to the address too (v14): without
+// it, accepting "10.0.0.5 shared by A, B" also accepted any conflict A and B
+// came to have later, and a new critical finding was born accepted. Entries
+// written before that are given their address when read
+// (scopeLegacyConflicts, below).
 //
 // Scheduled (v14): an entry with `until` (a date) is accepted up to and
 // including that day, and from the next one it no longer matches, so the
@@ -1364,6 +1368,76 @@ function servicedToday(nodeId) {
     return true;
 }
 
+// ---- The notes kept in step with the document ----
+// An accepted entry and a pin name devices and cables by id. The serializers
+// leave out the ids that are gone, but the lists in memory are what the
+// Findings tab, the report and Serviced today read: a pin whose devices were
+// all deleted stayed on the list as "Service: n_lx3k9a · Not raised at the
+// moment", and Serviced today found nothing to take it off. So they are
+// pruned the way the serializers prune: save() calls this (every removal of a
+// device or a cable ends there, as the host rule does), and so does reading a
+// document, for a file that names ids it does not hold. An entry left naming
+// nothing goes. A list is only replaced when something in it changed.
+function pruneFindingNotes() {
+    const nodeIds = new Set(state.nodes.map((n) => n.id));
+    const linkIds = new Set(state.links.map((l) => l.id));
+    const prune = (list) => {
+        let changed = false;
+        const out = [];
+        list.forEach((a) => {
+            const was = { n: a.nodeIds || [], l: a.linkIds || [] };
+            const n = was.n.filter((id) => nodeIds.has(id)), l = was.l.filter((id) => linkIds.has(id));
+            if (n.length === was.n.length && l.length === was.l.length) { out.push(a); return; }
+            changed = true;
+            if (n.length || l.length) out.push(Object.assign({}, a, { nodeIds: n, linkIds: l }));
+        });
+        return changed ? out : list;
+    };
+    state.accepted = prune(acceptedList());
+    state.pinned = prune(pinnedList());
+}
+
+// ---- Conflicts accepted before they had a scope ----
+// Before v14 an IP or a MAC conflict carried no scope, so its entry named
+// only the devices, and it covered any conflict between them: accepting
+// "10.0.0.5 shared by A, B" accepted A and B on 10.0.0.9 the day that came
+// about. Documents written then hold such entries, and neither plain reading
+// of them is right: kept as they are, they match no scoped finding and every
+// one reopens on the upgrade; matched as before, they over-cover for good.
+// So an entry with no scope is given, as it is read, each address its
+// devices share in the document (one entry per address; almost always one),
+// and an entry whose devices share none goes, as there is nothing it can
+// have been accepting. A retired device counts: its address is the one that
+// was accepted, and it comes back with the device. A scoped entry is left
+// alone, so reading a document twice changes nothing. This is done on
+// reading (loadDocState, js/app.js) rather than in the 13→14 step, so a
+// document saved by a v14 build from before the scope reads the same way;
+// the next save writes the scoped entries. Pins are read the same way.
+const SCOPED_CONFLICTS = ['ip-conflict', 'mac-conflict'];
+// The addresses (IPs as written by ipConflictFindings, MACs normalised) that
+// two or more of these devices hold.
+function sharedConflictScopes(check, nodeIds) {
+    const ids = new Set(nodeIds || []);
+    const nodes = state.nodes.filter((n) => ids.has(n.id));
+    if (check === 'mac-conflict') {
+        return duplicateMacs(nodes).filter((d) => new Set(d.holders.map((h) => h.node.id)).size > 1).map((d) => d.hex);
+    }
+    const held = new Map();
+    nodes.forEach((n) => getValidIps(n).forEach((p) => {
+        const ip = p.ip.toString();
+        if (!held.has(ip)) held.set(ip, new Set());
+        held.get(ip).add(n.id);
+    }));
+    return [...held].filter(([, holders]) => holders.size > 1).map(([ip]) => ip);
+}
+function scopeLegacyConflicts(list) {
+    const legacy = (a) => SCOPED_CONFLICTS.includes(a.check) && !a.scope;
+    if (!Array.isArray(list) || !list.some(legacy)) return list;
+    return list.flatMap((a) => (legacy(a)
+        ? sharedConflictScopes(a.check, a.nodeIds).map((scope) => Object.assign({}, a, { scope }))
+        : [a]));
+}
+
 // Keyed by node, not by interface: one device holding the same address on two
 // of its own interfaces is not in conflict with itself, and was being reported
 // as "X, X".
@@ -1391,8 +1465,10 @@ function ipConflictFindings() {
         if (list.length < 2 || list.every((n) => n.type === 'cloud')) return;
         const names = list.map((n) => n.name || n.id).join(', ');
         const detail = t('{ip} shared by {names}.', { ip, names });
+        // Scoped to the address: what is accepted is A and B on this one, not
+        // whatever A and B come to share later.
         out.push({ key: 'ip-conflict', level: 'bad', check: t('IP Conflict'), subject: names, detail,
-            line: `${t('IP Conflict')}: ${detail}`, nodeIds: list.map((n) => n.id) });
+            line: `${t('IP Conflict')}: ${detail}`, nodeIds: list.map((n) => n.id), scope: ip });
     });
     return out;
 }
@@ -1412,7 +1488,7 @@ function macConflictFindings(ctx) {
         const detail = t('{mac} shared by {where}.', { mac, where });
         out.push({ key: 'mac-conflict', level: 'bad', check: t('MAC Conflict'),
             subject: [...new Set(d.holders.map((h) => h.node.name || h.node.id))].join(', '),
-            detail, line: `${t('MAC Conflict')}: ${detail}`, nodeIds: ids });
+            detail, line: `${t('MAC Conflict')}: ${detail}`, nodeIds: ids, scope: d.hex });   // the address, as an IP conflict's
     });
     return out;
 }
