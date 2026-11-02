@@ -284,12 +284,24 @@ async function onRackSizeField(el) {
 // keeps every device on the units printed beside it). -> true when written.
 async function setRackHeight(g, n) {
     if (!isRackGroup(g) || readOnlyRefuses() || n === rackTop(g)) { afterRackSize(); return false; }
-    const question = rackShrinkQuestion(g, n);
-    if (question) {
+    // Devices in the units it loses: moved into the units left when there is
+    // room (rackShrinkChoice), or taken out of their units, as before.
+    let move = false;
+    const choice = rackShrinkChoice(g, n);
+    const question = choice ? '' : rackShrinkQuestion(g, n);
+    if (choice) {
+        const one = choice.n === 1;
+        const answer = await askChoice(choice.text, { title: t('Height of the rack'), choices: [
+            { id: 'out', label: t(one ? 'Take it out of its units' : 'Take them out of their units') },
+            { id: 'move', label: t(choice.up ? (one ? 'Move it up' : 'Move them up') : (one ? 'Move it down' : 'Move them down')), primary: true }
+        ] });
+        if (!answer || !isRackGroup(groupById(g.id))) { afterRackSize(); return false; }
+        move = answer === 'move';
+    } else if (question) {
         const ok = await askConfirm(question, { title: t('Height of the rack'), ok: t('Make it {h}U', { h: n }), danger: true });
         if (!ok || !isRackGroup(groupById(g.id))) { afterRackSize(); return false; }
     }
-    batch(() => { applyRackHeight(g, n); save(); renderCanvasOnly(); });
+    batch(() => { applyRackHeight(g, n, state.nodes, { move }); save(); renderCanvasOnly(); });
     afterRackSize();
     return true;
 }

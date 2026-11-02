@@ -238,16 +238,25 @@ window.addEventListener('load', () => { setTimeout(async () => {
     sizeField('uHeight').value = '42'; fire(sizeField('uHeight'), 'change'); await tick(); await tick();
     ok('taller: one step, no question, nothing moves', rk().uHeight === 42 && steps() === d0 + 1 && asked.length === 0 && node('sw').rackU === 22 && node('srv').rackU === 10);
     undo();
-    // Shorter than a placed device: asked, the device named, and No is no.
+    // Shorter than a placed device: asked, the device named with where it
+    // would go, and Cancel is no.
     renderRackView(true);
-    answers.push(() => false);
+    answers.push(() => null);
     sizeField('uHeight').value = '12'; fire(sizeField('uHeight'), 'change'); await tick(); await tick();
-    ok('shorter than a placed device: asked first, naming it and where it is', asked.length === 1 && /Rack 1 becomes 12U/.test(lastAsked().message)
-       && /SW \(U22 front\)/.test(lastAsked().message) && !/SRV/.test(lastAsked().message) && lastAsked().ok === 'Make it 12U', lastAsked() ? lastAsked().message : '');
-    ok('No changes nothing, and the field shows the height again', rk().uHeight === 24 && node('sw').rackU === 22 && steps() === d0 && sizeField('uHeight').value === '24');
-    answers.push(() => true);
+    ok('shorter than a placed device: asked first, naming it, where it is and where it would go', asked.length === 1 && lastAsked().kind === 'choice'
+       && /Rack 1 becomes 12U/.test(lastAsked().message) && /SW \(U22 front\) → U12/.test(lastAsked().message) && !/SRV/.test(lastAsked().message)
+       && lastAsked().choices.map((c) => c.id).join() === 'out,move' && lastAsked().choices[1].label === 'Move it down' && lastAsked().choices[1].primary, lastAsked() ? lastAsked().message : '');
+    ok('Cancel changes nothing, and the field shows the height again', rk().uHeight === 24 && node('sw').rackU === 22 && steps() === d0 && sizeField('uHeight').value === '24');
+    answers.push(() => 'move');
     sizeField('uHeight').value = '12'; fire(sizeField('uHeight'), 'change'); await tick(); await tick();
-    ok('Yes: 12U in one step; the switch waits in the rack, not placed, keeping its size', rk().uHeight === 12 && steps() === d0 + 1
+    ok('Move it down: 12U in one step, the switch at the top of what is left', rk().uHeight === 12 && steps() === d0 + 1
+       && node('sw').rackU === 12 && rackFaceOf(node('sw')) === 'front' && node('srv').rackU === 10 && !topologyFindings().some((f) => f.key === 'rack'), json([rk().uHeight, steps() - d0, node('sw'), node('srv').rackU]));
+    undo();
+    ok('one undo puts it back at U22', rk().uHeight === 24 && node('sw').rackU === 22 && steps() === d0);
+    renderRackView(true);
+    answers.push(() => 'out');
+    sizeField('uHeight').value = '12'; fire(sizeField('uHeight'), 'change'); await tick(); await tick();
+    ok('Take it out: 12U in one step; the switch waits in the rack, not placed, keeping its size', rk().uHeight === 12 && steps() === d0 + 1
        && node('sw').group === 'rk' && node('sw').rackU === undefined && node('sw').rackFace === undefined && node('srv').rackU === 10);
     ok('it is listed under Not placed yet, and there is no finding', !!view().querySelector('.rk-unplaced [data-node="sw"]') && !topologyFindings().some((f) => f.key === 'rack'));
     undo();
@@ -259,13 +268,22 @@ window.addEventListener('load', () => { setTimeout(async () => {
     renderRackView(true);
     asked.length = 0;
     d0 = steps();
-    answers.push(() => true);
+    answers.push(() => 'out');
     sizeField('uHeight').value = '12'; fire(sizeField('uHeight'), 'change'); await tick(); await tick();
     ok('top-down, shorter: asked about the devices at the bottom, not the switch at the top', asked.length === 1 && /SRV \(U14–U15 front\)/.test(lastAsked().message)
        && /PP \(U24 rear, half depth\)/.test(lastAsked().message) && !/SW/.test(lastAsked().message), lastAsked() ? lastAsked().message : '');
     ok('the switch is still at U3', rk().uHeight === 12 && rackSpanText(node('sw')) === 'U3 front' && node('sw').rackU === 10 && node('srv').rackU === undefined && node('pp').rackU === undefined);
     undo();
     ok('undone: as it was', rk().uHeight === 24 && node('sw').rackU === 22 && node('srv').rackU === 10 && node('pp').rackU === 1);
+    // Moved up instead: the stack cannot move as one (the switch is in the
+    // way), so each goes to the nearest free units, keeping their order.
+    renderRackView(true);
+    answers.push((req) => (req.choices[1].label === 'Move them up' ? 'move' : null));
+    sizeField('uHeight').value = '12'; fire(sizeField('uHeight'), 'change'); await tick(); await tick();
+    ok('top-down, Move them up: the patch panel at the bottom, the server above it, the switch where it was',
+       rk().uHeight === 12 && rackSpanText(node('pp')) === 'U12 rear, half depth' && rackSpanText(node('srv')) === 'U10–U11 front' && rackSpanText(node('sw')) === 'U3 front',
+       [node('pp'), node('srv'), node('sw')].map((n) => rackSpanText(n)).join(' | '));
+    undo();
     renderRackView(true);
     sizeField('uHeight').value = '42'; fire(sizeField('uHeight'), 'change'); await tick(); await tick();
     ok('top-down, taller: every device keeps its printed unit', rk().uHeight === 42 && rackSpanText(node('sw')) === 'U3 front'

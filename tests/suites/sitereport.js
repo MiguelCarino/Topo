@@ -6,9 +6,10 @@
 //      its address and the cable's label;
 //   2. a compact inventory: one line per interface, the device's own fields
 //      on its first line only, a device with no interface still one line;
-//   3. past 40 devices the diagram goes to an appendix at the end, on a page
-//      of its own, and the report says so where it would have been; at 40 or
-//      fewer it stays where it was;
+//   3. the diagram stays inline while its labels read at the width of the
+//      text; past that (or past 40 devices) it goes to a landscape page at
+//      the end, and past one landscape page to an overview and tiled
+//      landscape sheets; the report says so where it would have been;
 //   4. the new headings are translated.
 window.addEventListener('load', () => { setTimeout(() => {
   const out = [];
@@ -81,24 +82,51 @@ window.addEventListener('load', () => { setTimeout(() => {
     ok('the headers: device, type, interface, address, MAC, then the schema\'s', /<th>Device<\/th><th>Type<\/th><th>Interface<\/th><th>Address<\/th><th>MAC<\/th><th>Gateway<\/th>/.test(inv));
 
     // ---- 3. The diagram ----
-    ok('a small site keeps the diagram before the inventory', html.indexOf('<img src="data:image/png') < html.indexOf('>Device inventory<') && !html.includes('class="appendix"'));
+    ok('a small site keeps the diagram before the inventory', html.indexOf('<img src="data:image/png') < html.indexOf('>Device inventory<') && !html.includes('class="sheet land"'));
     loadDocState(site(REPORT_DIAGRAM_INLINE_MAX)); renderCanvasOnly();
     const big = reportModel();
     ok('the large lab is past the line', big.counts.devices > REPORT_DIAGRAM_INLINE_MAX && REPORT_DIAGRAM_INLINE_MAX === 40, String(big.counts.devices));
     const bigHtml = reportHtml(big, image);
-    const appendix = bigHtml.split('class="appendix"')[1] || '';
-    ok('past 40 devices the diagram is in an appendix', count(bigHtml, '<img src="data:image/png') === 1 && /<img src="data:image\/png/.test(appendix));
-    ok('at the end, after Scope and method, on a page of its own', bigHtml.indexOf('>Scope and method<') < bigHtml.indexOf('class="appendix"')
-       && bigHtml.includes('.appendix { page-break-before: always'));
-    ok('and the report says where it went', new RegExp(`At ${big.counts.devices} devices the diagram needs a page of its own`).test(bigHtml.split('>Device inventory<')[0]));
-    ok('without a picture there is no appendix either', !reportHtml(big, null).includes('class="appendix"'));
+    const land = bigHtml.split('class="sheet land"')[1] || '';
+    ok('past 40 devices the diagram is on a landscape page of its own', count(bigHtml, 'class="sheet land"') === 1 && !bigHtml.includes('<img src="data:image/png')
+       && /<image id="topo-dg" href="data:image\/png/.test(land) && /<use href="#topo-dg"\/>/.test(land));
+    ok('at the end, after Scope and method, turned on its side', bigHtml.indexOf('>Scope and method<') < bigHtml.indexOf('class="sheet land"')
+       && bigHtml.includes('@page topo-land { size: landscape;') && bigHtml.includes('.sheet.land { page: topo-land;'));
+    ok('and the report says where it went', bigHtml.split('>Device inventory<')[0].includes('The diagram is on a landscape page of its own at the end of this report.'));
+    ok('without a picture there is no landscape page either', !reportHtml(big, null).includes('class="sheet land"'));
+
+    // The tier follows how small the labels would print (0.2 mm a unit), not
+    // the device count alone. Pictures at 1 px a unit, so units = pixels.
+    const pic = (w, h, extra = {}) => ({ url: 'data:image/png;base64,iVBORw0KGgo=', width: w, height: h, scale: 1, minX: 0, minY: 0, ...extra });
+    ok('a small, narrow drawing stays inline', reportDiagramLayout(pic(800, 600), 10).kind === 'inline');
+    ok('a small but wide one goes to a landscape page', reportDiagramLayout(pic(1200, 500), 10).kind === 'sheet');
+    ok('a big one that reads on one landscape page gets just that', reportDiagramLayout(pic(1250, 800), 80).kind === 'sheet');
+    const huge = reportDiagramLayout(pic(4000, 2000), 300);
+    ok('one too big for a page is tiled', huge.kind === 'tiles' && huge.cols >= 4 && huge.rows >= 2 && huge.tiles.length === huge.cols * huge.rows, JSON.stringify([huge.cols, huge.rows]));
+    ok('every tile prints at least as large as it aims', huge.mm >= REPORT_DIAGRAM_TILE - 1e-9, String(huge.mm));
+    ok('the tiles cover the drawing, edge to edge', Math.min(...huge.tiles.map((x) => x.x)) <= 0 && Math.max(...huge.tiles.map((x) => x.x + x.w)) >= 4000 - 1e-6
+       && Math.min(...huge.tiles.map((x) => x.y)) <= 0 && Math.max(...huge.tiles.map((x) => x.y + x.h)) >= 2000 - 1e-6);
+    const a1 = huge.tiles.find((x) => x.name === 'A1'), b1 = huge.tiles.find((x) => x.name === 'B1');
+    ok('neighbours overlap, so nothing on an edge is cut in two', a1 && b1 && a1.x + a1.w - b1.x >= a1.w * REPORT_DIAGRAM_OVERLAP - 1e-6);
+    ok('each tile has the page\'s shape', Math.abs(a1.w / a1.h - REPORT_DIAGRAM_PAPER.sheetW / REPORT_DIAGRAM_PAPER.sheetH) < 1e-9);
+    const sparse = reportDiagramLayout(pic(4000, 2000, { points: [[100, 100], [3900, 1900]] }), 300);
+    ok('a square with no device in it is left out', sparse.tiles.length === 2 && sparse.tiles[0].name === 'A1'
+       && sparse.tiles[1].name === `${String.fromCharCode(64 + sparse.cols)}${sparse.rows}`, sparse.tiles.map((x) => x.name).join(','));
+    ok('a vast drawing gets smaller tiles, not endless ones', reportDiagramLayout(pic(40000, 30000), 3000).tiles.length <= REPORT_DIAGRAM_MAX_TILES);
+    const tiled = reportHtml(big, pic(4000, 2000));
+    const nTiles = huge.tiles.length;
+    ok('tiled: an overview and one landscape sheet per square', count(tiled, 'class="sheet land"') === nTiles + 1);
+    ok('the picture is carried once, every sheet points at it', count(tiled, 'href="data:image/png') === 1 && count(tiled, '<use href="#topo-dg"/>') === nTiles + 1);
+    ok('the overview draws the grid, the sheets say where they are', count(tiled, 'class="dg-cell"') === nTiles && tiled.includes(`Sheet A1 · 1 of ${nTiles}`) && /Continues on → B1  ↓ A2/.test(tiled));
+    ok('and the report says how many', tiled.split('>Device inventory<')[0].includes(`as an overview and ${nTiles} landscape sheets`));
+    ok('the report caps the picture\'s pixels for a vast drawing', (() => { const f = reportDiagramScale(4); const s = f(10000, 6000); return f(500, 400) === 4 && s < 1 && s * s * 10000 * 6000 <= REPORT_DIAGRAM_MAX_PIXELS + 1 && f(40000, 400) * 40000 <= REPORT_DIAGRAM_MAX_SIDE; })());
     ok('the second switch\'s map runs to its 40 ports', reportPortMaps().find((m) => m.id === 'sw2').rows.length === 41
        && reportPortMaps().find((m) => m.id === 'sw2').free === '41–47');
 
     // ---- 4. In Spanish ----
     setLocale('es');
     const es = reportHtml(reportModel(), image);
-    ok('the new headings are translated', es.includes('>Puertos de los switches<') && es.includes('>Anexo: diagrama de la topología<')
+    ok('the new headings are translated', es.includes('>Puertos de los switches<') && es.includes('El diagrama está en una página horizontal propia')
        && /<th>Puerto<\/th>/.test(es) && /<th>Dirección<\/th>/.test(es) && /Libres: 41–47/.test(es));
     setLocale('en');
 

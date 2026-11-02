@@ -585,10 +585,128 @@ function reportPortMaps() {
 }
 
 // Past this many devices the diagram no longer reads at the width of a page
-// of text, and it pushed the inventory pages down behind it: it goes to an
-// appendix at the end, on a page of its own, and the report says so where it
-// would have been.
+// of text, and it pushed the inventory pages down behind it: it goes to a
+// landscape page at the end, and the report says so where it would have been.
 const REPORT_DIAGRAM_INLINE_MAX = 40;
+
+// How the diagram goes on paper, by how small its labels would print: a
+// device's name is 10 drawing units tall (js/ui.js), and below about 0.2 mm
+// a unit (a 2 mm, 5.7 pt name) it stops reading. Three ways:
+//   inline   at the width of the text, where it always was (a small site);
+//   sheet    a landscape page of its own at the end, filled edge to edge,
+//            when it reads there but not at the width of the text, or the
+//            site is past REPORT_DIAGRAM_INLINE_MAX devices;
+//   tiles    too big for even that: a landscape overview of the whole
+//            network with a lettered grid on it, then a landscape sheet per
+//            square of the grid that has a device in it, each at a size its
+//            labels read at, overlapping its neighbours a little so nothing
+//            on an edge is cut in two.
+// The paper is not known (A4 or Carta, see @page), so the sizes are what
+// fits on both: the text width of a portrait page, and a landscape page
+// with 10 mm margins less its heading. In mm.
+const REPORT_DIAGRAM_PAPER = { inlineW: 180, inlineH: 230, sheetW: 259, sheetH: 170 };
+const REPORT_DIAGRAM_LEGIBLE = 0.2;    // mm per drawing unit, the least that reads
+const REPORT_DIAGRAM_TILE = 0.22;      // mm per drawing unit a tile aims at (a 6 pt name)
+const REPORT_DIAGRAM_OVERLAP = 0.06;   // of a tile, shared with the next one
+const REPORT_DIAGRAM_MAX_TILES = 40;   // past this the tiles get smaller, not more
+
+// Pixels per drawing unit for the report's picture: `base` (4, 2 in a binder)
+// while that is a reasonable image, fewer for a very large drawing, which
+// would otherwise ask for a canvas the browser refuses. At the floor a tile
+// still prints at about 75 dpi.
+const REPORT_DIAGRAM_MAX_PIXELS = 48e6, REPORT_DIAGRAM_MAX_SIDE = 16000;
+// The side is a hard limit (a canvas past it draws nothing), the floor is not.
+const reportDiagramScale = (base) => (w, h) => Math.min(REPORT_DIAGRAM_MAX_SIDE / w, REPORT_DIAGRAM_MAX_SIDE / h,
+    Math.max(0.75, Math.min(base, Math.sqrt(REPORT_DIAGRAM_MAX_PIXELS / Math.max(1, w * h)))));
+
+// A grid square's name: its column as a letter (A…Z, AA…), its row a number.
+const tileName = (c, r) => {
+    let col = '', n = c + 1;
+    while (n > 0) { col = String.fromCharCode(65 + ((n - 1) % 26)) + col; n = Math.floor((n - 1) / 26); }
+    return `${col}${r + 1}`;
+};
+
+// image: { width, height } in pixels and, from captureReportDiagram, scale
+// (pixels per unit), minX/minY (the drawing's corner) and points (where each
+// device is drawn). A picture without them (a test's stand-in) is placed by
+// its device count alone, as before. Tiles are in the picture's pixels.
+function reportDiagramLayout(image, devices) {
+    if (!image) return null;
+    const P = REPORT_DIAGRAM_PAPER;
+    const s = Number(image.scale);
+    if (!(s > 0) || !(image.width > 0) || !(image.height > 0)) {
+        return { kind: devices > REPORT_DIAGRAM_INLINE_MAX ? 'sheet' : 'inline' };
+    }
+    const W = image.width / s, H = image.height / s;   // drawing units
+    const fit = (w, h) => Math.min(w / W, h / H);
+    if (devices <= REPORT_DIAGRAM_INLINE_MAX && fit(P.inlineW, P.inlineH) >= REPORT_DIAGRAM_LEGIBLE) return { kind: 'inline' };
+    if (fit(P.sheetW, P.sheetH) >= REPORT_DIAGRAM_LEGIBLE) return { kind: 'sheet' };
+
+    const OV = REPORT_DIAGRAM_OVERLAP;
+    const count = (len, tile) => (len <= tile ? 1 : Math.ceil((len - tile * OV) / (tile * (1 - OV))));
+    let mm = REPORT_DIAGRAM_TILE, cols, rows;
+    for (;;) {
+        cols = count(W, P.sheetW / mm); rows = count(H, P.sheetH / mm);
+        if (cols * rows <= REPORT_DIAGRAM_MAX_TILES) break;
+        mm *= 0.9;
+    }
+    // Every tile the shape of the page, then shrunk as far as the grid still
+    // covers the drawing: a tile never prints smaller than `mm` asks.
+    let tw = P.sheetW / mm, th = P.sheetH / mm;
+    const span = (n, size) => n * size - (n - 1) * size * OV;
+    const f = Math.min(1, Math.max(W / span(cols, tw), H / span(rows, th)));
+    tw *= f; th *= f;
+    const at = (i, n, len, size) => (n === 1 ? (len - size) / 2 : (i * (len - size)) / (n - 1));
+    const pts = Array.isArray(image.points) && Number.isFinite(image.minX) && Number.isFinite(image.minY)
+        ? image.points.map(([x, y]) => [x - image.minX, y - image.minY]) : null;
+    const REACH = 30;   // a device's card and its labels round its centre
+    const tiles = [];
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const x = at(c, cols, W, tw), y = at(r, rows, H, th);
+            if (pts && !pts.some(([px, py]) => px >= x - REACH && px <= x + tw + REACH && py >= y - REACH && py <= y + th + REACH)) continue;
+            tiles.push({ c, r, name: tileName(c, r), x: x * s, y: y * s, w: tw * s, h: th * s });
+        }
+    }
+    if (!tiles.length) return { kind: 'sheet' };
+    return { kind: 'tiles', cols, rows, tiles, mm: P.sheetW / tw };
+}
+
+// The landscape pages: the picture once, as an <image> every page points at
+// with <use>, so a network on twelve sheets carries its picture once and not
+// twelve times; each page's viewBox is its piece of it.
+function diagramSheets(layout, image, caption, id) {
+    const W = image.width, H = image.height;
+    const pic = `<svg class="dg-src" width="0" height="0" aria-hidden="true"><defs><image id="${id}" href="${image.url}" width="${W}" height="${H}"/></defs></svg>`;
+    const view = (x, y, w, h, extra = '') => `<svg class="dg" viewBox="${x} ${y} ${w} ${h}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeHtml(t('Network topology diagram'))}"><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#f8fafc"/><use href="#${id}"/>${extra}</svg>`;
+    if (layout.kind === 'sheet') {
+        return `<div class="sheet land">${pic}
+    <div class="land-head"><b>${escapeHtml(caption)}</b></div>
+    ${view(0, 0, W, H)}
+</div>`;
+    }
+    const tiles = layout.tiles, n = tiles.length;
+    const font = Math.min(tiles[0].w, tiles[0].h) * 0.09;
+    const grid = tiles.map((tl) => `<g class="dg-cell"><rect x="${tl.x}" y="${tl.y}" width="${tl.w}" height="${tl.h}"/><text x="${tl.x + font * 0.4}" y="${tl.y + font * 1.05}" font-size="${font}">${tl.name}</text></g>`).join('');
+    const overview = `<div class="sheet land">${pic}
+    <div class="land-head"><b>${escapeHtml(caption)}</b><span>${escapeHtml(t('Overview: each square is one of the {n} sheets that follow, printed large enough to read.', { n }))}</span></div>
+    ${view(0, 0, W, H, grid)}
+</div>`;
+    const byCell = new Map(tiles.map((tl) => [`${tl.c},${tl.r}`, tl]));
+    // A small map of the grid in each page's corner, its own square filled.
+    const mw = 64, mh = Math.max(16, Math.min(64, (mw * H) / W)), kx = mw / W, ky = mh / H;
+    const locator = (cur) => `<svg class="dg-loc" viewBox="0 0 ${mw} ${mh}" width="${mw}" height="${mh}" aria-hidden="true"><rect width="${mw}" height="${mh}" fill="#fff" stroke="#cbd5e1"/>${tiles.map((tl) => `<rect x="${tl.x * kx}" y="${tl.y * ky}" width="${tl.w * kx}" height="${tl.h * ky}"${tl === cur ? ' class="on"' : ''}/>`).join('')}</svg>`;
+    const pages = tiles.map((tl, i) => {
+        const next = [['←', -1, 0], ['↑', 0, -1], ['→', 1, 0], ['↓', 0, 1]]
+            .map(([arrow, dc, dr]) => { const o = byCell.get(`${tl.c + dc},${tl.r + dr}`); return o ? `${arrow} ${o.name}` : ''; })
+            .filter(Boolean);
+        return `<div class="sheet land">
+    <div class="land-head"><b>${escapeHtml(caption)}</b><span>${escapeHtml(t('Sheet {name} · {i} of {n}', { name: tl.name, i: i + 1, n }))}${next.length ? ` · ${escapeHtml(t('Continues on'))} ${next.join('  ')}` : ''}</span>${locator(tl)}</div>
+    ${view(tl.x, tl.y, tl.w, tl.h)}
+</div>`;
+    });
+    return overview + pages.join('');
+}
 
 // Read-only, so the whole model is built in one lookup pass (js/model.js):
 // every device's row asks its diagnosis, its effective gateway and DNS and
@@ -929,7 +1047,21 @@ function reportStyles() {
     .changes td:nth-child(2) { width: 34%; }
     /* The accepted findings: the reason is the column that matters. */
     .accepted td:last-child { color: #334155; }
-    .appendix { page-break-before: always; break-before: page; }
+    /* The diagram's landscape pages (diagramSheets): a named page turned on its
+       side, and the picture filling it. Landscape, still no paper size. */
+    @page topo-land { size: landscape; margin: 10mm; }
+    .sheet.land { page: topo-land; max-width: 297mm; padding: 10mm; }
+    .land-head { display: flex; align-items: center; gap: 12px; margin: 0 0 6px; font-size: 11px; color: #475569; }
+    .land-head b { color: #0f172a; font-size: 12px; }
+    .land-head span { flex: 1; }
+    .dg { display: block; width: 100%; height: 170mm; border: 1px solid #e2e8f0; border-radius: 4px; }
+    .dg-src { position: absolute; }
+    .dg-cell rect { fill: rgba(37, 99, 235, 0.04); stroke: #2563eb; stroke-width: 1.5; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+    .dg-cell text { fill: #1d4ed8; font-weight: 700; paint-order: stroke; stroke: #fff; stroke-width: 3; vector-effect: non-scaling-stroke;
+                    font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .dg-loc { flex: none; }
+    .dg-loc rect + rect { fill: none; stroke: #94a3b8; stroke-width: 0.6; }
+    .dg-loc rect.on { fill: #2563eb; stroke: #2563eb; }
     /* The rack elevations: front and rear side by side, a unit a row, so a
        42U rack is a third of a page and never splits. */
     .rack { margin-bottom: 14px; }
@@ -973,7 +1105,7 @@ function reportStyles() {
 
     @media print {
         body { background: #fff; padding: 0; }
-        .sheet { box-shadow: none; max-width: none; padding: 0; }
+        .sheet, .sheet.land { box-shadow: none; max-width: none; padding: 0; }
         /* On paper the page break IS the separation; the screen gap would print
            as a stripe of dead space at the top of every site's first page. */
         .sheet + .sheet { margin-top: 0; }
@@ -1614,12 +1746,16 @@ function reportSheet(model, image, opts = {}) {
         .join('');
     const accepted = model.accepted || [];
     const portMaps = model.portMaps || [];
-    // A large site's diagram goes to an appendix (REPORT_DIAGRAM_INLINE_MAX).
-    const appendix = !!image && counts.devices > REPORT_DIAGRAM_INLINE_MAX;
-    const figure = image ? `<div class="figure">
+    // Inline, a landscape page of its own, or tiles (reportDiagramLayout).
+    const layout = reportDiagramLayout(image, counts.devices);
+    const caption = meta.site ? `${t('Topology')} — ${meta.site}` : t('Topology');
+    const figure = layout && layout.kind === 'inline' ? `<div class="figure">
         <img src="${image.url}" alt="${escapeHtml(t('Network topology diagram'))}">
-        <div class="caption">${escapeHtml(meta.site ? `${t('Topology')} — ${meta.site}` : t('Topology'))}</div>
+        <div class="caption">${escapeHtml(caption)}</div>
     </div>` : '';
+    const away = !layout ? '' : layout.kind === 'sheet'
+        ? t('The diagram is on a landscape page of its own at the end of this report.')
+        : layout.kind === 'tiles' ? t('The diagram is too large to read on one page: it is at the end, as an overview and {n} landscape sheets.', { n: layout.tiles.length }) : '';
 
     return `<div class="sheet"${opts.anchorId ? ` id="${escapeHtml(opts.anchorId)}"` : ''}>
     <div class="rule"></div>
@@ -1647,7 +1783,7 @@ ${(model.visit || []).length ? `
     ${acceptedSection(accepted)}
 ` : ''}
     ${image ? `<h2>${escapeHtml(t('Topology'))}</h2>
-    ${appendix ? `<p class="muted">${escapeHtml(t('At {n} devices the diagram needs a page of its own: it is in the appendix at the end.', { n: counts.devices }))}</p>` : figure}` : ''}
+    ${away ? `<p class="muted">${escapeHtml(away)}</p>` : figure}` : ''}
 
     <h2>${escapeHtml(t('Device inventory'))}</h2>
     ${devicesSection(model.devices, model.groups)}
@@ -1673,17 +1809,11 @@ ${model.changes ? `
 ` : ''}
     <h2>${escapeHtml(t('Scope and method'))}</h2>
     ${methodSection(meta)}
-${appendix ? `
-    <div class="appendix">
-    <h2>${escapeHtml(t('Appendix: topology diagram'))}</h2>
-    ${figure}
-    </div>
-` : ''}
     <footer>
         <span>${escapeHtml(meta.ref || '')}</span>
         <span>${escapeHtml(t('Generated with Topo · topo.carino.systems'))}</span>
     </footer>
-</div>`;
+</div>${away ? diagramSheets(layout, image, caption, opts.diagramId || 'topo-dg') : ''}`;
 }
 
 // What a report holds: the summary for the client, the technical sheet, or
@@ -1802,7 +1932,7 @@ function binderHtml(binder, images = {}, parts) {
         // the cover's, with the site's own where it says something else.
         const summary = p.summary ? summarySheet(Object.assign({}, s.model, { meta: Object.assign({}, binder.meta, { site: '' }, pickSet(sheetMeta)) }),
             { title: s.name, subtitle: t('Network summary'), anchorId: s.anchor }) : '';
-        return summary + (p.technical ? reportSheet(sheetModel, images[s.id] || null, { title: s.name, subtitle: '', anchorId: p.summary ? '' : s.anchor }) : '');
+        return summary + (p.technical ? reportSheet(sheetModel, images[s.id] || null, { title: s.name, subtitle: '', anchorId: p.summary ? '' : s.anchor, diagramId: `topo-dg-${s.anchor}` }) : '');
     }).join('');
     return reportDocument(title, (p.technical ? binderCoverSheet(binder) : '') + sheets);
 }
@@ -1882,10 +2012,16 @@ async function generateSiteReport(meta, parts) {
 // for today again. Only the drawing: the panels never show the report's day.
 // A pending typing redraw is flushed first, or the copy would draw it for
 // that day through all of renderCanvasOnly.
-function captureReportDiagram(day, scale) {
-    if (!day || day === todayISO()) return captureCanvasImage('png', scale);
+// It also says where each device is drawn, which reportDiagramLayout needs to
+// leave out a tile with nothing on it. base: pixels per unit before a very
+// large drawing is capped (reportDiagramScale).
+function captureReportDiagram(day, base = 4) {
+    const scale = reportDiagramScale(base);
+    const points = mapPointsOf(state.nodes).map((n) => [n.x, n.y]);
+    const withPoints = (p) => p.then((img) => (img ? Object.assign(img, { points }) : img));
+    if (!day || day === todayISO()) return withPoints(captureCanvasImage('png', scale));
     flushTypedRender();
-    try { return onChecksDay(day, () => { withLookupPass(drawCanvas); return captureCanvasImage('png', scale); }); }
+    try { return withPoints(onChecksDay(day, () => { withLookupPass(drawCanvas); return captureCanvasImage('png', scale); })); }
     finally { withLookupPass(drawCanvas); }
 }
 

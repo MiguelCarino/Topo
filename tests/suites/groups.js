@@ -296,11 +296,12 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // leaving it outside the rack as a finding. (Before, the height was a
     // typed number and the device became a finding.)
     const h = field('rk', 'uHeight');
-    answers.push((req) => (req.kind === 'confirm' ? true : null));
+    // The question also offers to move it down; Take it out is the old way.
+    answers.push((req) => (req.kind === 'choice' ? 'out' : null));
     h.value = '24'; fire(h, 'change');
     await tick(); await tick();
     ok('a rack\'s height is picked, after a question that names the device above the new top', grp('rk').uHeight === 24
-       && /RTR \(U40 front\)/.test(asked[asked.length - 1].message), asked.length ? asked[asked.length - 1].message : '');
+       && /RTR \(U40 front\) → U24/.test(asked[asked.length - 1].message), asked.length ? asked[asked.length - 1].message : '');
     ok('that device then waits in the rack with no units, and is no finding', node('rtr').group === 'rk' && node('rtr').rackU === undefined
        && !topologyFindings().some((f) => f.key === 'rack' && f.nodeIds[0] === 'rtr'));
     undo();

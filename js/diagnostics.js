@@ -2234,13 +2234,13 @@ function validateTopology(diag) {
             // every device on it, the way Accept takes the whole line.
             const serviceIds = item.findings.every((f) => SERVICE_CHECKS.includes(f.key)) ? [...new Set(item.findings.flatMap((f) => f.nodeIds))] : [];
             const actions = canAccept ? `<span class="ca-acts">
-                ${serviceIds.length ? `<button type="button" class="link-btn quiet ca-serviced" ${at} title="${escapeHtml(t('Record that it was serviced today'))}">${escapeHtml(t('Serviced today'))}</button>` : ''}
-                <button type="button" class="link-btn quiet ca-accept" ${at} title="${escapeHtml(t('Keep this finding as known, with a reason, for good or until a date. It stays listed but no longer counts.'))}">${escapeHtml(t('Accept…'))}</button>
-                <button type="button" class="link-btn quiet ca-pin" ${at} aria-pressed="${pinned}" title="${escapeHtml(t(pinned ? 'Take it off the list for the next visit' : 'Add it to the list to check on the next visit'))}">${escapeHtml(t(pinned ? 'Unpin' : 'Pin'))}</button>
+                ${serviceIds.length ? `<button type="button" class="cs-btn ca-serviced" ${at} title="${escapeHtml(t('Record that it was serviced today'))}">${escapeHtml(t('Serviced today'))}</button>` : ''}
+                <button type="button" class="cs-btn ca-accept" ${at} title="${escapeHtml(t('Keep this finding as known, with a reason, for good or until a date. It stays listed but no longer counts.'))}">${escapeHtml(t('Accept…'))}</button>
+                <button type="button" class="cs-btn ca-pin" ${at} aria-pressed="${pinned}" title="${escapeHtml(t(pinned ? 'Take it off the list for the next visit' : 'Add it to the list to check on the next visit'))}">${escapeHtml(t(pinned ? 'Unpin' : 'Pin'))}</button>
             </span>` : '';
             return `<li class="ca-item ${item.level}"><button type="button" class="ca-line" ${at}
-                title="${escapeHtml(t(many ? 'Show on the map (click again for the next one)' : 'Show on the map'))}">${pinned ? '<span class="ca-pinned" aria-hidden="true">📌</span> ' : ''}${escapeHtml(findingItemText(item))}</button>${actions}${lapsed
-                ? `<p class="ca-reason">${escapeHtml(t('Was scheduled until {date}: {reason}', { date: lapsed.until, reason: lapsed.reason }))}</p>` : ''}</li>`;
+                title="${escapeHtml(t(many ? 'Show on the map (click again for the next one)' : 'Show on the map'))}">${pinned ? '<span class="ca-pinned" aria-hidden="true">📌</span> ' : ''}${escapeHtml(findingItemText(item))}</button>${lapsed
+                ? `<p class="ca-reason">${escapeHtml(t('Was scheduled until {date}: {reason}', { date: lapsed.until, reason: lapsed.reason }))}</p>` : ''}${actions}</li>`;
         }).join('');
         return `<li class="ca-group ${g.level}">
             <button type="button" class="ca-group-head" data-g="${gi}" aria-expanded="${open}">
@@ -2265,7 +2265,7 @@ function validateTopology(diag) {
         return `<li class="ca-item accepted">
             <button type="button" class="ca-line" data-a="${ai}" title="${escapeHtml(t('Show on the map'))}"${a.findings.length ? '' : ' disabled'}>${lines.map(escapeHtml).join('<br>')}</button>
             <p class="ca-reason">${escapeHtml(a.entry.until ? t('Scheduled until {date}: {reason}', { date: a.entry.until, reason: a.entry.reason }) : t('Reason: {reason}', { reason: a.entry.reason }))}</p>
-            ${canAccept ? `<button type="button" class="link-btn quiet ca-reopen" data-a="${ai}">${escapeHtml(t('Reopen'))}</button>` : ''}
+            ${canAccept ? `<span class="ca-acts"><button type="button" class="cs-btn ca-reopen" data-a="${ai}">${escapeHtml(t('Reopen'))}</button></span>` : ''}
         </li>`;
     }).join('');
 
@@ -2282,8 +2282,8 @@ function validateTopology(diag) {
         return `<li class="ca-item visit ${p.findings.length ? p.findings[0].level : 'gone'}">
             <button type="button" class="ca-line" data-p="${pi}" title="${escapeHtml(t('Show on the map'))}">${lines.map(escapeHtml).join('<br>')}</button>
             ${p.entry.note ? `<p class="ca-reason">${escapeHtml(t('To check: {note}', { note: p.entry.note }))}</p>` : ''}
-            ${canAccept ? `<span class="ca-acts">${serviceNode ? `<button type="button" class="link-btn quiet ca-serviced" data-p="${pi}" title="${escapeHtml(t('Record that it was serviced today'))}">${escapeHtml(t('Serviced today'))}</button>` : ''}
-                <button type="button" class="link-btn quiet ca-unpin" data-p="${pi}">${escapeHtml(t('Unpin'))}</button></span>` : ''}
+            ${canAccept ? `<span class="ca-acts">${serviceNode ? `<button type="button" class="cs-btn ca-serviced" data-p="${pi}" title="${escapeHtml(t('Record that it was serviced today'))}">${escapeHtml(t('Serviced today'))}</button>` : ''}
+                <button type="button" class="cs-btn ca-unpin" data-p="${pi}">${escapeHtml(t('Unpin'))}</button></span>` : ''}
         </li>`;
     }).join('');
 
@@ -2311,6 +2311,80 @@ function openFindingsTab() {
         if (toggle) toggle.click();
     }
 }
+// Straight to one finding's line (from a port's tip in the rack view): the
+// tab opened, its group unfolded (for this visit, as a click on its head
+// would, but not saved), the line scrolled to, focused and flashed. The
+// finding is matched by its check, level and words, so a copy from another
+// diagnosis of the same document finds its line too. -> true when found.
+// opts.from: where the reader was looking (a port's tip, a DOMRect); with
+// motion on, a card with the finding's words flies from there to its line
+// before the line lights, so the eye follows it to the rail.
+function revealFinding(f, opts = {}) {
+    if (isReduced() || !f) return false;
+    openFindingsTab();
+    validateTopology();
+    const same = (x) => x === f || (x.key === f.key && x.level === f.level && x.detail === f.detail);
+    const gi = panelGroups.findIndex((g) => g.findings.some(same));
+    if (gi < 0) return false;
+    const ii = panelGroups[gi].items.findIndex((it) => it.findings.some(same));
+    const list = document.getElementById('conflictMsgList');
+    const head = list.querySelector(`.ca-group-head[data-g="${gi}"]`);
+    if (head && head.getAttribute('aria-expanded') !== 'true') {
+        panelOpen.set(panelGroups[gi].key, true);
+        head.setAttribute('aria-expanded', 'true');
+        head.querySelector('.ca-caret').textContent = '▾';
+        head.nextElementSibling.hidden = false;
+    }
+    const line = list.querySelector(`.ca-line[data-g="${gi}"][data-i="${ii}"]`) || head;
+    if (!line) return false;
+    const row = line.closest('.ca-item') || line;
+    // Scrolled in its own list only: scrollIntoView also scrolls every
+    // ancestor, the rail among them (overflow hidden, but scrollable by
+    // script), which left the rail's tabs pushed up out of sight.
+    const scroller = (() => { for (let el = line.parentElement; el && el !== document.body; el = el.parentElement) { const o = getComputedStyle(el).overflowY; if ((o === 'auto' || o === 'scroll') && el.scrollHeight > el.clientHeight) return el; } return null; })();
+    if (scroller) {
+        const sr = scroller.getBoundingClientRect(), lr = line.getBoundingClientRect();
+        scroller.scrollTop += lr.top - sr.top - (sr.height - lr.height) / 2;
+    }
+    line.focus({ preventScroll: true });
+    const flash = () => {
+        row.classList.remove('ca-flash');
+        void row.offsetWidth;   // restart the flash on a second visit
+        row.classList.add('ca-flash');
+        setTimeout(() => row.classList.remove('ca-flash'), 2000);
+    };
+    if (!flyToFinding(f, opts.from, row, flash)) flash();
+    return true;
+}
+
+// The card that carries a finding from a port's tip to its line: drawn over
+// everything, taking no pointer, gone when it lands (or after a second, if
+// the animation never reports). -> false when there is no motion to show.
+const FINDING_FLY_MS = 650;
+function flyToFinding(f, from, row, landed) {
+    if (!from || typeof motionOn !== 'function' || !motionOn()) return false;
+    // A drawer sliding open (a phone) moves the line: aim where it ends up.
+    const to = row.getBoundingClientRect();
+    if (!to.width || !to.height) return false;
+    const card = document.createElement('div');
+    card.className = `ca-fly ${f.level || ''}`;
+    card.setAttribute('aria-hidden', 'true');
+    card.innerHTML = `<b>${escapeHtml(f.check || '')}</b> ${escapeHtml(f.detail ? f.detail.charAt(0).toUpperCase() + f.detail.slice(1) : '')}`;
+    document.body.appendChild(card);
+    const box = (r) => ({ left: `${Math.round(r.left)}px`, top: `${Math.round(r.top)}px`, width: `${Math.round(r.width)}px`, height: `${Math.round(r.height)}px` });
+    let done = false;
+    const finish = () => { if (done) return; done = true; card.remove(); landed(); };
+    const anim = motionAnimate(card, [
+        { ...box(from), opacity: 0.2, offset: 0 },
+        { ...box(from), opacity: 1, offset: 0.12 },
+        { ...box(to), opacity: 1, offset: 0.85 },
+        { ...box(to), opacity: 0, offset: 1 },
+    ], { duration: FINDING_FLY_MS, easing: 'cubic-bezier(0.45, 0, 0.2, 1)', fill: 'forwards' });
+    if (anim) anim.onfinish = finish;
+    setTimeout(finish, anim ? FINDING_FLY_MS + 400 : 0);
+    return true;
+}
+
 // A on the keyboard: to the Findings tab, and from it back to Configuration.
 function toggleFindingsTab() {
     if (findingsTabShown()) showConfigTab('config');

@@ -199,6 +199,39 @@ window.addEventListener('load', () => { setTimeout(async () => {
     renderRackView(true);
     ok('a cable an open finding names rings its ports', port('core', 'p11').classList.contains('rk-pbad') || port('core', 'p10').classList.contains('rk-pbad'),
        json(topologyFindings().filter((f) => f.key === 'loop').map((f) => f.linkIds)));
+    // Its tip names the finding, and takes you to its line in the Findings tab.
+    const badPid = port('core', 'p11').classList.contains('rk-pbad') ? 'p11' : 'p10';
+    rvShowPortTip('core', badPid, 'hover');
+    ok('a pointer\'s tip names the finding and says how to keep it', /Loop|loop/.test(tipText()) && tipText().includes('Click the port to keep this open.')
+       && !tipText().includes('see the Findings tab'), tipText());
+    rvShowPortTip('core', badPid, 'pin');
+    const findBtn = view().querySelector('.rk-ptip [data-rk-finding]');
+    ok('a kept tip has Show in Findings, and takes the pointer', !!findBtn && view().querySelector('.rk-ptip').classList.contains('rk-ptip-act')
+       && !tipText().includes('Click the port to keep this open.'));
+    if (findBtn) findBtn.click();
+    const flashed = document.querySelector('#conflictMsgList .ca-item.ca-flash');
+    ok('Show in Findings opens the tab on that finding\'s line', findingsTabShown() && !!flashed && /loop/i.test(flashed.closest('.ca-group').textContent)
+       && document.activeElement === flashed.querySelector('.ca-line') && !flashed.closest('.ca-items').hidden);
+    ok('and the tip goes', !tipText());
+    // With motion on, a card carries the finding from the tip to its line,
+    // and the line lights when it lands.
+    showConfigTab('config');
+    const heldMotion = window.TOPO_MOTION;
+    window.TOPO_MOTION = true;
+    rvShowPortTip('core', badPid, 'pin');
+    view().querySelector('.rk-ptip [data-rk-finding]').click();
+    const fly = document.querySelector('.ca-fly');
+    ok('with motion, a card flies to the finding first', !!fly && /loop/i.test(fly.textContent) && !document.querySelector('#conflictMsgList .ca-flash'));
+    // This Chromium barely advances an animation's clock (tests/run.sh), so
+    // the flight is played to its end here, and so is anything else motion
+    // started meanwhile, or it would hang on every later measurement.
+    // Script animations only: the CSS transitions (the phone drawer's) are
+    // left as every other suite leaves them.
+    document.getAnimations().filter((a) => !(a instanceof CSSTransition)).forEach((a) => { try { a.finish(); } catch (e) { /* infinite */ } });
+    await frame();
+    ok('and is gone when it lands, the line lit', !document.querySelector('.ca-fly') && !!document.querySelector('#conflictMsgList .ca-item.ca-flash'));
+    window.TOPO_MOTION = heldMotion;
+    showConfigTab('config');
     undo();
 
     // ---- 5: the box grows; the zoom ----

@@ -764,11 +764,12 @@
                 </div>
             </div>
 
-            <!-- Kept on screen while editing: the canvas is someone's
-                 addressing plan. carino-diag.js only asks for this device's
-                 public IP when its status panel is opened, so that is named. -->
-            <div class="ws-rail-foot">
-                <p class="privacy-line"><span data-i18n>Runs in your browser. Nothing you add here is uploaded.</span>&nbsp;<span class="pl-also" data-i18n>The status panel, when opened, asks a public service for this device's IP address.</span></p>
+            <!-- The privacy notice, in the navbar's About popup (carino-navbar.js
+                 moves this node there): the canvas is someone's addressing
+                 plan. carino-diag.js only asks for this device's public IP
+                 when its status panel is opened, so that is named. -->
+            <div data-carino-about hidden>
+                <p><span data-i18n>Runs in your browser. Nothing you add here is uploaded.</span> <span data-i18n>The status panel, when opened, asks a public service for this device's IP address.</span></p>
             </div>
         </aside>
 

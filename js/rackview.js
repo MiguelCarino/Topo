@@ -118,6 +118,7 @@ const _rv = {
     reveal: '',        // a device just tapped, for the rebuild to keep in sight: renderRackView
     zoom: 1,           // the unit's height, 1x, 2x or 3x (a view kept in this browser): setRackZoom
     portTip: null,     // the port whose tip shows, { node, port, how }: rvShowPortTip
+    tipFindings: [],   // the findings its Show in Findings buttons stand for, by index
     badLinks: null,    // the cables an open finding names, as of the last rebuild: rvBadLinks
     sort: { key: 'dev', dir: 1 }, // the patch schedule's sort (a view, this visit): setRackSort
     trace: '',         // a cable a schedule row just traced, for the rebuild to bring into sight: rvTraceCable
@@ -684,7 +685,16 @@ function rvPortInfo(node, portId) {
     });
     if (st.problem === 'past') lines.push(t('Past the {total}-port faceplate', { total: portCountOf(node) }));
     else if (st.problem === 'doubled') lines.push(t('{n} cables on this port: a port carries one.', { n: p.links.length }));
-    else if (st.problem === 'finding') lines.push(t('A finding names this cable: see the Findings tab.'));
+    else if (st.problem === 'finding') {
+        // The findings themselves, each with the way to its line in the
+        // Findings tab: a tip that only said "see the Findings tab" left the
+        // reader to find it among the rest.
+        const ids = new Set(p.links.map((l) => l.id));
+        const named = currentDiagnosis().findings.filter((f) => isOpenFinding(f) && (f.level === 'bad' || f.level === 'warn')
+            && (f.linkIds || []).some((id) => ids.has(id)));
+        named.slice(0, 3).forEach((f) => lines.push({ finding: f }));
+        if (named.length > 3) lines.push(t('And {n} more in the Findings tab.', { n: named.length - 3 }));
+    }
     return { head, lines, colour: st.colour, bad: !!st.problem, links: p.links.map((l) => l.id) };
 }
 
@@ -713,10 +723,24 @@ function rvShowPortTip(nodeId, portId, how) {
     tip.classList.toggle('rk-ptip-bad', info.bad);
     // A line is words, or { text, pick }: a cable to Pick a port for.
     const pick = (x) => (x.pick && !state.readOnly ? `<button type="button" class="cs-btn rk-pick" data-rk-pick="${escapeHtml(x.pick)}">${escapeHtml(t('Pick a port'))}</button>` : '');
-    tip.classList.toggle('rk-ptip-act', info.lines.some((x) => x.pick) && !state.readOnly);
+    // Or { finding }: a finding on the port's cable, with Show in Findings
+    // (the full editor's tab; a reduced view has none, so the words only).
+    _rv.tipFindings = [];
+    const canShow = !isReduced();
+    const finding = (f) => {
+        const i = _rv.tipFindings.push(f) - 1;
+        const detail = f.detail ? f.detail.charAt(0).toUpperCase() + f.detail.slice(1) : '';
+        return `<span class="rk-ptrow rk-ptfind ${escapeHtml(f.level)}"><span><b>${escapeHtml(f.check)}</b> ${escapeHtml(detail)}</span>${canShow
+            ? `<button type="button" class="cs-btn rk-pick" data-rk-finding="${i}">${escapeHtml(t('Show in Findings'))}</button>` : ''}</span>`;
+    };
+    const finds = info.lines.some((x) => x.finding) && canShow;
+    tip.classList.toggle('rk-ptip-act', (info.lines.some((x) => x.pick) && !state.readOnly) || finds);
+    // A pointer's tip goes when it leaves the port, so the button is a tapped
+    // (kept) tip's: the hover says how to keep it.
+    const note = info.note || (finds && how === 'hover' ? t('Click the port to keep this open.') : '');
     tip.innerHTML = `<strong>${info.colour ? `<i class="rk-swatch" style="background:${escapeHtml(info.colour)}"></i>` : ''}${escapeHtml(info.head)}</strong>`
-        + info.lines.map((x) => (typeof x === 'string' ? `<span>${escapeHtml(x)}</span>` : `<span class="rk-ptrow"><span>${escapeHtml(x.text)}</span>${pick(x)}</span>`)).join('')
-        + (info.note ? `<span class="rk-ptnote">${escapeHtml(info.note)}</span>` : '');
+        + info.lines.map((x) => (typeof x === 'string' ? `<span>${escapeHtml(x)}</span>` : x.finding ? finding(x.finding) : `<span class="rk-ptrow"><span>${escapeHtml(x.text)}</span>${pick(x)}</span>`)).join('')
+        + (note ? `<span class="rk-ptnote">${escapeHtml(note)}</span>` : '');
     tip.hidden = false;
     const vr = view.getBoundingClientRect(), pr = el.getBoundingClientRect();
     const w = tip.offsetWidth, h = tip.offsetHeight;
@@ -2696,6 +2720,16 @@ function onRackClick(e) {
         const req = _rv.pendingPlace;
         _rv.pendingPlace = null;
         openPlaceDialog(req);
+        return;
+    }
+    // Show in Findings, in a port's tip: that finding's line in the tab.
+    const findBtn = e.target.closest('[data-rk-finding]');
+    if (findBtn) {
+        const f = _rv.tipFindings[Number(findBtn.dataset.rkFinding)];
+        // The finding's own row in the tip, where the flight starts.
+        const from = (findBtn.closest('.rk-ptfind') || findBtn).getBoundingClientRect();
+        rvHidePortTip();
+        if (f) revealFinding(f, { from });
         return;
     }
     // Pick a port, in a no-port spot's tip: the rail's port picker on it.

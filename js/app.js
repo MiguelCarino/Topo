@@ -2822,11 +2822,13 @@ function importJsonFile(file) {
 // binder in one go: at the export's 4x a twelve-site estate is a lot of canvas
 // for pictures that are printed two to a page. Omitted everywhere else, so the
 // PNG export and the single-site report are byte-for-byte what they were.
+// scale: pixels per drawing unit (4 when not given), or a function of the
+// drawing's width and height in units that returns one, so a caller can cap
+// a very large drawing's pixels before the canvas is made (the report does).
 function captureCanvasImage(format, scale) {
-    const SCALE = Number.isFinite(scale) && scale > 0 ? scale : 4;
-    const drawn = canvasSvgMarkup(SCALE);
+    const drawn = canvasSvgMarkup(typeof scale === 'function' ? scale : (Number.isFinite(scale) && scale > 0 ? scale : 4));
     if (!drawn) return Promise.resolve(null);
-    const { minX, minY, width: exportWidth, height: exportHeight } = drawn;
+    const { minX, minY, width: exportWidth, height: exportHeight, scale: SCALE } = drawn;
     const url = URL.createObjectURL(new Blob([drawn.markup], { type: 'image/svg+xml;charset=utf-8' })), img = new Image();
 
     return new Promise((resolve, reject) => {
@@ -2843,7 +2845,7 @@ function captureCanvasImage(format, scale) {
             ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0, exportWidth * SCALE, exportHeight * SCALE);
             const out = encodeCanvas(canvas, format);
             URL.revokeObjectURL(url);
-            resolve({ url: out.url, ext: out.ext, width: canvas.width, height: canvas.height });
+            resolve({ url: out.url, ext: out.ext, width: canvas.width, height: canvas.height, minX, minY, scale: SCALE });
         };
         img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not rasterise the canvas.')); };
         img.src = url;
@@ -2897,6 +2899,8 @@ function canvasSvgMarkup(scale = 1) {
 
     minX -= PADDING; minY -= PADDING; maxX += PADDING; maxY += PADDING;
     const exportWidth = Math.max(1, Math.ceil(maxX - minX)), exportHeight = Math.max(1, Math.ceil(maxY - minY));
+    const asked = typeof scale === 'function' ? scale(exportWidth, exportHeight) : scale;
+    scale = Number.isFinite(asked) && asked > 0 ? asked : 1;
 
     const svg = document.getElementById('networkCanvas').cloneNode(true);
     svg.querySelector('#workspace').setAttribute('transform', `translate(${-minX}, ${-minY}) scale(1)`);
@@ -2934,7 +2938,7 @@ function canvasSvgMarkup(scale = 1) {
 
     let markup = new XMLSerializer().serializeToString(svg);
     if (!markup.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)) markup = markup.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
-    return { markup, minX, minY, width: exportWidth, height: exportHeight };
+    return { markup, minX, minY, width: exportWidth, height: exportHeight, scale };
 }
 
 // Vector export (plan, "Vector SVG export"): the same drawing the PNG holds,

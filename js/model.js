@@ -3449,18 +3449,95 @@ function rackResizePlan(rack, height, nodes = state.nodes) {
     });
     return { shift, lost };
 }
+// Where the devices a shorter rack would lose can go instead, so a rack drawn
+// at 42U with its gear at the top, corrected to 24U, does not need each
+// device dragged down first. Worked out on a copy of the rack as it will be
+// (the others already on their new units): first all of them moved by one
+// amount, down on a rack numbered from the bottom (its units go at the top),
+// up on one numbered from the top, which keeps their order and the gaps
+// between them; when that runs into another device or the end of the rack,
+// one by one from the end they leave, each to the nearest free units on its
+// own face, so the order still holds. One that finds no room stays lost.
+// Pure: -> { moves: [{ node, rackU }], left: [node], up }.
+function rackShrinkMoves(rack, height, nodes = state.nodes) {
+    const plan = rackResizePlan(rack, height, nodes);
+    const up = rackTopDown(rack);
+    if (!plan.lost.length) return { moves: [], left: [], up };
+    const lost = new Set(plan.lost);
+    const after = { ...rack, uHeight: height };
+    const members = rackMembers(rack, nodes);
+    const copy = new Map(members.map((n) => [n, { ...n }]));
+    const reset = () => members.forEach((n) => {
+        const c = copy.get(n);
+        if (lost.has(n) || !Number.isInteger(n.rackU)) delete c.rackU;
+        else c.rackU = n.rackU + plan.shift;
+    });
+    const scratch = () => [...copy.values()];
+    const fits = (n, lo) => rackSpanCheck(after, rackFaceOf(n), lo, rackHeightOf(n), n.id, scratch()).ok;
+    const order = plan.lost.slice().sort((a, b) => (up ? a.rackU - b.rackU : b.rackU + rackHeightOf(b) - (a.rackU + rackHeightOf(a))));
+
+    // 1. All by one amount, so the stack keeps its shape.
+    reset();
+    const los = plan.lost.map((n) => n.rackU + plan.shift), his = plan.lost.map((n) => n.rackU + plan.shift + rackHeightOf(n) - 1);
+    const delta = up ? 1 - Math.min(...los) : height - Math.max(...his);
+    if (order.every((n) => { const lo = n.rackU + plan.shift + delta; if (!fits(n, lo)) return false; copy.get(n).rackU = lo; return true; })) {
+        return { moves: order.map((n) => ({ node: n, rackU: copy.get(n).rackU })), left: [], up };
+    }
+    // 2. One by one, the nearest free units to the end they leave.
+    reset();
+    const moves = [], left = [];
+    order.forEach((n) => {
+        const h = rackHeightOf(n);
+        let at = null;
+        if (up) { for (let lo = 1; lo + h - 1 <= height && at === null; lo++) if (fits(n, lo)) at = lo; }
+        else { for (let lo = height - h + 1; lo >= 1 && at === null; lo--) if (fits(n, lo)) at = lo; }
+        if (at === null) { left.push(n); return; }
+        copy.get(n).rackU = at;
+        moves.push({ node: n, rackU: at });
+    });
+    return { moves, left, up };
+}
+
 // Writes it, in place, on `rack` and `nodes`: the caller's batch() makes it
-// one undo step. -> the plan it followed.
-function applyRackHeight(rack, height, nodes = state.nodes) {
+// one undo step. opts.move: the devices it would lose go where
+// rackShrinkMoves puts them instead, those with no room still lose their
+// units. -> the plan it followed (with its moves).
+function applyRackHeight(rack, height, nodes = state.nodes, opts = {}) {
+    const moved = opts.move ? rackShrinkMoves(rack, height, nodes) : { moves: [] };
+    const to = new Map(moved.moves.map((m) => [m.node, m.rackU]));
     const plan = rackResizePlan(rack, height, nodes);
     const lost = new Set(plan.lost);
     rackMembers(rack, nodes).forEach((n) => {
         if (!Number.isInteger(n.rackU)) return;
+        if (to.has(n)) { n.rackU = asRackU(to.get(n)); return; }
         if (lost.has(n)) { delete n.rackU; delete n.rackFace; return; }
         if (plan.shift) n.rackU = asRackU(n.rackU + plan.shift);
     });
     rack.uHeight = height;
-    return plan;
+    return { ...plan, moves: moved.moves };
+}
+
+// The question when the lost devices can be moved (rackShrinkMoves): each
+// named with where it is and where it would go. '' when none is lost or
+// none has room. -> { text, n, up } or null.
+function rackShrinkChoice(rack, height, nodes = state.nodes, groups = state.groups) {
+    const { lost } = rackResizePlan(rack, height, nodes);
+    if (!lost.length) return null;
+    const { moves, left, up } = rackShrinkMoves(rack, height, nodes);
+    if (!moves.length) return null;
+    const after = { ...rack, uHeight: height };
+    const to = new Map(moves.map((m) => [m.node, m.rackU]));
+    // Listed as they stand in the rack, top first.
+    const lines = lost.slice().sort((a, b) => b.rackU - a.rackU).slice(0, RACK_LOST_LIST_MAX).map((n) => {
+        const where = `• ${n.name || n.id} (${rackSpanText(n, groups)})`;
+        return to.has(n) ? `${where} → ${rackUnitsText(after, to.get(n), to.get(n) + rackHeightOf(n) - 1)}` : where;
+    });
+    if (lost.length > RACK_LOST_LIST_MAX) lines.push(t('…and {n} more.', { n: lost.length - RACK_LOST_LIST_MAX }));
+    const text = [t(lost.length === 1 ? '{rack} becomes {h}U. This device is in units it loses:' : '{rack} becomes {h}U. These {n} devices are in units it loses:',
+        { rack: groupLabel(rack), h: height, n: lost.length }), ...lines,
+    t(up ? 'Moving them up keeps them in the same order, in the units that are left.' : 'Moving them down keeps them in the same order, in the units that are left.')];
+    if (left.length) text.push(t(left.length === 1 ? 'One of them has no room left and waits under Not placed yet.' : '{n} of them have no room left and wait under Not placed yet.', { n: left.length }));
+    return { text: text.join('\n'), n: lost.length, up };
 }
 // The question asked before: which devices lose their units, by name and
 // where they are now. '' when none does (a taller rack, or free units).
