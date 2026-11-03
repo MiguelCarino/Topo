@@ -1486,7 +1486,7 @@ function planPaste(colKey, text, targets = pasteTargets(), tab = _tv.tab) {
 function pasteFindingsDelta(plan) {
     const changes = plan.cells.filter((c) => c.status === 'change');
     if (!changes.length) return [];
-    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi });
+    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers });
     changes.forEach((c) => { const target = findTarget(plan.col.rec, c.row.ref, scratch); if (target) plan.col.set(target, c.value, scratch); });
     return findingsDelta(topologyFindings(), diagnoseDoc(scratch).findings);
 }

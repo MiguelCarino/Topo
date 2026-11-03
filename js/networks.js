@@ -350,6 +350,7 @@ function openNetworkInTab(id) {
         if (e.target.id === 'subnetZonesToggle') {
             state.settings.subnetZones = e.target.checked;
             saveSettings(); renderCanvasOnly();
+            if (typeof renderSettings === 'function') renderSettings();
             return;
         }
         if (e.target.matches('input[type="checkbox"][data-field], select[data-field]')) onNetworkField(e);

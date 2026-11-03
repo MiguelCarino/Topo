@@ -3,7 +3,9 @@ window.addEventListener('load',()=>{ setTimeout(()=>{
   const out=[]; const ok=(n,c,e)=>out.push(`${c?'PASS':'FAIL'} :: ${n}${e?' :: '+e:''}`);
   loadDocState(templatesData.military); autoBindLinks(); renderCanvasOnly();
 
-  const alerts=[...document.querySelectorAll('#conflictMsgList .ca-line')].map(li=>li.textContent);
+  // Less the info notes on the clouds nobody is named for (providerFindings):
+  // a template leaves its providers to whoever documents the real site.
+  const alerts=topologyFindings().filter(f=>f.key!=='provider').map(f=>f.line);
   ok('military base validates clean', alerts.length===0, alerts.slice(0,2).join(' | '));
   ok('no node is badged', state.nodes.filter(n=>nodeSeverity(n)).length===0,
      state.nodes.filter(n=>nodeSeverity(n)).map(n=>n.name).join(', '));

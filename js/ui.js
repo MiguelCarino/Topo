@@ -597,6 +597,7 @@ function renderCanvasOnly() {
         renderNetworksPanel();   // js/networks.js: the Subnets tab's counts follow the drawing
         renderGroupsPanel();     // js/groups.js: so do the Groups tab's
         renderWifiPanel();       // js/wifi.js: and the Wi-Fi tab's, and whether it is offered
+        renderProvidersPanel();  // js/providers.js: and the Providers tab's
         renderTableView(false, live());   // js/table.js: so does the table view, while it shows
         renderRackView(false, live());    // js/rackview.js: and the rack view, and the switch's Rack
         if (typeof updateQueryBar === 'function') updateQueryBar();   // js/query.js: the match count
@@ -987,6 +988,13 @@ function drawCanvas() {
             if (addsToSelection(event)) toggleSelected('link', link.id); else select(link.id, 'link');
         });
         if (qm && !qm.links.has(link.id)) line.classList.add('q-dim');
+        // Who is responsible for the run, on hover, when Settings says so.
+        if (state.settings.providerHover === true && linkProvider(link)) {
+            const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            tip.setAttribute('class', 'pv-tip');
+            tip.textContent = providerTipText(`${src.name || src.id} ↔ ${tgt.name || tgt.id}`, { provider: linkProvider(link), via: 'own' });
+            line.appendChild(tip);
+        }
         lLinks.appendChild(line);
 
         // The cable's own label (link.cable, js/assets.js), lifted off the
@@ -1186,6 +1194,17 @@ function drawCanvas() {
         g.setAttribute('id', `ui-node-${node.id}`);
         g.setAttribute('transform', `translate(${node.x}, ${node.y})`);
 
+        // Who is responsible for it, on hover, when Settings says so
+        // (js/settings.js). Left out of every export (canvasSvgFile).
+        if (state.settings.providerHover === true) {
+            const tipText = providerTipText(node.name || node.id, nodeProvider(node));
+            if (tipText) {
+                const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+                tip.setAttribute('class', 'pv-tip');
+                tip.textContent = tipText;
+                g.appendChild(tip);
+            }
+        }
         const isSelected = inSelection('node', node.id);
         const isLinkSource = state.linkSourceId === node.id;
         const isReachable = reach && (reach.reachableNodes.has(node.id) || (!!inFold && inFold.some((x) => reach.reachableNodes.has(x.id))));
@@ -2537,7 +2556,7 @@ function select(id, type) {
     nPane.classList.add('hidden'); pPane.classList.remove('hidden');
     // A device's tag and QR, or a cable's label (js/assets.js); a note has none.
     document.getElementById('printLabelBtn').classList.toggle('hidden', type !== 'node' && type !== 'link');
-    if (type !== 'link') { renderCableFields(null); renderLinkWifi(null); }
+    if (type !== 'link') { renderCableFields(null); renderLinkWifi(null); renderLinkProviderPicker(null); }
 
     if (type === 'node') {
         const node = getNode(id); if (!node) return;
@@ -2608,6 +2627,7 @@ function select(id, type) {
         const linkFacts = () => {
             renderCableFields(link);
             renderLinkWifi(link);
+            renderLinkProviderPicker(link);
             const m = effectiveMedium(link);
             document.getElementById('printLabelBtn').classList.toggle('hidden', m === 'wireless' || m === 'vpn');
         };

@@ -158,6 +158,9 @@ function reportDevices() {
         // and the inventory lists it under its host.
         hostId: hostOf(node) ? node.host : '',
         host: hostOf(node) ? (hostOf(node).name || node.host) : '',
+        // Who is responsible for it (js/model.js "Providers"): its own, its
+        // host's or its group's.
+        provider: (() => { const r = nodeProvider(node); return r ? providerLabel(r.provider) : ''; })(),
         // The network's own columns (js/model.js "Custom columns") that the
         // Devices table shows, in its order, with what this device holds.
         custom: reportCustomOf(node),
@@ -375,9 +378,70 @@ function reportConnections() {
             label: cableOf(link, 'label').trim(),
             length: cableOf(link, 'length').trim(),
             color: cableOf(link, 'color').trim(),
-            via: cableOf(link, 'via').trim()
+            via: cableOf(link, 'via').trim(),
+            provider: linkProvider(link) ? providerLabel(linkProvider(link)) : ''
         };
     }).filter((c) => c.from !== '—' && c.to !== '—');
+}
+
+// Who is responsible for what (js/model.js "Providers"): one row per
+// provider with how to reach them and what they answer for. A group's
+// devices are the group's line ("Server room, 6 devices"), not each device
+// again; a device that names the provider itself (or through its host) is
+// listed by name.
+const REPORT_PROVIDER_NAMES_MAX = 12;
+function reportProviders() {
+    return (state.providers || []).map((p) => {
+        const c = providerCovers(p.id);
+        const named = c.nodes.filter((n) => { const r = nodeProvider(n); return r && r.via !== 'group'; });
+        const groupCount = (g) => c.nodes.filter((n) => { const r = nodeProvider(n); return r && r.via === 'group' && r.from.id === g.id; }).length;
+        const cable = (l) => { const a = getNode(l.source), b = getNode(l.target); return `${a ? a.name || a.id : '—'} ↔ ${b ? b.name || b.id : '—'}`; };
+        return {
+            id: p.id,
+            name: providerLabel(p),
+            service: p.service || '',
+            serviceName: providerServiceLabel(p.service),
+            contact: p.contact || '', phone: p.phone || '', email: p.email || '',
+            account: p.account || '', hours: p.hours || '', notes: p.notes || '',
+            devices: named.map((n) => n.name || n.id),
+            groups: c.groups.map((g) => ({ path: groupPath(g), devices: groupCount(g) })),
+            cables: c.links.map((l) => cableLabelOrEnds(l, cable)),
+            covered: c.nodes.length + c.links.length
+        };
+    });
+}
+const cableLabelOrEnds = (l, ends) => { const label = cableOf(l, 'label').trim(); return label ? `${label} (${ends(l)})` : ends(l); };
+// "Reception PC, NAS, Server room (6 devices), the cable WAN-01 (…)" for a
+// row, the names cut at REPORT_PROVIDER_NAMES_MAX with "…and N more".
+function providerCoversLine(p) {
+    const parts = p.groups.map((g) => (g.devices ? `${g.path} (${t(g.devices === 1 ? '{n} device' : '{n} devices', { n: g.devices })})` : g.path))
+        .concat(p.devices, p.cables.map((c) => t('the cable {name}', { name: c })));
+    const shown = parts.slice(0, REPORT_PROVIDER_NAMES_MAX).join(', ');
+    return parts.length > REPORT_PROVIDER_NAMES_MAX ? `${shown} ${t('…and {n} more.', { n: parts.length - REPORT_PROVIDER_NAMES_MAX })}` : shown;
+}
+// The technical sheet's table: provider, how to reach them, the contract
+// and hours, and what they are responsible for.
+function providersSection(list) {
+    const muted = (text) => `<span class="muted">${escapeHtml(text)}</span>`;
+    const dash = muted('—');
+    return `<table class="providers">
+        <thead><tr><th>${t('Provider')}</th><th>${t('Contact')}</th><th>${t('Account / contract')}</th><th>${t('Support hours / SLA')}</th><th>${t('Responsible for')}</th></tr></thead>
+        <tbody>${list.map((p) => `<tr>
+            <td><b>${escapeHtml(p.name)}</b>${p.serviceName ? `<br>${muted(p.serviceName)}` : ''}${p.notes ? `<br>${muted(p.notes)}` : ''}</td>
+            <td>${[p.contact ? escapeHtml(p.contact) : '', p.phone ? `<span class="mono">${escapeHtml(p.phone)}</span>` : '', p.email ? `<span class="mono">${escapeHtml(p.email)}</span>` : ''].filter(Boolean).join('<br>') || dash}</td>
+            <td class="mono">${p.account ? escapeHtml(p.account) : dash}</td>
+            <td>${p.hours ? escapeHtml(p.hours) : dash}</td>
+            <td>${p.covered || p.groups.length ? escapeHtml(providerCoversLine(p)) : muted(t('Nothing on the map yet'))}</td>
+        </tr>`).join('')}</tbody></table>`;
+}
+// The summary's Who to call: a short block per provider in plain words.
+function whoToCallSection(list) {
+    return `<ul class="who-to-call">${list.map((p) => {
+        const reach = [p.phone, p.email].filter(Boolean).join(' · ');
+        const covers = p.covered || p.groups.length ? providerCoversLine(p) : '';
+        return `<li><b>${escapeHtml(p.name)}</b>${p.serviceName ? ` <span class="muted">· ${escapeHtml(p.serviceName)}</span>` : ''}
+        ${p.contact || reach ? `<br>${escapeHtml([p.contact, reach].filter(Boolean).join(' — '))}` : ''}${p.hours ? `<br><span class="muted">${escapeHtml(p.hours)}</span>` : ''}${p.account ? `<br><span class="muted">${escapeHtml(t('Account / contract'))}: ${escapeHtml(p.account)}</span>` : ''}${covers ? `<br><span class="muted">${escapeHtml(t('Responsible for {what}', { what: covers }))}</span>` : ''}</li>`;
+    }).join('')}</ul>`;
 }
 
 // One row per network: the declared ones (R7) with what they say about
@@ -784,6 +848,7 @@ function reportModelNow() {
         subnets,
         portMaps: reportPortMaps(),
         wifi: reportWifiSection(),
+        providers: reportProviders(),
         counts: {
             devices: devices.length,
             connections: connections.length,
@@ -1044,6 +1109,8 @@ function reportStyles() {
     .changes { margin: 4px 0; padding-left: 18px; }
     .planned { margin: 4px 0; padding-left: 18px; }
     .planned li + li { margin-top: 4px; }
+    .who-to-call { margin: 4px 0; padding-left: 18px; }
+    .who-to-call li + li { margin-top: 6px; }
     .changes li { margin: 0 0 3px; }
     .who { margin-top: 18px; color: #334155; }
     .figure { margin: 10px 0 4px; text-align: center; page-break-inside: avoid; }
@@ -1346,7 +1413,8 @@ function devicesSection(devices, groups) {
         // name, and a status other than in service, which a reader of the
         // register has to see.
         const where = grouped && d.groupId ? d.rackSpan : (d.place !== undefined ? d.place : d.location);
-        const asset = [d.assetTag ? `${t('Asset tag')} ${d.assetTag}` : '', d.serial ? `${t('Serial number')} ${d.serial}` : '', where]
+        const asset = [d.assetTag ? `${t('Asset tag')} ${d.assetTag}` : '', d.serial ? `${t('Serial number')} ${d.serial}` : '', where,
+            d.provider ? `${t('Provider')}: ${d.provider}` : '']
             .filter(Boolean).join(' · ');
         // The network's own columns, one line of "Name: value" under the
         // asset line: the inventory's columns are Topo's, and a site's own
@@ -1396,11 +1464,12 @@ function devicesSection(devices, groups) {
 // it did before the column existed.
 function connectionsSection(connections) {
     if (!connections.length) return `<p class="muted">${escapeHtml(t('No connections recorded.'))}</p>`;
-    const withCable = connections.some((c) => c.label || c.length || c.color || c.via);
+    const withCable = connections.some((c) => c.label || c.length || c.color || c.via || c.provider);
     const cableCell = (c) => {
         const facts = [c.length, c.color].filter(Boolean).join(' · ');
         return [c.label ? `<b class="mono">${escapeHtml(c.label)}</b>` : '', facts ? `<span class="muted">${escapeHtml(facts)}</span>` : '',
-            c.via ? `<span class="mono muted">${escapeHtml(c.via)}</span>` : ''].filter(Boolean).join('<br>');
+            c.via ? `<span class="mono muted">${escapeHtml(c.via)}</span>` : '',
+            c.provider ? `<span class="muted">${escapeHtml(t('Provider'))}: ${escapeHtml(c.provider)}</span>` : ''].filter(Boolean).join('<br>');
     };
     const rows = connections.map((c) => `<tr>
         <td><b>${escapeHtml(c.from)}</b></td>
@@ -1694,6 +1763,10 @@ function summarySheet(model, opts = {}) {
         .concat((model.scheduled || []).map((f) => `<li><b>${escapeHtml(plainFinding(f).what)}</b> — ${escapeHtml(f.subject || '')}<br><span class="muted">${escapeHtml(t('By {date}: {reason}', { date: f.accepted.until, reason: f.accepted.reason }))}</span></li>`));
     const plan = planned.length ? `<h2>${escapeHtml(t('What is planned'))}</h2>
     <ul class="planned">${planned.join('')}</ul>` : '';
+    // Who to call: whoever is responsible for what, so someone new to the
+    // site knows (js/model.js "Providers").
+    const call = (model.providers || []).length ? `<h2>${escapeHtml(t('Who to call'))}</h2>
+    ${whoToCallSection(model.providers)}` : '';
 
     // What they have: how many of each kind, then the devices themselves with
     // where they are and the network's own columns the table shows.
@@ -1730,6 +1803,7 @@ function summarySheet(model, opts = {}) {
     <div class="verdict ${verdict.cls}"><b>${escapeHtml(verdict.title)}</b>${verdict.more ? `<span>${escapeHtml(verdict.more)}</span>` : ''}<small>${escapeHtml(basis)}</small></div>
     ${todo}
     ${plan}
+    ${call}
 
     <h2>${escapeHtml(t('What you have'))}</h2>
     <div class="stats">${kindStats || `<div class="stat"><b>0</b><span>${escapeHtml(t('Devices'))}</span></div>`}</div>
@@ -1817,6 +1891,9 @@ ${(model.visit || []).length ? `
 ` : ''}${accepted.length ? `
     <h2>${escapeHtml(t('Known / accepted'))}</h2>
     ${acceptedSection(accepted)}
+` : ''}${(model.providers || []).length ? `
+    <h2>${escapeHtml(t('Providers'))}</h2>
+    ${providersSection(model.providers)}
 ` : ''}
     ${image ? `<h2>${escapeHtml(t('Topology'))}</h2>
     ${away ? `<p class="muted">${escapeHtml(away)}</p>` : figure}${largeNote ? `
@@ -2099,7 +2176,7 @@ function captureReportDiagram(day, base = 4) {
 
 async function withDocRendered(doc, fn) {
     const held = {
-        nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report,
+        nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report,
         camera: { x: state.camera.x, y: state.camera.y, zoom: state.camera.zoom },
         selection: state.selection,   // the whole set: a getter pair would lose a set of several
     };
@@ -2110,7 +2187,7 @@ async function withDocRendered(doc, fn) {
         renderCanvasOnly();
         return await fn();
     } finally {
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
         state.columns = held.columns; state.tableView = held.tableView;
         state.annotations = held.annotations; state.report = held.report;
         state.camera = held.camera;
@@ -2192,7 +2269,9 @@ function renderReportFields(seed) {
         input.id = `report-${key}`;
         input.className = multiline ? 'textarea' : 'input';
         input.placeholder = (key === 'site' && _reportMode === 'site' && keptSiteName()) || t(placeholder) || '';
-        input.value = meta[key];
+        // Who prepares it: the network's own, else this browser's default
+        // (Settings, js/settings.js).
+        input.value = meta[key] || (key === 'engineer' && typeof reportEngineerDefault === 'function' ? reportEngineerDefault() : '');
         wrap.append(cap, input);
         host.appendChild(wrap);
     });
@@ -2257,15 +2336,19 @@ function openReportDialog(mode) {
     const dialog = document.getElementById('reportDialog');
     if (!dialog) return;
     _reportMode = mode === 'binder' ? 'binder' : 'site';
-    // Both, every time it opens: the hand-over copy is the usual report.
-    ['reportSummary', 'reportTechnical'].forEach((id) => { const cb = document.getElementById(id); if (cb) cb.checked = true; });
+    // Both, every time it opens: the hand-over copy is the usual report,
+    // unless Settings says to start with one of them off (js/settings.js).
+    const startOn = (key) => (typeof reportPartDefault === 'function' ? reportPartDefault(key) : true);
+    [['reportSummary', 'reportSummaryOn'], ['reportTechnical', 'reportTechnicalOn']].forEach(([id, key]) => { const cb = document.getElementById(id); if (cb) cb.checked = startOn(key); });
+    if (!document.getElementById('reportSummary')?.checked && !document.getElementById('reportTechnical')?.checked) { const tech = document.getElementById('reportTechnical'); if (tech) tech.checked = true; }
+    document.getElementById('reportLargeMapRow')?.classList.toggle('hidden', !document.getElementById('reportTechnical')?.checked);
     // Off: it adds pages.
     const large = document.getElementById('reportLargeMap');
     if (large) large.checked = false;
     ['reportLargeCols', 'reportLargeRows'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = String(REPORT_DIAGRAM_GRID_DEFAULT); });
     _largeSkip.clear();
     syncLargeSheets();
-    document.getElementById('reportLargeMapRow')?.classList.remove('hidden');
+    document.getElementById('reportLargeMapRow')?.classList.toggle('hidden', !document.getElementById('reportTechnical')?.checked);
     renderReportDialog();
     dropReportPreview();
     dialog.classList.remove('hidden');

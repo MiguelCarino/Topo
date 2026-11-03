@@ -75,7 +75,7 @@ window.addEventListener('load', () => { setTimeout(() => {
 
     // ---- 3: cables.csv ----
     const cab = csvCablesSheet();
-    ok('cables.csv has ssid, band and signal before the cable\'s own facts', cab.headers.slice(9, 12).join(',') === 'ssid,band,signal' && cab.headers.slice(-4).join(',') === 'cable_label,cable_length,cable_color,cable_via', cab.headers.join(','));
+    ok('cables.csv has ssid, band and signal before the cable\'s own facts', cab.headers.slice(9, 12).join(',') === 'ssid,band,signal' && cab.headers.slice(-5).join(',') === 'cable_label,cable_length,cable_color,cable_via,cable_provider', cab.headers.join(','));
     ok('as stored: a band nobody picked is blank', json([row(cab, 'a1').ssid, row(cab, 'a1').band, row(cab, 'a1').signal]) === '["Staff","","-58"]'
        && json([row(cab, 'a3').ssid, row(cab, 'a3').band, row(cab, 'a3').signal]) === '["=IoT","2.4","-71"]' && row(cab, 'u1').ssid === '' && row(cab, 'a2').ssid === '');
 

@@ -409,11 +409,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // Showcase, Common Errors since W2) has radios and associations that
     // name them, and its networks name subnets: as the README says, the
     // subnets and Wi-Fi sheets go in first (SW), then the three in each order.
-    const wifiFirst = () => ((state.wifi || []).length ? 'SW' : '');
+    // And providers.csv before anything names a provider (the samples carry
+    // them since v15, SAMPLE_EXTRAS in js/data.js), as wifi.csv before what
+    // names a Wi-Fi network.
+    const wifiFirst = () => ((state.providers || []).length ? 'P' : '') + ((state.wifi || []).length ? 'SW' : '');
     Object.keys(templatesData).forEach((key) => {
       loadDocState(cloneData(templatesData[key])); autoBindLinks();
       const want = { nodes: state.nodes.map((n) => `${n.id}:${n.type}`).sort().join(), cables: cableSig(), findings: fkeys() };
-      const sheets = { S: csvText(csvSubnetsSheet()), W: csvText(csvWifiSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
+      const sheets = { P: csvText(csvProvidersSheet()), S: csvText(csvSubnetsSheet()), W: csvText(csvWifiSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
       const first = wifiFirst();
       orders.forEach((order) => {
         blank();
@@ -446,14 +449,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
     Object.keys(templatesData).forEach((key) => {
       loadDocState(cloneData(templatesData[key])); autoBindLinks();
       const want = { nodes: devSig(), cables: cableSig(), findings: fkeys(), nets: netSig(), grps: grpSig(), eff: effSig() };
-      const sheets = { S: csvText(csvSubnetsSheet()), G: csvText(csvGroupsSheet()), W: csvText(csvWifiSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
+      const sheets = { P: csvText(csvProvidersSheet()), S: csvText(csvSubnetsSheet()), G: csvText(csvGroupsSheet()), W: csvText(csvWifiSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
       // With Wi-Fi, the subnets and Wi-Fi sheets first whichever the order
       // (a Wi-Fi network names its subnet, a radio or a cable its network),
       // and only groups.csv last.
       const wifiOrder = { SGDIC: 'SWGDIC', DICSG: 'SWDICG' };
       const hasWifi = (state.wifi || []).length > 0;
       Object.keys(full).forEach((key0) => {
-        const order = hasWifi ? wifiOrder[key0] : key0;
+        const order = ((state.providers || []).length ? 'P' : '') + (hasWifi ? wifiOrder[key0] : key0);
         blank();
         // With the review's "make the groups the sheet names" ticked, as a
         // person importing devices.csv on its own would.

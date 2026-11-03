@@ -33,7 +33,9 @@ window.addEventListener('load', () => {
     // "clean" covers them: the replica at site B reaches its gateway and its
     // resolver on Node A over the tunnel, and the VM reaches its gateway
     // through the host.
-    const findings = topologyFindings();
+    // Less the info note on a cloud nobody is named for: a template leaves its
+    // providers to whoever documents the real site (providerFindings).
+    const findings = topologyFindings().filter((f) => f.key !== 'provider');
     ok(`${k} raises no finding at all`, findings.length === 0, findings.map((f) => f.line.slice(0, 70)).join(' | '));
   });
 

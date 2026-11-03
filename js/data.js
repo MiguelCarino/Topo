@@ -862,6 +862,141 @@ function nameSampleNetworks(doc, names) {
     delete doc.netNames;
     return doc;
 }
+// ---- The simple samples ----
+// Every sample but the Full Showcase has two versions. The full one (above)
+// shows what Topo can hold: groups, racks, Wi-Fi, VLANs, cable facts, dates.
+// The simple one shows how easy it is to read one: the same kind of site,
+// drawn the way its owner would explain it. The internet and the ISP, one
+// box at the edge (a router, or a firewall where the site would have one),
+// and a switch per part of the site (the tills, the office, the cameras),
+// each part its own named subnet, with plain names. One or two providers
+// say who to call. No groups, racks, Wi-Fi, VLANs or dates: those are the
+// full version's. Smart Home is the one with a single subnet, as a home is.
+// Each opens with no finding at all, not even an info note, but the simple
+// Common Errors, which keeps two easy faults: two devices on one address and
+// one with a gateway nobody has.
+//
+// Built here from a short description rather than written out, so every one
+// is laid out and addressed the same way: the parts side by side under the
+// edge, each part's devices in rows of three under its switch, addresses
+// from .10 up, the edge at .1. Written as v2 documents like the samples
+// above, gateway and DNS on each device, so the migration below declares the
+// subnets; the providers are laid on after it (applySampleExtras). The
+// Templates tab's cards open either version (renderLibrary, js/app.js); a
+// simple one's key is the full one's with SIMPLE_SUFFIX.
+const SIMPLE_SUFFIX = '_simple';
+// parts: [name, first three octets, [[type, name, provider?], ...]];
+// provider: 'isp' is the internet line's, 'pv' the second provider's.
+const SIMPLE_SAMPLES = {
+    house: { edge: ['router', 'Home Router'], isp: 'Fibra Norte', parts: [
+        ['Home', '192.168.1', [['pc', 'Laptop'], ['iot', 'Phone'], ['printer', 'Printer'], ['iot', 'Smart TV']]]] },
+    imaging: { edge: ['router', 'Clinic Gateway'], isp: 'Salud Conecta', pv: ['MedImagen Service', 'vendor'], parts: [
+        ['Modalities', '10.60.10', [['dicom', 'CT Scanner', 'pv'], ['dicom', 'MRI', 'pv'], ['dicom', 'Ultrasound', 'pv']]],
+        ['Reading', '10.60.20', [['server', 'PACS'], ['pc', 'Reading Station 1'], ['pc', 'Reading Station 2'], ['printer', 'Film Printer']]]] },
+    retail: { edge: ['router', 'Store Router'], isp: 'Fibra Norte', pv: ['Vigilancia Total', 'security'], parts: [
+        ['Tills', '10.5.10', [['pc', 'Register 1'], ['pc', 'Register 2'], ['printer', 'Receipt Printer']]],
+        ['Office', '10.5.20', [['pc', 'Back Office PC'], ['printer', 'Office Printer']]],
+        ['Cameras', '10.5.30', [['server', 'NVR', 'pv'], ['camera', 'Door Camera', 'pv'], ['camera', 'Aisle Camera', 'pv']]]] },
+    callcenter: { edge: ['router', 'Office Gateway'], isp: 'Metro Fibra', pv: ['VozClara', 'phone'], parts: [
+        ['Voice', '10.5.10', [['custom', 'Phone System', 'pv'], ['voip', 'Agent Phone 1'], ['voip', 'Agent Phone 2'], ['voip', 'Agent Phone 3']]],
+        ['Desks', '10.5.20', [['pc', 'Agent PC 1'], ['pc', 'Agent PC 2'], ['pc', 'Agent PC 3'], ['pc', 'Supervisor PC'], ['printer', 'Printer']]]] },
+    datacenter: { edge: ['firewall', 'Firewall'], isp: 'Backbone Uno', pv: ['Almacena Systems', 'vendor'], parts: [
+        ['Web', '10.10.10', [['server', 'Web Server 1'], ['server', 'Web Server 2']]],
+        ['Apps', '10.10.20', [['server', 'App Server'], ['server', 'Mail Server']]],
+        ['Data', '10.10.30', [['server', 'Database'], ['server', 'Backup NAS', 'pv']]]] },
+    errors: { edge: ['router', 'Office Router'], isp: 'Fibra Norte', faults: true, parts: [
+        ['Office', '192.168.9', [['pc', 'Reception PC'], ['pc', 'Office PC'], ['printer', 'Printer'], ['pc', 'Laptop']]]] },
+    hospital: { edge: ['firewall', 'Hospital Firewall'], isp: 'Salud Conecta', pv: ['MedImagen Service', 'vendor'], parts: [
+        ['Admin', '10.10.10', [['server', 'Records Server'], ['pc', 'Admin PC'], ['printer', 'Printer']]],
+        ['Wards', '10.10.20', [['pc', 'Nurse Station 1'], ['pc', 'Nurse Station 2'], ['iot', 'Vitals Monitor'], ['iot', 'Infusion Pump']]],
+        ['Imaging', '10.10.30', [['server', 'PACS', 'pv'], ['dicom', 'X-ray', 'pv']]]] },
+    bank: { edge: ['firewall', 'Branch Firewall'], isp: 'Red Bancaria Telecom', pv: ['Cajeros del Centro', 'vendor'], parts: [
+        ['Staff', '10.50.10', [['pc', 'Teller 1'], ['pc', 'Teller 2'], ['pc', 'Manager PC'], ['printer', 'Printer']]],
+        ['ATMs', '10.50.20', [['custom', 'Lobby ATM', 'pv'], ['custom', 'Drive-Thru ATM', 'pv']]]] },
+    campus: { edge: ['router', 'Campus Router'], isp: 'Metro Fibra', pv: ['Andes IT Services', 'it'], parts: [
+        ['IT', '10.0.1', [['server', 'Domain Controller', 'pv'], ['server', 'File Server', 'pv'], ['pc', 'Admin PC']]],
+        ['HR', '10.0.2', [['pc', 'HR PC 1'], ['pc', 'HR PC 2'], ['printer', 'HR Printer']]],
+        ['Visitors', '172.20.0', [['pc', 'Visitor Kiosk']]]] },
+    hotel: { edge: ['router', 'Hotel Router'], isp: 'Costa Net', pv: ['HuéspedSoft', 'vendor'], parts: [
+        ['Front desk', '10.70.10', [['pc', 'Reception PC'], ['server', 'Booking Server', 'pv'], ['voip', 'Desk Phone'], ['pc', 'Back Office PC']]],
+        ['Rooms', '10.70.20', [['iot', 'Room TV 101'], ['iot', 'Room TV 102'], ['iot', 'Door Lock Hub'], ['camera', 'Lobby Camera']]]] },
+    warehouse: { edge: ['router', 'Site Router'], isp: 'Metro Fibra', pv: ['Bodega Software', 'vendor'], parts: [
+        ['Office', '10.80.10', [['server', 'Stock Server', 'pv'], ['pc', 'Office PC'], ['printer', 'Label Printer']]],
+        ['Floor', '10.80.20', [['iot', 'Scanner 1', 'pv'], ['iot', 'Scanner 2', 'pv'], ['iot', 'Forklift Terminal'], ['camera', 'Dock Camera']]]] },
+    factory: { edge: ['firewall', 'Plant Firewall'], isp: 'Metro Fibra', pv: ['Automata Integradores', 'vendor'], parts: [
+        ['Office', '10.20.10', [['pc', 'Engineering PC'], ['printer', 'Office Printer']]],
+        ['Plant floor', '10.20.20', [['server', 'SCADA', 'pv'], ['pc', 'Operator PC'], ['iot', 'PLC 1', 'pv'], ['iot', 'PLC 2', 'pv'], ['camera', 'QA Camera']]]] },
+    studio: { edge: ['router', 'Studio Router'], isp: 'Backbone Uno', pv: ['Almacena Systems', 'vendor'], parts: [
+        ['Edit suite', '10.40.10', [['server', 'NAS', 'pv'], ['pc', 'Edit PC 1'], ['pc', 'Edit PC 2'], ['pc', 'Edit PC 3']]],
+        ['Studio floor', '10.40.20', [['camera', 'Studio Cam A'], ['camera', 'Studio Cam B'], ['pc', 'Streaming PC']]]] },
+    military: { edge: ['firewall', 'Base Firewall'], isp: 'Base Telecom', pv: ['Seguridad Perimetral', 'security'], parts: [
+        ['Offices', '10.90.10', [['server', 'Mail Server'], ['pc', 'Duty PC'], ['pc', 'Ops PC'], ['printer', 'Printer']]],
+        ['Gate', '10.90.20', [['camera', 'Gate Camera', 'pv'], ['custom', 'Access Control', 'pv'], ['pc', 'Guard PC']]]] },
+    vessel: { edge: ['router', 'Satellite Router'], isp: 'Mar Satelital', pv: ['Puerto Electrónica Naval', 'vendor'], parts: [
+        ['Bridge', '172.20.10', [['pc', 'Bridge PC', 'pv'], ['iot', 'Radar Display', 'pv'], ['iot', 'Chart Plotter', 'pv']]],
+        ['Engine room', '172.20.20', [['iot', 'Engine Monitor'], ['pc', 'Engine PC']]],
+        ['Crew', '172.20.30', [['pc', 'Crew PC'], ['voip', 'Crew Phone']]]] },
+    offlineLean: { edge: ['router', 'Router'], isp: 'Fibra Norte', parts: [
+        ['Home', '192.168.88', [['server', 'Mini PC'], ['pc', 'Laptop'], ['iot', 'Tablet']]]] },
+    offlineBalanced: { edge: ['router', 'Router'], isp: 'Fibra Norte', parts: [
+        ['Home', '192.168.88', [['server', 'Mini PC'], ['server', 'NAS'], ['pc', 'Laptop'], ['iot', 'Tablet']]],
+        ['Workshop', '192.168.89', [['pc', 'Workshop PC'], ['printer', 'Printer']]]] },
+    offlineExtended: { edge: ['router', 'Router'], isp: 'Fibra Norte', parts: [
+        ['Home', '192.168.88', [['server', 'Mini PC'], ['server', 'NAS'], ['server', 'GPU PC'], ['pc', 'Laptop']]],
+        ['Workshop', '192.168.89', [['pc', 'Workshop PC'], ['printer', 'Printer'], ['iot', 'Tablet']]]] }
+};
+const SIMPLE_ROW = 3, SIMPLE_DX = 150, SIMPLE_DY = 130;
+function simpleSample(spec) {
+    const dns = '1.1.1.1';
+    const widths = spec.parts.map(([, , devs]) => Math.max(2, Math.min(SIMPLE_ROW, devs.length)) * SIMPLE_DX + 60);
+    const total = widths.reduce((a, b) => a + b, 0);
+    const nodes = [
+        { id: 's_net', type: 'cloud', name: 'Internet', x: 0, y: 40, interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.1/30' }] },
+        { id: 's_rtr', type: spec.edge[0], name: spec.edge[1], x: 0, y: 170, gw: '203.0.113.1', dns,
+          interfaces: [{ id: 'i0', name: 'wan', ip: '203.0.113.2/30' }].concat(spec.parts.map(([, net], k) => ({ id: `i${k + 1}`, name: spec.parts.length > 1 ? `lan${k + 1}` : 'lan', ip: `${net}.1/24` }))) }
+    ];
+    const links = [{ id: 's_l0', source: 's_net', target: 's_rtr', sourceIface: 'i1', targetIface: 'i0' }];
+    const netNames = {};
+    let left = -total / 2;
+    spec.parts.forEach(([name, net, devs], k) => {
+        netNames[`${net}.0/24`] = { name };
+        const mid = left + widths[k] / 2;
+        const sw = `s_sw${k + 1}`;
+        nodes.push({ id: sw, type: 'switch', name: spec.parts.length > 1 ? `${name} Switch` : 'Switch', x: mid, y: 310, portCount: 8, interfaces: [] });
+        links.push({ id: `s_u${k + 1}`, source: 's_rtr', target: sw, sourceIface: `i${k + 1}`, targetIface: 'p1' });
+        const cols = Math.min(SIMPLE_ROW, devs.length);
+        devs.forEach(([type, dname, pv], i) => {
+            const id = `s_${k + 1}_${i + 1}`;
+            const row = Math.floor(i / SIMPLE_ROW), col = i % SIMPLE_ROW;
+            const inRow = Math.min(cols, devs.length - row * SIMPLE_ROW);
+            // The simple Common Errors: the second device on the first one's
+            // address, the third with a gateway nobody has.
+            const host = spec.faults && i === 1 ? 10 : 10 + i;
+            nodes.push({ id, type, name: dname, x: mid + (col - (inRow - 1) / 2) * SIMPLE_DX, y: 460 + row * SIMPLE_DY,
+                gw: spec.faults && i === 2 ? `${net}.254` : `${net}.1`, dns,
+                interfaces: [{ id: 'i1', name: 'eth0', ip: `${net}.${host}/24` }], _pv: pv });
+            links.push({ id: `s_l${k + 1}_${i + 1}`, source: sw, target: id, sourceIface: `p${i + 2}`, targetIface: 'i1' });
+        });
+        left += widths[k];
+    });
+    nodes.forEach((n) => { n.x = Math.round(n.x + total / 2 + 60); });
+    return { netNames, nodes, links };
+}
+// Who answers for what in a simple sample: the ISP for the internet line,
+// and the second provider for the devices marked for it.
+function simpleSampleExtras(spec, doc) {
+    const providers = [{ id: 'pv_isp', name: spec.isp, service: 'internet' }];
+    const nodes = { s_net: { provider: 'pv_isp' } };
+    if (spec.pv) providers.push({ id: 'pv_2', name: spec.pv[0], service: spec.pv[1] });
+    spec.parts.forEach(([, , devs], k) => devs.forEach(([, , pv], i) => { if (pv === 'pv') nodes[`s_${k + 1}_${i + 1}`] = { provider: 'pv_2' }; }));
+    return { providers, nodes, links: [['s_net', 's_rtr', 'pv_isp']] };
+}
+Object.keys(SIMPLE_SAMPLES).forEach((key) => {
+    const doc = simpleSample(SIMPLE_SAMPLES[key]);
+    doc.nodes.forEach((n) => { delete n._pv; });
+    templatesData[key + SIMPLE_SUFFIX] = doc;
+});
+
 Object.keys(templatesData).forEach((key) => {
     const half = new Set((templatesData[key].nodes || []).filter((n) => n.rackDepth === 'half').map((n) => n.id));
     const names = templatesData[key].netNames;
@@ -875,6 +1010,293 @@ Object.keys(templatesData).forEach((key) => {
     });
     templatesData[key] = doc;
 });
+
+// ---- Who answers for what, and the dates (js/model.js "Providers", "Age
+// and upkeep") ----
+// The samples a visitor opens should show the register filled in, not just
+// the addressing: who provides the line and the support, the vendor under
+// contract, when the boxes went in and when they were last serviced. Every
+// company here is made up (example.* addresses, 555 numbers). Laid over the
+// migrated documents by id, so the samples above keep their own shape.
+//
+// The dates are chosen so a sample opens clean for years: nothing was put in
+// service long enough ago to be past its expected life before 2029, and
+// every interval falls due after that, so the checks' findings are what the
+// sample was written to show, not what the calendar did to it. The offline
+// tiers, the military base and Common Errors are left as they are: their
+// findings are part of what they teach.
+const SAMPLE_EXTRAS = {
+    house: {
+        providers: [
+            { id: 'pv_isp', name: 'Fibra Norte', service: 'internet', phone: '+52 55 5555 0101', email: 'soporte@fibranorte.example', account: 'FN-2219-4471', hours: '24/7 by phone', notes: 'The router is theirs: they swap it if it fails.' },
+            { id: 'pv_sec', name: 'Casa Segura', service: 'security', contact: 'Rosa Medina', phone: '+52 55 5555 0144', hours: 'Mon–Sat 8–20' }
+        ],
+        nodes: {
+            h1: { provider: 'pv_isp' },
+            h2: { provider: 'pv_isp', serial: 'FN-RT-88213', inService: '2024-05' },
+            h3: { inService: '2023-11' },
+            hp1: { inService: '2024' },
+            h5: { inService: '2024-12' },
+            h6: { provider: 'pv_sec', inService: '2025-02', serviced: '2026-02', serviceEvery: 36 }
+        },
+        links: [['h1', 'h2', 'pv_isp']]
+    },
+    bank: {
+        providers: [
+            { id: 'pv_wan', name: 'Red Bancaria Telecom', service: 'internet', phone: '+52 55 5555 0200', email: 'noc@redbancaria.example', account: 'RBT-MPLS-0457', hours: '24/7 NOC · 4 h restore' },
+            { id: 'pv_msp', name: 'Andes IT Services', service: 'it', contact: 'Jorge Salas', phone: '+52 55 5555 0233', email: 'mesa@andesit.example', account: 'Contract AIT-2025-118', hours: 'Mon–Fri 8–19 · on-site next business day' },
+            { id: 'pv_atm', name: 'Cajeros del Centro', service: 'vendor', phone: '+52 55 5555 0277', email: 'servicio@cajeros.example', account: 'Maintenance 7731', hours: '24/7 · 4 h on-site', notes: 'Cash and card faults go to them, not to IT.' }
+        ],
+        nodes: {
+            b1: { provider: 'pv_wan' },
+            b2: { provider: 'pv_msp', serial: 'FG-60F-7X21', assetTag: 'BK-0001', inService: '2024-02', serviced: '2026-02', serviceEvery: 36 },
+            b3: { provider: 'pv_msp', assetTag: 'BK-0002', inService: '2024-02' },
+            b4: { provider: 'pv_msp', inService: '2024-03' },
+            b8: { provider: 'pv_msp', inService: '2024-03' },
+            b5: { inService: '2025-01' },
+            b6: { inService: '2025-01' },
+            b9: { provider: 'pv_atm', serial: 'ATM-44-1902', inService: '2023-06', serviced: '2026-04', serviceEvery: 36 },
+            b10: { provider: 'pv_atm', serial: 'ATM-44-1977', inService: '2023-06', serviced: '2026-04', serviceEvery: 36 },
+            b11: { provider: 'pv_msp', inService: '2024-02' }
+        },
+        links: [['b1', 'b2', 'pv_wan']]
+    },
+    datacenter: {
+        providers: [
+            { id: 'pv_bb', name: 'Backbone Uno', service: 'internet', phone: '+1 555 0100 200', email: 'noc@backbone-uno.example', account: 'Circuit BU-10G-3381', hours: '24/7 NOC · SLA 99.95%' },
+            { id: 'pv_colo', name: 'ColoSpace Norte', service: 'cloud', contact: 'Remote hands desk', phone: '+1 555 0100 260', email: 'hands@colospace.example', account: 'Cage 14 · contract CS-0912', hours: '24/7 remote hands' },
+            { id: 'pv_stor', name: 'Almacena Systems', service: 'vendor', phone: '+1 555 0100 290', email: 'support@almacena.example', account: 'Support SR-55120', hours: 'Next business day parts' }
+        ],
+        groups: { g_hall: { provider: 'pv_colo' } },
+        nodes: {
+            d1: { provider: 'pv_bb' },
+            d2: { inService: '2024-09', serviced: '2026-03', serviceEvery: 36 },
+            d3: { serial: 'PA-3410-55X1', inService: '2024-09', serviced: '2026-03', serviceEvery: 36 },
+            d9: { inService: '2024-06' },
+            d10: { inService: '2024-06' },
+            d13: { inService: '2024-06', serviced: '2026-05', serviceEvery: 36 },
+            d14: { inService: '2024-06', serviced: '2026-05', serviceEvery: 36 },
+            d15: { provider: 'pv_stor', serial: 'ALM-N8-00731', inService: '2025-01', serviced: '2026-07', serviceEvery: 36 }
+        },
+        links: [['d1', 'd2', 'pv_bb']]
+    },
+    hospital: {
+        add: [
+            { on: 'hp4', node: { id: 'hp12', type: 'pc', name: 'Admin PC', x: 250, y: 560, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.51/24' }], inService: '2025-01' } },
+            { on: 'hp8', node: { id: 'hp13', type: 'pc', name: 'Nurse Station 2', x: 450, y: 560, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.100.50/24' }], inService: '2025-01' } },
+            { on: 'hp8', node: { id: 'hp14', type: 'iot', name: 'Infusion Pump', x: 550, y: 560, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.100.60/24' }], inService: '2024-11', serviced: '2026-05', serviceEvery: 36 } },
+            { on: 'hp8', node: { id: 'hp15', type: 'dicom', name: 'X-ray', x: 650, y: 560, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.100.12/24' }], provider: 'pv_med', serial: 'DX-500-3391', inService: '2023-07', serviced: '2026-07', serviceEvery: 36 } }
+        ],
+        providers: [
+            { id: 'pv_isp', name: 'Salud Conecta', service: 'internet', phone: '+52 81 5555 0300', email: 'soporte@saludconecta.example', account: 'SC-HOSP-0071', hours: '24/7 · 2 h restore' },
+            { id: 'pv_it', name: 'Clínica IT', service: 'it', contact: 'Mesa de ayuda', phone: '+52 81 5555 0333', email: 'ayuda@clinicait.example', hours: '24/7 on call' },
+            { id: 'pv_med', name: 'MedImagen Service', service: 'vendor', contact: 'Ing. Paula Ríos', phone: '+52 81 5555 0377', email: 'servicio@medimagen.example', account: 'Service contract MI-2024-33', hours: '24/7 · 6 h on-site', notes: 'Only their engineers touch the scanner and the archive.' }
+        ],
+        nodes: {
+            hp1: { provider: 'pv_isp' },
+            hp2: { provider: 'pv_it', inService: '2024-04', serviced: '2026-04', serviceEvery: 36 },
+            hp3: { provider: 'pv_it', inService: '2024-04' },
+            hp5: { provider: 'pv_it', assetTag: 'HSP-0105', inService: '2024-08', serviced: '2026-08', serviceEvery: 36 },
+            hp9: { provider: 'pv_med', serial: 'PX-7781-A', inService: '2022-03', serviced: '2026-03', serviceEvery: 36 },
+            hp10: { provider: 'pv_med', serial: 'MR-1.5T-20811', inService: '2021-10', serviced: '2026-06', serviceEvery: 36 }
+        },
+        links: [['hp1', 'hp2', 'pv_isp']]
+    },
+    campus: {
+        add: [
+            { on: 'c4', node: { id: 'c11', type: 'server', name: 'File Server', x: 200, y: 680, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.1.20/24' }], group: 'g_main', inService: '2024-07', serviced: '2026-07', serviceEvery: 36 } },
+            { on: 'c7', node: { id: 'c12', type: 'pc', name: 'HR Desktop 2', x: 420, y: 680, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.2.51/24' }], group: 'g_hr', inService: '2025-03' } },
+            { on: 'c7', node: { id: 'c13', type: 'printer', name: 'HR Printer', x: 540, y: 680, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.2.80/24' }], group: 'g_hr', inService: '2024-08' } }
+        ],
+        providers: [
+            { id: 'pv_isp', name: 'Metro Fibra', service: 'internet', phone: '+52 33 5555 0400', email: 'empresas@metrofibra.example', account: 'MF-CORP-2290', hours: '24/7' },
+            { id: 'pv_it', name: 'Andes IT Services', service: 'it', contact: 'Jorge Salas', phone: '+52 55 5555 0233', email: 'mesa@andesit.example', hours: 'Mon–Fri 8–19' }
+        ],
+        groups: { g_main: { provider: 'pv_it' }, g_hr: { provider: 'pv_it' }, g_vis: { provider: 'pv_it' } },
+        nodes: {
+            c1: { provider: 'pv_isp' },
+            c2: { inService: '2024-07', serviced: '2026-07', serviceEvery: 36 },
+            c5: { inService: '2024-07', serviced: '2026-07', serviceEvery: 36 }
+        },
+        links: [['c1', 'c2', 'pv_isp']]
+    },
+    retail: {
+        providers: [
+            { id: 'pv_isp', name: 'Fibra Norte', service: 'internet', phone: '+52 55 5555 0101', email: 'negocios@fibranorte.example', account: 'FN-BIZ-7702', hours: '24/7' },
+            { id: 'pv_pos', name: 'CobraFácil POS', service: 'vendor', phone: '+52 55 5555 0511', email: 'soporte@cobrafacil.example', account: 'Store 118', hours: 'Every day 7–23', notes: 'Tills and the receipt printer: call them before IT.' },
+            { id: 'pv_sec', name: 'Vigilancia Total', service: 'security', contact: 'Central de monitoreo', phone: '+52 55 5555 0555', hours: '24/7 monitoring' }
+        ],
+        nodes: {
+            r1: { provider: 'pv_isp' },
+            r5: { provider: 'pv_pos', assetTag: 'POS-01', inService: '2025-03' },
+            r6: { provider: 'pv_pos', assetTag: 'POS-02', inService: '2025-03' },
+            r7: { provider: 'pv_pos', inService: '2025-03' },
+            r8: { provider: 'pv_sec', inService: '2024-10' },
+            r9: { provider: 'pv_sec', serial: 'NVR-16-4410', inService: '2024-10', serviced: '2026-04', serviceEvery: 36 },
+            r10: { provider: 'pv_sec', inService: '2024-10' },
+            r11: { provider: 'pv_sec', inService: '2024-10' }
+        },
+        links: [['r1', 'r2', 'pv_isp']]
+    },
+    imaging: {
+        providers: [
+            { id: 'pv_isp', name: 'Salud Conecta', service: 'internet', phone: '+52 81 5555 0300', email: 'soporte@saludconecta.example', account: 'SC-IMG-0144', hours: '24/7' },
+            { id: 'pv_mod', name: 'MedImagen Service', service: 'vendor', contact: 'Ing. Paula Ríos', phone: '+52 81 5555 0377', email: 'servicio@medimagen.example', account: 'Service contract MI-2024-51', hours: '24/7 · 6 h on-site' },
+            { id: 'pv_it', name: 'Clínica IT', service: 'it', phone: '+52 81 5555 0333', email: 'ayuda@clinicait.example', hours: 'Mon–Sat 7–21' },
+            { id: 'pv_tele', name: 'TeleRad Lectura', service: 'other', contact: 'Reading coordinator', phone: '+52 81 5555 0399', email: 'coordinacion@telerad.example', hours: 'Reads 24/7', notes: 'The remote radiologist and the VPN to them.' }
+        ],
+        groups: { g_ctmr: { provider: 'pv_mod' }, g_usxr: { provider: 'pv_mod' }, g_srv: { provider: 'pv_it' } },
+        nodes: {
+            i_net: { provider: 'pv_isp' },
+            i_vpn: { provider: 'pv_tele' },
+            i_rad: { provider: 'pv_tele' },
+            i_ct: { serial: 'CT-128-50731', inService: '2022-05', serviced: '2026-05', serviceEvery: 36 },
+            i_mr: { serial: 'MR-3T-11902', inService: '2021-11', serviced: '2026-06', serviceEvery: 36 },
+            i_us: { inService: '2024-01', serviced: '2026-01', serviceEvery: 36 },
+            i_cr: { inService: '2023-08', serviced: '2026-02', serviceEvery: 36 },
+            i_pacs: { inService: '2024-03', serviced: '2026-03', serviceEvery: 36 },
+            i_vna: { inService: '2024-03' }
+        },
+        links: [['i_net', 'i_rtr', 'pv_isp']]
+    },
+    hotel: {
+        providers: [
+            { id: 'pv_isp', name: 'Costa Net', service: 'internet', phone: '+52 998 555 0600', email: 'hoteles@costanet.example', account: 'CN-HTL-3390', hours: '24/7' },
+            { id: 'pv_pms', name: 'HuéspedSoft', service: 'vendor', phone: '+52 998 555 0644', email: 'soporte@huespedsoft.example', account: 'Licence HS-8812', hours: '24/7 hotline' },
+            { id: 'pv_lock', name: 'Cerraduras Pro', service: 'security', phone: '+52 998 555 0677', hours: 'Every day 8–22' }
+        ],
+        nodes: {
+            h_net: { provider: 'pv_isp' },
+            h_pms: { provider: 'pv_pms', inService: '2024-11', serviced: '2026-05', serviceEvery: 36 },
+            h_lock: { provider: 'pv_lock', inService: '2024-06' },
+            h_cam: { provider: 'pv_lock', inService: '2024-06' }
+        }
+    },
+    warehouse: {
+        providers: [
+            { id: 'pv_isp', name: 'Metro Fibra', service: 'internet', phone: '+52 33 5555 0400', account: 'MF-IND-5521', hours: '24/7' },
+            { id: 'pv_wms', name: 'Bodega Software', service: 'vendor', phone: '+52 33 5555 0711', email: 'soporte@bodegasoft.example', account: 'Contract BS-221', hours: 'Mon–Sat 6–22', notes: 'The WMS and the handheld scanners.' }
+        ],
+        nodes: {
+            wh_net: { provider: 'pv_isp' },
+            wh_wms: { provider: 'pv_wms', inService: '2024-08', serviced: '2026-08', serviceEvery: 36 },
+            wh_h1: { provider: 'pv_wms', inService: '2025-04' },
+            wh_h2: { provider: 'pv_wms', inService: '2025-04' }
+        }
+    },
+    callcenter: {
+        providers: [
+            { id: 'pv_isp', name: 'Metro Fibra', service: 'internet', phone: '+52 33 5555 0400', email: 'empresas@metrofibra.example', account: 'MF-CC-1180', hours: '24/7' },
+            { id: 'pv_voip', name: 'VozClara', service: 'phone', contact: 'Trunk support', phone: '+1 555 0100 330', email: 'support@vozclara.example', account: 'SIP trunk VC-5520', hours: '24/7 · 1 h response', notes: 'Calls not connecting: them first, then the PBX.' },
+            { id: 'pv_it', name: 'Andes IT Services', service: 'it', contact: 'Jorge Salas', phone: '+52 55 5555 0233', email: 'mesa@andesit.example', hours: 'Mon–Fri 8–19' }
+        ],
+        groups: { g_cc: { provider: 'pv_it' } },
+        nodes: {
+            c1: { provider: 'pv_isp' },
+            c10: { provider: 'pv_voip', serial: 'PBX-200-7761', inService: '2024-04', serviced: '2026-04', serviceEvery: 36 },
+            c14: { inService: '2024-04', serviced: '2026-04', serviceEvery: 36 },
+            c3: { serial: 'UTM-60-2290', inService: '2024-04' },
+            c11: { inService: '2025-02' }, c12: { inService: '2025-02' }, c13: { inService: '2025-02' }
+        },
+        links: [['c1', 'c2', 'pv_isp']]
+    },
+    factory: {
+        add: [
+            { on: 'f5', node: { id: 'f9', type: 'iot', name: 'PLC Controller 2', x: 450, y: 570, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.20.52/24' }], provider: 'pv_ot', serial: 'PLC-1500-8813', inService: '2023-09' } },
+            { on: 'f5', node: { id: 'f10', type: 'pc', name: 'Operator HMI', x: 550, y: 570, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.20.60/24' }], inService: '2024-02' } },
+            { on: 'f5', node: { id: 'f11', type: 'pc', name: 'Maintenance Laptop', x: 650, y: 570, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.20.61/24' }], inService: '2025-05' } }
+        ],
+        providers: [
+            { id: 'pv_isp', name: 'Metro Fibra', service: 'internet', phone: '+52 33 5555 0400', account: 'MF-IND-3302', hours: '24/7' },
+            { id: 'pv_ot', name: 'Automata Integradores', service: 'vendor', contact: 'Ing. Luis Pardo', phone: '+52 33 5555 0820', email: 'soporte@automata.example', account: 'Contract AUT-77', hours: 'Every day 6–22 · 8 h on-site', notes: 'PLCs, the robot and SCADA: OT changes go through them.' }
+        ],
+        nodes: {
+            f1: { provider: 'pv_isp' },
+            f4: { provider: 'pv_ot', inService: '2023-09', serviced: '2026-03', serviceEvery: 36 },
+            f6: { provider: 'pv_ot', serial: 'PLC-1500-8812', inService: '2023-09' },
+            f7: { provider: 'pv_ot', serial: 'ARM-6-0042', inService: '2024-01', serviced: '2026-01', serviceEvery: 36 },
+            f2: { inService: '2024-05', serviced: '2026-05', serviceEvery: 36 }
+        },
+        links: [['f1', 'f2', 'pv_isp']]
+    },
+    studio: {
+        add: [
+            { on: 's3', node: { id: 's10', type: 'pc', name: 'Edit Bay 3', x: 350, y: 470, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.52/24' }], inService: '2025-01' } },
+            { on: 's3', node: { id: 's11', type: 'pc', name: 'Streaming PC', x: 450, y: 470, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.60/24' }], inService: '2025-04' } }
+        ],
+        providers: [
+            { id: 'pv_isp', name: 'Backbone Uno', service: 'internet', phone: '+1 555 0100 200', account: 'BU-MEDIA-0310', hours: '24/7' },
+            { id: 'pv_stor', name: 'Almacena Systems', service: 'vendor', phone: '+1 555 0100 290', email: 'support@almacena.example', account: 'Support SR-60881', hours: 'Next business day parts' }
+        ],
+        nodes: {
+            s1: { provider: 'pv_isp' },
+            s4: { provider: 'pv_stor', serial: 'ALM-N12-01190', inService: '2024-10', serviced: '2026-04', serviceEvery: 36 },
+            s6: { inService: '2025-01' }, s7: { inService: '2025-01' }
+        },
+        links: [['s1', 's2', 'pv_isp']]
+    },
+    vessel: {
+        providers: [
+            { id: 'pv_sat', name: 'Mar Satelital', service: 'internet', contact: 'Network operations', phone: '+1 555 0100 900', email: 'noc@marsatelital.example', account: 'VSAT plan MS-OCEAN-14', hours: '24/7 NOC' },
+            { id: 'pv_marine', name: 'Puerto Electrónica Naval', service: 'vendor', phone: '+52 229 555 0950', hours: 'In port: next day', notes: 'Bridge and engine-room electronics.' }
+        ],
+        groups: { g_bridge: { provider: 'pv_marine' }, g_engine: { provider: 'pv_marine' } },
+        nodes: {
+            v_sat: { provider: 'pv_sat' },
+            v_mdm: { provider: 'pv_sat', serial: 'SAT-MDM-30117', inService: '2024-06' },
+            v_fw: { inService: '2024-06', serviced: '2026-06', serviceEvery: 36 }
+        },
+        links: [['v_sat', 'v_mdm', 'pv_sat']]
+    },
+    showcase: {
+        providers: [
+            { id: 'pv_isp', name: 'Backbone Uno', service: 'internet', phone: '+1 555 0100 200', email: 'noc@backbone-uno.example', account: 'BU-ENT-7710', hours: '24/7 NOC' },
+            { id: 'pv_voip', name: 'VozClara', service: 'phone', phone: '+1 555 0100 330', email: 'support@vozclara.example', account: 'SIP trunk VC-4471', hours: '24/7' },
+            { id: 'pv_it', name: 'Andes IT Services', service: 'it', contact: 'Jorge Salas', phone: '+52 55 5555 0233', email: 'mesa@andesit.example', hours: 'Mon–Fri 8–19' }
+        ],
+        groups: { g_branch: { provider: 'pv_it' } },
+        nodes: {
+            net: { provider: 'pv_isp' },
+            pbx: { provider: 'pv_voip', inService: '2024-09', serviced: '2026-03', serviceEvery: 36 },
+            fw: { inService: '2024-09', serviced: '2026-03', serviceEvery: 36 }
+        }
+    }
+};
+// add: devices the full sample gains, each cabled to a switch's next free
+// port (on), or associated to an access point's radio (wifi: { ap, iface,
+// ssid, signal }), placed where it says, its address on that part's subnet.
+function applySampleExtras(doc, extra, key) {
+    const miss = (what, id) => { throw new Error(`SAMPLE_EXTRAS.${key}: no ${what} ${id}`); };
+    (extra.add || []).forEach(({ node, on, wifi }) => {
+        if (doc.nodes.some((x) => x.id === node.id)) miss('new id for', node.id);
+        doc.nodes.push(Object.assign({ gw: '', dns: '', os: '', ports: '', notes: '', nat: false }, node));
+        if (wifi) {
+            if (!doc.nodes.some((x) => x.id === wifi.ap)) miss('access point', wifi.ap);
+            const w = {};
+            if (wifi.ssid) w.ssid = wifi.ssid;
+            if (Number.isFinite(wifi.signal)) w.signal = wifi.signal;
+            doc.links.push({ id: `${node.id}_l`, source: wifi.ap, target: node.id, sourceIface: wifi.iface, targetIface: node.interfaces[0].id, wifi: w });
+            return;
+        }
+        if (!doc.nodes.some((x) => x.id === on)) miss('switch', on);
+        const used = new Set(doc.links.flatMap((l) => [l.source === on ? l.sourceIface : null, l.target === on ? l.targetIface : null]).filter(Boolean));
+        let p = 1;
+        while (used.has(`p${p}`)) p++;
+        doc.links.push({ id: `${node.id}_l`, source: on, target: node.id, sourceIface: `p${p}`, targetIface: node.interfaces[0].id });
+    });
+    doc.providers = normalizeProviders(extra.providers || []);
+    Object.entries(extra.groups || {}).forEach(([id, set]) => { const g = (doc.groups || []).find((x) => x.id === id) || miss('group', id); Object.assign(g, set); });
+    Object.entries(extra.nodes || {}).forEach(([id, set]) => { const n = doc.nodes.find((x) => x.id === id) || miss('device', id); Object.assign(n, set); });
+    (extra.links || []).forEach(([a, b, pv]) => {
+        const l = doc.links.find((x) => (x.source === a && x.target === b) || (x.source === b && x.target === a)) || miss('cable', `${a}–${b}`);
+        l.provider = pv;
+    });
+    return doc;
+}
+Object.keys(SAMPLE_EXTRAS).forEach((key) => { if (templatesData[key]) applySampleExtras(templatesData[key], SAMPLE_EXTRAS[key], key); });
+// A simple sample's providers (simpleSampleExtras).
+Object.keys(SIMPLE_SAMPLES).forEach((key) => applySampleExtras(templatesData[key + SIMPLE_SUFFIX],
+    simpleSampleExtras(SIMPLE_SAMPLES[key]), key + SIMPLE_SUFFIX));
 
 // Menu copy for the library tabs. Order here is the order shown; the key must
 // match templatesData / SNIPPETS.
@@ -904,10 +1326,10 @@ const TEMPLATE_META = [
     { key: 'studio',     icon: '🎬', name: 'Media Studio',    blurb: '10G edit bays and a passthrough render node', example: true },
     { key: 'military',   icon: '🪖', name: 'Military Base',   blurb: 'Air-gapped NIPR and SIPR enclaves, Type 1 crypto', example: true },
     { key: 'vessel',     icon: '🚢', name: 'Vessel',          blurb: 'Satellite uplink, bridge, engine room, crew', example: true },
-    { key: 'showcase',   icon: '🧩', name: 'Full Showcase',   blurb: 'Every node type, medium and feature at once', example: true },
     { key: 'offlineLean',     icon: '🔌', name: 'Offline · Lean',     blurb: 'One node, one site — the smallest tier', example: true },
     { key: 'offlineBalanced', icon: '🔋', name: 'Offline · Balanced', blurb: 'Second site over VPN, LTE failover — the recommended tier', example: true },
-    { key: 'offlineExtended', icon: '🛰️', name: 'Offline · Extended', blurb: 'Third site, satellite path and a GPU node', example: true }
+    { key: 'offlineExtended', icon: '🛰️', name: 'Offline · Extended', blurb: 'Third site, satellite path and a GPU node', example: true },
+    { key: 'showcase',   icon: '🧩', name: 'Full Showcase',   blurb: 'Every node type, medium and feature at once', last: true },
 ];
 
 const SNIPPET_META = [

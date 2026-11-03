@@ -716,11 +716,19 @@ function loadSettings() {
         // '' (light), 'dark' or 'blue'; true, from before the blueprint was a
         // choice of its own, was the dark map.
         state.settings.mapInk = saved.mapInk === true ? 'dark' : (MAP_INKS.includes(saved.mapInk) ? saved.mapInk : '');
+        // Settings (js/settings.js): the provider on hover is an opt-in, the
+        // report's defaults are on unless turned off.
+        if (saved.providerHover === true) state.settings.providerHover = true;
+        if (typeof saved.reportEngineer === 'string') state.settings.reportEngineer = saved.reportEngineer.slice(0, 120);
+        if (saved.reportSummaryOn === false) state.settings.reportSummaryOn = false;
+        if (saved.reportTechnicalOn === false) state.settings.reportTechnicalOn = false;
     } catch (e) { /* first run or blocked storage */ }
 }
 
 function saveSettings() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ profile: state.settings.profile, advanced: !!state.settings.advanced, lang: state.settings.lang, libraryTab: state.settings.libraryTab, subnetZones: state.settings.subnetZones !== false, view: state.settings.view, mapInk: state.settings.mapInk || '' })); } catch (e) { /* private mode */ }
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ profile: state.settings.profile, advanced: !!state.settings.advanced, lang: state.settings.lang, libraryTab: state.settings.libraryTab, subnetZones: state.settings.subnetZones !== false, view: state.settings.view, mapInk: state.settings.mapInk || '',
+        providerHover: state.settings.providerHover === true || undefined, reportEngineer: state.settings.reportEngineer || undefined,
+        reportSummaryOn: state.settings.reportSummaryOn === false ? false : undefined, reportTechnicalOn: state.settings.reportTechnicalOn === false ? false : undefined })); } catch (e) { /* private mode */ }
 }
 
 // Saved templates used to have a store of their own here (USER_TPL_KEY,
@@ -858,7 +866,7 @@ function serializeDoc() {
     // `wifi` (v12): the Wi-Fi networks, through WIFI_FIELDS, likewise. And
     // `columns` and `tableView` (v13): the custom columns and the Devices
     // table's arrangement (js/model.js "Custom columns").
-    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView) };
+    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), providers: serializeProviders(state.providers), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView) };
 }
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
@@ -1551,6 +1559,9 @@ function loadDocState(doc) {
     // And after both: a VM's host must be a device here it may run on, and
     // its group is its host's (js/model.js "Hosts").
     repairHosts(state.nodes);
+    // The providers, and every device, cable and group naming one.
+    state.providers = normalizeProviders(d.providers);
+    normalizeProviderRefs(state.nodes, state.links, state.groups, state.providers);
     state.accepted = normalizeAccepted(d.accepted);
     state.pinned = normalizePinned(d.pinned);
     // After the devices and cables they name: an id the file does not hold
@@ -2430,6 +2441,7 @@ function showConfigTab(name) {
     if (name === 'networks') renderNetworksPanel(true);
     if (name === 'groups') renderGroupsPanel(true);   // and the Groups tab (js/groups.js)
     if (name === 'wifi') renderWifiPanel(true);       // and the Wi-Fi tab (js/wifi.js)
+    if (name === 'providers') renderProvidersPanel(true);   // and the Providers tab (js/providers.js)
 }
 document.querySelectorAll('.cfg-tab').forEach((t) => { t.onclick = () => showConfigTab(t.dataset.cfgtab); });
 
@@ -2509,8 +2521,10 @@ function applyLocale(lang) {
     document.getElementById('undoBtn').textContent = `↶ ${t('Undo')}`;
     document.getElementById('redoBtn').textContent = `↷ ${t('Redo')}`;
     document.getElementById('tidyBtn').textContent = `⤢ ${t('Tidy')}`;
-    // File, not Export (plan R3): it opens, keeps and starts networks too.
-    document.getElementById('exportMenuBtn').innerHTML = `📁 ${t('File')} <span class="cs-caret">▾</span>`;
+    // Export (it was File, plan R3), with Settings beside it.
+    document.getElementById('exportMenuBtn').innerHTML = `📁 ${t('Export')} <span class="cs-caret">▾</span>`;
+    document.getElementById('settingsBtn').textContent = `⚙ ${t('Settings')}`;
+    if (typeof renderSettings === 'function') renderSettings();
     document.getElementById('copyUrlBtn').innerHTML = `🔗 ${t('Copy link')} <span class="cs-menu-note">${t('short URL')}</span>`;
     document.getElementById('exportPngBtn').textContent = `🖼️ ${t('PNG image')}`;
     document.getElementById('exportSvgBtn').innerHTML = `🖼️ ${t('SVG image')} <span class="cs-menu-note">${t('vector')}</span>`;
@@ -2553,6 +2567,7 @@ function applyLocale(lang) {
     renderNetworksPanel(true);   // its counts and buttons are built, not marked up
     renderGroupsPanel(true);     // so are the Groups tab's
     renderWifiPanel(true);       // and the Wi-Fi tab's
+    renderProvidersPanel(true);  // and the Providers tab's
     renderTableView(true);       // so are the table's headers and counts
     renderBulkPanel(true);       // and the bulk panel's field rows
 }
@@ -2636,15 +2651,43 @@ async function applyTemplate(template) {
     return true;
 }
 
+// A sample's card opens either version: Simple (SIMPLE_SUFFIX, js/data.js),
+// easy to read, or Full, every feature, each button saying how many devices
+// it has. A sample with no simple version (the Full Showcase) is one button,
+// as any library card.
+function sampleItem(meta) {
+    const full = templatesData[meta.key], simple = templatesData[meta.key + SIMPLE_SUFFIX];
+    const name = t(meta.name), blurb = t(meta.blurb);
+    if (!simple) return libraryItem({ ...meta, name, blurb: `${blurb} · ${t(full.nodes.length === 1 ? '{n} device' : '{n} devices', { n: full.nodes.length })}` }, () => applyTemplate(full));
+    const row = document.createElement('div');
+    row.className = 'lib-item tpl-item';
+    row.dataset.sample = meta.key;
+    row.innerHTML = `<div class="tpl-head"><span class="lib-item-icon">${meta.icon}</span><span style="min-width:0"><span class="lib-item-name">${escapeHtml(name)}</span><span class="lib-item-blurb">${escapeHtml(blurb)}</span></span></div>
+        <div class="tpl-pick"></div>`;
+    const pick = row.querySelector('.tpl-pick');
+    [['simple', simple, 'Simple', 'Open the simple version: {n} devices, easy to read'], ['full', full, 'Full', 'Open the full version: {n} devices and every feature']].forEach(([v, doc, label, tip]) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `tpl-btn tpl-${v}`;
+        btn.dataset.version = v;
+        btn.title = t(tip, { n: doc.nodes.length });
+        btn.setAttribute('aria-label', `${name}: ${btn.title}`);
+        btn.innerHTML = `<b>${escapeHtml(t(label))}</b><span>${doc.nodes.length}</span>`;
+        btn.onclick = () => applyTemplate(doc);
+        pick.appendChild(btn);
+    });
+    return row;
+}
 function renderLibrary() {
     const tplList = document.getElementById('templateList');
     const exampleList = document.getElementById('exampleTemplateList');
-    tplList.innerHTML = ''; exampleList.innerHTML = '';
+    const lastList = document.getElementById('lastTemplateList');
+    tplList.innerHTML = ''; exampleList.innerHTML = ''; if (lastList) lastList.innerHTML = '';
     TEMPLATE_META.forEach((meta) => {
         if (!templatesData[meta.key]) return; // meta without data would render a dead row
         // The catalogue is chrome (the Examples tab of the simple view); Blocks
         // below are Advanced vocabulary and keep their English names.
-        (meta.example ? exampleList : tplList).appendChild(libraryItem({ ...meta, name: t(meta.name), blurb: t(meta.blurb) }, () => applyTemplate(templatesData[meta.key])));
+        (meta.last && lastList ? lastList : meta.example ? exampleList : tplList).appendChild(sampleItem(meta));
     });
 
     // js/library.js: the saved templates are library cards, and so are your
@@ -2757,7 +2800,7 @@ function setMapInk(mode) {
 }
 const MAP_INK_NEXT = { '': 'dark', dark: 'blue', blue: '' };
 const MAP_INK_NEXT_TITLE = { '': 'Dark background', dark: 'Blueprint background', blue: 'Light background' };
-document.getElementById('mapInkBtn').onclick = () => { setMapInk(MAP_INK_NEXT[state.settings.mapInk || '']); saveSettings(); };
+document.getElementById('mapInkBtn').onclick = () => { setMapInk(MAP_INK_NEXT[state.settings.mapInk || '']); saveSettings(); if (typeof renderSettings === 'function') renderSettings(); };
 // New network, in the File menu, replaced the toolbar's Clear. Clear emptied
 // the nodes and cables and nothing else — the card stayed attached (so the
 // next Save overwrote the saved network with nothing), and the notes, the
@@ -3048,7 +3091,7 @@ function canvasSvgMarkup(scale = 1) {
     // A group's ▾ and a collapsed rack's Open rack (js/groupmap.js) are
     // controls too; its frame and tab are drawing. So is a host badge's
     // chevron and tap target; its count of guests is drawing.
-    svg.querySelectorAll('.node-delete, .grp-toggle, .grp-rack-open, .host-fold-chev, .host-badge > .grp-toggle-hit').forEach((el) => el.remove());
+    svg.querySelectorAll('.node-delete, .grp-toggle, .grp-rack-open, .host-fold-chev, .host-badge > .grp-toggle-hit, .pv-tip').forEach((el) => el.remove());
     // A selection is the editor's, not the network's: the copy is drawn as if
     // nothing were picked (restLook, js/ui.js), and what only a selection shows goes.
     svg.querySelectorAll('[data-sel-only]').forEach((el) => el.remove());

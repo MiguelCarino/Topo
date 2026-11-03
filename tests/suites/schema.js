@@ -79,7 +79,9 @@ window.addEventListener('load', () => {
   // here without those keys; tests/suites/hosts.js, groups.js and the rack
   // suites hold the keys themselves.
   // The Showcase's CT Modality ships its serial and asset tag too.
-  const LATER_KEYS = ['host', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'serial', 'assetTag'];
+  // And since v15 the samples carry providers, serials, tags and dates
+  // (SAMPLE_EXTRAS, js/data.js).
+  const LATER_KEYS = ['host', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'serial', 'assetTag', 'provider', 'inService', 'serviced', 'serviceEvery'];
   // The fourth: Wi-Fi (v12). Smart Home, Retail, Hotel, the Showcase and
   // Common Errors ship radios on their wireless interfaces and associations
   // on their wireless links, which the reference drops (a radio) or never
@@ -90,7 +92,7 @@ window.addEventListener('load', () => {
   const legacyMinusLater = (n) => minusRadio(legacyMinusNetcfg(n));
   // So is a cable's tag (link.cable): the Data Centre and the Showcase ship
   // theirs tagged, which the reference never knew.
-  const currentLinkMinusWifi = (l) => { const o = serializeLink(l); delete o.wifi; delete o.cable; return o; };
+  const currentLinkMinusWifi = (l) => { const o = serializeLink(l); delete o.wifi; delete o.cable; delete o.provider; return o; };
   const both = (doc) => frozen(() => [
     pipe(doc, legacyNormalizeNode, legacyMinusLater, legacyNormalizeLink, legacySerializeLink),
     pipe(doc, normalizeLoadedNode, currentMinusHost, normalizeLoadedLink, currentLinkMinusWifi)

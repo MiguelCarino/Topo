@@ -136,14 +136,19 @@ const BULK_FIELD_OPTS = {
     inService: { plain: true, get: (node) => (node.inService == null ? '' : node.inService) },
     serviced: { plain: true, get: (node) => (node.serviced == null ? '' : node.serviced) },
     serviceEvery: { plain: true, get: (node) => (node.serviceEvery == null ? '' : node.serviceEvery) },
-    lifeYears: { plain: true, get: (node) => (node.lifeYears == null ? '' : node.lifeYears) }
+    lifeYears: { plain: true, get: (node) => (node.lifeYears == null ? '' : node.lifeYears) },
+    // Who is responsible for them (js/model.js "Providers"): a pick of the
+    // network's providers. Its own, as stored: one that only inherits one
+    // from its group reads as none, and a blank pick asks for nothing.
+    provider: { editor: 'provider', plain: true, get: (node) => node.provider || '' }
 };
 // A cable's medium is a pick of the five the canvas draws. It is compared as
 // drawn (effectiveMedium), as the table's Medium column does: a cable never
 // given one is drawn as UTP, and picking UTP for it is not a change. No Clear:
 // "no medium" only means "guess", which the drawing already shows.
 const BULK_LINK_FIELD_OPTS = {
-    medium: { editor: 'medium', get: (link) => effectiveMedium(link) }
+    medium: { editor: 'medium', get: (link) => effectiveMedium(link) },
+    provider: { editor: 'provider', plain: true, get: (link) => link.provider || '' }
 };
 // A cable's own facts that a run of cables shares (CABLE_FIELDS' bulk rows:
 // length, colour, via; never the label, which names one cable). They live in
@@ -181,6 +186,7 @@ function bulkShow(bf, value) {
     if (bf.editor === 'type') return typeName(value);
     if (bf.editor === 'medium') return MEDIUM_NAMES[value] || String(value || '');
     if (bf.editor === 'status') return statusName(value);
+    if (bf.editor === 'provider') return value ? providerLabel(providerById(value)) || String(value) : '';
     return value == null ? '' : String(value);
 }
 
@@ -208,6 +214,7 @@ function bulkParse(bf, text) {
     if (bf.editor === 'type') return paletteDefs.some((p) => p.type === text) ? { value: text } : { error: true };
     if (bf.editor === 'medium') return Object.prototype.hasOwnProperty.call(FLOW_CLASS, text) ? { value: text } : { error: true };
     if (bf.editor === 'status') return asStatus(text) ? { value: asStatus(text) } : { error: true };
+    if (bf.editor === 'provider') { const p = providerById(text) || findProviderRef(text); return p ? { value: p.id } : { error: true }; }
     if (bf.custom) { const r = parseCustomValue(bf.custom, text); return r.error ? r : { value: customText(bf.custom, r.value) }; }
     if (bf.field && bf.field.fromText) return fromTextResult(bf.field.fromText, text);
     const v = bf.keepSpace ? String(text) : String(text).trim();
@@ -795,7 +802,7 @@ function bulkWrite(plan, doc) {
 // The findings the plan would leave, against the ones there now.
 function bulkFindingsDelta(plan) {
     if (!plan.ops.length || plan.errors.length) return [];
-    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi });
+    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers });
     bulkWrite(plan, scratch);
     return findingsDelta(topologyFindings(), diagnoseDoc(scratch).findings);
 }
@@ -1021,7 +1028,9 @@ function renderBulkFields(nodes, draft, force, kind = 'node') {
                     ? Object.keys(FLOW_CLASS).map((k) => ({ value: k, label: bulkShow(bf, k) }))
                     : bf.editor === 'status'
                         ? (common.mixed ? [] : [{ value: '', label: '—' }]).concat(STATUS_VALUES.map((k) => ({ value: k, label: statusName(k) })))
-                        : paletteDefs.map((d) => ({ value: d.type, label: typeName(d.type) }));
+                        : bf.editor === 'provider'
+                            ? (common.mixed ? [] : [{ value: '', label: '—' }]).concat((state.providers || []).map((p) => ({ value: p.id, label: providerLabel(p) })))
+                            : paletteDefs.map((d) => ({ value: d.type, label: typeName(d.type) }));
             const initial = common.mixed ? '' : String(common.value);
             input.dataset.initial = initial;
             input.innerHTML = (common.mixed ? `<option value="">${escapeHtml(t('mixed'))}</option>` : '')

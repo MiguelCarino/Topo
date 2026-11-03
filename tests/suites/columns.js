@@ -37,7 +37,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
   try {
     // ---- 1: the model ----
-    ok('the document is version 14', DOC_VERSION === 14);
+    ok('the document is version 14 or later', DOC_VERSION >= 14);
     const cols = normalizeCustomColumns([
       { id: 'c1', name: '  Owner  ', kind: 'text' },
       { id: 'c2', name: 'owner', kind: 'text' },            // the same name in another case
@@ -84,7 +84,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a document with no columns and no view writes no key for them', !('columns' in asWritten(serializeDoc())) && !('tableView' in asWritten(serializeDoc())));
     const v12 = lab(); v12.v = 12;
     replaceDocument(v12, { origin: 'file' });
-    ok('a v12 document opens, editable, and is written as v14', !state.readOnly && serializeDoc().v === 14);
+    ok('a v12 document opens, editable, and is written as the current version', !state.readOnly && serializeDoc().v === DOC_VERSION);
     replaceDocument(doc, { origin: 'file' }); initHistory();
     const other = Object.assign(lab(), { columns: [{ id: 'c1', name: 'Something else' }] });
     withDoc(other, () => state.nodes.length);

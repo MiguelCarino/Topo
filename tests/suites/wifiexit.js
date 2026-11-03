@@ -192,7 +192,8 @@ window.addEventListener('load', () => { setTimeout(() => {
       };
     };
     const want = sig();
-    const sheets = [csvSubnetsSheet(), csvWifiSheet(), csvDevicesSheet(), csvInterfacesSheet(), csvCablesSheet()].map((x) => csvText(x));
+    // providers.csv first: the sample names its ISP (SAMPLE_EXTRAS, js/data.js).
+    const sheets = [csvProvidersSheet(), csvSubnetsSheet(), csvWifiSheet(), csvDevicesSheet(), csvInterfacesSheet(), csvCablesSheet()].map((x) => csvText(x));
     replaceDocument({ v: DOC_VERSION, nodes: [], links: [] }, { origin: 'file' });
     const why = [];
     sheets.forEach((text) => {

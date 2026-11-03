@@ -381,8 +381,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const sheet = (text) => { const p = csvParse(text); return csvSheet(p, csvHasHeadingRow(p.rows)); };
     const gsheet = csvGroupsSheet();
     const rkRow = gsheet.rows.find((r) => r[0] === 'rk');
-    ok('groups.csv carries width, depth_mm and numbering', json(gsheet.headers.slice(-3)) === '["width","depth_mm","numbering"]' && json(rkRow.slice(-3)) === '["10in","450","bottom"]'
-       && json(gsheet.rows.find((r) => r[0] === 'room').slice(-3)) === '["","",""]', json(gsheet.rows));
+    ok('groups.csv carries width, depth_mm and numbering', json(gsheet.headers.slice(-4, -1)) === '["width","depth_mm","numbering"]' && json(rkRow.slice(-4, -1)) === '["10in","450","bottom"]'
+       && json(gsheet.rows.find((r) => r[0] === 'room').slice(-4, -1)) === '["","",""]', json(gsheet.rows));
     const own = csvPlan(sheet(csvText(gsheet)), csvAutoMap(sheet(csvText(gsheet))));
     ok('its own sheet reads back with no change', own.counts.change === 0 && own.counts.conflict === 0, json(own.rows.map((r) => r.changes)));
     const edited = 'group_id,u_height,width,depth_mm,numbering\nrk,12,23",800,Top down\n';

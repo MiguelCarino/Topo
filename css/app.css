@@ -2257,3 +2257,40 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
     .dlg-parts .dlg-cells { grid-template-columns: repeat(var(--cols, 2), 44px); }
     .dlg-parts .dlg-cell { min-height: 44px; }
 }
+
+/* Settings (js/settings.js): three sections, each change kept at once. */
+.modal.topo-settings { max-width: 34rem; }
+.topo-settings .set-body { display: flex; flex-direction: column; gap: 18px; max-height: min(70vh, 640px); overflow-y: auto; }
+.topo-settings .set-sec { display: flex; flex-direction: column; gap: 10px; }
+.topo-settings .set-sec + .set-sec { border-top: 1px solid var(--border); padding-top: 16px; }
+.topo-settings .set-head { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-sec); }
+.topo-settings .set-row { display: flex; align-items: flex-start; gap: 10px; min-height: 32px; cursor: pointer; font-size: 13px; line-height: 1.45; }
+.topo-settings .set-row input[type="checkbox"] { margin-top: 2px; flex: none; width: 16px; height: 16px; accent-color: var(--accent); }
+.topo-settings .set-row .dlg-dim { font-size: 12px; }
+.topo-settings .set-field { display: flex; flex-direction: column; gap: 4px; }
+.topo-settings .set-field .select, .topo-settings .set-field .input { width: 100%; }
+.topo-settings .set-sec p { margin: 0; font-size: 13px; line-height: 1.5; }
+.topo-settings .set-sec .btn { align-self: flex-start; }
+@media (max-width: 900px) {
+    .topo-settings .set-row { min-height: 44px; align-items: center; }
+    .topo-settings .set-row input[type="checkbox"] { width: 20px; height: 20px; margin-top: 0; }
+    .topo-settings .set-field .select, .topo-settings .set-field .input, .topo-settings .set-sec .btn { min-height: 44px; }
+}
+
+/* A sample's card: its name, then Simple and Full side by side, each with
+   its device count (sampleItem, js/app.js). */
+.lib-item.tpl-item { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; }
+.tpl-item .tpl-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.tpl-item .tpl-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.tpl-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; padding: 6px 10px;
+    border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.tpl-btn b { font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; font-size: 11px; }
+.tpl-btn span { color: var(--text-sec); font-variant-numeric: tabular-nums; }
+.tpl-btn:hover { border-color: var(--accent); background: var(--accent-faint); }
+.tpl-btn.tpl-full b { color: var(--accent); }
+.tpl-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tpl-last { margin-top: 10px; }
+@media (max-width: 900px) { .tpl-btn { min-height: 44px; } }
+.tpl-item .tpl-head .lib-item-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tpl-item .tpl-head .lib-item-blurb { display: block; }
+.tpl-item .tpl-head .lib-item-icon { flex: none; }

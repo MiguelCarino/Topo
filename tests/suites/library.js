@@ -379,6 +379,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
   loadDocState(templatesData.hospital); autoBindLinks();
 
   const cloud = state.nodes.find((n) => n.type === 'cloud') || spawnNode('cloud');
+  // Nobody named for it (the sample names its ISP since v15), so the provider
+  // note below is about the site claim alone.
+  delete cloud.provider; state.links.forEach((l) => { if (l.source === cloud.id || l.target === cloud.id) delete l.provider; });
   cloud.siteRef = { id: torreA, name: 'Torre A' };
   save();
   await load();
@@ -414,11 +417,15 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
   // The checks read state.nodes/state.links only. A field they do not know
   // about must not perturb them, or a card and a report could disagree.
-  const withRef = topologyFindings().map((f) => f.line).join('|');
+  // Except one: a cloud standing for another site is not the internet, so
+  // only without the claim does it ask for a provider (providerFindings).
+  const lines = () => topologyFindings().filter((f) => f.key !== 'provider').map((f) => f.line).join('|');
+  const withRef = lines();
+  ok('a cloud standing for another site asks for no provider', !topologyFindings().some((f) => f.key === 'provider' && f.nodeIds.includes(cloud.id)));
   delete getNode(cloud.id).siteRef;
   renderCanvasOnly();
-  ok('the diagnostics are indifferent to it',
-     topologyFindings().map((f) => f.line).join('|') === withRef);
+  ok('the diagnostics are indifferent to it', lines() === withRef);
+  ok('and without the claim it is the internet, with nobody named for it', topologyFindings().some((f) => f.key === 'provider' && f.nodeIds.includes(cloud.id)));
 
   // ---- The binder ----
   // The file is the copy that outlives the browser, so the two things that

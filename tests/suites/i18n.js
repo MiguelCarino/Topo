@@ -238,7 +238,7 @@ window.addEventListener('load', () => { setTimeout(() => {
   };
   const grpKeys = new Map();
   ['js/groups.js', 'js/groupmap.js', 'js/rackview.js', 'js/ui.js', 'js/add.js', 'js/diagnostics.js', 'js/app.js',
-   'js/report.js', 'js/csv.js', 'js/library.js', 'js/share.js', 'js/table.js'].forEach((file) => {
+   'js/report.js', 'js/csv.js', 'js/library.js', 'js/share.js', 'js/table.js', 'js/providers.js'].forEach((file) => {
     const req = new XMLHttpRequest(); req.open('GET', file, false); req.send();
     firstArgKeys(req.responseText).forEach((k) => grpKeys.set(k.replace(/\\n/g, '\n').replace(/\\(['"\\])/g, '$1'), file));
   });
@@ -247,6 +247,10 @@ window.addEventListener('load', () => { setTimeout(() => {
   ok('the sweep reads both branches of a ternary inside t()', grpKeys.has('{n} node · reusable template') && grpKeys.has('{n} nodes · reusable template'),
      [...grpKeys.keys()].filter((k) => /reusable template/.test(k)).join(' | '));
   ['Group', 'Rack U', 'Rack height', 'Rack face', 'Rack depth', 'Ports face'].forEach((k) => grpKeys.set(k, 'NODE_FIELDS'));
+  // The providers' field labels and services (PROVIDER_FIELDS, PROVIDER_SERVICE_LABEL,
+  // js/model.js) reach t() by name.
+  PROVIDER_FIELDS.filter((f) => f.key !== 'id').forEach((f) => grpKeys.set(f.label, 'PROVIDER_FIELDS'));
+  PROVIDER_SERVICES.forEach((k) => grpKeys.set(PROVIDER_SERVICE_LABEL[k], 'PROVIDER_SERVICE_LABEL'));
   ok('the swept files ask for a real number of strings', grpKeys.size > 600, `${grpKeys.size} keys`);
   locales.forEach((loc) => {
     const missing = [...grpKeys].filter(([k]) => !has(loc, k));

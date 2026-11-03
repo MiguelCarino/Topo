@@ -307,9 +307,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const grpSheet = csvGroupsSheet();
     // A rack's size is four columns since Round 2, item 4: its depth in mm
     // (blank when none was given) and its numbering, "bottom" by default.
-    ok('groups.csv: every group field, in tree order, a rack\'s size only on a rack', grpSheet.headers.join() === 'group_id,name,kind,parent,u_height,width,depth_mm,numbering'
-       && grpSheet.rows.map((r) => r[0]).join() === 'bA,f1,office,srvroom,rk' && json(grpSheet.rows[4]) === '["rk","Rack 3","rack","srvroom","42","19in","","bottom"]'
-       && json(grpSheet.rows[0]) === '["bA","Building A","building","","","","",""]', json(grpSheet.rows));
+    ok('groups.csv: every group field, in tree order, a rack\'s size only on a rack', grpSheet.headers.join() === 'group_id,name,kind,parent,u_height,width,depth_mm,numbering,provider'
+       && grpSheet.rows.map((r) => r[0]).join() === 'bA,f1,office,srvroom,rk' && json(grpSheet.rows[4]) === '["rk","Rack 3","rack","srvroom","42","19in","","bottom",""]'
+       && json(grpSheet.rows[0]) === '["bA","Building A","building","","","","","",""]', json(grpSheet.rows));
     ok('it is one of the export sheets', CSV_SHEETS.some((s) => s.key === 'groups'));
 
     // devices.csv into a map with no groups: the groups are missing until ticked.
@@ -339,7 +339,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // groups.csv first, then devices.csv: the kinds and heights come back too.
     const gsh = sheet(grpText);
     const gmap = csvAutoMap(gsh);
-    ok('groups.csv is read as a sheet of groups', csvSheetKind(gmap) === 'groups' && gmap.join() === 'grp:id,grp:name,grp:kind,grp:parent,grp:uHeight,grp:width,grp:depthMm,grp:numbering', gmap.join());
+    ok('groups.csv is read as a sheet of groups', csvSheetKind(gmap) === 'groups' && gmap.join() === 'grp:id,grp:name,grp:kind,grp:parent,grp:uHeight,grp:width,grp:depthMm,grp:numbering,grp:provider', gmap.join());
     const gp = csvPlan(gsh, gmap);
     ok('every row a new group', gp.counts.add === 5 && gp.counts.conflict === 0, json(gp.rows.map((r) => r.why)));
     applyCsvPlan(gp);

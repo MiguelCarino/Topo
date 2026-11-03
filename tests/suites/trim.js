@@ -80,7 +80,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const examples = el('exampleTemplates');
     ok('the Examples group starts collapsed', examples.tagName === 'DETAILS' && !examples.open && el('exampleTemplatesSummary').textContent === 'Examples');
     const exampleText = el('exampleTemplateList').textContent;
-    ok('Military Base, Vessel and Full Showcase are examples', ['Military Base', 'Vessel', 'Full Showcase'].every((n) => exampleText.includes(n)));
+    ok('Military Base and Vessel are examples', ['Military Base', 'Vessel'].every((n) => exampleText.includes(n)));
+    // The Full Showcase is the last card, after the Examples (sampleItem, js/app.js).
+    ok('the Full Showcase is the last card, after them', document.getElementById('lastTemplateList').textContent.includes('Full Showcase') && !exampleText.includes('Full Showcase'));
     ok('so are the three Offline tiers', ['Offline · Lean', 'Offline · Balanced', 'Offline · Extended'].every((n) => exampleText.includes(n)));
     ok('none of them is gone', TEMPLATE_META.every((m) => templatesData[m.key]) && ['offlineLean', 'offlineBalanced', 'offlineExtended', 'military', 'vessel', 'showcase'].every((k) => templatesData[k]));
     // Prices stay with offline.carino.systems, in every language.

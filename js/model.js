@@ -1533,7 +1533,13 @@ const NODE_FIELDS = [
     { key: 'host', kind: 'raw', label: 'Runs on', csv: 'runs_on',
       read: (v, src) => (isVirtualType(src.type) ? asGroupRef(v) : undefined),
       write: (v, src) => (src && isVirtualType(src.type) ? asGroupRef(v) : undefined),
-      toText: (v) => hostRefText(v) }
+      toText: (v) => hostRefText(v) },
+    // ---- Who is responsible for it (document v15, "Providers" below) ----
+    // A provider in doc.providers, by id: the ISP for the modem, the alarm
+    // company for the NVR. Unset, the device's host's or its group's answers
+    // (nodeProvider). In a spreadsheet it is the provider's name.
+    { key: 'provider', kind: 'raw', label: 'Provider', read: asGroupRef, write: asGroupRef, csv: 'provider', bulk: true,
+      toText: (v) => providerRefText(v) }
 ];
 
 // A cable's own facts (link.cable, plan section 4): the label on both ends of
@@ -1642,7 +1648,11 @@ const LINK_FIELDS = [
     // What a wireless association is: its SSID, band and signal ("Wi-Fi"
     // below; document v12). readLinkWifi both ways, so only those three
     // keys ever leave.
-    { key: 'wifi', kind: 'raw', label: 'Wi-Fi', read: readLinkWifi, write: readLinkWifi }
+    { key: 'wifi', kind: 'raw', label: 'Wi-Fi', read: readLinkWifi, write: readLinkWifi },
+    // The provider responsible for the run (document v15): the carrier of a
+    // fibre circuit, the ISP of the line into the modem.
+    { key: 'provider', kind: 'raw', label: 'Provider', read: asGroupRef, write: asGroupRef, csv: 'provider', bulk: true,
+      toText: (v) => providerRefText(v) }
 ];
 
 const fieldRead = (f) => f.read || FIELD_KINDS[f.kind].read;
@@ -2834,7 +2844,11 @@ const GROUP_FIELDS = [
     { key: 'uHeight', kind: 'count', read: rackOnly(asRackSize), write: rackOnly(asRackSize), label: 'Height (U)', csv: 'u_height' },
     { key: 'width', kind: 'raw', read: rackOnly(asRackWidth), write: rackOnly(asRackWidth), label: 'Width', csv: 'width' },
     { key: 'depthMm', kind: 'count', read: rackOnly(asRackDepthMm), write: rackOnly(asRackDepthMm), label: 'Depth (mm)', csv: 'depth_mm' },
-    { key: 'numbering', kind: 'raw', read: rackOnly(asRackNumbering), write: rackOnly(asRackNumbering), label: 'Numbering', csv: 'numbering' }
+    { key: 'numbering', kind: 'raw', read: rackOnly(asRackNumbering), write: rackOnly(asRackNumbering), label: 'Numbering', csv: 'numbering' },
+    // The provider responsible for what is in it (document v15): every
+    // device inside, at any depth, that names none of its own.
+    { key: 'provider', kind: 'raw', label: 'Provider', read: asGroupRef, write: asGroupRef, csv: 'provider',
+      toText: (v) => providerRefText(v) }
 ];
 
 // Load: coerced through the table, one record per id (a repeated id is
@@ -3636,6 +3650,147 @@ function rackShrinkQuestion(rack, height, nodes = state.nodes, groups = state.gr
 }
 
 // ============================================================================
+// Providers (document v15)
+// ============================================================================
+// Who is responsible for what, so someone new to the site knows whom to call:
+// the ISP, the phone company, the IT support firm, the alarm company, the
+// vendor under contract. doc.providers is a list of its own, like the Wi-Fi
+// networks, and three records name one by id where the responsibility lies:
+//   node.provider   a device (the modem, the PBX, the NVR);
+//   link.provider   a cable or circuit (the fibre into the building);
+//   group.provider  a site, room or rack: every device inside that names
+//                   none of its own, at any depth.
+// A VM or container with none of its own is its host's responsibility.
+// Contact details are the provider's, never a person's private data the
+// network needs: the visitor types what they want printed.
+const PROVIDER_SERVICES = ['internet', 'phone', 'it', 'security', 'power', 'vendor', 'cloud', 'other'];
+const PROVIDER_SERVICE_LABEL = {
+    internet: 'Internet', phone: 'Phone / VoIP', it: 'IT support', security: 'CCTV / alarm',
+    power: 'Power / UPS', vendor: 'Hardware vendor', cloud: 'Cloud / hosting', other: 'Other'
+};
+// What a sheet or a hand-edited file may say for each, in the five locales.
+const PROVIDER_SERVICE_ALIASES = {
+    internet: ['internet', 'isp', 'internet provider', 'internet service provider', 'broadband', 'fibre', 'fiber', 'wan', 'carrier', 'proveedor de internet', 'provedor de internet', 'интернет', 'インターネット'],
+    phone: ['phone', 'phone / voip', 'phone/voip', 'voip', 'telephony', 'telephone', 'pbx', 'telefonía', 'telefonia', 'telefone', 'телефония', '電話'],
+    it: ['it', 'it support', 'msp', 'managed service provider', 'support', 'soporte', 'soporte ti', 'suporte', 'suporte de ti', 'ит-поддержка', 'itサポート'],
+    security: ['security', 'cctv', 'cctv / alarm', 'cctv/alarm', 'alarm', 'alarms', 'surveillance', 'cámaras', 'alarma', 'câmeras', 'alarme', 'видеонаблюдение', '防犯'],
+    power: ['power', 'power / ups', 'power/ups', 'ups', 'electricity', 'electrical', 'energía', 'energia', 'электропитание', '電源'],
+    vendor: ['vendor', 'hardware vendor', 'hardware', 'supplier', 'reseller', 'manufacturer', 'warranty', 'proveedor', 'fornecedor', 'поставщик', 'ベンダー'],
+    cloud: ['cloud', 'cloud / hosting', 'cloud/hosting', 'hosting', 'saas', 'datacenter', 'data centre', 'nube', 'nuvem', 'облако', 'クラウド'],
+    other: ['other', 'otro', 'outro', 'другое', 'その他']
+};
+const PROVIDER_NAME_MAX = 120;
+const PROVIDER_TEXT_MAX = 200;     // a phone, an email, an account, the hours
+const PROVIDER_NOTES_MAX = 2000;
+const PROVIDER_MAX = 100;
+function providerServiceKey(v) {
+    const s = typeof v === 'string' ? v.trim().toLowerCase().replace(/\s+/g, ' ') : '';
+    if (!s) return '';
+    if (PROVIDER_SERVICES.includes(s)) return s;
+    const hit = PROVIDER_SERVICES.find((k) => PROVIDER_SERVICE_ALIASES[k].includes(s)
+        || (typeof t === 'function' && t(PROVIDER_SERVICE_LABEL[k]).toLowerCase() === s));
+    return hit || '';
+}
+const asProviderService = (v) => providerServiceKey(v) || undefined;
+const providerServiceLabel = (k) => (PROVIDER_SERVICE_LABEL[k] ? t(PROVIDER_SERVICE_LABEL[k]) : '');
+// One line, trimmed and bounded; left out when blank.
+const providerLine = (max) => (v) => { const x = portText(v).trim().slice(0, max); return x || undefined; };
+const providerNotes = (v) => { const x = asText(v).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/g, ' ').trim().slice(0, PROVIDER_NOTES_MAX); return x || undefined; };
+const providerEmailOk = (v) => isBlank(v) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v).trim());
+
+// The order is the key order of the JSON (see the schema's header).
+const PROVIDER_FIELDS = [
+    // Devices, cables and groups name a provider by id, so a missing one is minted.
+    { key: 'id', kind: 'raw', read: (v) => asGroupRef(v) || nextId('pv'), label: 'ID', csv: 'provider_id' },
+    { key: 'name', kind: 'raw', read: providerLine(PROVIDER_NAME_MAX), write: providerLine(PROVIDER_NAME_MAX), label: 'Name', csv: 'name' },
+    { key: 'service', kind: 'raw', read: asProviderService, write: asProviderService, label: 'Service', csv: 'service',
+      validate: (v) => isBlank(v) || !!providerServiceKey(v) },
+    { key: 'contact', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Contact person', csv: 'contact' },
+    { key: 'phone', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Phone', csv: 'phone' },
+    { key: 'email', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Email', csv: 'email',
+      validate: providerEmailOk },
+    { key: 'account', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Account / contract', csv: 'account' },
+    { key: 'hours', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Support hours / SLA', csv: 'support_hours' },
+    { key: 'notes', kind: 'raw', read: providerNotes, write: providerNotes, label: 'Notes', csv: 'notes' }
+];
+// Load: coerced through the table, one record per id (a repeated id is
+// reminted), at most PROVIDER_MAX. Mutates nothing it is given.
+function normalizeProviders(list) {
+    return keepIdsUnique((Array.isArray(list) ? list : [])
+        .filter((p) => p && typeof p === 'object' && !Array.isArray(p))
+        .slice(0, PROVIDER_MAX)
+        .map((p) => readFields(PROVIDER_FIELDS, p)), 'pv');
+}
+// Save: no key at all when there are none, so a document that never named a
+// provider serializes as it did before they existed.
+const serializeProviders = (list) => (list && list.length ? list.map((p) => writeFields(PROVIDER_FIELDS, p)) : undefined);
+const makeProvider = (fields) => readFields(PROVIDER_FIELDS, Object.assign({ id: nextId('pv') }, fields));
+// Every reference names a provider the document holds; one that does not is
+// dropped. In place; on every load, and after a provider is deleted.
+function normalizeProviderRefs(nodes = state.nodes, links = state.links, groups = state.groups, providers = state.providers) {
+    const ids = new Set((providers || []).map((p) => p.id));
+    [nodes, links, groups].forEach((list) => (list || []).forEach((x) => {
+        if (x && x.provider !== undefined && !ids.has(x.provider)) delete x.provider;
+    }));
+}
+const providerById = (id, providers = state.providers) => (id ? (providers || []).find((p) => p.id === id) || null : null);
+// What a provider is called where it is listed: its name, else its service,
+// else a plain word.
+const providerLabel = (p) => (p ? (p.name || providerServiceLabel(p.service) || t('Provider')) : '');
+// A reference as a sheet writes it: the name, or the id when two share it.
+function providerRefText(id, providers = state.providers) {
+    const p = providerById(id, providers);
+    if (!p) return '';
+    const name = providerLabel(p);
+    return (providers || []).filter((x) => providerLabel(x).toLowerCase() === name.toLowerCase()).length > 1 ? p.id : name;
+}
+// A sheet's or a typed reference back to an id: an id, else a name (case
+// does not matter), else null.
+function findProviderRef(text, providers = state.providers) {
+    const s = String(text == null ? '' : text).trim();
+    if (!s) return null;
+    const byId = (providers || []).find((p) => p.id === s);
+    if (byId) return byId;
+    const low = s.toLowerCase();
+    return (providers || []).find((p) => providerLabel(p).toLowerCase() === low) || null;
+}
+
+// Who answers for a device: { provider, via, from } or null. via is 'own',
+// 'host' (a VM's or container's host names one) or 'group' (the innermost
+// group round it that names one; from is that group).
+function nodeProvider(node, ctx = {}) {
+    const providers = ctx.providers || state.providers, groups = ctx.groups || state.groups, nodes = ctx.nodes || state.nodes;
+    if (!node) return null;
+    const own = providerById(node.provider, providers);
+    if (own) return { provider: own, via: 'own', from: node };
+    // The host through the lookup index when it is the live document's (a
+    // scan per VM would make the table's every render quadratic).
+    const host = node.host && isVirtualType(node.type)
+        ? (ctx.nodes ? nodes.find((n) => n.id === node.host) : getNode(node.host)) || null : null;
+    const hp = host && providerById(host.provider, providers);
+    if (hp) return { provider: hp, via: 'host', from: host };
+    const g = groupById((host || node).group, groups);
+    const chain = g ? groupChain(g, groups) : [];
+    for (let i = chain.length - 1; i >= 0; i--) {
+        const gp = providerById(chain[i].provider, providers);
+        if (gp) return { provider: gp, via: 'group', from: chain[i] };
+    }
+    return null;
+}
+const linkProvider = (link, providers = state.providers) => (link ? providerById(link.provider, providers) : null);
+// What a provider answers for: the devices (named or through a host or a
+// group), the cables and the groups that name it, in the document's order.
+function providerCovers(id, ctx = {}) {
+    const nodes = ctx.nodes || state.nodes, links = ctx.links || state.links, groups = ctx.groups || state.groups;
+    return {
+        nodes: nodes.filter((n) => { const r = nodeProvider(n, ctx); return r && r.provider.id === id; }),
+        own: nodes.filter((n) => n.provider === id),
+        links: links.filter((l) => l.provider === id),
+        groups: groups.filter((g) => g.provider === id)
+    };
+}
+
+// ============================================================================
 // Document versions and migrations
 // ============================================================================
 // The document carries its own schema version, `v`. Before it did, every load,
@@ -4069,7 +4224,7 @@ function serializeTableView(v) {
     return n.devices ? n : undefined;
 }
 
-const DOC_VERSION = 14;
+const DOC_VERSION = 15;
 
 // A document's outline: an object whose lists, where present, are lists. The
 // loader tolerates a missing list (a bare { nodes } file is a document), but a
@@ -4211,7 +4366,9 @@ const MIGRATIONS = [
     // Custom columns and the table's view are new keys, not a new shape.
     { from: 12, to: 13, run: (doc) => ({ ...doc, v: 13 }) },
     // A device's service dates and interval are new keys, not a new shape.
-    { from: 13, to: 14, run: (doc) => ({ ...doc, v: 14 }) }
+    { from: 13, to: 14, run: (doc) => ({ ...doc, v: 14 }) },
+    // Providers and the references to them are new keys, not a new shape.
+    { from: 14, to: 15, run: (doc) => ({ ...doc, v: 15 }) }
 ];
 
 // The v2 interface zone flags of `src`, put back on the same node as written.

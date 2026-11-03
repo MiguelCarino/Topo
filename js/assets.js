@@ -158,6 +158,7 @@ function renderAssetFields(node) {
     renderNotesLint(node);
     renderGroupPicker(node);   // the group it sits in, and its place in a rack (js/groups.js)
     renderHostPicker(node);    // what a VM runs on, and what runs on a host (js/hosts.js)
+    renderNodeProviderPicker(node);   // who is responsible for it (js/providers.js)
 }
 // text: what the field holds now, which is ahead of node.notes while the
 // keystroke's other listener (js/app.js) has yet to run.

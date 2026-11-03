@@ -135,12 +135,13 @@
             </div>
 
             <!-- One menu for every get-data-in/out action, so the bar stays lean.
-                 Called File (plan R3): it opens, keeps and starts networks as
-                 well as exporting them, and its Open a file… is the landing's.
+                 Called Export since Settings came beside it (it was File, plan
+                 R3): it still opens, keeps and starts networks as well as
+                 exporting them, and its Open a file… is the landing's.
                  Items keep their original ids, so their handlers wire up unchanged.
                  carino-ui.js opens and closes it (the hidden attribute). -->
             <div class="cs-menu" data-priority="1">
-                <button id="exportMenuBtn" class="cs-btn" aria-haspopup="true" aria-expanded="false" data-i18n-title title="Share, export & import builds">📁 File <span class="cs-caret">▾</span></button>
+                <button id="exportMenuBtn" class="cs-btn" aria-haspopup="true" aria-expanded="false" data-i18n-title title="Share, export & import builds">📁 Export <span class="cs-caret">▾</span></button>
                 <div id="exportMenu" class="cs-menu-panel" role="menu" aria-labelledby="exportMenuBtn" hidden>
                     <!-- Was the toolbar's Clear, which emptied the canvas but kept the
                          saved card, the notes, the report header and the undo history.
@@ -170,6 +171,10 @@
                 </div>
                 <input type="file" id="importFileInput" accept=".json,.nettopo,application/json" hidden>
             </div>
+
+            <!-- This browser's preferences: what the map shows, the report's
+                 defaults, and About (js/settings.js). -->
+            <button id="settingsBtn" type="button" class="cs-btn" data-i18n-title title="Settings: what the map shows, the report's defaults, and about Topo">⚙ Settings</button>
 
             <div class="cs-vdiv"></div>
             <button id="helpBtn" class="cs-btn" data-i18n-title data-i18n-aria-label title="How to use — mouse & keyboard (press ?)" aria-label="Help">?</button>
@@ -206,6 +211,8 @@
 
                 <div id="tabPanel-templates" class="lib-panel hidden">
                     <p data-i18n class="rail-note">A whole network. Replaces the canvas.</p>
+                    <!-- Each card opens either version of its sample: Simple, easy
+                         to read, or Full, every feature (renderLibrary, js/app.js). -->
                     <div id="templateList" class="lib-list"></div>
                     <!-- Everything that is not a real starting point (TEMPLATE_META's
                          `example` rows, js/data.js): collapsed, so the list a person
@@ -214,6 +221,8 @@
                         <summary id="exampleTemplatesSummary" class="rail-sub">Examples</summary>
                         <div id="exampleTemplateList" class="lib-list"></div>
                     </details>
+                    <!-- The Full Showcase, after everything: one version only. -->
+                    <div id="lastTemplateList" class="lib-list tpl-last"></div>
                     <div id="userTemplateSection" class="hidden rail-subsec">
                         <!-- Templates are library cards flagged as such (js/library.js);
                              this used to be a second store, also titled "My networks". -->
@@ -254,6 +263,10 @@
                          only while the network has an AP, a wireless link or
                          a Wi-Fi network. Technical vocabulary: English. -->
                     <button id="wifiTabBtn" data-adv class="cfg-tab hidden" data-cfgtab="wifi" role="tab" aria-selected="false">Wi-Fi</button>
+                    <!-- Who is responsible for what (doc.providers,
+                         js/providers.js): the ISP, IT support, the alarm
+                         company. A plain word, so translated. -->
+                    <button id="providerTabBtn" data-adv class="cfg-tab" data-cfgtab="providers" role="tab" aria-selected="false" data-i18n>Providers</button>
                     <!-- The findings of the whole map (js/diagnostics.js, "The
                          Findings tab"), docked here instead of floating over
                          the canvas. A plain word, so translated; the count is
@@ -425,6 +438,13 @@
                         </select>
                     </div>
 
+                    <!-- Who is responsible for the run (link.provider,
+                         js/providers.js): the carrier of a circuit. -->
+                    <div id="linkProviderProps" data-adv class="hidden prop-sec">
+                        <label class="prop-lbl" for="propLinkProvider" data-i18n>Provider</label>
+                        <select id="propLinkProvider" class="select"></select>
+                    </div>
+
                     <!-- A wireless link's association (link.wifi, js/wifi.js): it
                          has no cable, so these stand where the cable's facts
                          would. The first entry of each select is what Topo
@@ -590,6 +610,14 @@
                                     <label class="prop-lbl" for="propGroup" data-i18n>Group</label>
                                     <select id="propGroup" class="select"></select>
                                     <p id="groupPathNote" class="rail-note grp-path hidden"></p>
+                                </div>
+                                <!-- Who is responsible for it (node.provider,
+                                     js/providers.js); unset, the note says
+                                     whose it is through its group or host. -->
+                                <div class="span2">
+                                    <label class="prop-lbl" for="propProvider" data-i18n>Provider</label>
+                                    <select id="propProvider" class="select"></select>
+                                    <p id="providerNote" class="rail-note grp-path hidden"></p>
                                 </div>
                                 <!-- What a VM or a container runs on (node.host,
                                      js/hosts.js), and on a host what runs on it.
@@ -761,6 +789,18 @@
                         <button id="addWifiBtn" type="button" class="link-btn" data-i18n>+ Wi-Fi network</button>
                     </div>
                     <div id="wifiList" class="net-list"></div>
+                </div>
+
+                <!-- The providers (doc.providers): one card each with what it
+                     provides, how to reach it and what it is responsible for;
+                     Select what it covers, Edit, Delete. Built by
+                     js/providers.js. -->
+                <div id="cfgPanel-providers" data-adv class="cfg-panel hidden">
+                    <div class="prop-headrow net-toolbar">
+                        <p class="rail-note grp-intro" data-i18n>Who is responsible for what, and how to reach them.</p>
+                        <button id="addProviderBtn" type="button" class="link-btn" data-i18n>+ Provider</button>
+                    </div>
+                    <div id="providerList" class="net-list"></div>
                 </div>
 
                 <!-- Grouped by check; a line selects and centres what it is
@@ -1108,6 +1148,63 @@
                  and added as one undo step. The intake ('#setup', the landing,
                  the mode picker's Setup wizard) is the same dialog building a
                  new network around a router. Opened through CarinoUI.modal. -->
+            <!-- Settings (js/settings.js): this browser's, never the document's.
+                 Each change applies and is kept at once. -->
+            <div id="settingsDialog" class="modal-scrim" hidden>
+                <div class="modal topo-settings" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+                    <div class="modal-head">
+                        <h2 id="settingsTitle" class="modal-title" data-i18n>Settings</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body set-body">
+                        <section class="set-sec" aria-labelledby="setMapHead">
+                            <h3 id="setMapHead" class="set-head" data-i18n>Map</h3>
+                            <label class="set-row">
+                                <input type="checkbox" id="setProviderHover">
+                                <span><span data-i18n>Show the provider on hover</span><br><span class="dlg-dim" data-i18n>Hovering over a device or a cable names who is responsible for it and how to reach them. Off by default.</span></span>
+                            </label>
+                            <label class="set-row">
+                                <input type="checkbox" id="setSubnetZones">
+                                <span><span data-i18n>Draw subnet zones</span><br><span class="dlg-dim" data-i18n>The shaded area round each subnet's devices.</span></span>
+                            </label>
+                            <div class="set-field">
+                                <label class="prop-lbl" for="setMapInk" data-i18n>Background</label>
+                                <select id="setMapInk" class="select">
+                                    <option value="" data-i18n>Light</option>
+                                    <option value="dark" data-i18n>Dark</option>
+                                    <option value="blue" data-i18n>Blueprint</option>
+                                </select>
+                            </div>
+                        </section>
+                        <section class="set-sec" aria-labelledby="setReportHead">
+                            <h3 id="setReportHead" class="set-head" data-i18n>Reports</h3>
+                            <div class="set-field">
+                                <label class="prop-lbl" for="setEngineer" data-i18n>Prepared by, unless the network says</label>
+                                <input type="text" id="setEngineer" class="input" maxlength="120" autocomplete="off" data-i18n-placeholder placeholder="Your name — your company">
+                            </div>
+                            <label class="set-row">
+                                <input type="checkbox" id="setReportSummary">
+                                <span data-i18n>Simple summary ticked to start</span>
+                            </label>
+                            <label class="set-row">
+                                <input type="checkbox" id="setReportTechnical">
+                                <span data-i18n>Technical details ticked to start</span>
+                            </label>
+                        </section>
+                        <section class="set-sec" aria-labelledby="setAboutHead">
+                            <h3 id="setAboutHead" class="set-head" data-i18n>About</h3>
+                            <p data-i18n>Topo documents a network: its devices, cables, addressing, racks and who is responsible for what, and prints it as a report.</p>
+                            <p class="dlg-dim"><span data-i18n>Runs in your browser. Nothing you add here is uploaded.</span> <span data-i18n>The status panel, when opened, checks this connection: it asks public services for this device's IP address and provider, times a download and tries a few well-known websites.</span></p>
+                            <p id="setVersion" class="dlg-dim mono"></p>
+                            <button type="button" id="settingsLegalBtn" class="btn" data-i18n>Licence, contact and legal notice</button>
+                        </section>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" id="settingsDoneBtn" class="btn btn-primary" data-i18n>Done</button>
+                    </div>
+                </div>
+            </div>
+
             <div id="addDevices" class="modal-scrim" hidden>
                 <div class="modal topo-add" role="dialog" aria-modal="true" aria-labelledby="addTitle">
                     <div class="modal-head">
@@ -1557,6 +1654,7 @@
     <script src="js/groups.js"></script>
     <script src="js/hosts.js"></script>
     <script src="js/wifi.js"></script>
+    <script src="js/providers.js"></script>
     <script src="js/motion.js"></script>
     <script src="js/groupmap.js"></script>
     <script src="js/table.js"></script>
@@ -1567,6 +1665,7 @@
     <script src="js/csv.js"></script>
     <script src="js/assets.js"></script>
     <script src="js/app.js"></script>
+    <script src="js/settings.js"></script>
 <script src="carino-navbar.js" data-app="Topo" data-repo="Topo" data-license="AGPL-3.0" defer></script>
 <script src="carino-theme.js" data-mark="logo.svg" data-mark-color="logo-color.svg" defer></script>
 <script src="carino-ui.js" defer></script>

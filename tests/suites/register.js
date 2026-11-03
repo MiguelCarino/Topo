@@ -175,7 +175,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const all = topologyFindings();
     ok('the two deliberate faults are found', all.some((f) => f.key === 'ip-conflict') && all.some((f) => /10\.41\.0\.1/.test(f.line)),
        all.map((f) => f.key).join(','));
-    ok('the report lists exactly the panel’s findings', sig(reportModel().findings) === baseFindings);
+    // The info notes (a cloud with no provider) are the editor's, not the reader's.
+    ok('the report lists exactly the panel’s findings, less its info notes', sig(reportModel().findings) === sig(topologyFindings().filter((f) => f.level !== 'info')));
     const summary = CarinoLibrary.librarySummary(CarinoLibrary.loadLibrary()[id].doc);
     ok('the card counts what the panel counts', summary.devices === 63
        && summary.critical === all.filter((f) => f.level === 'bad').length && summary.advisory === all.filter((f) => f.level === 'warn').length,

@@ -47,7 +47,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
   try {
     // ---- 1: the model ----
-    ok('the document is version 14', DOC_VERSION === 14);
+    ok('the document is version 14 or later', DOC_VERSION >= 14);
     const read = (text) => field('inService').fromText(text);
     ok('a year, a month or a day is a date', read('2019') === '2019' && read('2019-3') === '2019-03' && read('03/2019') === '2019-03'
        && read('2019-03-15') === '2019-03-15' && read('03/15/2019') === '2019-03-15', show([read('2019'), read('2019-3'), read('03/2019'), read('03/15/2019')]));
@@ -93,9 +93,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a hand-edited file\'s values that are not ours are dropped', !['inService', 'serviced', 'serviceEvery'].some((k) => k in saved().nodes[0]), show(saved().nodes[0]));
     const v13 = lab(); v13.v = 13;
     const m = migrateDoc(v13);
-    ok('a v13 document opens as v14, its devices as they were', m.doc.v === 14 && !m.newer && m.from === 13);
+    ok('a v13 document opens as the current version, its devices as they were', m.doc.v === DOC_VERSION && !m.newer && m.from === 13);
     open(v13);
-    ok('and its fields stay', getNode('sw').serviceEvery === 12 && !state.readOnly && saved().v === 14);
+    ok('and its fields stay', getNode('sw').serviceEvery === 12 && !state.readOnly && saved().v === DOC_VERSION);
 
     // ---- 4: the side panel ----
     open();

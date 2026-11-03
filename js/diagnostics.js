@@ -1075,17 +1075,18 @@ const runNodeCheck = (c, node, ctx) => (isRetired(node)
 // The Wi-Fi networks likewise: a scratch copy's links name the document's.
 function diagnoseDoc(doc) {
     if (!doc) return withLookupPass(runDiagnosis);
-    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted };
+    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted };
     try {
         state.nodes = Array.isArray(doc.nodes) ? doc.nodes : [];
         state.links = Array.isArray(doc.links) ? doc.links : [];
         state.networks = Array.isArray(doc.networks) ? doc.networks : [];
         if (Array.isArray(doc.groups)) state.groups = doc.groups;
         if (Array.isArray(doc.wifi)) state.wifi = doc.wifi;
+        if (Array.isArray(doc.providers)) state.providers = doc.providers;
         if (Array.isArray(doc.accepted)) state.accepted = doc.accepted;
         return withLookupPass(runDiagnosis);
     } finally {
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.accepted = held.accepted;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.accepted = held.accepted;
     }
 }
 
@@ -1130,6 +1131,7 @@ function runDiagnosis() {
     placeFindings().forEach(add);
     hostFindings().forEach(add);
     wifiFindings().forEach(add);
+    providerFindings().forEach(add);
 
     // Each finding says whether it was accepted, and why: { reason, index }
     // (the entry's place in state.accepted, which the Findings tab's Reopen
@@ -1292,7 +1294,7 @@ function dropFindingNotes(kind, drop, refresh) {
 const FINDING_CHECK_NAMES = { 'ip-conflict': 'IP Conflict', 'mac-conflict': 'MAC Conflict', cabling: 'Cabling', loop: 'L2 loop',
     'cable-label': 'Cable label', 'asset-tag': 'Asset tag', group: 'Groups', rack: 'Rack', 'rack-tag': 'Cable tags', host: 'Runs on', age: 'Age', service: 'Service', 'service-due': 'Service due',
     'wifi-band': 'Wi-Fi band', 'wifi-ssid': 'SSID', 'wifi-subnet': 'Wi-Fi subnet', 'wifi-overlap': 'Channel overlap', 'wifi-plan': 'Channel plan',
-    'wifi-security': 'Wi-Fi security', 'wifi-signal': 'Signal' };
+    'wifi-security': 'Wi-Fi security', 'wifi-signal': 'Signal', provider: 'Provider' };
 const findingCheckName = (key) => t(FINDING_CHECK_NAMES[key] || (NODE_CHECKS_BY_KEY[key] && NODE_CHECKS_BY_KEY[key].label) || key);
 
 // One undo step: the findings of one line of the tab (the same finding on
@@ -1750,6 +1752,29 @@ function placeFindings() {
         const detail = bare.length === 1 ? t('One cable in {rack} has no tag.', { rack: groupLabel(rack) })
             : t('{n} cables in {rack} have no tag.', { n: bare.length, rack: groupLabel(rack) });
         out.push({ key: 'rack-tag', level: 'info', check: t('Cable tags'), subject: groupLabel(rack), detail, linkIds: bare.map((l) => l.id) });
+    });
+    return out;
+}
+
+// ---- Providers (js/model.js "Providers") ----
+// The way out to the internet with nobody named for it: when the line is
+// down, whoever reads the documentation does not know whom to call. A cloud
+// that stands for another site of the binder (siteRef) is not the internet,
+// and a retired one is off the network. Satisfied by a provider on the cloud
+// (its own or its group's) or on any cable into it. Info, like an untagged
+// rack cable: the register is thin, nothing on the network is wrong, so it is
+// listed but never counted (isCountedFinding).
+function providerFindings() {
+    const out = [];
+    state.nodes.forEach((node) => {
+        if (node.type !== 'cloud' || node.siteRef || isRetired(node)) return;
+        if (nodeProvider(node)) return;
+        const links = linksAtNode(node.id);
+        if (links.some((l) => linkProvider(l))) return;
+        const name = node.name || node.id;
+        out.push({ key: 'provider', level: 'info', check: t('Provider'), subject: name,
+            detail: t('Nobody is named for {name}: when the line is down, whoever reads this will not know whom to call. Set its provider.', { name }),
+            nodeIds: [node.id], linkIds: links.map((l) => l.id) });
     });
     return out;
 }

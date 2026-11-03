@@ -151,6 +151,12 @@ function groupCardHtml({ group: g, depth }, counts, tree = groupTree()) {
                     ${parents.map((p) => option(p.id, p.label, (g.parent || '') === p.id)).join('')}
                 </select>
             </div>
+            <div class="span2">
+                <label class="prop-lbl" for="grp-${id}-provider">${escapeHtml(t('Provider'))}</label>
+                <select id="grp-${id}-provider" class="select" data-field="provider" data-grp="${id}">
+                    ${providerOptionsHtml(g.provider)}
+                </select>
+            </div>
             ${rack ? rackSizeFieldsHtml(g, 'grp') : ''}
         </div>
     </article>`;
@@ -179,6 +185,7 @@ function onGroupField(e) {
     }
     if (e.type !== 'change') return;
     if (key === 'kind') { changeGroupKind(g, el.value); return; }
+    if (key === 'provider') { pickProvider(g, el.value).then(() => refreshGroupViews(true)); return; }
     if (key === 'parent') {
         const parent = el.value || null;
         if (!groupParentOk(g.id, parent)) { renderGroupsPanel(true); return; }

@@ -679,14 +679,14 @@ function binderLinkFile() {
 // the live document's index.
 function canonicalDoc(doc) {
     return withoutLookupPass(() => {
-        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report };
+        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report };
         _borrowedState++;
         try {
             loadDocState(doc);
             return serializeDoc();
         } finally {
             _borrowedState--;
-            state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
+            state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
             state.columns = held.columns; state.tableView = held.tableView;
             state.annotations = held.annotations; state.report = held.report;
         }
@@ -986,7 +986,7 @@ function binderStatus() { const s = backupStatus(); return s ? s.text : null; }
 // borrowed arrays. The state goes back first, then the pass.
 function withDoc(doc, fn) {
     return withoutLookupPass(() => {
-        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report };
+        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report };
         _borrowedState++;
         try {
             // The same reader replaceDocument() uses, so a stored v1 card is
@@ -1001,7 +1001,7 @@ function withDoc(doc, fn) {
             return fn();
         } finally {
             _borrowedState--;
-            state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
+            state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
             state.columns = held.columns; state.tableView = held.tableView;
             state.annotations = held.annotations; state.report = held.report;
         }

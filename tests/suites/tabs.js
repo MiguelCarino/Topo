@@ -16,18 +16,21 @@ window.addEventListener('load', () => { setTimeout(() => {
   showLibraryTab('templates');
   ok('networks tab shows only itself', vis('tabPanel-templates') && !vis('tabPanel-nodes'));
   // Starting points in the list, everything else in the collapsed Examples group.
-  const tplRows = document.querySelectorAll('#templateList .lib-item, #exampleTemplateList .lib-item');
+  // The Full Showcase (`last`) after them all, a list of its own.
+  const tplRows = document.querySelectorAll('#templateList .lib-item, #exampleTemplateList .lib-item, #lastTemplateList .lib-item');
   ok('every template is listed', tplRows.length === TEMPLATE_META.length, `${tplRows.length} rows / ${TEMPLATE_META.length} meta`);
   ok('the starting points are a short list',
-     document.querySelectorAll('#templateList .lib-item').length === TEMPLATE_META.filter(m => !m.example).length
-     && TEMPLATE_META.filter(m => !m.example).length <= 7);
+     document.querySelectorAll('#templateList .lib-item').length === TEMPLATE_META.filter(m => !m.example && !m.last).length
+     && TEMPLATE_META.filter(m => !m.example && !m.last).length <= 7);
   ok('the rest are in the Examples group, collapsed',
      document.querySelectorAll('#exampleTemplateList .lib-item').length === TEMPLATE_META.filter(m => m.example).length
      && !document.getElementById('exampleTemplates').open);
   ok('no template metadata is orphaned', TEMPLATE_META.every(m => templatesData[m.key]),
      TEMPLATE_META.filter(m => !templatesData[m.key]).map(m => m.key).join(',') || 'all match');
-  ok('no template is missing from the menu', Object.keys(templatesData).every(k => TEMPLATE_META.some(m => m.key === k)),
-     Object.keys(templatesData).filter(k => !TEMPLATE_META.some(m => m.key === k)).join(',') || 'all listed');
+  // A simple version (SIMPLE_SUFFIX) is listed through its full one.
+  const listedKey = (k) => TEMPLATE_META.some(m => m.key === k || m.key + SIMPLE_SUFFIX === k);
+  ok('no template is missing from the menu', Object.keys(templatesData).every(listedKey),
+     Object.keys(templatesData).filter(k => !listedKey(k)).join(',') || 'all listed');
 
   showLibraryTab('blocks');
   ok('blocks tab lists every block', document.querySelectorAll('#blockList .lib-item').length === SNIPPET_META.length);

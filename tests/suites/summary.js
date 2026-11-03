@@ -259,7 +259,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     } finally { window.deliverReport = realDeliver; closeReportDialog(); }
 
     // ---- 6: words ----
-    const reachable = Object.keys(FINDING_CHECK_NAMES).concat(NODE_CHECKS.map((c) => c.key)).filter((k) => !['rack-tag', 'wifi-plan', 'service-due'].includes(k));
+    const reachable = Object.keys(FINDING_CHECK_NAMES).concat(NODE_CHECKS.map((c) => c.key)).filter((k) => !['rack-tag', 'wifi-plan', 'service-due', 'provider'].includes(k));
     const missing = reachable.filter((k) => !PLAIN_FINDINGS[k]);
     ok('every check the report prints has its plain words (the info notes are not printed)', missing.length === 0, missing.join(','));
     const { MESSAGES } = window.CarinoI18N;

@@ -116,7 +116,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       // (broken on purpose) opens with nothing wrong. Bank, Hospital, Campus
       // and the Factory shipped their core router's gateway on a subnet it
       // did not have, a critical finding on a page that was meant to be fine.
-      const faulty = Object.keys(templatesData).filter((k) => k !== 'errors').map((k) => {
+      const faulty = Object.keys(templatesData).filter((k) => k !== 'errors' && k !== 'errors' + SIMPLE_SUFFIX).map((k) => {
         replaceDocument(templatesData[k], { origin: 'template' });
         const f = topologyFindings().filter((x) => x.level === 'bad' || x.level === 'warn');
         return f.length ? `${k}: ${f.map((x) => `${x.check} ${x.subject}`).join('; ')}` : '';

@@ -59,7 +59,7 @@ const state = {
     // query: what the search box over the map and the table holds (plan 3.3,
     // js/query.js). A view, like the trace: never serialized, never an undo
     // step, not kept between visits, and kept when another network is opened.
-    nodes: [], links: [], networks: [], groups: [], wifi: [], accepted: [], pinned: [], expectedLife: {}, columns: [], tableView: {}, annotations: [], report: null, libraryId: null, docId: null, docUpdated: 0, readOnly: null, linkSourceId: null,
+    nodes: [], links: [], networks: [], groups: [], wifi: [], providers: [], accepted: [], pinned: [], expectedLife: {}, columns: [], tableView: {}, annotations: [], report: null, libraryId: null, docId: null, docUpdated: 0, readOnly: null, linkSourceId: null,
     query: '',
     selection: new Set(),
     get selectedId() { const one = soleSelected(this.selection); return one ? one.id : null; },

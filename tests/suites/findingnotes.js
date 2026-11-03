@@ -64,7 +64,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('and serializeDoc writes the same document', docText.endsWith(',"links":[{"id":"l1","source":"a","target":"b"}],'
        + '"accepted":[{"check":"ip-conflict","scope":"10.0.0.5","nodeIds":["a","b"],"linkIds":["l1"],"reason":"Known","until":"2030-01-02"},{"check":"age","nodeIds":["c"],"reason":"Old"}],'
        + '"pinned":[{"check":"ip-conflict","scope":"10.0.0.5","nodeIds":["b","a"],"linkIds":["l1"],"note":"Look"},{"check":"age","nodeIds":["c"]}]}')
-       && docText.startsWith('{"v":14,"nodes":[{"id":"a","type":"pc","name":"A","x":0,"y":0,"gw":"","dns":"","os":"","ports":"","notes":"","nat":false,"interfaces":[]}'), docText);
+       && docText.startsWith('{"v":' + DOC_VERSION + ',"nodes":[{"id":"a","type":"pc","name":"A","x":0,"y":0,"gw":"","dns":"","os":"","ports":"","notes":"","nat":false,"interfaces":[]}'), docText);
 
     // ---- 2: reading and writing ----
     const longScope = 'x'.repeat(70);
