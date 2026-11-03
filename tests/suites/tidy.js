@@ -8,7 +8,11 @@
 //   3. devices with no cable go last;
 //   4. with two or more devices selected, only those are arranged, starting
 //      where the selection started, and nothing else moves;
-//   5. either way it is one undo step (Untidy is gone: tests/suites/batch.js).
+//   5. either way it is one undo step (Untidy is gone: tests/suites/batch.js);
+//   6. the notes go with their devices: a note on one keeps its offset, a
+//      note on two takes the mean of their steps, one on nothing stays;
+//   7. a rack is one column in unit order, its VMs and containers on their
+//      host's row; without groups, a VM cabled to a switch goes under its host.
 window.addEventListener('load', () => { setTimeout(() => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
@@ -121,6 +125,65 @@ window.addEventListener('load', () => { setTimeout(() => {
     tidyLayout();
     ok('one device selected tidies the whole map', JSON.stringify(state.nodes.map((n) => [n.id, n.x, n.y])) === tidied);
     ok('tidyPositions is pure', (() => { const before = JSON.stringify(state.nodes); tidyPositions(state.nodes, state.links); return JSON.stringify(state.nodes) === before; })());
+
+    // ---- 6. Notes go with their devices ----
+    replaceDocument(Object.assign(site(), { annotations: [
+      { id: 'n1', x: 100, y: 3100, text: 'a1', style: 'note', size: 12, targets: ['a1'] },
+      { id: 'n2', x: 200, y: 200, text: 'both', style: 'note', size: 12, targets: ['a1', 'b1'] },
+      { id: 'n3', x: 700, y: 700, text: 'page', style: 'note', size: 12, targets: [] }
+    ] }));
+    select(null, null);
+    const a1 = { ...getNode('a1') }, b1 = { ...getNode('b1') }, n1 = { ...getAnnotation('n1') }, n2 = { ...getAnnotation('n2') };
+    tidyLayout();
+    const off = (n, a) => `${a.x - n.x},${a.y - n.y}`;
+    ok('a note on one device keeps its place beside it', off(getNode('a1'), getAnnotation('n1')) === off(a1, n1), `${off(a1, n1)} -> ${off(getNode('a1'), getAnnotation('n1'))}`);
+    const half = (k) => Math.round(n2[k] + ((getNode('a1')[k] - a1[k]) + (getNode('b1')[k] - b1[k])) / 2);
+    ok('a note on two devices takes the mean of their steps', getAnnotation('n2').x === half('x') && getAnnotation('n2').y === half('y'), `${getAnnotation('n2').x},${getAnnotation('n2').y}`);
+    ok('a note on nothing stays', getAnnotation('n3').x === 700 && getAnnotation('n3').y === 700);
+    undo();
+    ok('one undo step puts the notes back too', getAnnotation('n1').x === n1.x && getAnnotation('n1').y === n1.y && getAnnotation('n2').x === n2.x);
+    // With a selection, a note on a device left alone stays.
+    selectEntries(['b1', 'b2', 'b3'].map((id) => ({ type: 'node', id })));
+    tidyLayout();
+    ok('with a selection, a note on a device not tidied does not move', getAnnotation('n1').x === n1.x && getAnnotation('n1').y === n1.y);
+    select(null, null);
+
+    // ---- 7. Racks in unit order, guests beside their host ----
+    const D = (id, type, extra) => Object.assign({ id, type, name: id.toUpperCase(), x: 0, y: 0, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] }, extra);
+    replaceDocument({ v: DOC_VERSION,
+      groups: [{ id: 'rm', name: 'Room', kind: 'room' }, { id: 'rk', name: 'Rack', kind: 'rack', parent: 'rm', rackHeight: 42 }],
+      nodes: [
+        D('sw', 'switch', { group: 'rk', rackU: 40, portCount: 24, interfaces: [], x: 400, y: 900 }),
+        D('srv', 'server', { group: 'rk', rackU: 30, x: 100, y: 100 }),
+        D('nas', 'server', { group: 'rk', rackU: 36, x: 700, y: 400 }),
+        D('pdu', 'server', { group: 'rk', rackU: 2, rackFace: 'back', x: 50, y: 50 }),
+        D('new', 'server', { group: 'rk', x: 60, y: 60 }),
+        D('vm2', 'vm', { group: 'rk', host: 'srv', x: 900, y: 900 }),
+        D('vm1', 'vm', { group: 'rk', host: 'srv', x: 950, y: 50 }),
+        D('ct', 'container', { group: 'rk', host: 'vm2', x: 990, y: 990 }),
+        D('pc', 'pc', { group: 'rm', x: 0, y: 0 })
+      ],
+      links: [
+        { id: 'r1', source: 'sw', target: 'srv' }, { id: 'r2', source: 'sw', target: 'nas' }, { id: 'r3', source: 'sw', target: 'pdu' },
+        { id: 'r4', source: 'sw', target: 'vm1' }, { id: 'r5', source: 'sw', target: 'vm2' }, { id: 'r6', source: 'sw', target: 'pc' }
+      ] });
+    select(null, null); tidyLayout();
+    const col = ['sw', 'nas', 'srv', 'pdu', 'new'].map((id) => getNode(id));
+    ok('a rack is one column, the top unit at the top, then what has no units', col.every((n) => n.x === col[0].x)
+       && col.every((n, i) => !i || n.y > col[i - 1].y), col.map((n) => `${n.id}:${n.x},${n.y}`).join(' '));
+    const row = ['srv', 'vm1', 'vm2', 'ct'].map((id) => getNode(id));
+    ok('its VMs sit on their host\'s row, to its right: each VM, then what runs on it', row.every((n) => n.y === row[0].y)
+       && row.every((n, i) => !i || n.x > row[i - 1].x), row.map((n) => `${n.id}:${n.x},${n.y}`).join(' '));
+    ok('right beside it', getNode('vm1').x - getNode('srv').x <= 160, `${getNode('vm1').x - getNode('srv').x}`);
+    // Without groups, a VM cabled to a switch still goes under its host.
+    replaceDocument({ v: DOC_VERSION, nodes: [
+      D('sw', 'switch', { portCount: 24, interfaces: [] }), D('h', 'server', {}), D('p1', 'pc', {}), D('p2', 'pc', {}), D('p3', 'pc', {}),
+      D('v', 'vm', { host: 'h', x: 2000, y: 2000 })
+    ], links: ['h', 'p1', 'p2', 'p3', 'v'].map((id, i) => ({ id: `w${i}`, source: 'sw', target: id, sourceIface: `p${i + 1}`, targetIface: 'i1' })) });
+    select(null, null); tidyLayout();
+    const h = getNode('h'), v = getNode('v');
+    ok('a VM cabled to a switch goes under its host, not with the switch\'s desks', v.y > h.y && Math.abs(v.x - h.x) <= 160, `host ${h.x},${h.y} vm ${v.x},${v.y}`);
+    ok('the host stays on the switch\'s tier, over its VM', h.y > getNode('sw').y);
   } catch (e) {
     ok('the suite ran to the end', false, String(e && e.stack || e).slice(0, 300));
   }

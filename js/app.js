@@ -272,9 +272,30 @@ function tidyLayoutNow() {
         dy = minOf(nodes, 'y') - minOf(placed, 'y');
     }
     const snap = (v) => Math.round(v / GRID_SNAP) * GRID_SNAP;
+    const was = new Map(nodes.map((n) => [n.id, { x: n.x, y: n.y }]));
     nodes.forEach((n) => { const p = pos.get(n.id); if (p) { n.x = snap(p.x + dx); n.y = snap(p.y + dy); } });
+    tidyNotesAlong(was);
     save(); renderCanvasOnly();
     if (!only) fitToView();
+}
+
+// The notes go with the devices they are about. A note's red lines point at
+// devices; it takes the mean of the steps they took (`was`: id -> where each
+// tidied device stood before), a device left where it was counting as no
+// step, so a note between a moved device and one that stayed goes half way.
+// Left behind, the notes stayed where the devices used to be and their lines
+// ran across the map. A note pointing at nothing, or only at other notes,
+// stays: it is about the page, not a device.
+function tidyNotesAlong(was) {
+    state.annotations.forEach((a) => {
+        const on = (a.targets || []).map(getNode).filter(Boolean);
+        if (!on.length) return;
+        let sx = 0, sy = 0;
+        on.forEach((n) => { const w = was.get(n.id); if (w) { sx += n.x - w.x; sy += n.y - w.y; } });
+        if (!sx && !sy) return;
+        // Exactly the step, not snapped: a note keeps its offset from its device.
+        a.x = Math.round(a.x + sx / on.length); a.y = Math.round(a.y + sy / on.length);
+    });
 }
 
 // nodes, links -> Map(id -> { x, y }). Pure: reads positions only to keep the
@@ -284,8 +305,25 @@ function tidyPositions(nodes, links) {
     const ids = new Set(nodes.map((n) => n.id));
     const byId = new Map(nodes.map((n) => [n.id, n]));
     const adj = new Map(nodes.map((n) => [n.id, new Set()]));
-    const wired = links.filter((l) => l.source !== l.target && ids.has(l.source) && ids.has(l.target));
+    const cabled = links.filter((l) => l.source !== l.target && ids.has(l.source) && ids.has(l.target));
+    // A VM or a container is laid out under the host it runs on, as the
+    // devices on a switch are under the switch: by its cables alone a VM
+    // cabled to a switch went with the switch's desks, hundreds of pixels
+    // from its host. So for the layout its host is its one cable, and its
+    // own cables are left out, but for one that is all that holds a device
+    // to the drawing (a router VM with a switch behind it alone), which
+    // would otherwise come loose and go to the bottom.
+    const guestHost = new Map(nodes.filter((n) => n.host && n.host !== n.id && ids.has(n.host)).map((n) => [n.id, n.host]));
+    const degree = new Map();
+    cabled.forEach((l) => { degree.set(l.source, (degree.get(l.source) || 0) + 1); degree.set(l.target, (degree.get(l.target) || 0) + 1); });
+    const wired = cabled.filter((l) => {
+        const g = guestHost.has(l.source) ? l.source : guestHost.has(l.target) ? l.target : null;
+        if (!g) return true;
+        const far = g === l.source ? l.target : l.source;
+        return degree.get(far) === 1 && !guestHost.has(far);
+    });
     wired.forEach((l) => { adj.get(l.source).add(l.target); adj.get(l.target).add(l.source); });
+    guestHost.forEach((host, g) => { adj.get(g).add(host); adj.get(host).add(g); });
     const nameOrder = (a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true });
 
     // Depth from the top: the clouds, else a routing device, else the most
@@ -460,6 +498,43 @@ function tidyWithInnerGroups(picked) {
     return out;
 }
 
+// A rack's own devices as the rack holds them: one column, the top unit at
+// the top, so the map reads as the rack view does. Laid out by its cables, a
+// rack came out in any order (the U40 switch under the U36 server) or all on
+// one row. Front and back share the column by their units; what has no units
+// yet goes under the rest, by name. A VM or container runs on a device in
+// the rack sits on its host's row, to the right, as many as it has. Past
+// TIDY_WRAP rows the column goes on beside itself, clear of those guests.
+// -> Map(id -> { x, y }), from 0, 0. Pure.
+function tidyRackColumn(nodes) {
+    const COLW = 150, ROWH = 110;
+    const ids = new Set(nodes.map((n) => n.id));
+    const nameOrder = (a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true });
+    const guests = new Map();
+    const isGuest = (n) => !!(n.host && n.host !== n.id && ids.has(n.host));
+    nodes.filter(isGuest).forEach((n) => { if (!guests.has(n.host)) guests.set(n.host, []); guests.get(n.host).push(n); });
+    // Guests of guests ride on the top host's row too, each right after the
+    // guest it runs on: the host, a VM, that VM's containers, the next VM.
+    const rowOf = new Map();
+    const under = (id, seen, into) => (guests.get(id) || []).slice().sort(nameOrder).forEach((g) => {
+        if (seen.has(g.id)) return;
+        seen.add(g.id); into.push(g); under(g.id, seen, into);
+    });
+    nodes.filter((n) => !isGuest(n)).forEach((n) => { const row = []; under(n.id, new Set([n.id]), row); rowOf.set(n.id, row); });
+    const hasU = (n) => Number.isFinite(n.rackU);
+    const column = nodes.filter((n) => !isGuest(n)).sort((a, b) =>
+        (hasU(b) - hasU(a)) || (hasU(a) && hasU(b) ? b.rackU - a.rackU : 0)
+        || ((rackFaceOf(a) === 'back') - (rackFaceOf(b) === 'back')) || nameOrder(a, b));
+    const wide = 1 + Math.max(0, ...[...rowOf.values()].map((list) => list.length));
+    const pos = new Map();
+    column.forEach((n, i) => {
+        const x = Math.floor(i / TIDY_WRAP) * wide * COLW, y = (i % TIDY_WRAP) * ROWH;
+        pos.set(n.id, { x, y });
+        rowOf.get(n.id).forEach((g, k) => pos.set(g.id, { x: x + (k + 1) * COLW, y }));
+    });
+    return pos;
+}
+
 // nodes, links -> Map(id -> { x, y }), as tidyPositions. Pure.
 function tidyPositionsGrouped(nodes, links) {
     const groups = state.groups || [];
@@ -502,7 +577,8 @@ function tidyPositionsGrouped(nodes, links) {
         const items = [];
         const mine = own.get(key) || [];
         if (mine.length) {
-            const p = tidyPositions(mine, links);
+            const g = key !== null ? byId.get(key) : null;
+            const p = g && g.kind === 'rack' ? tidyRackColumn(mine) : tidyPositions(mine, links);
             let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
             p.forEach((v) => { x0 = Math.min(x0, v.x); y0 = Math.min(y0, v.y); x1 = Math.max(x1, v.x); y1 = Math.max(y1, v.y); });
             // A device's share of a frame: as far round it as groupMapView pads it.
