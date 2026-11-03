@@ -36,7 +36,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // +2: the Text and Note annotation tools share the palette and stay in the reduced view.
   ok('household devices remain', [...document.querySelectorAll('#nodePalette .palette-item:not([data-adv])')].length === paletteDefs.filter((d) => d.simple).length + 2);
   const diagBtn = document.getElementById('cnDiagBtn');
-  ok('Sys. Status is hidden', !diagBtn || getComputedStyle(diagBtn).display === 'none');
+  ok('Topo carries no Sys. Status', !diagBtn && !document.querySelector('script[src="carino-diag.js"]'));
   ok('zone bubbles are off the canvas', getComputedStyle(document.getElementById('layer-zones')).display === 'none');
   const ipTexts = document.querySelectorAll('.node-ip');
   ok('IP labels are off the canvas', ipTexts.length > 0 && getComputedStyle(ipTexts[0]).display === 'none',

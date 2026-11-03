@@ -268,6 +268,20 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('ticked, it is this browser\'s setting, not the document\'s', state.settings.providerHover === true && !/providerHover/.test(JSON.stringify(saved()))
        && JSON.parse(localStorage.getItem(SETTINGS_KEY)).providerHover === true);
     change(el('setProviderHover'), false);
+    // Language moved here from the navbar: the bar carries no language button
+    // (nor LinkedIn), and the picker drives the fleet preference.
+    const shown = (id) => { const b = document.getElementById(id); return !!b && getComputedStyle(b).display !== 'none'; };
+    ok('the navbar has no language or LinkedIn button', !shown('cnLangBtn') && !shown('cnLinkedIn'));
+    ok('Settings has the language, Auto first', el('setLang').options.length === 6 && el('setLang').options[0].value === 'auto');
+    if (window.CarinoLang) {
+      const before = CarinoLang.mode === 'auto' ? 'auto' : CarinoLang.current;
+      ok('it shows the current choice', el('setLang').value === before, `${el('setLang').value} vs ${before}`);
+      change(el('setLang'), 'es');
+      ok('picking one switches the page', CarinoLang.current === 'es' && document.documentElement.lang === 'es' && /Idioma/.test(el('setLangHead').textContent));
+      change(el('setLang'), before);
+      ok('and back', (before === 'auto' ? CarinoLang.mode === 'auto' : CarinoLang.current === before));
+      setLocale('en'); applyLocale();
+    } else ok('carino-lang.js is loaded', false);
     change(el('setMapInk'), 'blue');
     ok('the background follows', el('canvasContainer').classList.contains('map-blue'));
     change(el('setMapInk'), '');

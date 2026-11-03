@@ -1838,12 +1838,8 @@ body.rack-view #conflictPill { display: none !important; }
    One rule: whatever only the full editor shows carries `data-adv`, in
    index.html or where js/ builds it (the palette's technical devices, the
    canvas's IP and port labels, the phone's Trace button). It replaced about
-   25 per-id rules, which had to be kept in step with the markup by hand. The
-   two named here are the fleet's Sys. Status control, built by
-   carino-diag.js, which this app does not edit. */
-body.simple-mode [data-adv],
-body.simple-mode #cnDiagBtn,
-body.simple-mode #cnDiagBox { display: none !important; }
+   25 per-id rules, which had to be kept in step with the markup by hand. */
+body.simple-mode [data-adv] { display: none !important; }
 
 /* The other way round: the mode picker's button is for finding your way up
    out of a reduced view. In the full editor it only offered a way down that
@@ -1851,8 +1847,10 @@ body.simple-mode #cnDiagBox { display: none !important; }
    How to use dialog (renderShortcutHelp, js/app.js). */
 body:not(.simple-mode) #modeSwitchBtn { display: none; }
 
-/* The navbar Sys. Status control is the hub's: its label and pulse dot
-   (carino-diag.js), the label clipped on a phone. */
+/* Topo's navbar is trimmed: no LinkedIn button, and no language button
+   (carino-lang.js still owns the preference; the picker is in Settings,
+   js/settings.js). Hidden, not removed, because the shared scripts build them. */
+#cnLinkedIn, #cnLangBtn, #cnLangBox { display: none !important; }
 
 /* Mode picker options ("Something missing? Try another mode" / #setup) —
    the one place modes are switched; there is deliberately no header toggle. */

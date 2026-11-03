@@ -1,8 +1,11 @@
 // ---- Settings (the ⚙ Settings button in the bar) ----
 // This browser's preferences, never the document's: they are kept with the
 // rest of state.settings (saveSettings, js/app.js), so a network sent to
-// someone else opens with their settings, not these. Three sections:
+// someone else opens with their settings, not these. Four sections:
 //
+//   Language the fleet-wide language (carino-lang.js owns the preference and
+//            keeps it across *.carino.systems; Topo hides its navbar button,
+//            so this is where it is picked). Auto follows the browser.
 //   Map      the opt-ins and opt-outs of what the map shows: the provider on
 //            hover (off until ticked: a tooltip on every device is noise to
 //            anyone who has not asked for it), the background (as the ◐
@@ -27,6 +30,8 @@ const reportEngineerDefault = () => (typeof state.settings.reportEngineer === 's
 const reportPartDefault = (key) => state.settings[key] !== false;   // reportSummaryOn, reportTechnicalOn
 
 function renderSettings() {
+    const lang = setEl('setLang');
+    if (lang && window.CarinoLang) lang.value = CarinoLang.mode === 'auto' ? 'auto' : CarinoLang.current;
     const hover = setEl('setProviderHover');
     if (hover) hover.checked = providerHoverOn();
     const ink = setEl('setMapInk');
@@ -59,7 +64,8 @@ const settingsOpen = () => { const s = setEl('settingsDialog'); return !!s && !s
 
 function onSettingsChange(e) {
     const el = e.target;
-    if (el.id === 'setProviderHover') { state.settings.providerHover = el.checked; saveSettings(); renderCanvasOnly(); }
+    if (el.id === 'setLang') { if (window.CarinoLang) CarinoLang.set(el.value); }
+    else if (el.id === 'setProviderHover') { state.settings.providerHover = el.checked; saveSettings(); renderCanvasOnly(); }
     else if (el.id === 'setMapInk') { setMapInk(el.value); saveSettings(); }
     else if (el.id === 'setSubnetZones') { state.settings.subnetZones = el.checked; saveSettings(); renderCanvasOnly(); renderNetworksPanel(true); }
     else if (el.id === 'setReportSummary' || el.id === 'setReportTechnical') {
