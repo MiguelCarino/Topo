@@ -140,7 +140,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const indexed = withLookupPass(fans);
     ok('every cable fans out the same with and without the indexes', plain === indexed);
     ok('the five router legs on the core fan out around the straight line',
-      state.links.filter((l) => l.source === 'rt' && l.target === 'core').map((l) => linkGeometry(l).bow).join(',') === '-68,-34,0,34,68');
+      state.links.filter((l) => l.source === 'rt' && l.target === 'core').map((l) => linkGeometry(l).bow).sort((a, b) => a - b).join(',') === '-68,-34,0,34,68');
 
     // ---- 4. Time budgets ----
     within('the findings, from scratch,', median(() => diagnoseDoc(null)), 400);

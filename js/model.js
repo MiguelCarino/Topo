@@ -656,8 +656,18 @@ function linkGeometry(link) {
 
     const siblings = linkSiblings(link);
     const rank = siblings.indexOf(link.id);
-    // Fan symmetrically around the straight path, so a lone link stays straight.
-    const bow = siblings.length > 1 ? (rank - (siblings.length - 1) / 2) * PARALLEL_BOW : 0;
+    // Fan symmetrically around the straight path, so a lone link stays straight,
+    // unless a device stands in its way (linkDetour): then the fan bows round it.
+    // Both are worked out one way round for the pair (its lower id first) and
+    // turned for a cable drawn the other way: measured off each cable's own
+    // direction, two cables entered either way round fanned onto one curve.
+    const way = src.id <= tgt.id ? 1 : -1;
+    const fan = siblings.length > 1 ? (rank - (siblings.length - 1) / 2) * PARALLEL_BOW : 0;
+    // A detour clears the whole fan: its middle bows past by half the fan's
+    // spread, so the innermost cable clears too.
+    const off = way > 0 ? linkDetour(src, tgt) : linkDetour(tgt, src);
+    const detour = off ? off + Math.sign(off) * ((siblings.length - 1) / 2) * PARALLEL_BOW : 0;
+    const bow = way * (fan + detour);
 
     const dx = tgt.x - src.x, dy = tgt.y - src.y;
     const len = Math.hypot(dx, dy) || 1;
@@ -672,6 +682,73 @@ function linkGeometry(link) {
             y: (1 - t) * (1 - t) * src.y + 2 * (1 - t) * t * ctrl.y + t * t * tgt.y
         })
     };
+}
+
+// ---- Cables round devices ----
+// A straight cable drawn through a device it does not reach reads as if it
+// plugged into it, and buries the device's name. linkDetour(src, tgt) is the
+// bow (the same measure as PARALLEL_BOW: how far the curve's control point
+// sits off the middle, along the left-hand normal of src -> tgt) that carries
+// the run clear of every device in its way, on whichever side needs less;
+// 0 when nothing is in the way. A device's footprint is its card and the
+// name and address under it (DETOUR_BOX), with DETOUR_GAP to spare. Only
+// devices drawn on the map count: one folded into a collapsed group or its
+// host is not there to cross.
+const DETOUR_BOX = { x1: -34, y1: -30, x2: 34, y2: 52 }, DETOUR_GAP = 8, DETOUR_MAX = 0.7;
+function detourObstacles() {
+    if (lookupPass && lookupPass.obstacles) return lookupPass.obstacles;
+    const gv = typeof groupMapNow === 'function' ? groupMapNow() : null;
+    const out = state.nodes.filter((n) => !(gv && (gv.hidden.has(n.id) || gv.guestHidden.has(n.id))));
+    if (lookupPass) lookupPass.obstacles = out;
+    return out;
+}
+function linkDetour(src, tgt) {
+    const dx = tgt.x - src.x, dy = tgt.y - src.y, len = Math.hypot(dx, dy);
+    if (len < 1) return 0;
+    const ux = dx / len, uy = dy / len, nx = -uy, ny = ux;
+    // Each device near the run: where along it (t, 0..1) and its footprint's
+    // extent across it (lo..hi, signed along the normal).
+    const near = [];
+    detourObstacles().forEach((n) => {
+        if (n === src || n === tgt || n.id === src.id || n.id === tgt.id) return;
+        let lo = Infinity, hi = -Infinity, a0 = Infinity, a1 = -Infinity;
+        [[DETOUR_BOX.x1, DETOUR_BOX.y1], [DETOUR_BOX.x2, DETOUR_BOX.y1], [DETOUR_BOX.x1, DETOUR_BOX.y2], [DETOUR_BOX.x2, DETOUR_BOX.y2]].forEach(([ox, oy]) => {
+            const rx = n.x + ox - src.x, ry = n.y + oy - src.y;
+            const along = rx * ux + ry * uy, across = rx * nx + ry * ny;
+            a0 = Math.min(a0, along); a1 = Math.max(a1, along);
+            lo = Math.min(lo, across); hi = Math.max(hi, across);
+        });
+        // Past either end, or tucked against one (a device stacked on an
+        // end's own card): a bow cannot help there.
+        if (a1 < 24 || a0 > len - 24) return;
+        const t = Math.min(0.85, Math.max(0.15, ((n.x - src.x) * ux + (n.y - src.y) * uy) / len));
+        near.push({ t, lo: lo - DETOUR_GAP, hi: hi + DETOUR_GAP });
+    });
+    if (!near.length) return 0;
+    const hits = (bow) => near.filter((o) => { const off = 2 * o.t * (1 - o.t) * bow; return off > o.lo && off < o.hi; });
+    if (!hits(0).length) return 0;
+    const cap = len * DETOUR_MAX;
+    // Bow further one way until the run clears what it then crosses (a
+    // device passed clear straight may be met on the bow), or it would bow
+    // too far to read as this cable.
+    const tryside = (sign) => {
+        let bow = 0;
+        for (let i = 0; i < 6; i += 1) {
+            const now = hits(bow);
+            if (!now.length) return { bow, left: 0 };
+            const need = now.reduce((m, o) => {
+                const k = 2 * o.t * (1 - o.t);
+                return sign > 0 ? Math.max(m, o.hi / k) : Math.min(m, o.lo / k);
+            }, bow);
+            if (Math.abs(need) > cap) return { bow: sign * cap, left: hits(sign * cap).length };
+            bow = need;
+        }
+        return { bow, left: hits(bow).length };
+    };
+    const a = tryside(1), b = tryside(-1);
+    const best = a.left !== b.left ? (a.left < b.left ? a : b) : (Math.abs(a.bow) <= Math.abs(b.bow) ? a : b);
+    // Still through a device whichever way: straight, as drawn before.
+    return best.left && best.left >= hits(0).length ? 0 : best.bow;
 }
 
 // The ids of every cable between the same two devices, either way round, in

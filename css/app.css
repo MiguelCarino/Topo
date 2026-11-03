@@ -43,11 +43,21 @@
 .map-ink .topo-svg [fill="#fffbeb"] { fill: color-mix(in srgb, #f59e0b 20%, var(--mi-bg)); }
 .map-ink .topo-svg [fill="#fef2f2"] { fill: color-mix(in srgb, #dc2626 24%, var(--mi-bg)); }
 .map-ink .topo-svg :is([fill="#334155"], [fill="#1e293b"], [fill="#475569"]),
-.map-ink .topo-svg #layer-zones text { fill: var(--mi-fg); }
+.map-ink .topo-svg :is(#layer-zones, #layer-labels .zone-tag) text { fill: var(--mi-fg); }
 .map-ink .topo-svg [fill="#64748b"] { fill: var(--mi-muted); }
 .map-ink .topo-svg :is([stroke="#334155"], [stroke="#475569"]) { stroke: var(--mi-fg); }
 .map-ink .topo-svg :is([stroke="#cbd5e1"], [stroke="#94a3b8"], [stroke="#64748b"]) { stroke: var(--mi-line); }
 .map-ink .topo-svg [stroke="#ffffff"] { stroke: var(--mi-bg); }
+/* Dark and blueprint: each subnet in its own light ink (--zc, ZONE_INKS in
+   js/ui.js): a dashed outline you can see on the black or the blue, the
+   faintest wash of it inside, and its name tab in that ink on the
+   background tinted with it, ringed in it. */
+#canvasContainer.map-ink .topo-svg .zone-bubble > rect {
+    fill: color-mix(in srgb, var(--zc, #ffffff) 9%, transparent);
+    stroke: var(--zc, #ffffff); stroke-opacity: 0.85; stroke-width: 1.5;
+}
+#canvasContainer.map-ink .topo-svg .zone-tag rect { fill: color-mix(in srgb, var(--zc, #ffffff) 14%, var(--mi-bg)); fill-opacity: 1; stroke: var(--zc, #ffffff); stroke-opacity: 0.9; }
+#canvasContainer.map-ink .topo-svg .zone-tag text { fill: var(--zc, #ffffff); }
 /* A sticky note stays yellow with dark writing; plain text turns white. */
 .map-ink .topo-svg #layer-annotations rect[fill="#fef9c3"] + text { fill: #1e293b; }
 .map-ink .topo-svg #layer-annotations rect[fill="transparent"] + text { fill: var(--mi-fg); }

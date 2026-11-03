@@ -109,7 +109,7 @@ window.addEventListener('load', () => { setTimeout(() => {
     ok('its tooltip is the SSID, the band and the signal', tvTip && tvTip.textContent === 'Home · 5 GHz · -58 dBm', tvTip && tvTip.textContent);
     batch(() => { getLink(tv.id).cable = { label: 'C-07' }; save(); });
     renderCanvasOnly();
-    ok('a radio link shows no cable label, though one is stored', !document.querySelector('#layer-links text.cable-label') && getLink(tv.id).cable.label === 'C-07');
+    ok('a radio link shows no cable label, though one is stored', !document.querySelector('#layer-labels text.cable-label') && getLink(tv.id).cable.label === 'C-07');
     undo();
     const tagEl = document.querySelector(`#layer-links text.wifi-band-label[data-link="${cam.id}"]`);
     select(null, null);
@@ -143,7 +143,7 @@ window.addEventListener('load', () => { setTimeout(() => {
         const pills = chips.map((c) => boxOf(c.querySelector('rect:nth-of-type(2)')));
         // Zone name tabs, group name tabs, device names and addresses, and a
         // selected link's port labels and ✕.
-        const tabs = [...document.querySelectorAll('#layer-zones rect[rx="3"], #layer-groups .grp-tab-pill, #layer-nodes text, #layer-links .port-label, #layer-links .node-delete circle')].map(boxOf);
+        const tabs = [...document.querySelectorAll('#layer-labels .zone-tag rect[rx="3"], #layer-groups .grp-tab-pill, #layer-nodes text, #layer-links .port-label, #layer-links .node-delete circle')].map(boxOf);
         const out = [];
         chips.forEach((c, i) => {
             const id = c.getAttribute('data-link');

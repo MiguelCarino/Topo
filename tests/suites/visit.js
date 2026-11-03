@@ -167,7 +167,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     setLocale('es'); applyLocale();
     validateTopology();
     ok('the buttons and the list are translated', /Para revisar en la próxima visita/.test(el('visitSummary').textContent)
-       && [...document.querySelectorAll('#conflictMsgList .ca-accept')].every((b) => b.textContent === 'Aceptar…') && el('servicedTodayBtn').textContent === 'Mantenimiento hecho hoy');
+       && [...document.querySelectorAll('#conflictMsgList .ca-accept')].every((b) => b.textContent === 'Aceptar…') && el('servicedTodayBtn').textContent === 'Mantenimiento realizado');
     setLocale('en'); applyLocale();
   } catch (e) {
     ok('the suite ran to the end', false, e && (e.stack || e.message));

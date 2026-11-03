@@ -1864,9 +1864,19 @@ window.addEventListener('mousedown', (event) => {
         // press on empty canvas keeps the set rather than clearing it. With
         // nothing selected or armed there is nothing to clear, and a pan
         // draws nothing but the camera.
-        if (event.button === 0 && !isDraggingNode && !event.ctrlKey && !event.metaKey && (state.selection.size || state.linkSourceId)) select(null, null);
+        // While a trace runs from the selected device, the press waits for its
+        // release (mapPointerUp): a pan keeps the device and its trace, only
+        // a click that did not move lets them go.
+        _panPress = null;
+        if (event.button === 0 && !isDraggingNode && !event.ctrlKey && !event.metaKey && (state.selection.size || state.linkSourceId)) {
+            if (tracingSelected() && !state.linkSourceId) _panPress = { x: event.clientX, y: event.clientY, slop: gmSlopOf(event) };
+            else select(null, null);
+        }
     }
 });
+// A press on empty map held back while a trace runs (above).
+let _panPress = null;
+const tracingSelected = () => !!(state.settings.traceMode && state.selectedId && state.selectedType === 'node');
 
 // The drag's move and its release, named so a finger's drag on a device
 // (touchPressNode, below) goes through exactly what a mouse's does.
@@ -1949,6 +1959,8 @@ function mapPointerMove(event) {
 window.addEventListener('mouseup', (event) => mapPointerUp(event));
 function mapPointerUp(event) {
     isDraggingCanvas = false;
+    const pan = _panPress; _panPress = null;
+    if (pan && Math.hypot(event.clientX - pan.x, event.clientY - pan.y) <= pan.slop) select(null, null);
     if (_marquee) { endMarquee(); return; }
     // A press on a collapsed group's node that never became a drag was a tap
     // on it: it expands the group, a view (js/groupmap.js). Nothing moved, so

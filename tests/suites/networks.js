@@ -163,9 +163,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 4: zones ----
     const zoneCidrs = () => zonesToDraw().map((z) => z.net.cidr).sort();
     ok('a private network draws its zone; one set to never does not', JSON.stringify(zoneCidrs()) === '["10.10.0.0/24"]', JSON.stringify(zoneCidrs()));
-    ok('the zone is on the canvas, labelled with the network', el('layer-zones').children.length === 1 && /10\.10\.0\.0\/24/.test(el('layer-zones').textContent));
+    ok('the zone is on the canvas, labelled with the network', el('layer-zones').children.length === 1 && /10\.10\.0\.0\/24/.test(el('layer-labels').textContent));
     lanNet.name = 'Office LAN'; lanNet.vlan = 10; save(); renderCanvasOnly();
-    ok('its label carries the name and the VLAN', /Office LAN · 10\.10\.0\.0\/24 · VLAN 10/.test(el('layer-zones').textContent), el('layer-zones').textContent);
+    ok('its label carries the name and the VLAN', /Office LAN · 10\.10\.0\.0\/24 · VLAN 10/.test(el('layer-labels').textContent), el('layer-labels').textContent);
     showConfigTab('networks');
     el('subnetZonesToggle').click();
     ok('"Subnet zones" off clears them all', el('layer-zones').children.length === 0 && state.settings.subnetZones === false);

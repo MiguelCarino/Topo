@@ -38,7 +38,7 @@ const paletteDefs = [
     { type: 'custom', name: 'Custom Node' }
 ];
 
-const lZones = document.getElementById('layer-zones'), lLinks = document.getElementById('layer-links'), lNodes = document.getElementById('layer-nodes'), lAnn = document.getElementById('layer-annotations');
+const lZones = document.getElementById('layer-zones'), lLinks = document.getElementById('layer-links'), lNodes = document.getElementById('layer-nodes'), lAnn = document.getElementById('layer-annotations'), lLabels = document.getElementById('layer-labels');
 let isDraggingCanvas = false, isDraggingNode = false, draggedNode = null, dragOffset = { x: 0, y: 0 }, lastMouse = { x: 0, y: 0 };
 // dragGroup: everything a press moves, each with its offset from the pointer
 // and where it started — the pressed device alone, or every selected device
@@ -62,6 +62,18 @@ function startDrag(event, items, pressed) {
     // A drop into a group is a device's press's to arm (js/groupmap.js), after this.
     if (typeof clearGroupDrop === 'function') clearGroupDrop();
 }
+// The notes that go where their devices go: a note whose red lines point at
+// devices, all of them among those being dragged, is about them and moves
+// with them. One that also points at a device staying put stays too (it
+// would drag its other line across the map), and so does one pointing only
+// at other notes.
+function notesRidingWith(nodes) {
+    const ids = new Set(nodes.map((n) => n.id));
+    return state.annotations.filter((a) => {
+        const onDevices = (a.targets || []).filter((tid) => getNode(tid));
+        return onDevices.length > 0 && onDevices.every((tid) => ids.has(tid));
+    });
+}
 // Shift, Ctrl or Cmd held: the press adds to the selection or takes out of it.
 const addsToSelection = (event) => !!(event.shiftKey || event.ctrlKey || event.metaKey);
 
@@ -76,7 +88,8 @@ function pressNode(event, node) {
     // One of a set: the whole set moves (startDrag), and a release
     // that moved nothing selects this one alone (dragCollapse).
     const ofSet = state.selection.size > 1 && inSelection('node', node.id);
-    startDrag(event, ofSet ? selectedOf('node').map(getNode).filter(Boolean) : [node], node);
+    const moving = ofSet ? selectedOf('node').map(getNode).filter(Boolean) : [node];
+    startDrag(event, moving.concat(notesRidingWith(moving)), node);
     // Let go in a group's frame, it goes into that group; on a host, it runs
     // on it; on another device, a new group is offered (js/groupmap.js).
     armGroupDrop(dragGroup.map((g) => g.item));
@@ -659,6 +672,53 @@ function wifiChipPlace(geo, fromAp, w, h, avoid) {
     return first;
 }
 
+// Where a cable's label goes: 16px off its line, beside the middle first,
+// then further along either way, on either side; the first spot clear of
+// `avoid` (devices with their names, subnet and group tabs, Wi-Fi chips,
+// notes, the labels already placed) wins. At the middle alone a label
+// landed under a device on a short or crowded run, where the device's card
+// hid it. None clear: the middle, as before. -> its centre and its box.
+const CABLE_LABEL_AT = [0.5, 0.4, 0.6, 0.3, 0.7, 0.22, 0.78];
+function cableLabelPlace(geo, text, avoid) {
+    const hit = (b) => avoid.some((o) => b.x1 < o.x2 && b.x2 > o.x1 && b.y1 < o.y2 && b.y2 > o.y1);
+    const half = text.length * 2.5 + 2;
+    let first = null;
+    for (const t of CABLE_LABEL_AT) {
+        // The normal of the curve itself at t, so a bowed run's label rides
+        // beside its bow rather than off its straight chord.
+        const p = geo.pointAt(t);
+        const tx = 2 * (1 - t) * (geo.ctrl.x - geo.src.x) + 2 * t * (geo.tgt.x - geo.ctrl.x);
+        const ty = 2 * (1 - t) * (geo.ctrl.y - geo.src.y) + 2 * t * (geo.tgt.y - geo.ctrl.y);
+        const len = Math.hypot(tx, ty) || 1;
+        for (const side of [1, -1]) {
+            const x = p.x - (ty / len) * 16 * side, y = p.y + (tx / len) * 16 * side;
+            const box = { x1: x - half, y1: y - 6, x2: x + half, y2: y + 6 };
+            if (!first) first = { x, y, box };
+            if (!hit(box)) return { x, y, box };
+        }
+    }
+    return first;
+}
+
+// A subnet's ink on the dark and blueprint maps: light colours that read on
+// black and on blue (none of them blue), one per subnet drawn. The paper map's hue adds up the
+// address's characters, so 10.10.10.0/24, 10.10.20.0/24 and 10.10.30.0/24
+// came out one purple, and on blue that purple all but vanished. Each subnet
+// takes the ink its address hashes to (FNV-1a), or the next one no other
+// zone on the map has: the same subnet keeps its colour from one redraw to
+// the next, and none repeats until all eight are in use.
+const ZONE_INKS = ['#67e8f9', '#fcd34d', '#f9a8d4', '#6ee7b7', '#fdba74', '#c4b5fd', '#bef264', '#fca5a5'];
+function zoneInkSlots(cidrs) {
+    const hash = (str) => { let h = 0x811c9dc5; for (let i = 0; i < str.length; i += 1) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
+    const out = new Map(), used = new Set();
+    [...new Set(cidrs)].sort().forEach((c) => {
+        let i = hash(c) % ZONE_INKS.length;
+        if (used.size < ZONE_INKS.length) while (used.has(i)) i = (i + 1) % ZONE_INKS.length;
+        used.add(i); out.set(c, i);
+    });
+    return out;
+}
+
 // The look an element has when nothing is selected, kept on it so the export
 // (canvasSvgMarkup, js/app.js) draws the map unselected from its copy, with no
 // redraw. rest: attribute -> value; null = not set at rest. Set only where the
@@ -667,7 +727,7 @@ function wifiChipPlace(geo, fromAp, w, h, avoid) {
 function restLook(el, rest) { el.setAttribute('data-rest', JSON.stringify(rest)); }
 
 function drawCanvas() {
-    lZones.innerHTML = ''; lLinks.innerHTML = ''; lNodes.innerHTML = ''; lAnn.innerHTML = '';
+    lZones.innerHTML = ''; lLinks.innerHTML = ''; lLabels.innerHTML = ''; lNodes.innerHTML = ''; lAnn.innerHTML = '';
     state.annotations.forEach(renderAnnotation);
     renderNoteLeaders();
     document.getElementById('networkCanvas').className = `topo-svg${state.linkSourceId ? ' linking' : ''}`;
@@ -681,7 +741,9 @@ function drawCanvas() {
     // Where each zone's label tab landed, so a Wi-Fi band chip (below) can
     // keep off it: the chip is drawn over the zones and would bury the name.
     const zoneTagBoxes = [];
-    zonesToDraw(gv).forEach(({ net, nodes, box }) => {
+    const zones = zonesToDraw(gv);
+    const inks = zoneInkSlots(zones.map((z) => z.net.cidr));
+    zones.forEach(({ net, nodes, box }) => {
         const subnet = net.cidr;
         const { minX, minY, maxX, maxY } = box;
 
@@ -690,6 +752,9 @@ function drawCanvas() {
 
         const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         g.setAttribute('class', 'zone-bubble');
+        // Its ink on the dark and blueprint maps (css/app.css); the paper colours below
+        // stay what the exports draw.
+        g.style.setProperty('--zc', ZONE_INKS[inks.get(subnet)]);
 
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('x', minX - padX); rect.setAttribute('y', minY - padTop);
@@ -715,8 +780,16 @@ function drawCanvas() {
         // The address, and the name and VLAN when the network has them.
         text.textContent = [isBlank(net.name) ? '' : net.name.trim(), subnet, Number.isInteger(net.vlan) ? `VLAN ${net.vlan}` : '']
             .filter(Boolean).join(' · ');
-        g.appendChild(text);
+        // The tab goes in the labels layer, over the cables: in the zones'
+        // own layer every cable crossing it was drawn through the name.
+        const tagG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        tagG.setAttribute('class', 'zone-tag');
+        tagG.style.setProperty('--zc', ZONE_INKS[inks.get(subnet)]);
+        tagG.setAttribute('data-adv', '');
+        tagG.style.pointerEvents = 'none';
+        tagG.appendChild(text);
         lZones.appendChild(g);
+        lLabels.appendChild(tagG);
         // Backdrop behind the text so crossing links don't bleed through it.
         try {
             const bb = text.getBBox();
@@ -726,7 +799,7 @@ function drawCanvas() {
             bg.setAttribute('rx', '3');
             bg.setAttribute('fill', '#f8fafc'); bg.setAttribute('fill-opacity', '0.9');
             bg.setAttribute('stroke', `hsla(${hue}, 70%, 50%, 0.35)`); bg.setAttribute('stroke-width', '1');
-            g.insertBefore(bg, text);
+            tagG.insertBefore(bg, text);
             zoneTagBoxes.push({ x1: bb.x - 5, y1: bb.y - 2, x2: bb.x + bb.width + 5, y2: bb.y + bb.height + 2 });
         } catch (e) { /* getBBox unavailable */ }
     });
@@ -765,6 +838,13 @@ function drawCanvas() {
         ((gv && gv.frames) || []).forEach(({ group, rect, members }) => {
             const words = `${groupLabel(group)} · ${(members || []).length}`;
             chipAvoid.push({ x1: rect.x + 14, y1: rect.y - 10, x2: rect.x + 14 + 46 + words.length * 6, y2: rect.y + 10 });
+        });
+        // A note, drawn over everything: what lands under it is hidden.
+        state.annotations.forEach((a) => {
+            const el = document.getElementById(`ui-ann-${a.id}`);
+            let bb = null;
+            try { bb = el && el.getBBox(); } catch (e) { /* not laid out */ }
+            if (bb && bb.width) chipAvoid.push({ x1: a.x + bb.x, y1: a.y + bb.y, x2: a.x + bb.x + bb.width, y2: a.y + bb.y + bb.height });
         });
     };
     state.links.forEach((link) => {
@@ -820,14 +900,14 @@ function drawCanvas() {
         // its band instead, as a chip on its line (below).
         const cableLabel = medium === 'wireless' || medium === 'vpn' ? '' : cableOf(link, 'label').trim();
         if (cableLabel) {
-            const mid = geo.pointAt(0.5);
-            const span = Math.hypot(tgt.x - src.x, tgt.y - src.y) || 1;
-            const nx = -(tgt.y - src.y) / span, ny = (tgt.x - src.x) / span;
+            chipAvoidNodes();
+            const { x: cx, y: cy, box } = cableLabelPlace(geo, cableLabel, chipAvoid);
             const tag = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             tag.setAttribute('class', qm && !qm.links.has(link.id) ? 'cable-label q-dim' : 'cable-label');
             tag.setAttribute('data-adv', '');
-            tag.setAttribute('x', String(mid.x + nx * 16));
-            tag.setAttribute('y', String(mid.y + ny * 16 + 3));
+            tag.setAttribute('data-link', link.id);
+            tag.setAttribute('x', String(cx));
+            tag.setAttribute('y', String(cy + 3));
             tag.setAttribute('text-anchor', 'middle');
             tag.setAttribute('font-size', '8');
             tag.setAttribute('font-family', 'monospace');
@@ -838,9 +918,8 @@ function drawCanvas() {
             tag.setAttribute('stroke-width', '3');
             tag.textContent = cableLabel;
             tag.style.pointerEvents = 'none';
-            lLinks.appendChild(tag);
-            const cx = mid.x + nx * 16, cy = mid.y + ny * 16, half = cableLabel.length * 2.5 + 2;
-            chipAvoid.push({ x1: cx - half, y1: cy - 6, x2: cx + half, y2: cy + 6 });
+            lLabels.appendChild(tag);
+            chipAvoid.push(box);
         }
 
         // The band ("5 GHz") as a small chip sitting on the link's own line

@@ -114,6 +114,28 @@ window.addEventListener('load', () => {
   ok('a node listing tcp/dicom answers a trace for 11112',
      acceptsPort({ id: 'pacs', type: 'server', ports: 'tcp/dicom', interfaces: [] }, '11112') === true);
 
+  // A pan while a trace runs keeps the traced device and its trace: a press
+  // on empty map lets them go only when it is a click that did not move.
+  {
+    const canvas = document.getElementById('networkCanvas');
+    const fire = (target, type, x, y) => target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }));
+    const r = canvas.getBoundingClientRect(), x = r.left + 30, y = r.top + 30;
+    const held = state.settings.traceMode, cam = { ...state.camera };
+    setPort('', false);
+    select('r', 'node'); state.settings.traceMode = true; renderCanvasOnly();
+    fire(canvas, 'mousedown', x, y); fire(window, 'mousemove', x + 80, y + 40); fire(window, 'mouseup', x + 80, y + 40);
+    ok('a pan while tracing keeps the device selected and the trace on', state.selectedId === 'r' && state.settings.traceMode === true, `${state.selectedId}`);
+    ok('the map did pan', state.camera.x === cam.x + 80 && state.camera.y === cam.y + 40, `${state.camera.x - cam.x},${state.camera.y - cam.y}`);
+    ok('the trace is still drawn', !!document.querySelector('#layer-links path.flow-utp'));
+    fire(canvas, 'mousedown', x, y); fire(window, 'mouseup', x + 1, y);
+    ok('a click on empty map still lets the device go', state.selectedId === null);
+    state.settings.traceMode = false; select('r', 'node');
+    fire(canvas, 'mousedown', x, y);
+    ok('with no trace, a press on empty map lets go at once, as before', state.selectedId === null);
+    fire(window, 'mouseup', x + 50, y);
+    state.camera = cam; applyCamera(); state.settings.traceMode = held; select(null, null);
+  }
+
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);
 });

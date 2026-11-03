@@ -140,9 +140,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
     // ---- 3. Labels on the map, duplicates as findings ----
     open();
-    const labels = [...document.querySelectorAll('#layer-links text.cable-label')].map((t) => t.textContent);
+    const labels = [...document.querySelectorAll('#layer-labels text.cable-label')].map((t) => t.textContent);
     ok('a cable\'s label is drawn on the map', labels.includes('UP-1') && labels.includes('WS-3B') && labels.length === 2, labels.join(','));
-    const lbl = document.querySelector('#layer-links text.cable-label');
+    const lbl = document.querySelector('#layer-labels text.cable-label');
     ok('with explicit fonts (the PNG has no stylesheet) and hidden in the reduced views', lbl.getAttribute('font-family') === 'monospace' && lbl.hasAttribute('data-adv'));
     ok('no label finding while every label is its own', !topologyFindings().some((f) => f.key === 'cable-label' || f.key === 'asset-tag'));
     setCableField(getLink('l2'), 'label', 'ws-3b '); save();

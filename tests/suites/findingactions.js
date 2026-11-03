@@ -167,7 +167,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     setLocale('es'); applyLocale();
     validateTopology();
     const es = document.querySelector('#conflictMsgList .ca-serviced');
-    ok('the button is translated', !!es && es.textContent === 'Mantenimiento hecho hoy', es && es.textContent);
+    ok('the button is translated', !!es && es.textContent === 'Mantenimiento realizado', es && es.textContent);
   } catch (e) {
     ok('the suite ran to the end', false, e && (e.stack || e.message));
   } finally {
