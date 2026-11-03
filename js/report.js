@@ -267,7 +267,10 @@ function reportWifi() {
             bands,
             bandsText: wifiBandsText(bands),
             networkId: net ? net.id : '',
-            subnet: net ? networkLabel(net) : '',
+            // The address, and the network's name over it when it has one:
+            // a named network alone ("Home") left the reader without the subnet.
+            subnet: net ? net.cidr : '',
+            subnetName: net && !isBlank(net.name) ? net.name.trim() : '',
             vlan: net && Number.isInteger(net.vlan) ? net.vlan : null,
             hidden: !!w.hidden,
             aps: wifiBroadcasters(w.id).map((n) => n.name || n.id),
@@ -606,9 +609,20 @@ const REPORT_DIAGRAM_INLINE_MAX = 40;
 // with 10 mm margins less its heading. In mm.
 const REPORT_DIAGRAM_PAPER = { inlineW: 180, inlineH: 230, sheetW: 259, sheetH: 170 };
 const REPORT_DIAGRAM_LEGIBLE = 0.2;    // mm per drawing unit, the least that reads
-const REPORT_DIAGRAM_TILE = 0.22;      // mm per drawing unit a tile aims at (a 6 pt name)
 const REPORT_DIAGRAM_OVERLAP = 0.06;   // of a tile, shared with the next one
-const REPORT_DIAGRAM_MAX_TILES = 40;   // past this the tiles get smaller, not more
+// The large map the dialog can add (Large map): the whole diagram again on
+// a grid of landscape sheets the visitor picks, so many across and so many
+// down (Sheets across, Sheets down), to read up close or tape together.
+// Nothing about it is guessed: every square of the grid is printed, empty or
+// not, and the grid is even, the same overlap between every two sheets.
+const REPORT_DIAGRAM_GRID_MAX = 6;   // sheets across, and down, at most
+const REPORT_DIAGRAM_GRID_DEFAULT = 2;
+const gridCount = (v) => Math.max(1, Math.min(REPORT_DIAGRAM_GRID_MAX, Math.floor(Number(v)) || REPORT_DIAGRAM_GRID_DEFAULT));
+// The squares left out (the dialog's toggles, or a click on the preview's
+// overview): their names, A1, B2… A square left out is still drawn on the
+// overview, faded, but has no sheet of its own.
+const gridSkip = (v) => new Set((Array.isArray(v) || v instanceof Set ? [...v] : String(v || '').split(','))
+    .map((x) => String(x).trim().toUpperCase()).filter((x) => /^[A-Z]+[0-9]+$/.test(x)));
 
 // Pixels per drawing unit for the report's picture: `base` (4, 2 in a binder)
 // while that is a reasonable image, fewer for a very large drawing, which
@@ -630,54 +644,57 @@ const tileName = (c, r) => {
 // (pixels per unit), minX/minY (the drawing's corner) and points (where each
 // device is drawn). A picture without them (a test's stand-in) is placed by
 // its device count alone, as before. Tiles are in the picture's pixels.
-function reportDiagramLayout(image, devices) {
+// opts.large: the large map, always tiles, opts.cols × opts.rows of them
+// (null for a picture without its scale, which cannot be tiled).
+function reportDiagramLayout(image, devices, opts = {}) {
     if (!image) return null;
     const P = REPORT_DIAGRAM_PAPER;
     const s = Number(image.scale);
     if (!(s > 0) || !(image.width > 0) || !(image.height > 0)) {
-        return { kind: devices > REPORT_DIAGRAM_INLINE_MAX ? 'sheet' : 'inline' };
+        return opts.large ? null : { kind: devices > REPORT_DIAGRAM_INLINE_MAX ? 'sheet' : 'inline' };
     }
     const W = image.width / s, H = image.height / s;   // drawing units
     const fit = (w, h) => Math.min(w / W, h / H);
-    if (devices <= REPORT_DIAGRAM_INLINE_MAX && fit(P.inlineW, P.inlineH) >= REPORT_DIAGRAM_LEGIBLE) return { kind: 'inline' };
-    if (fit(P.sheetW, P.sheetH) >= REPORT_DIAGRAM_LEGIBLE) return { kind: 'sheet' };
-
-    const OV = REPORT_DIAGRAM_OVERLAP;
-    const count = (len, tile) => (len <= tile ? 1 : Math.ceil((len - tile * OV) / (tile * (1 - OV))));
-    let mm = REPORT_DIAGRAM_TILE, cols, rows;
-    for (;;) {
-        cols = count(W, P.sheetW / mm); rows = count(H, P.sheetH / mm);
-        if (cols * rows <= REPORT_DIAGRAM_MAX_TILES) break;
-        mm *= 0.9;
+    // Without the large map a diagram is in the text where it reads there,
+    // else on one landscape sheet of its own, however small that prints it:
+    // the lettered grid and its sheets are the Large map's alone.
+    if (!opts.large) {
+        if (devices <= REPORT_DIAGRAM_INLINE_MAX && fit(P.inlineW, P.inlineH) >= REPORT_DIAGRAM_LEGIBLE) return { kind: 'inline' };
+        return { kind: 'sheet' };
     }
-    // Every tile the shape of the page, then shrunk as far as the grid still
-    // covers the drawing: a tile never prints smaller than `mm` asks.
-    let tw = P.sheetW / mm, th = P.sheetH / mm;
-    const span = (n, size) => n * size - (n - 1) * size * OV;
-    const f = Math.min(1, Math.max(W / span(cols, tw), H / span(rows, th)));
-    tw *= f; th *= f;
-    const at = (i, n, len, size) => (n === 1 ? (len - size) / 2 : (i * (len - size)) / (n - 1));
-    const pts = Array.isArray(image.points) && Number.isFinite(image.minX) && Number.isFinite(image.minY)
-        ? image.points.map(([x, y]) => [x - image.minX, y - image.minY]) : null;
-    const REACH = 30;   // a device's card and its labels round its centre
+
+    // opts.cols × opts.rows sheets, each the shape of the page, as large as
+    // that grid allows while it covers the drawing, centred on it. The
+    // squares named in opts.skip are left out (grid: every square, tiles:
+    // the ones printed); leaving every one out leaves none out.
+    const OV = REPORT_DIAGRAM_OVERLAP;
+    const cols = gridCount(opts.cols), rows = gridCount(opts.rows);
+    const across = (n) => n - (n - 1) * OV;   // a grid's span, in sheets
+    const aspect = P.sheetW / P.sheetH;
+    const tw = Math.max(W / across(cols), (H / across(rows)) * aspect), th = tw / aspect;
+    const x0 = (W - tw * across(cols)) / 2, y0 = (H - th * across(rows)) / 2;
     const tiles = [];
     for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
-            const x = at(c, cols, W, tw), y = at(r, rows, H, th);
-            if (pts && !pts.some(([px, py]) => px >= x - REACH && px <= x + tw + REACH && py >= y - REACH && py <= y + th + REACH)) continue;
+            const x = x0 + c * tw * (1 - OV), y = y0 + r * th * (1 - OV);
             tiles.push({ c, r, name: tileName(c, r), x: x * s, y: y * s, w: tw * s, h: th * s });
         }
     }
-    if (!tiles.length) return { kind: 'sheet' };
-    return { kind: 'tiles', cols, rows, tiles, mm: P.sheetW / tw };
+    const skip = gridSkip(opts.skip);
+    if (tiles.every((tl) => skip.has(tl.name))) skip.clear();
+    tiles.forEach((tl) => { tl.off = skip.has(tl.name); });
+    return { kind: 'tiles', cols, rows, grid: tiles, tiles: tiles.filter((tl) => !tl.off), mm: P.sheetW / tw };
 }
 
 // The landscape pages: the picture once, as an <image> every page points at
 // with <use>, so a network on twelve sheets carries its picture once and not
 // twelve times; each page's viewBox is its piece of it.
-function diagramSheets(layout, image, caption, id) {
+// defined: the picture is already in the document under `id` (the summary's
+// map, or the diagram's own sheet before the large map), so it is not
+// carried again.
+function diagramSheets(layout, image, caption, id, defined = false) {
     const W = image.width, H = image.height;
-    const pic = `<svg class="dg-src" width="0" height="0" aria-hidden="true"><defs><image id="${id}" href="${image.url}" width="${W}" height="${H}"/></defs></svg>`;
+    const pic = defined ? '' : `<svg class="dg-src" width="0" height="0" aria-hidden="true"><defs><image id="${id}" href="${image.url}" width="${W}" height="${H}"/></defs></svg>`;
     const view = (x, y, w, h, extra = '') => `<svg class="dg" viewBox="${x} ${y} ${w} ${h}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeHtml(t('Network topology diagram'))}"><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#f8fafc"/><use href="#${id}"/>${extra}</svg>`;
     if (layout.kind === 'sheet') {
         return `<div class="sheet land">${pic}
@@ -685,17 +702,22 @@ function diagramSheets(layout, image, caption, id) {
     ${view(0, 0, W, H)}
 </div>`;
     }
-    const tiles = layout.tiles, n = tiles.length;
-    const font = Math.min(tiles[0].w, tiles[0].h) * 0.09;
-    const grid = tiles.map((tl) => `<g class="dg-cell"><rect x="${tl.x}" y="${tl.y}" width="${tl.w}" height="${tl.h}"/><text x="${tl.x + font * 0.4}" y="${tl.y + font * 1.05}" font-size="${font}">${tl.name}</text></g>`).join('');
+    const tiles = layout.tiles, n = tiles.length, all = layout.grid || tiles;
+    // The grid may reach past the drawing (it is centred on it): the
+    // overview and the corner map show the whole grid, the squares left out
+    // faded.
+    const gx = Math.min(...all.map((tl) => tl.x)), gy = Math.min(...all.map((tl) => tl.y));
+    const gw = Math.max(...all.map((tl) => tl.x + tl.w)) - gx, gh = Math.max(...all.map((tl) => tl.y + tl.h)) - gy;
+    const font = Math.min(all[0].w, all[0].h) * 0.09;
+    const grid = all.map((tl) => `<g class="dg-cell${tl.off ? ' off' : ''}" data-cell="${tl.name}"><rect x="${tl.x}" y="${tl.y}" width="${tl.w}" height="${tl.h}"/><text x="${tl.x + font * 0.4}" y="${tl.y + font * 1.05}" font-size="${font}">${tl.name}</text></g>`).join('');
     const overview = `<div class="sheet land">${pic}
-    <div class="land-head"><b>${escapeHtml(caption)}</b><span>${escapeHtml(t('Overview: each square is one of the {n} sheets that follow, printed large enough to read.', { n }))}</span></div>
-    ${view(0, 0, W, H, grid)}
+    <div class="land-head"><b>${escapeHtml(caption)}</b><span>${escapeHtml(all.length > n ? t('Overview: each square is one of the {n} sheets that follow; the faded ones are left out.', { n }) : t('Overview: each square is one of the {n} sheets that follow.', { n }))}</span></div>
+    ${view(gx, gy, gw, gh, grid)}
 </div>`;
     const byCell = new Map(tiles.map((tl) => [`${tl.c},${tl.r}`, tl]));
     // A small map of the grid in each page's corner, its own square filled.
-    const mw = 64, mh = Math.max(16, Math.min(64, (mw * H) / W)), kx = mw / W, ky = mh / H;
-    const locator = (cur) => `<svg class="dg-loc" viewBox="0 0 ${mw} ${mh}" width="${mw}" height="${mh}" aria-hidden="true"><rect width="${mw}" height="${mh}" fill="#fff" stroke="#cbd5e1"/>${tiles.map((tl) => `<rect x="${tl.x * kx}" y="${tl.y * ky}" width="${tl.w * kx}" height="${tl.h * ky}"${tl === cur ? ' class="on"' : ''}/>`).join('')}</svg>`;
+    const mw = 64, mh = Math.max(16, Math.min(64, (mw * gh) / gw)), kx = mw / gw, ky = mh / gh;
+    const locator = (cur) => `<svg class="dg-loc" viewBox="0 0 ${mw} ${mh}" width="${mw}" height="${mh}" aria-hidden="true"><rect width="${mw}" height="${mh}" fill="#fff" stroke="#cbd5e1"/>${all.map((tl) => `<rect x="${(tl.x - gx) * kx}" y="${(tl.y - gy) * ky}" width="${tl.w * kx}" height="${tl.h * ky}"${tl === cur ? ' class="on"' : tl.off ? ' class="off"' : ''}/>`).join('')}</svg>`;
     const pages = tiles.map((tl, i) => {
         const next = [['←', -1, 0], ['↑', 0, -1], ['→', 1, 0], ['↓', 0, 1]]
             .map(([arrow, dc, dr]) => { const o = byCell.get(`${tl.c + dc},${tl.r + dr}`); return o ? `${arrow} ${o.name}` : ''; })
@@ -1062,6 +1084,9 @@ function reportStyles() {
     .dg-loc { flex: none; }
     .dg-loc rect + rect { fill: none; stroke: #94a3b8; stroke-width: 0.6; }
     .dg-loc rect.on { fill: #2563eb; stroke: #2563eb; }
+    .dg-cell.off rect { fill: rgba(148, 163, 184, 0.28); stroke: #94a3b8; }
+    .dg-cell.off text { fill: #94a3b8; }
+    .dg-loc rect.off { fill: #e2e8f0; }
     /* The rack elevations: front and rear side by side, a unit a row, so a
        42U rack is a third of a page and never splits. */
     .rack { margin-bottom: 14px; }
@@ -1404,7 +1429,7 @@ function wifiSection(w) {
             <td><b>${escapeHtml(n.ssid || t('Wi-Fi network'))}</b>${n.hidden ? `<br>${muted(t('Hidden network'))}` : ''}</td>
             <td>${n.securityName ? escapeHtml(n.securityName) : dash}</td>
             <td class="mono">${escapeHtml(n.bandsText)}</td>
-            <td>${n.subnet ? `<span class="mono">${escapeHtml(n.subnet)}</span>${n.vlan !== null ? `<br>${muted(`VLAN ${n.vlan}`)}` : ''}` : dash}</td>
+            <td>${n.subnet ? `${n.subnetName ? `${escapeHtml(n.subnetName)}<br>` : ''}<span class="mono">${escapeHtml(n.subnet)}</span>${n.vlan !== null ? `<br>${muted(`VLAN ${n.vlan}`)}` : ''}` : dash}</td>
             <td>${n.aps.length ? escapeHtml(n.aps.join(', ')) : dash}</td>
             <td>${n.clients.length ? escapeHtml(n.clients.join(', ')) : dash}</td>
         </tr>`).join('')}</tbody></table>` : `<p class="muted">${escapeHtml(t('No Wi-Fi networks recorded.'))}</p>`;
@@ -1691,6 +1716,11 @@ function summarySheet(model, opts = {}) {
     <p class="muted">${escapeHtml(baselineSentence(ch))}</p>${ch.rows.length ? `<ul class="changes">${ch.rows.slice(0, SUMMARY_CHANGES_MAX).map((r) => `<li>${escapeHtml(r.op)} · ${escapeHtml(r.what)}${r.name ? ` <b>${escapeHtml(r.name)}</b>` : ''}${r.detail ? ` <span class="muted">— ${escapeHtml(r.detail)}</span>` : ''}</li>`).join('')}${ch.rows.length > SUMMARY_CHANGES_MAX ? `<li class="muted">${escapeHtml(t('…and {n} more.', { n: ch.rows.length - SUMMARY_CHANGES_MAX }))}</li>` : ''}</ul>` : `<p>${escapeHtml(t('Nothing has changed since then.'))}</p>`}` : '';
 
     const who = meta.engineer ? `<p class="who">${escapeHtml(t('Checked by {name}. Questions about this summary go to them.', { name: meta.engineer }))}</p>` : '';
+    // The map: a landscape sheet of its own after the summary's page, the
+    // whole network on it (opts.image; the technical sheet after it points
+    // at the same picture).
+    const caption = meta.site ? `${t('Topology')} — ${meta.site}` : t('Topology');
+    const map = opts.image ? diagramSheets({ kind: 'sheet' }, opts.image, caption, opts.diagramId || 'topo-dg') : '';
     return `<div class="sheet summary"${opts.anchorId ? ` id="${escapeHtml(opts.anchorId)}"` : ''}>
     <div class="rule"></div>
     <h1>${escapeHtml(opts.title || t('Network summary'))}</h1>
@@ -1703,14 +1733,15 @@ function summarySheet(model, opts = {}) {
 
     <h2>${escapeHtml(t('What you have'))}</h2>
     <div class="stats">${kindStats || `<div class="stat"><b>0</b><span>${escapeHtml(t('Devices'))}</span></div>`}</div>
-    ${list}
+    ${list}${map ? `
+    <p class="muted">${escapeHtml(t('The map of the network is on the next page.'))}</p>` : ''}
     ${changes}
     ${who}
     <footer>
         <span>${escapeHtml(meta.ref || '')}</span>
         <span>${escapeHtml(t('Generated with Topo · topo.carino.systems'))}</span>
     </footer>
-</div>`;
+</div>${map}`;
 }
 
 // ---- The document shell, and one sheet inside it ----
@@ -1747,15 +1778,20 @@ function reportSheet(model, image, opts = {}) {
     const accepted = model.accepted || [];
     const portMaps = model.portMaps || [];
     // Inline, a landscape page of its own, or tiles (reportDiagramLayout).
+    // With the large map asked for (opts.largeMap, the dialog's Large map)
+    // the diagram is also tiled large at the end: an overview with each
+    // sheet's square marked, then the sheets. A diagram already in tiles is
+    // tiled large in their place rather than twice.
     const layout = reportDiagramLayout(image, counts.devices);
+    const large = opts.largeMap ? reportDiagramLayout(image, counts.devices, { large: true, cols: opts.largeCols, rows: opts.largeRows, skip: opts.largeSkip }) : null;
     const caption = meta.site ? `${t('Topology')} — ${meta.site}` : t('Topology');
     const figure = layout && layout.kind === 'inline' ? `<div class="figure">
         <img src="${image.url}" alt="${escapeHtml(t('Network topology diagram'))}">
         <div class="caption">${escapeHtml(caption)}</div>
     </div>` : '';
-    const away = !layout ? '' : layout.kind === 'sheet'
-        ? t('The diagram is on a landscape page of its own at the end of this report.')
-        : layout.kind === 'tiles' ? t('The diagram is too large to read on one page: it is at the end, as an overview and {n} landscape sheets.', { n: layout.tiles.length }) : '';
+    const away = layout && layout.kind === 'sheet' ? t('The diagram is on a landscape page of its own at the end of this report.') : '';
+    const largeNote = large ? t('A large map is at the end: an overview with each sheet marked, then {n} landscape sheets.', { n: large.tiles.length }) : '';
+    const diagramId = opts.diagramId || 'topo-dg';
 
     return `<div class="sheet"${opts.anchorId ? ` id="${escapeHtml(opts.anchorId)}"` : ''}>
     <div class="rule"></div>
@@ -1783,7 +1819,8 @@ ${(model.visit || []).length ? `
     ${acceptedSection(accepted)}
 ` : ''}
     ${image ? `<h2>${escapeHtml(t('Topology'))}</h2>
-    ${away ? `<p class="muted">${escapeHtml(away)}</p>` : figure}` : ''}
+    ${away ? `<p class="muted">${escapeHtml(away)}</p>` : figure}${largeNote ? `
+    <p class="muted">${escapeHtml(largeNote)}</p>` : ''}` : ''}
 
     <h2>${escapeHtml(t('Device inventory'))}</h2>
     ${devicesSection(model.devices, model.groups)}
@@ -1813,14 +1850,16 @@ ${model.changes ? `
         <span>${escapeHtml(meta.ref || '')}</span>
         <span>${escapeHtml(t('Generated with Topo · topo.carino.systems'))}</span>
     </footer>
-</div>${away ? diagramSheets(layout, image, caption, opts.diagramId || 'topo-dg') : ''}`;
+</div>${away ? diagramSheets(layout, image, caption, diagramId, !!opts.diagramDefined) : ''}${large ? diagramSheets(large, image, `${caption} · ${t('Large map')}`, diagramId, !!opts.diagramDefined || !!away) : ''}`;
 }
 
 // What a report holds: the summary for the client, the technical sheet, or
 // both (the summary first). The dialog ticks both by default; a caller that
 // says nothing gets the technical sheet alone, as before the summary existed.
 const reportParts = (parts) => {
-    const p = { summary: !!(parts && parts.summary), technical: !parts || parts.technical !== false };
+    const p = { summary: !!(parts && parts.summary), technical: !parts || parts.technical !== false, largeMap: !!(parts && parts.largeMap),
+        largeCols: gridCount(parts && parts.largeCols), largeRows: gridCount(parts && parts.largeRows),
+        largeSkip: [...gridSkip(parts && parts.largeSkip)].sort() };
     if (!p.summary && !p.technical) p.technical = true;
     return p;
 };
@@ -1830,7 +1869,8 @@ const reportTitleWord = (p) => t(p.technical ? 'Network documentation report' : 
 function reportHtml(model, image, parts) {
     const p = reportParts(parts);
     const title = model.meta.site ? `${model.meta.site} — ${reportTitleWord(p)}` : reportTitleWord(p);
-    return reportDocument(title, (p.summary ? summarySheet(model) : '') + (p.technical ? reportSheet(model, image) : ''));
+    return reportDocument(title, (p.summary ? summarySheet(model, { image }) : '')
+        + (p.technical ? reportSheet(model, image, { largeMap: p.largeMap, largeCols: p.largeCols, largeRows: p.largeRows, largeSkip: p.largeSkip, diagramDefined: p.summary && !!image }) : ''));
 }
 
 // The cover: what the whole engagement adds up to, before any one building.
@@ -1930,9 +1970,10 @@ function binderHtml(binder, images = {}, parts) {
         const sheetModel = Object.assign({}, s.model, { meta: sheetMeta });
         // The summary is read on its own, so it carries the whole header:
         // the cover's, with the site's own where it says something else.
+        const image = images[s.id] || null, diagramId = `topo-dg-${s.anchor}`;
         const summary = p.summary ? summarySheet(Object.assign({}, s.model, { meta: Object.assign({}, binder.meta, { site: '' }, pickSet(sheetMeta)) }),
-            { title: s.name, subtitle: t('Network summary'), anchorId: s.anchor }) : '';
-        return summary + (p.technical ? reportSheet(sheetModel, images[s.id] || null, { title: s.name, subtitle: '', anchorId: p.summary ? '' : s.anchor, diagramId: `topo-dg-${s.anchor}` }) : '');
+            { title: s.name, subtitle: t('Network summary'), anchorId: s.anchor, image, diagramId }) : '';
+        return summary + (p.technical ? reportSheet(sheetModel, image, { title: s.name, subtitle: '', anchorId: p.summary ? '' : s.anchor, diagramId, largeMap: p.largeMap, largeCols: p.largeCols, largeRows: p.largeRows, largeSkip: p.largeSkip, diagramDefined: p.summary && !!image }) : '');
     }).join('');
     return reportDocument(title, (p.technical ? binderCoverSheet(binder) : '') + sheets);
 }
@@ -1947,7 +1988,23 @@ const pickSet = (meta) => { const out = {}; Object.keys(meta || {}).forEach((k) 
 // leaves the new tab pointed at nothing.
 // `kind` names the download ('report', or 'labels' for Print labels in
 // js/assets.js, which is delivered the same way).
-function deliverReport(html, meta, kind = 'report') {
+// A report (kind 'report' or 'summary') has been read in the dialog's
+// preview already (refreshReportPreview below): it is saved as a file, and
+// handed over, so `onKept` runs (a kept network's report baseline,
+// buildSiteReport). Labels still open as before, in a tab.
+function deliverReport(html, meta, kind = 'report', onKept = null) {
+    if (kind !== 'report' && kind !== 'summary') return openReportTab(html, meta, kind);
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+    const name = reportFileName(meta, kind);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    if (typeof onKept === 'function') onKept();
+    return { url, name, opened: false, downloaded: true };
+}
+const reportFileName = (meta, kind) => `${fileSlug(meta.site)}-${kind}-${meta.date || todayISO()}.html`;
+function openReportTab(html, meta, kind) {
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const name = `${fileSlug(meta.site)}-${kind}-${meta.date || todayISO()}.html`;
@@ -1977,9 +2034,12 @@ function deliverReport(html, meta, kind = 'report') {
 // (js/changes.js), and is then its new baseline: the next report says what
 // changed since this one. Worked out before the baseline moves, or every
 // report would say nothing had changed.
-// parts: { summary, technical } (reportParts); the diagram is drawn only for
-// the technical sheet, the one that prints it.
-async function generateSiteReport(meta, parts) {
+// parts: { summary, technical, largeMap } (reportParts); the diagram is drawn
+// for either part, the summary carrying it on a sheet of its own.
+// cache: the dialog's (reportImageCache), so a preview redrawn for every
+// edit draws the diagram once per date rather than per keystroke.
+// -> { html, meta, kind, onKept }
+async function buildSiteReport(meta, parts, cache = null) {
     const p = reportParts(parts);
     // The dialog's date, not only the stored one: a read-only document never
     // stores what was typed, and the model would count to another day.
@@ -1989,13 +2049,25 @@ async function generateSiteReport(meta, parts) {
     const doc = keptId ? serializeDoc() : null;
     if (keptId) model.changes = reportChanges(keptId, doc);
     let image = null;
-    if (p.technical) {
-        try { image = await captureReportDiagram(reportAsOf(meta || state.report)); }
+    {
+        const day = reportAsOf(meta || state.report);
+        try { image = await cachedImage(cache, `site:${day}`, () => captureReportDiagram(day)); }
         catch (e) { console.warn('Report: could not rasterise the diagram; continuing without it.', e); }
     }
-    const out = deliverReport(reportHtml(model, image, p), model.meta, p.technical ? 'report' : 'summary');
-    if (keptId) takeSnapshot(keptId, 'report', doc);
-    return out;
+    // The baseline moves when the report is handed over (downloaded or
+    // printed), not when it is only looked at.
+    return { html: reportHtml(model, image, p), meta: model.meta, kind: p.technical ? 'report' : 'summary',
+        onKept: keptId ? () => takeSnapshot(keptId, 'report', doc) : null };
+}
+async function generateSiteReport(meta, parts) {
+    const b = await buildSiteReport(meta, parts);
+    return deliverReport(b.html, b.meta, b.kind, b.onKept);
+}
+// A cache's promise for `key`, made once; a failed one is not kept.
+function cachedImage(cache, key, make) {
+    if (!cache) return make();
+    if (!cache.has(key)) cache.set(key, Promise.resolve().then(make).catch((e) => { cache.delete(key); throw e; }));
+    return cache.get(key);
 }
 
 // Draw a stored document onto the real canvas so it can be rasterised, then put
@@ -2067,11 +2139,11 @@ async function captureBinderImages(sites, onProgress, capture) {
     return images;
 }
 
-async function generateBinderReport(estateMeta, opts = {}) {
+async function buildBinderReport(estateMeta, opts = {}, cache = null) {
     // Sites only: a saved template is a starting point, not a building.
     flushAutosave();
     const entries = libraryNetworks();
-    if (!entries.length) { showToast(t('Nothing to report on yet — save a network first.')); return null; }
+    if (!entries.length) return null;
     const binder = binderModel(entries, estateMeta);
     // binderSiteModels drops the document once it has the model; the image
     // sweep needs it back, and matching by id keeps that lookup honest.
@@ -2081,10 +2153,16 @@ async function generateBinderReport(estateMeta, opts = {}) {
     // estate report is then every card's new one, as a site report is.
     binder.sites.forEach((s) => { if (s.model) s.model.changes = reportChanges(s.id, s.doc); });
     const p = reportParts(opts.parts);
-    const images = opts.images === false || !p.technical ? {} : await captureBinderImages(binder.sites, opts.onProgress, opts.capture);
-    const out = deliverReport(binderHtml(binder, images, p), { site: binder.meta.site || 'estate', date: binder.meta.date, ref: binder.meta.ref }, p.technical ? 'report' : 'summary');
-    entries.forEach((e) => takeSnapshot(e.id, 'report', e.doc));
-    return out;
+    const images = opts.images === false ? {}
+        : await cachedImage(cache, 'binder', () => captureBinderImages(binder.sites, opts.onProgress, opts.capture));
+    return { html: binderHtml(binder, images, p), meta: { site: binder.meta.site || 'estate', date: binder.meta.date, ref: binder.meta.ref },
+        kind: p.technical ? 'report' : 'summary', onKept: () => entries.forEach((e) => takeSnapshot(e.id, 'report', e.doc)) };
+}
+
+async function generateBinderReport(estateMeta, opts = {}) {
+    const b = await buildBinderReport(estateMeta, opts);
+    if (!b) { showToast(t('Nothing to report on yet — save a network first.')); return null; }
+    return deliverReport(b.html, b.meta, b.kind, b.onKept);
 }
 
 // ---- The dialog ----
@@ -2160,13 +2238,13 @@ function renderReportDialog() {
             : t('The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.')
                 + (state.readOnly ? ` ${t('This network is read-only, so the header is used for this report and not kept.')}` : '');
     }
-    if (build) build.textContent = binder ? `📋 ${t('Open binder report')}` : `📋 ${t('Open report')}`;
+    if (build) build.textContent = t('⬇ Download');
     // The report prints every device's notes: a password in one is named
     // here, before the document is handed to anyone (js/assets.js).
     renderSecretLint(document.getElementById('reportLint'), secretHitsFor(binder ? 'binder-report' : 'doc'), binder ? null : closeReportDialog);
     if (images) {
-        // The diagrams are the technical sheets'; a summary has none.
-        images.classList.toggle('hidden', !binder || !readReportParts().technical);
+        // Every part shows each site's map now, the summary too.
+        images.classList.toggle('hidden', !binder);
         // On by default up to eight sites. Past that the sweep is slow and the
         // file is enormous, and the estate cover is the part being read anyway.
         const cb = document.getElementById('reportImages');
@@ -2181,9 +2259,18 @@ function openReportDialog(mode) {
     _reportMode = mode === 'binder' ? 'binder' : 'site';
     // Both, every time it opens: the hand-over copy is the usual report.
     ['reportSummary', 'reportTechnical'].forEach((id) => { const cb = document.getElementById(id); if (cb) cb.checked = true; });
+    // Off: it adds pages.
+    const large = document.getElementById('reportLargeMap');
+    if (large) large.checked = false;
+    ['reportLargeCols', 'reportLargeRows'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = String(REPORT_DIAGRAM_GRID_DEFAULT); });
+    _largeSkip.clear();
+    syncLargeSheets();
+    document.getElementById('reportLargeMapRow')?.classList.remove('hidden');
     renderReportDialog();
+    dropReportPreview();
     dialog.classList.remove('hidden');
     document.getElementById('report-site')?.focus();
+    scheduleReportPreview(0);
 }
 
 function openBinderReportDialog() {
@@ -2196,7 +2283,10 @@ const reportMode = () => _reportMode;
 // The two ticks as reportParts reads them.
 function readReportParts() {
     const on = (id) => { const cb = document.getElementById(id); return !cb || cb.checked; };
-    return reportParts({ summary: on('reportSummary'), technical: on('reportTechnical') });
+    const large = document.getElementById('reportLargeMap');
+    const val = (id) => { const el = document.getElementById(id); return el ? Number(el.value) : REPORT_DIAGRAM_GRID_DEFAULT; };
+    return reportParts({ summary: on('reportSummary'), technical: on('reportTechnical'), largeMap: !!(large && large.checked),
+        largeCols: val('reportLargeCols'), largeRows: val('reportLargeRows'), largeSkip: largeSkipInGrid(val('reportLargeCols'), val('reportLargeRows')) });
 }
 // At least one stays ticked: unticking the last one ticks the other.
 (function wireReportParts() {
@@ -2205,12 +2295,238 @@ function readReportParts() {
     const keep = (other) => (e) => {
         if (!e.target.checked && !other.checked) other.checked = true;
         const images = document.getElementById('reportImagesRow');
-        if (images) images.classList.toggle('hidden', _reportMode !== 'binder' || !tech.checked);
+        if (images) images.classList.toggle('hidden', _reportMode !== 'binder');
+        // The large map is a diagram's, so the technical sheet's.
+        document.getElementById('reportLargeMapRow')?.classList.toggle('hidden', !tech.checked);
     };
     s.addEventListener('change', keep(tech));
     tech.addEventListener('change', keep(s));
 })();
 
+// The squares of the large map the visitor left out, by name. Kept while
+// the grid changes size (a square that is no longer on it simply does not
+// count), cleared each time the dialog opens.
+const _largeSkip = new Set();
+function largeSkipInGrid(cols, rows) {
+    cols = gridCount(cols); rows = gridCount(rows);
+    const names = new Set();
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) names.add(tileName(c, r));
+    const skip = [..._largeSkip].filter((x) => names.has(x));
+    return skip.length >= names.size ? [] : skip;
+}
+// One square on or off; the last one printed stays on.
+function toggleLargeSheet(name) {
+    const p = readReportParts();
+    if (_largeSkip.has(name)) _largeSkip.delete(name);
+    else if (p.largeCols * p.largeRows - p.largeSkip.length > 1) _largeSkip.add(name);
+    else return false;
+    _reportPv.focusLarge = true;
+    syncLargeSheets();
+    scheduleReportPreview(50);
+    return true;
+}
+// The large map's grid is asked only while Large map is ticked: its size,
+// and a square per sheet to leave it out or put it back.
+function syncLargeSheets() {
+    const on = !!document.getElementById('reportLargeMap')?.checked && !!document.getElementById('reportTechnical')?.checked;
+    document.getElementById('reportLargeSheetsRow')?.classList.toggle('hidden', !on);
+    const p = readReportParts(), total = document.getElementById('reportLargeTotal');
+    const all = p.largeCols * p.largeRows, n = all - p.largeSkip.length;
+    if (total) total.textContent = n < all ? t('= {n} of {all} sheets', { n, all }) : t(n === 1 ? '= 1 sheet' : '= {n} sheets', { n });
+    const cells = document.getElementById('reportLargeCells');
+    if (!cells) return;
+    const skip = new Set(p.largeSkip);
+    cells.style.setProperty('--cols', p.largeCols);
+    cells.replaceChildren(...Array.from({ length: all }, (_, i) => {
+        const name = tileName(i % p.largeCols, Math.floor(i / p.largeCols));
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'dlg-cell';
+        b.dataset.cell = name;
+        b.textContent = name;
+        b.setAttribute('aria-pressed', String(!skip.has(name)));
+        b.title = t(skip.has(name) ? 'Sheet {name}: left out' : 'Sheet {name}: printed', { name });
+        return b;
+    }));
+}
 function closeReportDialog() {
     document.getElementById('reportDialog')?.classList.add('hidden');
+    dropReportPreview();
 }
+
+// ---- The preview, in the dialog ----
+// The report as it will print, beside the questions that shape it: redrawn
+// a moment after each edit, so what is downloaded or printed is what was
+// read. The diagram is drawn once per opening (per date for a site, once
+// for a binder's sweep) and reused for every redraw. The frame is a blob:
+// page of this origin under this page's CSP; the report's own toolbar (an
+// inline onclick) is hidden there, the dialog's buttons do its job. Only
+// Download or Print hands the report over (its onKept); the header typed
+// into a site's dialog is stored then too (commitReportMeta).
+const _reportPv = { seq: 0, timer: null, url: null, built: null, cache: null, pending: null, focusLarge: false };
+// What the dialog asks for now, read and not stored.
+function reportDialogAsk() {
+    const binder = _reportMode === 'binder';
+    const raw = readReportFields();
+    return { binder, meta: binder ? raw : normalizeReportMeta(raw), parts: readReportParts(),
+        images: binder ? !!document.getElementById('reportImages')?.checked : false };
+}
+function buildFromAsk(ask) {
+    return ask.binder ? buildBinderReport(ask.meta, { images: ask.images, parts: ask.parts }, _reportPv.cache)
+        : buildSiteReport(ask.meta, ask.parts, _reportPv.cache);
+}
+function scheduleReportPreview(delay = 400) {
+    clearTimeout(_reportPv.timer);
+    _reportPv.timer = setTimeout(() => { refreshReportPreview(); }, delay);
+}
+function reportPreviewStatus(key) {
+    const el = document.getElementById('reportPreviewStatus');
+    if (el) el.textContent = key ? t(key) : '';
+}
+async function refreshReportPreview() {
+    clearTimeout(_reportPv.timer);
+    const dialog = document.getElementById('reportDialog');
+    const frame = document.getElementById('reportPreviewFrame');
+    if (!dialog || dialog.classList.contains('hidden') || !frame) return null;
+    if (!_reportPv.cache) _reportPv.cache = new Map();
+    const seq = ++_reportPv.seq;
+    reportPreviewStatus('Updating…');
+    const run = (async () => {
+        let b;
+        try { b = await buildFromAsk(reportDialogAsk()); }
+        catch (e) { console.warn('Report preview failed:', e); if (seq === _reportPv.seq) reportPreviewStatus('Could not build the report.'); return null; }
+        if (seq !== _reportPv.seq || dialog.classList.contains('hidden')) return null;
+        if (!b) { reportPreviewStatus('Nothing to report on yet — save a network first.'); return null; }
+        const url = URL.createObjectURL(new Blob([b.html], { type: 'text/html;charset=utf-8' }));
+        const old = _reportPv.url;
+        _reportPv.url = url; _reportPv.built = b;
+        // Where the preview was, so a redraw does not send it back to the
+        // top; after a change to the large map's grid, its overview instead.
+        let was = 0;
+        try { was = old && frame.contentWindow ? frame.contentWindow.scrollY : 0; } catch (e) { /* not readable */ }
+        const toLarge = _reportPv.focusLarge;
+        _reportPv.focusLarge = false;
+        // Resolved once the frame shows it, so Print prints this one.
+        await new Promise((done) => {
+            const shown = () => {
+                frame.onload = null;
+                try {
+                    const bar = frame.contentDocument && frame.contentDocument.querySelector('.toolbar');
+                    if (bar) bar.style.display = 'none';
+                    wirePreviewCells(frame.contentDocument);
+                    fitReportPreview(frame);
+                    placeReportPreview(frame, toLarge, was);
+                } catch (e) { /* not readable: the toolbar stays, harmless */ }
+                if (old) URL.revokeObjectURL(old);
+                done();
+            };
+            frame.onload = shown;
+            setTimeout(shown, 5000);   // a frame that never says it loaded
+            frame.src = url;
+        });
+        if (seq !== _reportPv.seq) return null;
+        const name = document.getElementById('reportPreviewName');
+        if (name) name.textContent = reportFileName(b.meta, b.kind);
+        reportPreviewStatus('');
+        return b;
+    })();
+    _reportPv.pending = run;
+    return run;
+}
+// Scrolls the preview within its own frame (never the dialog around it): to
+// the large map's overview when asked and there is one, else back to `y`.
+function placeReportPreview(frame, toLarge, y) {
+    const win = frame.contentWindow, doc = frame.contentDocument;
+    if (!win || !doc) return;
+    const ov = toLarge ? doc.querySelector('.dg-cell[data-cell]') : null;
+    const sheet = ov && ov.closest('.sheet');
+    if (sheet) win.scrollTo(0, Math.max(0, sheet.getBoundingClientRect().top + win.scrollY - 12));
+    else if (y) win.scrollTo(0, y);
+}
+// A preview narrower than a page (a phone) shows the page scaled down, as it
+// will print, rather than the report reflowed to a phone's width (its own
+// narrow-screen rules go by the frame's width): the frame is laid out a page
+// wide and the frame itself scaled to fit. Only the element is scaled, so
+// printing its document is untouched.
+const REPORT_PREVIEW_PAGE_PX = 820;
+function fitReportPreview(frame) {
+    const box = frame && frame.parentElement;
+    if (!box) return;
+    frame.style.width = ''; frame.style.height = ''; frame.style.transform = ''; frame.style.flex = '';
+    const w = box.clientWidth;
+    if (!w || w >= REPORT_PREVIEW_PAGE_PX) return;
+    const k = w / REPORT_PREVIEW_PAGE_PX;
+    const head = box.querySelector('.rp-head');
+    const h = Math.max(200, box.clientHeight - (head ? head.offsetHeight + 6 : 0));
+    Object.assign(frame.style, { flex: 'none', width: `${REPORT_PREVIEW_PAGE_PX}px`, height: `${Math.round(h / k)}px`,
+        transform: `scale(${k})`, transformOrigin: '0 0' });
+}
+window.addEventListener('resize', () => { const f = document.getElementById('reportPreviewFrame'); if (f && _reportPv.url) fitReportPreview(f); });
+function dropReportPreview() {
+    clearTimeout(_reportPv.timer);
+    _reportPv.seq++;
+    const frame = document.getElementById('reportPreviewFrame');
+    if (frame) { frame.onload = null; frame.removeAttribute('src'); }
+    if (_reportPv.url) URL.revokeObjectURL(_reportPv.url);
+    _reportPv.url = null; _reportPv.built = null; _reportPv.cache = null; _reportPv.pending = null;
+    const name = document.getElementById('reportPreviewName');
+    if (name) name.textContent = '';
+}
+const reportPreviewBuilt = () => _reportPv.built;
+// The header as the report will carry it: a site's is stored now (a
+// read-only document's is only read), a binder's belongs to this document.
+function commitReportAsk() {
+    if (_reportMode === 'binder') return;
+    commitReportMeta();
+}
+// Download: the report as previewed, built again after the header is
+// stored (so the changes section does not count the header it just got),
+// saved as a file; the dialog closes.
+async function downloadReportFromDialog() {
+    commitReportAsk();
+    const b = await buildFromAsk(reportDialogAsk());
+    if (!b) { showToast(t('Nothing to report on yet — save a network first.')); return null; }
+    closeReportDialog();
+    return deliverReport(b.html, b.meta, b.kind, b.onKept);
+}
+// Print: the preview redrawn with the stored header, then that frame printed
+// (or saved as PDF from the print dialog). The dialog stays, for a copy.
+async function printReportFromDialog() {
+    commitReportAsk();
+    const b = await refreshReportPreview();
+    const frame = document.getElementById('reportPreviewFrame');
+    if (!b || !frame || !frame.contentWindow) return false;
+    if (typeof b.onKept === 'function') { try { b.onKept(); } catch (e) { console.warn('Report: could not record the hand-over.', e); } }
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+    return true;
+}
+// In the preview, the large map's overview squares are the toggles too: a
+// click leaves that sheet out or puts it back. Only the preview is wired;
+// the file downloaded or printed is the plain report.
+function wirePreviewCells(doc) {
+    if (!doc) return;
+    const cells = doc.querySelectorAll('.land-head + svg .dg-cell[data-cell]');
+    if (!cells.length || !document.getElementById('reportLargeMap')?.checked) return;
+    const css = doc.createElement('style');
+    css.textContent = '.dg-cell[data-cell] { cursor: pointer; } .dg-cell[data-cell]:hover rect { fill: rgba(37, 99, 235, 0.14); }';
+    doc.head.appendChild(css);
+    cells.forEach((g) => {
+        // Only the overview's own squares (the sheets after it have none).
+        g.addEventListener('click', () => toggleLargeSheet(g.dataset.cell));
+    });
+}
+(function wireReportPreview() {
+    const fields = document.getElementById('reportFields');
+    if (fields) fields.addEventListener('input', () => scheduleReportPreview());
+    ['reportLargeMap', 'reportTechnical', 'reportLargeCols', 'reportLargeRows'].forEach((id) => document.getElementById(id)?.addEventListener('change', syncLargeSheets));
+    // A change to the large map's grid shows the preview at its overview.
+    ['reportLargeMap', 'reportLargeCols', 'reportLargeRows'].forEach((id) => document.getElementById(id)?.addEventListener('change', () => { _reportPv.focusLarge = true; }));
+    document.getElementById('reportLargeCells')?.addEventListener('click', (e) => {
+        const b = e.target.closest('.dlg-cell');
+        if (b) toggleLargeSheet(b.dataset.cell);
+    });
+    ['reportSummary', 'reportTechnical', 'reportLargeMap', 'reportLargeCols', 'reportLargeRows', 'reportImages'].forEach((id) => {
+        document.getElementById(id)?.addEventListener('change', () => scheduleReportPreview(50));
+    });
+})();

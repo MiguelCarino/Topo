@@ -34,7 +34,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
   let downloads = [];
   window.downloadJson = (payload, name) => { downloads.push({ payload: JSON.parse(JSON.stringify(payload)), name }); };
   let delivered = [];
-  window.deliverReport = (html, meta) => { delivered.push(html); return { opened: true }; };
+  // The preview hands the report over on Download or Print (onKept); these
+  // checks take it as handed over.
+  window.deliverReport = (html, meta, kind, onKept) => { delivered.push(html); if (onKept) onKept(); return { opened: true }; };
   window.captureCanvasImage = async () => null;
 
   const site = () => ({

@@ -282,10 +282,12 @@ window.addEventListener('load', () => { setTimeout(async () => {
               N('c', 'pc', { x: 1000, y: 0, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.9.0.7/24' }] })],
       links: [], networks: [{ id: 'n9', cidr: '10.9.0.0/24', drawZone: true }], groups: [{ id: 'z', name: 'Lab', kind: 'room' }] };
     replaceDocument(zoned, { origin: 'file', docId: 'doc-Z' });
-    const zoneBox = () => zonesToDraw()[0].box;
-    ok('expanded, the zone spans the devices', zoneBox().minX === 0 && zoneBox().maxX === 1000);
+    // One bubble per group the network's devices are in (zonesNow): the
+    // room's two, and the one outside it.
+    const zoneBoxes = () => zonesToDraw().map((z) => [z.box.minX, z.box.maxX]).sort((p, q) => p[0] - q[0]);
+    ok('expanded, a bubble spans the room\'s devices and one the device outside it', json(zoneBoxes()) === '[[0,400],[1000,1000]]', json(zoneBoxes()));
     setGroupCollapsed('z', true);
-    ok('collapsed, it spans the group\'s node instead', zoneBox().minX === 200 && zoneBox().maxX === 1000, json(zoneBox()));
+    ok('collapsed, the room\'s bubble is round the group\'s node instead', json(zoneBoxes()) === '[[200,200],[1000,1000]]', json(zoneBoxes()));
     setGroupCollapsed('z', false);
     open('doc-A');
 

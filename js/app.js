@@ -256,12 +256,21 @@ function nextFreeHost(networkStr, prefix) {
 // One batch: every node moves, and that is one step and one redraw.
 const TIDY_WRAP = 12;
 // Played (js/motion.js): every device glides to its tidied place.
-function tidyLayout() { mapMotion(() => batch(tidyLayoutNow)); }
-function tidyLayoutNow() {
+// The ⤢ Tidy button is that; its ▾ menu has Tidy all, the whole map
+// whatever is selected, and, while a device in a group or a group's
+// devices are selected, Tidy group (tidyGroupOfSelection): that group with
+// the groups inside it, where it stands, nothing else moving.
+// scope: undefined (the selection, or the map), 'all', or a group id.
+function tidyLayout(scope) { mapMotion(() => batch(() => tidyLayoutNow(scope))); }
+function tidyLayoutNow(scope) {
     if (!state.nodes.length || readOnlyRefuses()) return;
-    const picked = selectedOf('node').map(getNode).filter(Boolean);
-    const only = picked.length >= 2;
-    const nodes = only ? tidyWithInnerGroups(picked) : state.nodes;
+    const group = scope && scope !== 'all' ? (state.groups || []).find((g) => g.id === scope) : null;
+    if (scope && scope !== 'all' && !group) return;
+    const picked = group ? groupMembers(group.id, true)
+        : scope === 'all' ? [] : selectedOf('node').map(getNode).filter(Boolean);
+    const only = group ? picked.length > 0 : picked.length >= 2;
+    if (group && !only) return;
+    const nodes = group ? withGuests(picked) : only ? tidyWithInnerGroups(picked) : state.nodes;
     const pos = tidyPositionsGrouped(nodes, state.links);
     let dx = 0, dy = 0;
     if (only) {
@@ -277,6 +286,38 @@ function tidyLayoutNow() {
     tidyNotesAlong(was);
     save(); renderCanvasOnly();
     if (!only) fitToView();
+}
+
+// A group's devices and what runs on them: a VM or container on a host in
+// the group sits where its host is and carries no group of its own, so it
+// would otherwise be left behind when the group moves.
+function withGuests(nodes) {
+    const ids = new Set(nodes.map((n) => n.id));
+    const out = nodes.slice();
+    for (let grew = true; grew;) {
+        grew = false;
+        state.nodes.forEach((n) => { if (!ids.has(n.id) && n.host && ids.has(n.host)) { ids.add(n.id); out.push(n); grew = true; } });
+    }
+    return out;
+}
+
+// The group Tidy group arranges: the innermost one holding every selected
+// device (one device: its own group; a frame's tab selects the group's
+// devices, so that group). Null when a selected device is in no group, the
+// devices share none, or the view draws no groups. -> group or null
+function tidyGroupOfSelection() {
+    const groups = state.groups || [];
+    if (!groups.length || isReduced()) return null;
+    const byId = new Map(groups.map((g) => [g.id, g]));
+    const chain = (n) => {
+        const out = [], seen = new Set();
+        for (let g = n && byId.get(n.group); g && !seen.has(g.id); g = byId.get(g.parent)) { seen.add(g.id); out.push(g); }
+        return out;   // innermost first
+    };
+    const picked = selectedOf('node').map(getNode).filter(Boolean);
+    if (!picked.length) return null;
+    const rest = picked.slice(1).map((n) => new Set(chain(n).map((g) => g.id)));
+    return chain(picked[0]).find((g) => rest.every((s) => s.has(g.id))) || null;
 }
 
 // The notes go with the devices they are about. A note's red lines point at
@@ -1691,8 +1732,7 @@ function renderReadOnly() {
         const el = document.getElementById(id);
         if (el) el.inert = on;
     });
-    const tidy = document.getElementById('tidyBtn');
-    if (tidy) tidy.disabled = on;
+    ['tidyBtn', 'tidyMenuBtn'].forEach((id) => { const el = document.getElementById(id); if (el) el.disabled = on; });
 }
 
 // A one-line notice that goes away on its own (carino-ui.css's .toast).
@@ -2462,6 +2502,7 @@ function applyProfile() {
 function applyLocale(lang) {
     if (lang) { state.settings.lang = lang; saveSettings(); }
     applyStaticI18n();
+    if (typeof updateRailWrap === 'function') updateRailWrap();   // its hint and title are worded here
     // #tracePort's data-i18n-title is the "on" title; applyStaticI18n() just
     // wrote it whatever the filter says, so the suspended one is put back.
     updateTracePortUi();
@@ -2611,7 +2652,18 @@ function renderLibrary() {
     renderUserTemplates();
 }
 
-document.getElementById('tidyBtn').onclick = tidyLayout;
+document.getElementById('libWrapRow').onclick = () => setLibraryPinned(!libraryPinned());
+updateRailWrap();
+document.getElementById('tidyBtn').onclick = () => tidyLayout();
+document.getElementById('tidyAllBtn').onclick = () => tidyLayout('all');
+document.getElementById('tidyGroupBtn').onclick = () => { const g = tidyGroupOfSelection(); if (g) tidyLayout(g.id); };
+// Tidy group is offered only for a selection in a group, so it is worked out
+// as the menu opens (carino-ui.js shows the panel on the same click).
+document.getElementById('tidyMenuBtn').addEventListener('click', () => {
+    const g = tidyGroupOfSelection();
+    document.getElementById('tidyGroupBtn').hidden = !g;
+    document.getElementById('tidyGroupName').textContent = g ? (g.name || '') : '';
+});
 document.getElementById('saveTemplateBtn').onclick = saveAsTemplate;
 document.getElementById('undoBtn').onclick = undo;
 document.getElementById('redoBtn').onclick = redo;
@@ -3148,21 +3200,17 @@ document.getElementById('reportCancelBtn').onclick = () => closeReportDialog();
 document.getElementById('reportDialog').onclick = (e) => {
     if (e.target.id === 'reportDialog') closeReportDialog(); // click the backdrop to dismiss
 };
-document.getElementById('reportBuildBtn').onclick = async () => {
-    const btn = document.getElementById('reportBuildBtn');
-    // The binder path reads the form and stops there: the estate header belongs
-    // to this one document, and writing it into state.report would stamp it on
-    // whatever network happens to be open behind the landing.
-    const binder = reportMode() === 'binder';
-    const meta = binder ? readReportFields() : commitReportMeta();
-    const images = binder ? document.getElementById('reportImages').checked : false;
-    const parts = readReportParts();
-    closeReportDialog();
-    btn.disabled = true;
-    try { await (binder ? generateBinderReport(meta, { images, parts }) : generateSiteReport(meta, parts)); }
+// The dialog shows the report as it goes (refreshReportPreview, js/report.js):
+// Download saves it and closes the dialog, Print prints the preview.
+const reportAction = (fn) => async () => {
+    const btns = ['reportBuildBtn', 'reportPrintBtn'].map((id) => document.getElementById(id));
+    btns.forEach((b) => { if (b) b.disabled = true; });
+    try { await fn(); }
     catch (err) { console.warn('Could not build the report:', err); showToast(t('Could not build the report.'), 'err'); }
-    finally { btn.disabled = false; }
+    finally { btns.forEach((b) => { if (b) b.disabled = false; }); }
 };
+document.getElementById('reportBuildBtn').onclick = reportAction(downloadReportFromDialog);
+document.getElementById('reportPrintBtn').onclick = reportAction(printReportFromDialog);
 
 // The File menu's opening and closing is carino-ui.js's (shared .cs-menu);
 // its items keep the handlers wired above.

@@ -714,7 +714,7 @@ const TV_COLS = {
             },
             get: (w) => w.network || '',
             edit: (row) => row.data.networkId,
-            show: (row) => shown(row.data.subnet + (row.data.vlan != null ? ` · VLAN ${row.data.vlan}` : '')) }),
+            show: (row) => shown((row.data.subnetName || row.data.subnet) + (row.data.vlan != null ? ` · VLAN ${row.data.vlan}` : '')) }),
         wifiColumn('hidden', { label: 'Hidden network', plain: true, editor: 'bool', parse: tvBoolParse,
             get: (w) => !!w.hidden, same: (a, b) => !!a === !!b,
             set: (w, v) => { if (v) w.hidden = true; else delete w.hidden; },

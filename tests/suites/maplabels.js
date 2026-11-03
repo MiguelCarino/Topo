@@ -11,11 +11,18 @@
 //      pair, drawn either way round, bow to the same side, apart;
 //   3. cable labels and a subnet's name tab are drawn in the labels layer,
 //      over every cable and under the devices; a label whose middle spot is
-//      under a device moves along the cable off it; the export carries them.
+//      under a device moves along the cable off it; the export carries them;
+//      a device's name and addresses have a halo a cable passes behind;
+//   4. a transit network (routers and firewalls alone) draws no bubble unless
+//      set to; a network in two groups is a bubble in each, its gateway alone
+//      in a third none; a zone's tab keeps off a device over its corner;
+//   5. a detour never swings past its reach: a cable that cannot clear its
+//      way within it stays straight.
 window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
   const el = (id) => document.getElementById(id);
+  const json = (v) => JSON.stringify(v);
   const canvas = el('networkCanvas');
   const at = (x, y) => { const r = canvas.getBoundingClientRect(); return { clientX: r.left + state.camera.x + x * state.camera.zoom, clientY: r.top + state.camera.y + y * state.camera.zoom }; };
   const mouse = (target, type, pt, extra = {}) => target.dispatchEvent(new MouseEvent(type, Object.assign({ bubbles: true, cancelable: true, button: 0 }, pt, extra)));
@@ -120,8 +127,57 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('so it is on the dark map', getComputedStyle(zr).stroke === blueStroke && getComputedStyle(zt.querySelector('text')).fill === blueStroke, getComputedStyle(zr).stroke);
     setMapInk('');
     ok('the paper map keeps its own colours', getComputedStyle(zr).stroke !== blueStroke && zr.getAttribute('stroke').startsWith('hsla('), getComputedStyle(zr).stroke);
+    {
+      // The paper hue is the same slot's (ZONE_HUES): it used to add up the
+      // address's characters, so 10.10.10.0/24 and 10.10.20.0/24 matched.
+      const hueOf = (r) => r.getAttribute('stroke').match(/hsla\((\d+)/)[1];
+      const hues = [...el('layer-zones').querySelectorAll('.zone-bubble > rect')].map(hueOf);
+      const inks = [...el('layer-zones').querySelectorAll('.zone-bubble')].map((g) => g.style.getPropertyValue('--zc'));
+      ok('on paper each subnet takes its own slot\'s hue', hues.length > 0 && new Set(hues).size === new Set(inks).size
+        && hues.every((h, i) => Number(h) === ZONE_HUES[ZONE_INKS.indexOf(inks[i])]), JSON.stringify([hues, inks]));
+    }
     const svg = canvasSvgMarkup();
     ok('the export carries both', !!svg && svg.markup.indexOf('HT-C-101') >= 0 && svg.markup.indexOf('10.0.0.0/24') >= 0);
+    const nameEl = el('ui-node-in').querySelector('text');
+    ok('a device\'s name has a halo of the ground, so a cable passes behind it', nameEl.getAttribute('paint-order') === 'stroke' && nameEl.getAttribute('stroke') === '#ffffff');
+
+    // ---- 4. Zones: transit links, one bubble per group, tabs off devices ----
+    const I = (ip) => [{ id: 'i1', name: 'eth0', ip }];
+    const zoneDoc = (nets, extra = {}) => Object.assign({ v: DOC_VERSION, networks: nets, links: [], nodes: [
+      Object.assign(D('rt', 'router', 0, 0), { interfaces: [{ id: 'w', name: 'wan', ip: '172.16.0.1/24' }, { id: 'l', name: 'lan', ip: '10.5.0.1/24' }] }),
+      Object.assign(D('fw', 'firewall', 0, 200), { interfaces: I('172.16.0.2/24') }),
+      Object.assign(D('h1', 'server', 400, 0), { interfaces: I('10.5.0.11/24'), group: 'rk' }),
+      Object.assign(D('h2', 'server', 400, 200), { interfaces: I('10.5.0.12/24'), group: 'rk' }),
+      Object.assign(D('jh', 'pc', 1000, 0), { interfaces: I('10.5.0.50/24'), group: 'ops' })
+    ], groups: [{ id: 'rk', name: 'Rack', kind: 'room' }, { id: 'ops', name: 'Ops', kind: 'room' }, { id: 'net', name: 'Net', kind: 'room' }] }, extra);
+    const cidrsOf = () => zonesToDraw().map((z) => z.net.cidr).sort();
+    replaceDocument(zoneDoc([{ id: 'n1', cidr: '172.16.0.0/24' }, { id: 'n2', cidr: '10.5.0.0/24' }]));
+    ok('a network of routers and firewalls alone (a transit link) draws no bubble', cidrsOf().indexOf('172.16.0.0/24') < 0, json(cidrsOf()));
+    replaceDocument(zoneDoc([{ id: 'n1', cidr: '172.16.0.0/24', drawZone: true }, { id: 'n2', cidr: '10.5.0.0/24' }]));
+    ok('set to draw, it does', cidrsOf().indexOf('172.16.0.0/24') >= 0, json(cidrsOf()));
+    const lan = () => zonesToDraw().filter((z) => z.net.cidr === '10.5.0.0/24').map((z) => [z.box.minX, z.box.maxX]).sort((p, q) => p[0] - q[0]);
+    ok('a network in two groups is one bubble in each', json(lan()) === '[[400,400],[1000,1000]]', json(lan()));
+    // Its gateway alone in a third group is no bubble of its own.
+    getNode('rt').group = 'net'; save(); renderCanvasOnly();
+    ok('its gateway alone in another group is no bubble of its own', json(lan()) === '[[400,400],[1000,1000]]', json(lan()));
+    // A zone tab keeps off a device standing over the zone's corner.
+    replaceDocument({ v: DOC_VERSION, links: [], networks: [{ id: 'n2', cidr: '10.5.0.0/24' }], nodes: [
+      Object.assign(D('h1', 'server', 0, 200), { interfaces: I('10.5.0.11/24') }),
+      Object.assign(D('h2', 'server', 300, 200), { interfaces: I('10.5.0.12/24') }),
+      Object.assign(D('top', 'server', 0, 100), { interfaces: I('192.168.9.9/32') })
+    ] });
+    const tb = el('layer-labels').querySelector('.zone-tag rect').getBBox(), tp = getNode('top');
+    ok('a zone\'s tab keeps off a device over its corner, and its name', !(tb.x < tp.x + 46 && tb.x + tb.width > tp.x - 46 && tb.y < tp.y + 66 && tb.y + tb.height > tp.y - 28),
+      `${Math.round(tb.x)},${Math.round(tb.y)} ${Math.round(tb.width)}x${Math.round(tb.height)}`);
+
+    // ---- 5. A detour never swings wider than its reach ----
+    replaceDocument(doc([D('a', 'pc', 0, 0), D('b', 'pc', 2000, 0), D('m1', 'pc', 1000, 0), D('m2', 'pc', 1000, -80), D('m3', 'pc', 1000, 80),
+      D('m4', 'pc', 1000, -160), D('m5', 'pc', 1000, 160), D('m6', 'pc', 1000, -240), D('m7', 'pc', 1000, 240)], [{ id: 'far', source: 'a', target: 'b' }]));
+    const gf = linkGeometry(getLink('far'));
+    ok('a long cable that cannot clear a stack of devices within its reach stays straight', gf.bow === 0, `${gf.bow}`);
+    replaceDocument(doc([D('a', 'pc', 0, 0), D('b', 'pc', 2000, 0), D('m1', 'pc', 1000, 0)], [{ id: 'far', source: 'a', target: 'b' }]));
+    const gn = linkGeometry(getLink('far'));
+    ok('one device in its way: it bows, within the reach', gn.bow !== 0 && Math.abs(gn.bow) <= DETOUR_REACH, `${gn.bow}`);
   } catch (e) {
     ok('the suite ran to the end', false, e && (e.stack || e.message));
   } finally {

@@ -89,6 +89,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     select(null);
 
     // ---- 5: the untagged-cables finding ----
+    // The sample ships every cable tagged (DC1-001…); this part starts from none.
+    batch(() => { state.links.forEach((l) => { if (l.cable) delete l.cable; }); save(); renderCanvasOnly(); });
     const tagFinding = () => topologyFindings().find((f) => f.key === 'rack-tag' && f.subject === groupLabel(rack));
     let f = tagFinding();
     ok('an info finding counts A01\'s untagged cables', !!f && f.level === 'info' && f.linkIds.length === 14 && /14 cables in A01 Network have no tag/.test(f.detail), f && f.detail);

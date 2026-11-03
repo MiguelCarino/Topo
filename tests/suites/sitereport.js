@@ -101,24 +101,42 @@ window.addEventListener('load', () => { setTimeout(() => {
     ok('a small, narrow drawing stays inline', reportDiagramLayout(pic(800, 600), 10).kind === 'inline');
     ok('a small but wide one goes to a landscape page', reportDiagramLayout(pic(1200, 500), 10).kind === 'sheet');
     ok('a big one that reads on one landscape page gets just that', reportDiagramLayout(pic(1250, 800), 80).kind === 'sheet');
-    const huge = reportDiagramLayout(pic(4000, 2000), 300);
-    ok('one too big for a page is tiled', huge.kind === 'tiles' && huge.cols >= 4 && huge.rows >= 2 && huge.tiles.length === huge.cols * huge.rows, JSON.stringify([huge.cols, huge.rows]));
-    ok('every tile prints at least as large as it aims', huge.mm >= REPORT_DIAGRAM_TILE - 1e-9, String(huge.mm));
+    ok('one too big to read on a page is still one whole page, no grid', reportDiagramLayout(pic(4000, 2000), 300).kind === 'sheet');
+    // The lettered grid and its sheets are the Large map's (reportParts.largeMap),
+    // so many across and so many down as picked: nothing is guessed.
+    const huge = reportDiagramLayout(pic(4000, 2000), 300, { large: true, cols: 4, rows: 2 });
+    ok('the large map is the grid asked for, every square printed', huge.kind === 'tiles' && huge.cols === 4 && huge.rows === 2 && huge.tiles.length === 8
+       && huge.tiles.map((x) => x.name).join(',') === 'A1,B1,C1,D1,A2,B2,C2,D2', huge.tiles.map((x) => x.name).join(','));
     ok('the tiles cover the drawing, edge to edge', Math.min(...huge.tiles.map((x) => x.x)) <= 0 && Math.max(...huge.tiles.map((x) => x.x + x.w)) >= 4000 - 1e-6
        && Math.min(...huge.tiles.map((x) => x.y)) <= 0 && Math.max(...huge.tiles.map((x) => x.y + x.h)) >= 2000 - 1e-6);
-    const a1 = huge.tiles.find((x) => x.name === 'A1'), b1 = huge.tiles.find((x) => x.name === 'B1');
+    const a1 = huge.tiles.find((x) => x.name === 'A1'), b1 = huge.tiles.find((x) => x.name === 'B1'), c1 = huge.tiles.find((x) => x.name === 'C1'), a2 = huge.tiles.find((x) => x.name === 'A2');
     ok('neighbours overlap, so nothing on an edge is cut in two', a1 && b1 && a1.x + a1.w - b1.x >= a1.w * REPORT_DIAGRAM_OVERLAP - 1e-6);
+    ok('and by the same amount everywhere: an even grid', Math.abs((b1.x - a1.x) - (c1.x - b1.x)) < 1e-6 && Math.abs((a1.x + a1.w - b1.x) - a1.w * REPORT_DIAGRAM_OVERLAP) < 1e-6
+       && Math.abs((a1.y + a1.h - a2.y) - a1.h * REPORT_DIAGRAM_OVERLAP) < 1e-6);
     ok('each tile has the page\'s shape', Math.abs(a1.w / a1.h - REPORT_DIAGRAM_PAPER.sheetW / REPORT_DIAGRAM_PAPER.sheetH) < 1e-9);
-    const sparse = reportDiagramLayout(pic(4000, 2000, { points: [[100, 100], [3900, 1900]] }), 300);
-    ok('a square with no device in it is left out', sparse.tiles.length === 2 && sparse.tiles[0].name === 'A1'
-       && sparse.tiles[1].name === `${String.fromCharCode(64 + sparse.cols)}${sparse.rows}`, sparse.tiles.map((x) => x.name).join(','));
-    ok('a vast drawing gets smaller tiles, not endless ones', reportDiagramLayout(pic(40000, 30000), 3000).tiles.length <= REPORT_DIAGRAM_MAX_TILES);
-    const tiled = reportHtml(big, pic(4000, 2000));
+    ok('the grid is centred on the drawing', Math.abs((a1.x + Math.max(...huge.tiles.map((x) => x.x + x.w))) - 4000) < 1e-6
+       && Math.abs((a1.y + Math.max(...huge.tiles.map((x) => x.y + x.h))) - 2000) < 1e-6);
+    const sparse = reportDiagramLayout(pic(4000, 2000, { points: [[100, 100], [3900, 1900]] }), 300, { large: true, cols: 3, rows: 3 });
+    ok('a square with no device in it is printed too', sparse.tiles.length === 9);
+    // Squares can be left out by name: the grid stays the same, they get no sheet.
+    const holed = reportDiagramLayout(pic(4000, 2000), 300, { large: true, cols: 3, rows: 2, skip: ['b1', 'C2'] });
+    ok('a square left out has no sheet, the grid is the same', holed.grid.length === 6 && holed.tiles.length === 4
+       && holed.tiles.map((x) => x.name).join(',') === 'A1,C1,A2,B2' && holed.grid.find((x) => x.name === 'B1').off === true
+       && JSON.stringify(holed.grid.map((x) => [x.x, x.y])) === JSON.stringify(reportDiagramLayout(pic(4000, 2000), 300, { large: true, cols: 3, rows: 2 }).tiles.map((x) => [x.x, x.y])));
+    ok('leaving every square out leaves none out', reportDiagramLayout(pic(4000, 2000), 300, { large: true, cols: 1, rows: 1, skip: 'A1' }).tiles.length === 1);
+    const holedHtml = reportHtml(big, pic(4000, 2000), { technical: true, largeMap: true, largeCols: 3, largeRows: 2, largeSkip: ['B1', 'C2'] });
+    ok('the overview shows them faded, the sheets skip them', /class="dg-cell off" data-cell="B1"/.test(holedHtml) && /class="dg-cell off" data-cell="C2"/.test(holedHtml)
+       && !/Sheet B1 ·/.test(holedHtml) && /Sheet C1 · 2 of 4/.test(holedHtml) && /the faded ones are left out/.test(holedHtml));
+    ok('and no sheet points the way to one left out', !/→ B1/.test(holedHtml) && !/↓ C2/.test(holedHtml));
+    ok('past six either way, six; nonsense, two', (() => { const l = reportDiagramLayout(pic(4000, 2000), 3, { large: true, cols: 40, rows: 'x' }); return l.cols === REPORT_DIAGRAM_GRID_MAX && l.rows === REPORT_DIAGRAM_GRID_DEFAULT; })());
+    const whole = reportHtml(big, pic(4000, 2000));
+    ok('without the large map: one landscape page, no grid, no sheet marks', count(whole, 'class="sheet land"') === 1 && !whole.includes('class="dg-cell"') && !whole.includes('Sheet A1'));
+    const tiled = reportHtml(big, pic(4000, 2000), { technical: true, largeMap: true, largeCols: 4, largeRows: 2 });
     const nTiles = huge.tiles.length;
-    ok('tiled: an overview and one landscape sheet per square', count(tiled, 'class="sheet land"') === nTiles + 1);
-    ok('the picture is carried once, every sheet points at it', count(tiled, 'href="data:image/png') === 1 && count(tiled, '<use href="#topo-dg"/>') === nTiles + 1);
+    ok('with it: the page, then an overview and one landscape sheet per square', count(tiled, 'class="sheet land"') === nTiles + 2);
+    ok('the picture is carried once, every page points at it', count(tiled, 'href="data:image/png') === 1 && count(tiled, '<use href="#topo-dg"/>') === nTiles + 2);
     ok('the overview draws the grid, the sheets say where they are', count(tiled, 'class="dg-cell"') === nTiles && tiled.includes(`Sheet A1 · 1 of ${nTiles}`) && /Continues on → B1  ↓ A2/.test(tiled));
-    ok('and the report says how many', tiled.split('>Device inventory<')[0].includes(`as an overview and ${nTiles} landscape sheets`));
+    ok('and the report says how many', tiled.split('>Device inventory<')[0].includes(`then ${nTiles} landscape sheets`));
     ok('the report caps the picture\'s pixels for a vast drawing', (() => { const f = reportDiagramScale(4); const s = f(10000, 6000); return f(500, 400) === 4 && s < 1 && s * s * 10000 * 6000 <= REPORT_DIAGRAM_MAX_PIXELS + 1 && f(40000, 400) * 40000 <= REPORT_DIAGRAM_MAX_SIDE; })());
     ok('the second switch\'s map runs to its 40 ports', reportPortMaps().find((m) => m.id === 'sw2').rows.length === 41
        && reportPortMaps().find((m) => m.id === 'sw2').free === '41–47');

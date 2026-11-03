@@ -60,6 +60,23 @@ window.addEventListener('load', () => { setTimeout(async () => {
     el('mapInkBtn').click(); settle();
     ok('and back to light', !el('canvasContainer').classList.contains('map-ink') && !el('canvasContainer').classList.contains('map-blue')
       && el('mapInkBtn').getAttribute('aria-pressed') === 'false' && getComputedStyle(card()).fill === paper && el('mapInkBtn').title === 'Dark background');
+    // A selected note's A− / A+ (and ✕) keep a dark disc, white ring and
+    // white glyph on every background, so they never vanish.
+    {
+      const note = spawnAnnotation({ text: 'Rack note', style: 'note', at: { x: 40, y: 40 } });
+      renderCanvasOnly();
+      for (const ink of [false, 'dark', 'blue']) {
+        setMapInk(ink); settle();
+        const discs = [...document.querySelectorAll(`#ui-ann-${note.id} .node-delete`)];
+        const look = discs.map((d) => { const c = getComputedStyle(d.querySelector('circle')), tx = getComputedStyle(d.querySelector('text')); return [d.querySelector('text').textContent, c.fill, c.stroke, tx.fill]; });
+        const sizes = look.filter((l) => /^A/.test(l[0]));
+        ok(`the note's size buttons show on the ${ink || 'light'} map`, sizes.length === 2
+          && sizes.every((l) => l[1] === 'rgb(51, 65, 85)' && l[2] === 'rgb(255, 255, 255)' && l[3] === 'rgb(255, 255, 255)')
+          && look.some((l) => l[0] === '✕' && l[1] === 'rgb(220, 38, 38)' && l[2] === 'rgb(255, 255, 255)'), JSON.stringify(look));
+      }
+      setMapInk(false);
+      state.annotations = state.annotations.filter((x) => x.id !== note.id); select(null); renderCanvasOnly();
+    }
     setMapInk(true);
     ok('a setting saved before the blueprint (true) is the dark map', state.settings.mapInk === 'dark');
     setMapInk(false);

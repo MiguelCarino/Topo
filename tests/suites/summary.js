@@ -17,7 +17,7 @@
 //      and the binder's diagrams offered only with the technical pages;
 //   6. every check that can reach the report has its plain words, and the
 //      sentences are translated.
-window.addEventListener('load', () => { setTimeout(() => {
+window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
   const el = (id) => document.getElementById(id);
@@ -36,8 +36,8 @@ window.addEventListener('load', () => { setTimeout(() => {
   try {
     // ---- 1: what a report holds ----
     ok('nothing said is the technical sheet; both is both; neither is the technical sheet',
-       show(reportParts()) === show({ summary: false, technical: true }) && show(reportParts({ summary: true, technical: true })) === show({ summary: true, technical: true })
-       && show(reportParts({ summary: false, technical: false })) === show({ summary: false, technical: true }));
+       show(reportParts()) === show({ summary: false, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [] }) && show(reportParts({ summary: true, technical: true })) === show({ summary: true, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [] })
+       && show(reportParts({ summary: false, technical: false })) === show({ summary: false, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [] }));
     const m = model(clean());
     const plain = reportHtml(m, null);
     ok('a caller that says nothing gets the report as it was: no summary', !plain.includes('class="sheet summary"') && plain.includes('Device inventory'));
@@ -112,9 +112,9 @@ window.addEventListener('load', () => { setTimeout(() => {
     // ---- 5: the dialog ----
     replaceDocument(clean(), { origin: 'file' });
     openReportDialog();
-    ok('both are ticked when the dialog opens', el('reportSummary').checked && el('reportTechnical').checked && show(readReportParts()) === show({ summary: true, technical: true }));
+    ok('both are ticked when the dialog opens', el('reportSummary').checked && el('reportTechnical').checked && show(readReportParts()) === show({ summary: true, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [] }));
     el('reportSummary').checked = false; el('reportSummary').dispatchEvent(new Event('change'));
-    ok('one can be unticked', show(readReportParts()) === show({ summary: false, technical: true }));
+    ok('one can be unticked', show(readReportParts()) === show({ summary: false, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [] }));
     el('reportTechnical').checked = false; el('reportTechnical').dispatchEvent(new Event('change'));
     ok('unticking the last one ticks the other', el('reportSummary').checked && !el('reportTechnical').checked);
     closeReportDialog();
@@ -124,11 +124,139 @@ window.addEventListener('load', () => { setTimeout(() => {
     _reportMode = 'binder';
     renderReportDialog();
     el('reportTechnical').checked = false; el('reportTechnical').dispatchEvent(new Event('change'));
-    ok('a binder summary has no diagrams to offer', el('reportImagesRow').classList.contains('hidden'));
+    ok('a binder summary offers the diagrams too: it shows each site\'s map', !el('reportImagesRow').classList.contains('hidden'));
     el('reportTechnical').checked = true; el('reportTechnical').dispatchEvent(new Event('change'));
-    ok('and they come back with the technical pages', !el('reportImagesRow').classList.contains('hidden'));
+    ok('and so do the technical pages', !el('reportImagesRow').classList.contains('hidden'));
     _reportMode = 'site';
     closeReportDialog();
+
+    // ---- 5b: the large map ----
+    openReportDialog();
+    ok('Large map is offered, off, with the technical pages', !el('reportLargeMap').checked && !el('reportLargeMapRow').classList.contains('hidden'));
+    el('reportLargeMap').checked = true;
+    ok('ticked, the parts say so', readReportParts().largeMap === true);
+    el('reportTechnical').checked = false; el('reportTechnical').dispatchEvent(new Event('change'));
+    ok('a summary alone has no diagram, so no large map', el('reportLargeMapRow').classList.contains('hidden'));
+    closeReportDialog();
+    openReportDialog();
+    ok('and it is off again the next time', !el('reportLargeMap').checked);
+    closeReportDialog();
+    // A small network: its diagram is inline, and the large map adds the
+    // overview and its sheets at the end, under an image id of their own.
+    const lm = model(clean());
+    const pic = { url: 'data:image/png;base64,AA==', width: 4 * 900, height: 4 * 700, scale: 4, minX: 0, minY: 0, points: [[100, 100], [800, 600], [450, 350]] };
+    const without = reportHtml(lm, pic, { technical: true });
+    const withLarge = reportHtml(lm, pic, { technical: true, largeMap: true });
+    const pages = (h) => (h.match(/class="sheet land"/g) || []).length;
+    const bigMap = reportDiagramLayout(pic, 3, { large: true });   // 2 × 2 unless picked
+    ok('the small diagram stays in the text', /<div class="figure">/.test(withLarge) && pages(without) === 0);
+    ok('the large map is the 2 × 2 grid when nothing else is picked', bigMap && bigMap.kind === 'tiles' && bigMap.tiles.length === 4, bigMap && JSON.stringify({ n: bigMap.tiles.length }));
+    ok('it adds the overview and one sheet per square', pages(withLarge) === bigMap.tiles.length + 1, `${pages(withLarge)} vs ${bigMap.tiles.length + 1}`);
+    ok('the overview names the squares, the sheets say which one they are', /Overview: each square is one of the/.test(withLarge) && /Sheet A1 · 1 of/.test(withLarge));
+    ok('the text says it is there', /A large map is at the end/.test(withLarge));
+    ok('the picture is carried once, not once per sheet', (withLarge.match(/<image id="topo-dg"/g) || []).length === 1);
+    ok('without it, nothing changes', !/A large map/.test(without));
+    // The grid is picked (Sheets across, Sheets down), 2 × 2 unless changed.
+    ok('the parts carry the grid, 2 × 2 by default, clamped', reportParts({ technical: true }).largeCols === 2 && reportParts({ technical: true }).largeRows === 2
+       && reportParts({ technical: true, largeCols: 99, largeRows: 0 }).largeCols === REPORT_DIAGRAM_GRID_MAX && reportParts({ largeRows: 0 }).largeRows === 2);
+    const g32 = reportDiagramLayout(pic, 3, { large: true, cols: 3, rows: 2 });
+    const g32Html = reportHtml(lm, pic, { technical: true, largeMap: true, largeCols: 3, largeRows: 2 });
+    ok('3 × 2 is six sheets, every one printed', g32.tiles.length === 6 && pages(g32Html) === 6 + 1, String(pages(g32Html)));
+    openReportDialog();
+    ok('the grid pickers show only with Large map ticked, at 2 × 2', el('reportLargeSheetsRow').classList.contains('hidden')
+       && el('reportLargeCols').value === '2' && el('reportLargeRows').value === '2');
+    el('reportLargeMap').checked = true; el('reportLargeMap').dispatchEvent(new Event('change'));
+    ok('ticked, they show, with the total', !el('reportLargeSheetsRow').classList.contains('hidden') && el('reportLargeTotal').textContent === '= 4 sheets', el('reportLargeTotal').textContent);
+    el('reportLargeCols').value = '3'; el('reportLargeCols').dispatchEvent(new Event('change'));
+    ok('and the parts read them', readReportParts().largeCols === 3 && readReportParts().largeRows === 2 && el('reportLargeTotal').textContent === '= 6 sheets');
+    // A square per sheet, to leave it out; the last one stays.
+    ok('a toggle per sheet, all on', el('reportLargeCells').querySelectorAll('.dlg-cell').length === 6
+       && [...el('reportLargeCells').querySelectorAll('.dlg-cell')].every((b) => b.getAttribute('aria-pressed') === 'true'));
+    el('reportLargeCells').querySelector('[data-cell="B1"]').click();
+    ok('one clicked is left out', readReportParts().largeSkip.join() === 'B1' && el('reportLargeTotal').textContent === '= 5 of 6 sheets'
+       && el('reportLargeCells').querySelector('[data-cell="B1"]').getAttribute('aria-pressed') === 'false', el('reportLargeTotal').textContent);
+    el('reportLargeCells').querySelector('[data-cell="B1"]').click();
+    ok('clicked again, it is back', readReportParts().largeSkip.length === 0);
+    el('reportLargeCols').value = '1'; el('reportLargeCols').dispatchEvent(new Event('change'));
+    el('reportLargeCells').querySelector('[data-cell="A1"]').click();
+    ok('the last one printed cannot be left out', readReportParts().largeSkip.length === 1 && !toggleLargeSheet('A2') && readReportParts().largeSkip.length === 1);
+    el('reportLargeCols').value = '3'; el('reportLargeCols').dispatchEvent(new Event('change'));
+    ok('kept while the grid grows', readReportParts().largeSkip.join() === 'A1');
+    el('reportTechnical').checked = false; el('reportTechnical').dispatchEvent(new Event('change'));
+    ok('without the technical pages they go with Large map', el('reportLargeSheetsRow').classList.contains('hidden'));
+    closeReportDialog();
+    openReportDialog();
+    ok('and they are 2 × 2 again the next time, every sheet on', el('reportLargeCols').value === '2' && readReportParts().largeSkip.length === 0);
+    closeReportDialog();
+    const sumOnly = reportHtml(lm, pic, { summary: true, technical: false, largeMap: true });
+    ok('a summary alone has no large map even when asked', !sumOnly.includes('class="dg-cell"'));
+    ok('but it has the map, on one whole page after its own, no sheet marks', (sumOnly.match(/class="sheet land"/g) || []).length === 1
+       && sumOnly.indexOf('class="sheet summary"') < sumOnly.indexOf('class="sheet land"') && !/Sheet A1/.test(sumOnly) && /The map of the network is on the next page/.test(sumOnly));
+    const bothParts = reportHtml(lm, pic, { summary: true, technical: true });
+    ok('with the technical pages too, the picture is carried once', (bothParts.match(/<image id="topo-dg"/g) || []).length === 1);
+    ok('without a picture the summary has no map page', !/sheet land/.test(reportHtml(lm, null, { summary: true, technical: false })));
+
+    // ---- 5c: the preview, in the dialog ----
+    const realDeliver = window.deliverReport;
+    const handed = [];
+    window.deliverReport = (html, meta, kind, onKept) => { handed.push({ html, meta, kind }); return { opened: false }; };
+    try {
+      replaceDocument(clean(), { origin: 'file' });
+      openReportDialog();
+      let b = await refreshReportPreview();
+      ok('the dialog shows the report beside its questions', !!b && /^blob:/.test(el('reportPreviewFrame').getAttribute('src') || '')
+         && el('reportDialog').contains(el('reportPreviewFrame')) && /Network documentation report/.test(b.html));
+      ok('named as the file it downloads as', /-report-\d{4}-\d{2}-\d{2}\.html$/.test(el('reportPreviewName').textContent), el('reportPreviewName').textContent);
+      ok('with its own toolbar hidden (the dialog prints)', getComputedStyle(el('reportPreviewFrame').contentDocument.querySelector('.toolbar')).display === 'none');
+      ok('looking hands nothing over', !handed.length);
+      el('report-site').value = 'Torre B'; el('report-site').dispatchEvent(new Event('input', { bubbles: true }));
+      b = await refreshReportPreview();
+      ok('an edit redraws it with what was typed', /Torre B/.test(b.html));
+      ok('without storing the header yet', state.report.site !== 'Torre B');
+      el('reportSummary').checked = false; el('reportSummary').dispatchEvent(new Event('change'));
+      b = await refreshReportPreview();
+      ok('and a tick changes what it shows', !/class="sheet summary"/.test(b.html) && b.kind === 'report');
+      // A change to the large map's grid shows the preview at the overview,
+      // and any other redraw keeps the place the preview was scrolled to.
+      {
+        const fw = () => el('reportPreviewFrame').contentWindow, fd = () => el('reportPreviewFrame').contentDocument;
+        const ovTop = () => { const g = fd().querySelector('.dg-cell[data-cell]'); return g ? g.closest('.sheet').getBoundingClientRect().top : NaN; };
+        const atOverview = () => { const max = fd().documentElement.scrollHeight - fw().innerHeight; return Math.abs(ovTop() - 12) < 3 || (fw().scrollY >= max - 1 && ovTop() > 0); };
+        el('reportLargeMap').checked = true; el('reportLargeMap').dispatchEvent(new Event('change'));
+        await refreshReportPreview();
+        ok('ticking Large map shows the preview at its overview', fw().scrollY > 0 && atOverview(), JSON.stringify({ y: fw().scrollY, top: ovTop(), ih: fw().innerHeight }));
+        fw().scrollTo(0, 0);
+        el('reportLargeCols').value = '3'; el('reportLargeCols').dispatchEvent(new Event('change'));
+        await refreshReportPreview();
+        ok('and so does a new grid size', atOverview(), String(ovTop()));
+        fw().scrollTo(0, 0);
+        toggleLargeSheet('B1');
+        await refreshReportPreview();
+        ok('and a square left out', atOverview() && fd().querySelector('.dg-cell.off[data-cell="B1"]'), String(ovTop()));
+        fw().scrollTo(0, 40);
+        el('report-site').value = 'Torre B '; el('report-site').dispatchEvent(new Event('input', { bubbles: true }));
+        await refreshReportPreview();
+        ok('another edit keeps the preview where it was', fw().scrollY === 40, String(fw().scrollY));
+        el('report-site').value = 'Torre B'; el('report-site').dispatchEvent(new Event('input', { bubbles: true }));
+        el('reportLargeMap').checked = false; el('reportLargeMap').dispatchEvent(new Event('change'));
+        await refreshReportPreview();
+      }
+      const frame = el('reportPreviewFrame');
+      let printed = 0;
+      const stub = () => { try { frame.contentWindow.print = () => { printed++; }; } catch (e) { /* not reachable */ } };
+      frame.addEventListener('load', stub);
+      await printReportFromDialog();
+      frame.removeEventListener('load', stub);
+      ok('Print prints the preview, the dialog staying', printed === 1 && !el('reportDialog').classList.contains('hidden'), String(printed));
+      ok('and stores the header', state.report.site === 'Torre B');
+      el('reportBuildBtn').click();
+      for (let i = 0; i < 100 && !handed.length; i++) await new Promise((r) => setTimeout(r, 10));
+      ok('Download hands over the report as shown', handed.length === 1 && /Torre B/.test(handed[0].html) && handed[0].kind === 'report');
+      ok('and closes the dialog, preview and all', el('reportDialog').classList.contains('hidden') && !el('reportPreviewFrame').getAttribute('src') && !reportPreviewBuilt());
+      openReportDialog();
+      closeReportDialog();
+      ok('Close keeps nothing', handed.length === 1 && !reportPreviewBuilt());
+    } finally { window.deliverReport = realDeliver; closeReportDialog(); }
 
     // ---- 6: words ----
     const reachable = Object.keys(FINDING_CHECK_NAMES).concat(NODE_CHECKS.map((c) => c.key)).filter((k) => !['rack-tag', 'wifi-plan', 'service-due'].includes(k));
@@ -140,7 +268,7 @@ window.addEventListener('load', () => { setTimeout(() => {
     setLocale('es'); applyLocale();
     const es = summarySheet(cm);
     ok('the summary reads in the page\'s language', /Hay un problema que corregir/.test(es) && es.includes('Dos dispositivos tienen la misma dirección') && es.includes('Corregir ya'));
-    ok('the dialog too', el('reportSummary').nextElementSibling.textContent.startsWith('Resumen para el cliente'));
+    ok('the dialog too', el('reportSummary').nextElementSibling.textContent.startsWith('Resumen sencillo'));
     setLocale('en'); applyLocale();
   } catch (e) {
     ok('the suite ran to the end', false, e && (e.stack || e.message));

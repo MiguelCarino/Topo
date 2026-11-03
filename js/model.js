@@ -694,7 +694,11 @@ function linkGeometry(link) {
 // name and address under it (DETOUR_BOX), with DETOUR_GAP to spare. Only
 // devices drawn on the map count: one folded into a collapsed group or its
 // host is not there to cross.
-const DETOUR_BOX = { x1: -34, y1: -30, x2: 34, y2: 52 }, DETOUR_GAP = 8, DETOUR_MAX = 0.7;
+// A bow is at most DETOUR_MAX of the run's length and DETOUR_REACH px (the
+// curve's middle then sits half that off the straight line): a long cable
+// bowed by its length alone swung a wide arc round half the map, across far
+// more than the one device it avoided, and read as some other cable.
+const DETOUR_BOX = { x1: -34, y1: -30, x2: 34, y2: 52 }, DETOUR_GAP = 8, DETOUR_MAX = 0.7, DETOUR_REACH = 220;
 function detourObstacles() {
     if (lookupPass && lookupPass.obstacles) return lookupPass.obstacles;
     const gv = typeof groupMapNow === 'function' ? groupMapNow() : null;
@@ -727,7 +731,7 @@ function linkDetour(src, tgt) {
     if (!near.length) return 0;
     const hits = (bow) => near.filter((o) => { const off = 2 * o.t * (1 - o.t) * bow; return off > o.lo && off < o.hi; });
     if (!hits(0).length) return 0;
-    const cap = len * DETOUR_MAX;
+    const cap = Math.min(len * DETOUR_MAX, DETOUR_REACH);
     // Bow further one way until the run clears what it then crosses (a
     // device passed clear straight may be met on the bow), or it would bow
     // too far to read as this cable.
@@ -747,8 +751,9 @@ function linkDetour(src, tgt) {
     };
     const a = tryside(1), b = tryside(-1);
     const best = a.left !== b.left ? (a.left < b.left ? a : b) : (Math.abs(a.bow) <= Math.abs(b.bow) ? a : b);
-    // Still through a device whichever way: straight, as drawn before.
-    return best.left && best.left >= hits(0).length ? 0 : best.bow;
+    // Still through a device whichever way, within the reach: straight, as
+    // drawn before. A bent cable through a device is worse than a straight one.
+    return best.left ? 0 : best.bow;
 }
 
 // The ids of every cable between the same two devices, either way round, in

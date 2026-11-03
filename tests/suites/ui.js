@@ -183,6 +183,33 @@ window.addEventListener('load', () => { setTimeout(() => {
      overChip ? overChip.textContent : 'no overflow chip');
   select(null, null);
 
+  // ---- The library folds while something is selected ----
+  const rail = document.querySelector('.topo-rail'), row = document.getElementById('libWrapRow');
+  const heldPin = libraryPinned();
+  setLibraryPinned(false);
+  select(null, null);
+  ok('nothing selected: the library and the panels share the rail, no row', !rail.classList.contains('lib-wrapped') && row.classList.contains('hidden')
+     && document.querySelector('.rail-lib').offsetHeight > 0);
+  select('sw', 'node');
+  ok('a device selected: the library folds to its row, the panels take the rail', rail.classList.contains('lib-wrapped') && !row.classList.contains('hidden')
+     && document.querySelector('.rail-lib').offsetHeight === 0 && getComputedStyle(document.querySelector('.rail-props')).flexGrow === '1',
+     [document.querySelector('.rail-lib').offsetHeight, getComputedStyle(document.querySelector('.rail-props')).flexGrow].join(' '));
+  setSelectionEntries([{ type: 'node', id: 'sw' }, { type: 'node', id: Object.keys(Object.fromEntries(state.nodes.map((n) => [n.id, 1]))).find((id) => id !== 'sw') || 'sw' }]);
+  renderSelection();
+  ok('so it does for several', rail.classList.contains('lib-wrapped'));
+  ok('the row is a finger\'s height', row.getBoundingClientRect().height >= 44, String(row.getBoundingClientRect().height));
+  row.click();
+  ok('a click on the row opens it and keeps it open', libraryPinned() && !rail.classList.contains('lib-wrapped') && !row.classList.contains('hidden')
+     && document.querySelector('.rail-lib').offsetHeight > 0 && row.getAttribute('aria-expanded') === 'true');
+  select('sw', 'node'); select(null, null); select('sw', 'node');
+  ok('whatever is selected after', !rail.classList.contains('lib-wrapped'));
+  ok('and the choice is kept in this browser', (() => { try { return localStorage.getItem('topo-lib-open') === '1'; } catch (e) { return true; } })());
+  row.click();
+  ok('another click folds it, and it behaves as before', !libraryPinned() && rail.classList.contains('lib-wrapped'));
+  select(null, null);
+  ok('a click on empty map (nothing selected) brings the library back', !rail.classList.contains('lib-wrapped') && row.classList.contains('hidden'));
+  setLibraryPinned(heldPin);
+
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
   document.body.appendChild(pre);
   }, 50);

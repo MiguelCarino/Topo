@@ -61,6 +61,14 @@
 /* A sticky note stays yellow with dark writing; plain text turns white. */
 .map-ink .topo-svg #layer-annotations rect[fill="#fef9c3"] + text { fill: #1e293b; }
 .map-ink .topo-svg #layer-annotations rect[fill="transparent"] + text { fill: var(--mi-fg); }
+/* The map's little disc buttons (canvasDiscButton: a note's A− / A+, the ✕)
+   keep their own colours, white glyph on a dark disc in a white ring: the
+   ink rules above would turn a slate disc light under its white glyph. */
+.map-ink .topo-svg .node-delete circle[fill="#334155"] { fill: #334155; }
+.map-ink .topo-svg .node-delete circle[stroke="#ffffff"] { stroke: #ffffff; }
+.map-ink .topo-svg .node-delete text[fill="#ffffff"] { fill: #ffffff; }
+.map-ink .topo-svg .node-delete:hover circle[fill="#334155"] { fill: #0f172a; }
+.map-ink .topo-svg .node-delete:hover circle[fill="#dc2626"] { fill: #b91c1c; }
 /* A selected cable's port labels are dark amber (red when unbound) for the
    paper map; on dark or blue they would sink, so they take the light pair.
    Their white halo already follows --mi-bg by the stroke rule above. */
@@ -1843,11 +1851,8 @@ body.simple-mode #cnDiagBox { display: none !important; }
    How to use dialog (renderShortcutHelp, js/app.js). */
 body:not(.simple-mode) #modeSwitchBtn { display: none; }
 
-/* The navbar Sys. Status control is just its yellow pulse dot everywhere —
-   the label only ever repeated the tooltip. !important because carino-diag.js
-   injects its own equal-specificity styles after this sheet loads. */
-#cnDiagBtn .lbl { display: none !important; }
-#cnDiagBtn { padding: 0 10px !important; }
+/* The navbar Sys. Status control is the hub's: its label and pulse dot
+   (carino-diag.js), the label clipped on a phone. */
 
 /* Mode picker options ("Something missing? Try another mode" / #setup) —
    the one place modes are switched; there is deliberately no header toggle. */
@@ -2195,3 +2200,60 @@ body.landing-open .handy-bar { display: none !important; }
 
 /* A device on its way into a collapsed group (js/motion.js): a copy, never hit. */
 .motion-ghost { pointer-events: none; }
+
+/* Tidy and its ▾ read as one control: the caret is the menu's button
+   (carino-ui.js opens a .cs-menu from its [aria-haspopup]). */
+.cs-split > #tidyBtn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.cs-split > .cs-split-caret { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; padding: 0 8px; }
+body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
+
+/* The report dialog with its preview (js/report.js refreshReportPreview):
+   the questions on the left, the page as it will print on the right. On a
+   narrow screen the preview goes under the questions and the dialog scrolls. */
+.report-dlg .rp-card { width: min(1200px, calc(100vw - 32px)); max-width: none; height: calc(100dvh - 48px); max-height: none;
+    display: grid; grid-template-columns: minmax(300px, 360px) 1fr; gap: 16px; padding: 16px; overflow: hidden; }
+.report-dlg .rp-form { min-height: 0; overflow-y: auto; padding-right: 4px; display: flex; flex-direction: column; }
+.report-dlg .rp-actions { margin-top: auto; padding-top: 8px; position: sticky; bottom: 0; background: var(--bg-card); }
+.report-dlg .rp-view { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.report-dlg .rp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 18px; }
+.report-dlg .rp-name { font-size: var(--fs-label); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-dlg .rp-status { font-size: var(--fs-label); color: var(--accent); white-space: nowrap; }
+.report-dlg .rp-frame { flex: 1; width: 100%; min-height: 0; border: 1px solid var(--border); border-radius: 6px; background: #e2e8f0; }
+@media (max-width: 900px) {
+    .report-dlg .rp-card { display: flex; flex-direction: column; height: calc(100dvh - 24px); overflow-y: auto; padding: 12px; }
+    .report-dlg .rp-form { overflow: visible; flex-shrink: 0; padding-right: 0; }
+    .report-dlg .rp-view { flex-shrink: 0; height: 75dvh; overflow: hidden; }
+    .report-dlg .rp-actions .cs-btn { min-height: 44px; }
+}
+
+/* The library folded (updateRailWrap, js/ui.js): its row, and the panels
+   taking the whole rail. */
+.lib-wrap-row { display: flex; align-items: center; gap: 8px; flex-shrink: 0; width: 100%; min-height: 44px; padding: 8px 16px; border: 0; border-bottom: 1px solid var(--border);
+    background: var(--bg-elev); color: var(--text-sec); font-family: var(--mono); font-size: var(--fs-label); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    text-align: left; cursor: pointer; transition: 0.15s; }
+.lib-wrap-row:hover { color: var(--accent); background: var(--accent-faint); }
+.lib-wrap-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.lib-wrap-row .lw-caret { width: 10px; color: var(--accent); }
+.lib-wrap-row .lw-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-wrap-row .lw-hint { font-weight: 500; color: var(--text-muted); text-transform: none; letter-spacing: 0; }
+.topo-rail.lib-wrapped #libraryTabs, .topo-rail.lib-wrapped .rail-lib { display: none; }
+.topo-rail.lib-wrapped .rail-props { flex: 1; height: auto; }
+
+/* The large map's sheet count, under its tick. */
+.dlg-parts .dlg-sheets { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: -2px 0 8px 24px; }
+.dlg-parts .dlg-sheets label { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin: 0; }
+.dlg-parts .dlg-sheets .dlg-dim { padding-bottom: 8px; }
+.dlg-parts .dlg-sheets.hidden { display: none; }
+.dlg-parts .dlg-sheets select { width: auto; min-width: 72px; min-height: 36px; }
+.dlg-parts .dlg-cells-wrap { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; }
+.dlg-parts .dlg-cells-wrap .dlg-dim { font-size: 11px; line-height: 1.5; padding: 0; }
+.dlg-parts .dlg-cells { display: grid; grid-template-columns: repeat(var(--cols, 2), 40px); gap: 4px; }
+.dlg-parts .dlg-cell { min-height: 32px; padding: 0; border-radius: 4px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+    border: 1.5px dashed var(--accent, #2563eb); background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent); color: inherit; }
+.dlg-parts .dlg-cell[aria-pressed="false"] { border-style: solid; border-color: var(--border, #94a3b8); background: transparent; opacity: 0.5; text-decoration: line-through; }
+.dlg-parts .dlg-cell:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 1px; }
+@media (max-width: 900px) {
+    .dlg-parts .dlg-sheets select { min-height: 44px; }
+    .dlg-parts .dlg-cells { grid-template-columns: repeat(var(--cols, 2), 44px); }
+    .dlg-parts .dlg-cell { min-height: 44px; }
+}

@@ -111,6 +111,37 @@ window.addEventListener('load', () => { setTimeout(async () => {
     }
     ok('every shipped template declares its networks', Object.entries(templatesData).every(([, tpl]) => Array.isArray(tpl.networks) && tpl.networks.length > 0),
        Object.entries(templatesData).filter(([, tpl]) => !(tpl.networks || []).length).map(([k]) => k).join(', '));
+    {
+      // A sample is what a new user learns from: every one but Common Errors
+      // (broken on purpose) opens with nothing wrong. Bank, Hospital, Campus
+      // and the Factory shipped their core router's gateway on a subnet it
+      // did not have, a critical finding on a page that was meant to be fine.
+      const faulty = Object.keys(templatesData).filter((k) => k !== 'errors').map((k) => {
+        replaceDocument(templatesData[k], { origin: 'template' });
+        const f = topologyFindings().filter((x) => x.level === 'bad' || x.level === 'warn');
+        return f.length ? `${k}: ${f.map((x) => `${x.check} ${x.subject}`).join('; ')}` : '';
+      }).filter(Boolean);
+      ok('every sample but Common Errors opens with no warning and nothing critical', !faulty.length, faulty.join(' | '));
+      // Their networks carry names (netNames, js/data.js), so a zone reads
+      // "Voice · 10.5.10.0/24 · VLAN 10"; the Offline tiers follow the bill
+      // of materials on offline.carino.systems and stay as they are.
+      replaceDocument(templatesData.callcenter, { origin: 'template' });
+      const voice = state.networks.find((n) => n.cidr === '10.5.10.0/24');
+      ok('a sample names its networks and their VLANs', !!voice && voice.name === 'Voice' && voice.vlan === 10, voice && JSON.stringify(voice));
+      ok('the names are not left on the document', !('netNames' in templatesData.callcenter));
+      const blockNet = (BUILTIN_BLOCKS.voip.networks || [])[0];
+      ok('so does a block', !!blockNet && blockNet.name === 'Voice', blockNet && JSON.stringify(blockNet));
+      // A block brings the router its devices name as gateway: inserted, even
+      // twice and moved to free addresses, it raises no Gateway finding.
+      const blockFaults = Object.keys(BUILTIN_BLOCKS).map((k) => {
+        replaceDocument({ v: 2, nodes: [], links: [] }, { origin: 'template' });
+        insertBlock({ key: k, doc: BUILTIN_BLOCKS[k], builtin: true });
+        insertBlock({ key: k, doc: BUILTIN_BLOCKS[k], builtin: true });
+        const f = topologyFindings().filter((x) => x.level === 'bad' || x.level === 'warn');
+        return f.length ? `${k}: ${f.map((x) => `${x.check} ${x.subject}`).join('; ')}` : '';
+      }).filter(Boolean);
+      ok('every shipped block goes in, twice, with no warning and nothing critical', !blockFaults.length, blockFaults.join(' | '));
+    }
 
     // ---- 3: the readers ----
     replaceDocument(d, { origin: 'template' });

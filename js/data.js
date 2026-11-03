@@ -249,6 +249,7 @@ const templatesData = {
     // the best band both ends have. The gadgets are set to IoT, which has
     // no subnet of its own (it shares the LAN, as a home router does it).
     house: {
+        netNames: { '192.168.1.0/24': { name: 'Home' } },
         wifi: [
             { id: 'wf_home', ssid: 'Home', security: 'wpa2/3', network: '192.168.1.0/24' },
             { id: 'wf_iot', ssid: 'IoT', security: 'wpa2', bands: ['2.4'] }
@@ -270,10 +271,11 @@ const templatesData = {
         links: [{ id: 'hl1', source: 'h1', target: 'h2', sourceIface: 'i1', targetIface: 'i2' }, { id: 'hl2', source: 'h2', target: 'h3', sourceIface: 'i1', targetIface: 'i1' }, { id: 'hl3', source: 'h2', target: 'hap', sourceIface: 'i3', targetIface: 'p1' }, { id: 'hl4', source: 'hap', target: 'h5', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -58 } }, { id: 'hl5', source: 'hap', target: 'h6', sourceIface: 'w1', targetIface: 'i1', wifi: { ssid: 'wf_iot', signal: -71 } }, { id: 'hl6', source: 'hap', target: 'hp1', sourceIface: 'w1', targetIface: 'i1', wifi: { ssid: 'wf_iot', signal: -54 } }]
     },
     bank: {
+        netNames: { '10.50.10.0/24': { name: 'Staff', vlan: 10 }, '10.50.20.0/24': { name: 'Cardholder', vlan: 20 } },
         nodes: [
             { id: 'b1', type: 'cloud', name: 'WAN Connection', x: 400, y: 50, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
-            { id: 'b2', type: 'firewall', name: 'Edge Firewall', x: 400, y: 150, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.50.0.1/16' }, { id: 'i2', name: 'eth1', ip: '' }], dns: '1.1.1.1' },
-            { id: 'b3', type: 'router', name: 'Core Router', x: 400, y: 250, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.50.10.1/24' }, { id: 'i2', name: 'eth1', ip: '10.50.20.1/24' }, { id: 'i3', name: 'eth2', ip: '' }], gw: '10.50.0.1' },
+            { id: 'b2', type: 'firewall', name: 'Edge Firewall', x: 400, y: 150, nat: true, interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.2/30' }, { id: 'i2', name: 'eth1', ip: '10.50.0.1/30' }], gw: '203.0.113.1', dns: '1.1.1.1' },
+            { id: 'b3', type: 'router', name: 'Core Router', x: 400, y: 250, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.50.0.2/30' }, { id: 'i2', name: 'eth1', ip: '10.50.10.1/24' }, { id: 'i3', name: 'eth2', ip: '10.50.20.1/24' }], gw: '10.50.0.1' },
             { id: 'b4', type: 'switch', name: 'Teller SW', x: 250, y: 350, portCount: 8, interfaces: [] },
             { id: 'b5', type: 'pc', name: 'Teller 1', x: 150, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.50.10.51/24' }], gw: '10.50.10.1', dns: '10.50.10.10' },
             { id: 'b6', type: 'pc', name: 'Teller 2', x: 250, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.50.10.52/24' }], gw: '10.50.10.1', dns: '10.50.10.10' },
@@ -291,6 +293,7 @@ const templatesData = {
     // VMs and a container on the app servers: the sample that shows groups,
     // the rack view and hosts together (Review-Packs/Topo-groups.md).
     datacenter: {
+        netNames: { '10.10.0.0/24': { name: 'Web', vlan: 110 }, '10.20.0.0/24': { name: 'App', vlan: 120 }, '10.30.0.0/24': { name: 'Data', vlan: 130 } },
         groups: [
             { id: 'g_dc',  kind: 'building', name: 'DC-1' },
             { id: 'g_hall', kind: 'room', name: 'Data hall', parent: 'g_dc' },
@@ -318,49 +321,61 @@ const templatesData = {
             { id: 'd11', type: 'pc',           name: 'Jump Host',         x: 1010, y: 290, group: 'g_ops', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.0.50/24' }], gw: '10.20.0.1', ports: '22' }
         ],
         links: [
-            { id: 'dl1', source: 'd1', target: 'd2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'dl2', source: 'd2', target: 'd3', sourceIface: 'i3', targetIface: 'i1' },
-            { id: 'dl3', source: 'd3', target: 'd4', sourceIface: 'i2', targetIface: 'i1' }, { id: 'dl4', source: 'd3', target: 'd5', sourceIface: 'i3', targetIface: 'i1' },
-            { id: 'dl5', source: 'd4', target: 'd6', sourceIface: 'i2', targetIface: 'i1' }, { id: 'dl6', source: 'd4', target: 'd7', sourceIface: 'i2', targetIface: 'i1' }, { id: 'dl7', source: 'd4', target: 'd8', attachment: 'bridged', sourceIface: 'i2', targetIface: 'i1' },
-            { id: 'dl8', source: 'd5', target: 'd9', sourceIface: 'i2', targetIface: 'i1' }, { id: 'dl9', source: 'd5', target: 'd10', sourceIface: 'i2', targetIface: 'i1' }, { id: 'dl10', source: 'd5', target: 'd11', sourceIface: 'i2', targetIface: 'i1' }, { id: 'dl11', source: 'd5', target: 'd12', sourceIface: 'i3', targetIface: 'p1' },
-            { id: 'dl12', source: 'd12', target: 'd13', sourceIface: 'p2', targetIface: 'i1' }, { id: 'dl13', source: 'd12', target: 'd14', sourceIface: 'p3', targetIface: 'i1' }, { id: 'dl14', source: 'd12', target: 'd15', sourceIface: 'p4', targetIface: 'i1' }
+            { id: 'dl1', cable: { label: 'DC1-001' }, source: 'd1', target: 'd2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'dl2', cable: { label: 'DC1-002' }, source: 'd2', target: 'd3', sourceIface: 'i3', targetIface: 'i1' },
+            { id: 'dl3', cable: { label: 'DC1-003' }, source: 'd3', target: 'd4', sourceIface: 'i2', targetIface: 'i1' }, { id: 'dl4', cable: { label: 'DC1-004' }, source: 'd3', target: 'd5', sourceIface: 'i3', targetIface: 'i1' },
+            { id: 'dl5', cable: { label: 'DC1-005' }, source: 'd4', target: 'd6', sourceIface: 'i2', targetIface: 'i1' }, { id: 'dl6', cable: { label: 'DC1-006' }, source: 'd4', target: 'd7', sourceIface: 'i2', targetIface: 'i1' }, { id: 'dl7', cable: { label: 'DC1-007' }, source: 'd4', target: 'd8', attachment: 'bridged', sourceIface: 'i2', targetIface: 'i1' },
+            { id: 'dl8', cable: { label: 'DC1-008' }, source: 'd5', target: 'd9', sourceIface: 'i2', targetIface: 'i1' }, { id: 'dl9', cable: { label: 'DC1-009' }, source: 'd5', target: 'd10', sourceIface: 'i2', targetIface: 'i1' }, { id: 'dl10', cable: { label: 'DC1-010' }, source: 'd5', target: 'd11', sourceIface: 'i2', targetIface: 'i1' }, { id: 'dl11', cable: { label: 'DC1-011' }, source: 'd5', target: 'd12', sourceIface: 'i3', targetIface: 'p1' },
+            { id: 'dl12', cable: { label: 'DC1-012' }, source: 'd12', target: 'd13', sourceIface: 'p2', targetIface: 'i1' }, { id: 'dl13', cable: { label: 'DC1-013' }, source: 'd12', target: 'd14', sourceIface: 'p3', targetIface: 'i1' }, { id: 'dl14', cable: { label: 'DC1-014' }, source: 'd12', target: 'd15', sourceIface: 'p4', targetIface: 'i1' }
         ]
     },
     hospital: {
+        netNames: { '10.10.10.0/24': { name: 'Admin', vlan: 10 }, '192.168.100.0/24': { name: 'Clinical', vlan: 100 } },
         nodes: [
             { id: 'hp1', type: 'cloud', name: 'ISP', x: 400, y: 50, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
-            { id: 'hp2', type: 'firewall', name: 'Main Firewall', x: 400, y: 150, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.1/16' }, { id: 'i2', name: 'eth1', ip: '' }], dns: '1.1.1.1' },
-            { id: 'hp3', type: 'router', name: 'Core Router', x: 400, y: 250, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.1/24' }, { id: 'i2', name: 'eth1', ip: '192.168.100.1/24' }, { id: 'i3', name: 'eth2', ip: '' }], gw: '10.10.0.1' },
+            { id: 'hp2', type: 'firewall', name: 'Main Firewall', x: 400, y: 150, nat: true, interfaces: [{ id: 'i1', name: 'eth0', ip: '198.51.100.2/30' }, { id: 'i2', name: 'eth1', ip: '10.10.0.1/30' }], gw: '198.51.100.1', dns: '1.1.1.1' },
+            { id: 'hp3', type: 'router', name: 'Core Router', x: 400, y: 250, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.2/30' }, { id: 'i2', name: 'eth1', ip: '10.10.10.1/24' }, { id: 'i3', name: 'eth2', ip: '192.168.100.1/24' }], gw: '10.10.0.1' },
             { id: 'hp4', type: 'switch', name: 'Admin SW', x: 250, y: 350, portCount: 8, interfaces: [] },
             { id: 'hp5', type: 'server', name: 'EHR Server', x: 150, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.20/24' }], gw: '10.10.10.1' },
             { id: 'hp6', type: 'pc', name: 'Nurse Desk', x: 250, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.50/24' }], gw: '10.10.10.1' },
             { id: 'hp7', type: 'printer', name: 'Records Print', x: 350, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.80/24' }], gw: '10.10.10.1' },
             { id: 'hp8', type: 'switch', name: 'Medical SW', x: 550, y: 350, portCount: 8, interfaces: [] },
-            { id: 'hp9', type: 'dicom', name: 'PACS Archive', x: 450, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.100.10/24' }] },
-            { id: 'hp10', type: 'dicom', name: 'MRI Scanner', x: 550, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.100.11/24' }] },
+            { id: 'hp9', type: 'dicom', name: 'PACS Archive', x: 450, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.100.10/24' }], gw: '192.168.100.1', ports: '104, 11112' },
+            { id: 'hp10', type: 'dicom', name: 'MRI Scanner', x: 550, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.100.11/24' }], gw: '192.168.100.1', ports: '104' },
             { id: 'hp11', type: 'iot', name: 'Vitals Mon', x: 650, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.100.52/24' }], gw: '192.168.100.1' }
         ],
         links: [{ id: 'hpl1', source: 'hp1', target: 'hp2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'hpl2', source: 'hp2', target: 'hp3', sourceIface: 'i2', targetIface: 'i1' }, { id: 'hpl3', source: 'hp3', target: 'hp4', sourceIface: 'i2', targetIface: 'p1' }, { id: 'hpl4', source: 'hp3', target: 'hp8', sourceIface: 'i3', targetIface: 'p1' }, { id: 'hpl5', source: 'hp4', target: 'hp5', sourceIface: 'p2', targetIface: 'i1' }, { id: 'hpl6', source: 'hp4', target: 'hp6', sourceIface: 'p3', targetIface: 'i1' }, { id: 'hpl7', source: 'hp4', target: 'hp7', sourceIface: 'p4', targetIface: 'i1' }, { id: 'hpl8', source: 'hp8', target: 'hp9', sourceIface: 'p2', targetIface: 'i1' }, { id: 'hpl9', source: 'hp8', target: 'hp10', sourceIface: 'p3', targetIface: 'i1' }, { id: 'hpl10', source: 'hp8', target: 'hp11', sourceIface: 'p4', targetIface: 'i1' }]
     },
+    // Three buildings on one core: the main building (the edge, the core and
+    // IT), HR's, and the visitor centre with the guest Wi-Fi on a subnet of
+    // its own. OWE: no password to hand out at the desk, still encrypted.
     campus: {
-        nodes: [
-            { id: 'c1', type: 'cloud', name: 'WAN', x: 400, y: 50, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
-            { id: 'c2', type: 'firewall', name: 'Campus Firewall', x: 400, y: 150, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.1/16' }, { id: 'i2', name: 'eth1', ip: '' }], dns: '1.1.1.1' },
-            { id: 'c3', type: 'router', name: 'Core Router', x: 400, y: 250, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.1.1/24' }, { id: 'i2', name: 'eth1', ip: '10.0.2.1/24' }, { id: 'i3', name: 'eth2', ip: '172.20.0.1/24' }, { id: 'i4', name: 'eth3', ip: '' }], gw: '10.0.0.1' },
-            { id: 'c4', type: 'switch', name: 'IT SW', x: 200, y: 350, portCount: 8, interfaces: [] },
-            { id: 'c5', type: 'vm', name: 'Domain Controller', x: 150, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.1.10/24' }], gw: '10.0.1.1' },
-            { id: 'c6', type: 'pc', name: 'Admin PC', x: 250, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.1.50/24' }], gw: '10.0.1.1' },
-            { id: 'c7', type: 'switch', name: 'HR SW', x: 400, y: 350, portCount: 8, interfaces: [] },
-            { id: 'c8', type: 'pc', name: 'HR Desktop', x: 400, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.2.50/24' }], gw: '10.0.2.1' },
-            { id: 'c9', type: 'ap', name: 'Guest AP', x: 600, y: 350, interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
-            { id: 'c10', type: 'iot', name: 'Visitor Phone', x: 600, y: 450, interfaces: [{ id: 'i1', name: 'wlan0', ip: '172.20.0.50/24' }], gw: '172.20.0.1' }
+        netNames: { '10.0.1.0/24': { name: 'IT', vlan: 10 }, '10.0.2.0/24': { name: 'HR', vlan: 20 }, '172.20.0.0/24': { name: 'Guest', vlan: 99 } },
+        wifi: [{ id: 'wf_cguest', ssid: 'Campus Guest', security: 'owe', network: '172.20.0.0/24' }],
+        groups: [
+            { id: 'g_main', kind: 'building', name: 'Main building' },
+            { id: 'g_hr', kind: 'building', name: 'HR building' },
+            { id: 'g_vis', kind: 'building', name: 'Visitor centre' }
         ],
-        links: [{ id: 'cl1', source: 'c1', target: 'c2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'cl2', source: 'c2', target: 'c3', sourceIface: 'i2', targetIface: 'i1' }, { id: 'cl3', source: 'c3', target: 'c4', sourceIface: 'i2', targetIface: 'p1' }, { id: 'cl4', source: 'c3', target: 'c7', sourceIface: 'i3', targetIface: 'p1' }, { id: 'cl5', source: 'c3', target: 'c9', sourceIface: 'i4', targetIface: 'p1' }, { id: 'cl6', source: 'c4', target: 'c5', sourceIface: 'p2', targetIface: 'i1' }, { id: 'cl7', source: 'c4', target: 'c6', sourceIface: 'p3', targetIface: 'i1' }, { id: 'cl8', source: 'c7', target: 'c8', sourceIface: 'p2', targetIface: 'i1' }, { id: 'cl9', source: 'c9', target: 'c10', sourceIface: 'w1', targetIface: 'i1' }]
+        nodes: [
+            { id: 'c1', type: 'cloud', name: 'WAN', x: 200, y: 20, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
+            { id: 'c2', type: 'firewall', name: 'Campus Firewall', x: 200, y: 170, group: 'g_main', nat: true, interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.6/30' }, { id: 'i2', name: 'eth1', ip: '10.0.0.1/30' }], gw: '203.0.113.5', dns: '1.1.1.1' },
+            { id: 'c3', type: 'router', name: 'Core Router', x: 200, y: 290, group: 'g_main', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.2/30' }, { id: 'i2', name: 'eth1', ip: '10.0.1.1/24' }, { id: 'i3', name: 'eth2', ip: '10.0.2.1/24' }, { id: 'i4', name: 'eth3', ip: '172.20.0.1/24' }], gw: '10.0.0.1' },
+            { id: 'c4', type: 'switch', name: 'IT SW', x: 200, y: 410, group: 'g_main', portCount: 8, interfaces: [] },
+            { id: 'c5', type: 'server', name: 'Domain Controller', x: 130, y: 560, group: 'g_main', ports: '53, 88, 389, 445', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.1.10/24' }], gw: '10.0.1.1' },
+            { id: 'c6', type: 'pc', name: 'Admin PC', x: 270, y: 560, group: 'g_main', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.1.50/24' }], gw: '10.0.1.1' },
+            { id: 'c7', type: 'switch', name: 'HR SW', x: 480, y: 410, group: 'g_hr', portCount: 8, interfaces: [] },
+            { id: 'c8', type: 'pc', name: 'HR Desktop', x: 480, y: 560, group: 'g_hr', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.2.50/24' }], gw: '10.0.2.1' },
+            { id: 'c9', type: 'ap', name: 'Guest AP', x: 700, y: 410, group: 'g_vis', interfaces: [{ id: 'w1', name: 'wlan0', ip: '', radio: { standard: 'ax', bands: [{ band: '2.4', channel: 11, width: 20 }, { band: '5', channel: 149, width: 80 }] } }] },
+            { id: 'c10', type: 'iot', name: 'Visitor Phone', x: 700, y: 560, group: 'g_vis', interfaces: [{ id: 'i1', name: 'wlan0', ip: '172.20.0.50/24', radio: { standard: 'ax' } }], gw: '172.20.0.1' }
+        ],
+        links: [{ id: 'cl1', source: 'c1', target: 'c2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'cl2', source: 'c2', target: 'c3', sourceIface: 'i2', targetIface: 'i1' }, { id: 'cl3', source: 'c3', target: 'c4', sourceIface: 'i2', targetIface: 'p1' }, { id: 'cl4', source: 'c3', target: 'c7', sourceIface: 'i3', targetIface: 'p1' }, { id: 'cl5', source: 'c3', target: 'c9', sourceIface: 'i4', targetIface: 'p1' }, { id: 'cl6', source: 'c4', target: 'c5', sourceIface: 'p2', targetIface: 'i1' }, { id: 'cl7', source: 'c4', target: 'c6', sourceIface: 'p3', targetIface: 'i1' }, { id: 'cl8', source: 'c7', target: 'c8', sourceIface: 'p2', targetIface: 'i1' }, { id: 'cl9', source: 'c9', target: 'c10', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -60 } }]
     },
     // The guest Wi-Fi of the blurb: its own port on the router and its own
     // subnet, so a shopper's phone never shares a segment with the tills.
     // OWE (Enhanced Open): no password to print on the counter, and still
     // encrypted.
     retail: {
+        netNames: { '192.168.5.0/24': { name: 'POS', vlan: 10 }, '10.5.5.0/24': { name: 'CCTV', vlan: 20 }, '10.5.9.0/24': { name: 'Shop Guest', vlan: 99 } },
         wifi: [{ id: 'wf_shop', ssid: 'Shop Guest', security: 'owe', network: '10.5.9.0/24' }],
         nodes: [
             { id: 'r1', type: 'cloud', name: 'ISP', x: 400, y: 50, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
@@ -380,25 +395,27 @@ const templatesData = {
         links: [{ id: 'rl1', source: 'r1', target: 'r2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'rl2', source: 'r2', target: 'r3', sourceIface: 'i2', targetIface: 'p1' }, { id: 'rl3', source: 'r3', target: 'r4', sourceIface: 'p2', targetIface: 'p1' }, { id: 'rl4', source: 'r3', target: 'r8', sourceIface: 'p3', targetIface: 'p1' }, { id: 'rl5', source: 'r4', target: 'r5', sourceIface: 'p2', targetIface: 'i1' }, { id: 'rl6', source: 'r4', target: 'r6', sourceIface: 'p3', targetIface: 'i1' }, { id: 'rl7', source: 'r4', target: 'r7', sourceIface: 'p4', targetIface: 'i1' }, { id: 'rl8', source: 'r8', target: 'r9', sourceIface: 'p2', targetIface: 'i1' }, { id: 'rl9', source: 'r8', target: 'r10', sourceIface: 'p3', targetIface: 'i1' }, { id: 'rl10', source: 'r8', target: 'r11', sourceIface: 'p4', targetIface: 'i1' }, { id: 'rl11', source: 'r2', target: 'r12', sourceIface: 'i3', targetIface: 'p1' }, { id: 'rl12', source: 'r12', target: 'r13', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -63 } }]
     },
     factory: {
+        netNames: { '10.20.10.0/24': { name: 'IT', vlan: 10 }, '10.20.20.0/24': { name: 'OT', vlan: 20 } },
         nodes: [
             { id: 'f1', type: 'cloud', name: 'WAN', x: 400, y: 50, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
-            { id: 'f2', type: 'firewall', name: 'Plant Firewall', x: 400, y: 150, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.0.1/16' }, { id: 'i2', name: 'eth1', ip: '' }], dns: '1.1.1.1' },
-            { id: 'f3', type: 'router', name: 'Core Router', x: 400, y: 250, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.10.1/24' }, { id: 'i2', name: 'eth1', ip: '10.20.20.1/24' }], gw: '10.20.0.1' },
+            { id: 'f2', type: 'firewall', name: 'Plant Firewall', x: 400, y: 150, nat: true, interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.10/30' }, { id: 'i2', name: 'eth1', ip: '10.20.0.1/30' }], gw: '203.0.113.9', dns: '1.1.1.1' },
+            { id: 'f3', type: 'router', name: 'Core Router', x: 400, y: 250, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.0.2/30' }, { id: 'i2', name: 'eth1', ip: '10.20.10.1/24' }, { id: 'i3', name: 'eth2', ip: '10.20.20.1/24' }], gw: '10.20.0.1' },
             { id: 'f4', type: 'server', name: 'SCADA Master', x: 250, y: 350, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.10.10/24' }], gw: '10.20.10.1' },
             { id: 'f5', type: 'switch', name: 'Plant SW', x: 550, y: 350, portCount: 8, interfaces: [] },
             { id: 'f6', type: 'iot', name: 'PLC Controller 1', x: 450, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.20.50/24' }], gw: '10.20.20.1' },
             { id: 'f7', type: 'iot', name: 'Robotic Arm 2', x: 550, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.20.51/24' }], gw: '10.20.20.1' },
             { id: 'f8', type: 'camera', name: 'QA Cam', x: 650, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.20.90/24' }], gw: '10.20.20.1' }
         ],
-        links: [{ id: 'fl1', source: 'f1', target: 'f2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'fl2', source: 'f2', target: 'f3', sourceIface: 'i2', targetIface: 'i1' }, { id: 'fl3', source: 'f3', target: 'f4', sourceIface: 'i1', targetIface: 'i1' }, { id: 'fl4', source: 'f3', target: 'f5', sourceIface: 'i2', targetIface: 'p1' }, { id: 'fl5', source: 'f5', target: 'f6', sourceIface: 'p2', targetIface: 'i1' }, { id: 'fl6', source: 'f5', target: 'f7', sourceIface: 'p3', targetIface: 'i1' }, { id: 'fl7', source: 'f5', target: 'f8', sourceIface: 'p4', targetIface: 'i1' }]
+        links: [{ id: 'fl1', source: 'f1', target: 'f2', sourceIface: 'i1', targetIface: 'i1' }, { id: 'fl2', source: 'f2', target: 'f3', sourceIface: 'i2', targetIface: 'i1' }, { id: 'fl3', source: 'f3', target: 'f4', sourceIface: 'i2', targetIface: 'i1' }, { id: 'fl4', source: 'f3', target: 'f5', sourceIface: 'i3', targetIface: 'p1' }, { id: 'fl5', source: 'f5', target: 'f6', sourceIface: 'p2', targetIface: 'i1' }, { id: 'fl6', source: 'f5', target: 'f7', sourceIface: 'p3', targetIface: 'i1' }, { id: 'fl7', source: 'f5', target: 'f8', sourceIface: 'p4', targetIface: 'i1' }]
     },
     studio: {
+        netNames: { '10.0.0.0/24': { name: 'Production' } },
         nodes: [
             { id: 's1', type: 'cloud', name: 'Internet', x: 400, y: 50, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
             { id: 's2', type: 'router', name: 'Gateway', x: 400, y: 150, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.1/24' }, { id: 'i2', name: 'eth1', ip: '' }] },
             { id: 's3', type: 'switch', name: '10G Switch', x: 400, y: 250, portCount: 8, interfaces: [] },
             { id: 's4', type: 'server', name: 'NAS Storage', x: 200, y: 350, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.10/24' }, { id: 'i2', name: 'eth1', ip: '' }], gw: '10.0.0.1' },
-            { id: 's5', type: 'vm', name: 'Render Node (Passthrough)', x: 100, y: 450, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.11/24' }], gw: '10.0.0.1' },
+            { id: 's5', type: 'vm', name: 'Render Node (Passthrough)', x: 100, y: 450, host: 's4', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.11/24' }], gw: '10.0.0.1' },
             { id: 's6', type: 'pc', name: 'Edit Bay 1', x: 350, y: 350, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.50/24' }], gw: '10.0.0.1' },
             { id: 's7', type: 'pc', name: 'Edit Bay 2', x: 450, y: 350, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.51/24' }], gw: '10.0.0.1' },
             { id: 's8', type: 'camera', name: 'Studio Cam A', x: 550, y: 350, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.90/24' }], gw: '10.0.0.1' },
@@ -409,6 +426,7 @@ const templatesData = {
     // A wall-mount 12U comms rack and the agent floor around it: the call
     // centre filed by room, with the voice gear racked.
     callcenter: {
+        netNames: { '10.5.10.0/24': { name: 'Voice', vlan: 10 }, '10.5.20.0/24': { name: 'Data', vlan: 20 } },
         groups: [
             { id: 'g_cc', kind: 'floor', name: '3rd floor' },
             { id: 'g_comms', kind: 'room', name: 'Comms room', parent: 'g_cc' },
@@ -453,6 +471,13 @@ const templatesData = {
     // only, a 6E laptop that lands on 6 GHz by itself (the best band both
     // ends have), and a phone whose signal clears the stricter voice limit.
     showcase: {
+        netNames: {
+            '10.10.10.0/24': { name: 'Hospital', vlan: 10 }, '10.10.20.0/24': { name: 'Studio', vlan: 20 }, '10.10.30.0/24': { name: 'Office', vlan: 30 },
+            '10.10.40.0/24': { name: 'Call centre', vlan: 40 }, '10.30.0.0/24': { name: 'Compute' }, '10.31.0.0/24': { name: 'Storage' },
+            '172.16.5.0/24': { name: 'Branch' }, '192.168.1.0/24': { name: 'Home' }
+        },
+        // A note with a red line to the device it is about (it moves with it).
+        annotations: [{ id: 't_pacs', x: -250, y: 1080, text: 'PACS: no reboots during scanning hours', style: 'note', size: 12, targets: ['pacs'] }],
         wifi: [
             { id: 'wf_office', ssid: 'Office', security: 'wpa3', network: '10.10.30.0/24' },
             { id: 'wf_oiot', ssid: 'Office-IoT', security: 'wpa2', bands: ['2.4'] }
@@ -504,7 +529,7 @@ const templatesData = {
             { id: 'ctr',  type: 'container',    name: 'API Container',       x: 860, y: 540, host: 'wvm', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.13/24' }], gw: '10.30.0.1', ports: '8080' },
             // --- Hospital tenant (VLAN 10) ---
             { id: 'hsw',  type: 'switch',       name: 'Hospital Switch',     x: 160, y: 860, group: 'g_hosp', portCount: 8,  interfaces: [] },
-            { id: 'dcm',  type: 'dicom',        name: 'CT Modality',         x: 60, y: 980, group: 'g_hosp', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.20/24' }], gw: '10.10.10.1', ports: '104' },
+            { id: 'dcm',  type: 'dicom',        name: 'CT Modality',         x: 60, y: 980, group: 'g_hosp', serial: 'CT64-1187-A', assetTag: 'HT-0042', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.20/24' }], gw: '10.10.10.1', ports: '104' },
             { id: 'pacs', type: 'server',       name: 'PACS Server',         x: 160, y: 980, group: 'g_hosp', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.10/24' }], gw: '10.10.10.1', ports: '104, 11112' },
             { id: 'radpc',type: 'pc',           name: 'Radiology WS',        x: 260, y: 980, group: 'g_hosp', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.50/24' }], gw: '10.10.10.1' },
             { id: 'wcam', type: 'camera',       name: 'Ward Camera',         x: 160, y: 1100, group: 'g_hosp', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.90/24' }], gw: '10.10.10.1', ports: '554' },
@@ -542,8 +567,8 @@ const templatesData = {
             { id: 'k5',  source: 'edge', target: 'fw', medium: 'fiber', sourceIface: 'i3', targetIface: 'i1' },  { id: 'k6', source: 'edge', target: 'vpn', sourceIface: 'i3', targetIface: 'i2' },
             { id: 'k7',  source: 'fw', target: 'l3', sourceIface: 'i2', targetIface: 'i1' },    { id: 'k7b', source: 'fw', target: 'l3', sourceIface: 'i2', targetIface: 'i1' },  { id: 'k8', source: 'fw', target: 'lb', sourceIface: 'i3', targetIface: 'i1' },
             { id: 'k9',  source: 'lb', target: 'as', sourceIface: 'i2', targetIface: 'a1' },    { id: 'k10', source: 'lb', target: 'wvm', attachment: 'bridged', sourceIface: 'i2', targetIface: 'i1' }, { id: 'k11', source: 'lb', target: 'ctr', attachment: 'bridged', sourceIface: 'i2', targetIface: 'i1' },
-            { id: 'k12', source: 'l3', target: 'hsw', sourceIface: 'i2', targetIface: 'p1' },   { id: 'k13', source: 'l3', target: 'ssw', sourceIface: 'i3', targetIface: 'p1' }, { id: 'k14', source: 'l3', target: 'oap', sourceIface: 'i4', targetIface: 'p1' }, { id: 'k15', source: 'l3', target: 'csw', sourceIface: 'i5', targetIface: 'p1' },
-            { id: 'k16', source: 'hsw', target: 'dcm', sourceIface: 'p2', targetIface: 'i1' },  { id: 'k17', source: 'hsw', target: 'pacs', sourceIface: 'p3', targetIface: 'i1' }, { id: 'k18', source: 'hsw', target: 'radpc', sourceIface: 'p4', targetIface: 'i1' }, { id: 'k19', source: 'hsw', target: 'wcam', sourceIface: 'p5', targetIface: 'i1' },
+            { id: 'k12', cable: { label: 'HT-C-101' }, source: 'l3', target: 'hsw', sourceIface: 'i2', targetIface: 'p1' },   { id: 'k13', source: 'l3', target: 'ssw', sourceIface: 'i3', targetIface: 'p1' }, { id: 'k14', source: 'l3', target: 'oap', sourceIface: 'i4', targetIface: 'p1' }, { id: 'k15', source: 'l3', target: 'csw', sourceIface: 'i5', targetIface: 'p1' },
+            { id: 'k16', cable: { label: 'HT-C-102' }, source: 'hsw', target: 'dcm', sourceIface: 'p2', targetIface: 'i1' },  { id: 'k17', cable: { label: 'HT-C-103' }, source: 'hsw', target: 'pacs', sourceIface: 'p3', targetIface: 'i1' }, { id: 'k18', cable: { label: 'HT-C-104' }, source: 'hsw', target: 'radpc', sourceIface: 'p4', targetIface: 'i1' }, { id: 'k19', cable: { label: 'HT-C-105' }, source: 'hsw', target: 'wcam', sourceIface: 'p5', targetIface: 'i1' },
             { id: 'k20', source: 'ssw', target: 'scam', sourceIface: 'p2', targetIface: 'i1' }, { id: 'k21', source: 'ssw', target: 'epc', sourceIface: 'p3', targetIface: 'i1' },
             { id: 'k22', source: 'oap', target: 'opc', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -52 } }, { id: 'k23', source: 'oap', target: 'opr', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -66 } }, { id: 'k24', source: 'oap', target: 'oph', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { signal: -60 } }, { id: 'k25', source: 'oap', target: 'osen', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1', wifi: { ssid: 'wf_oiot', signal: -70 } },
             { id: 'k26', source: 'csw', target: 'cp1', sourceIface: 'p2', targetIface: 'i1' },  { id: 'k27', source: 'csw', target: 'cp2', sourceIface: 'p3', targetIface: 'i1' }, { id: 'k28', source: 'csw', target: 'capc', sourceIface: 'p4', targetIface: 'i1' }, { id: 'k29', source: 'csw', target: 'pbx', sourceIface: 'p5', targetIface: 'i1' },
@@ -560,6 +585,7 @@ const templatesData = {
     // Rooms on one floor, and the server room's 24U rack: groups as a clinic
     // would file them, so the sample shows frames, collapse and the rack view.
     imaging: {
+        netNames: { '10.60.10.0/24': { name: 'Modalities', vlan: 10 }, '10.60.20.0/24': { name: 'Reading', vlan: 20 }, '10.60.30.0/24': { name: 'Remote reading' } },
         groups: [
             { id: 'g_ic', kind: 'building', name: 'Imaging Centre' },
             { id: 'g_gf', kind: 'floor', name: 'Ground floor', parent: 'g_ic' },
@@ -616,6 +642,7 @@ const templatesData = {
     // password at the desk, on the guest VLAN's subnet. The two APs are on
     // 1/36 and 6/52: clear of each other on both bands.
     hotel: {
+        netNames: { '10.70.10.0/24': { name: 'Staff', vlan: 10 }, '10.70.20.0/24': { name: 'Guest', vlan: 20 }, '10.70.30.0/24': { name: 'Rooms', vlan: 30 } },
         wifi: [{ id: 'wf_guest', ssid: 'Hotel Guest', security: 'owe', network: '10.70.20.0/24' }],
         nodes: [
             { id: 'h_net', type: 'cloud', name: 'Internet',        x: 480, y: 40,  interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
@@ -655,22 +682,32 @@ const templatesData = {
             { id: 'ho14', source: 'h_bsw', target: 'h_cam', sourceIface: 'p4', targetIface: 'i1' }
         ]
     },
+    // The bridge, the engine room and the crew mess as rooms; the uplink and
+    // the firewall sit above them. The crew network is WPA2: the phones the
+    // crew bring do not all have WPA3.
     vessel: {
+        netNames: { '172.20.10.0/24': { name: 'Navigation', vlan: 10 }, '172.20.20.0/24': { name: 'Engine', vlan: 20 }, '172.20.30.0/24': { name: 'Crew', vlan: 30 } },
+        wifi: [{ id: 'wf_crew', ssid: 'Crew', security: 'wpa2', network: '172.20.30.0/24' }],
+        groups: [
+            { id: 'g_bridge', kind: 'room', name: 'Bridge' },
+            { id: 'g_engine', kind: 'room', name: 'Engine room' },
+            { id: 'g_mess', kind: 'room', name: 'Crew mess' }
+        ],
         nodes: [
             { id: 'v_sat', type: 'cloud',  name: 'VSAT / LEO Uplink', x: 480, y: 40, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
             { id: 'v_mdm', type: 'router', name: 'Satellite Modem',   x: 480, y: 150, nat: true, gw: '100.64.0.1',
               interfaces: [{ id: 'w', name: 'wan0', ip: '100.64.0.2/30' }, { id: 'l', name: 'lan', ip: '172.20.0.1/24' }] },
             { id: 'v_fw',  type: 'firewall', name: 'Vessel Firewall', x: 480, y: 270, nat: true, gw: '172.20.0.1', dns: '1.1.1.1', ports: '443, 22',
               interfaces: [{ id: 'w', name: 'igb0', ip: '172.20.0.2/24' }, { id: 'n', name: 'igb1', ip: '172.20.10.1/24' }, { id: 'o', name: 'igb2', ip: '172.20.20.1/24' }, { id: 'c', name: 'igb3', ip: '172.20.30.1/24' }] },
-            { id: 'v_nsw', type: 'switch', name: 'Bridge Switch',     x: 220, y: 390, portCount: 8, interfaces: [] },
-            { id: 'v_ecd', type: 'custom', name: 'ECDIS (Charts)',    x: 120, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.20.10.20/24' }], gw: '172.20.10.1' },
-            { id: 'v_rdr', type: 'custom', name: 'Radar',             x: 230, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.20.10.21/24' }], gw: '172.20.10.1' },
-            { id: 'v_ais', type: 'iot',    name: 'AIS Transponder',   x: 340, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.20.10.22/24' }], gw: '172.20.10.1' },
-            { id: 'v_osw', type: 'switch', name: 'Engine Room Switch', x: 560, y: 390, portCount: 8, interfaces: [] },
-            { id: 'v_scd', type: 'custom', name: 'Engine SCADA',      x: 490, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.20.20.10/24' }], gw: '172.20.20.1', ports: '502' },
-            { id: 'v_plc', type: 'iot',    name: 'Engine PLC',        x: 600, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.20.20.20/24' }], gw: '172.20.20.1', ports: '502' },
-            { id: 'v_ap',  type: 'ap',     name: 'Crew Wi-Fi',        x: 820, y: 390, interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
-            { id: 'v_cph', type: 'iot',    name: 'Crew Phone',        x: 820, y: 520, gw: '172.20.30.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '172.20.30.101/24' }] }
+            { id: 'v_nsw', group: 'g_bridge', type: 'switch', name: 'Bridge Switch',     x: 220, y: 450, portCount: 8, interfaces: [] },
+            { id: 'v_ecd', group: 'g_bridge', type: 'custom', name: 'ECDIS (Charts)',    x: 120, y: 570, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.20.10.20/24' }], gw: '172.20.10.1' },
+            { id: 'v_rdr', group: 'g_bridge', type: 'custom', name: 'Radar',             x: 230, y: 570, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.20.10.21/24' }], gw: '172.20.10.1' },
+            { id: 'v_ais', group: 'g_bridge', type: 'iot',    name: 'AIS Transponder',   x: 340, y: 570, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.20.10.22/24' }], gw: '172.20.10.1' },
+            { id: 'v_osw', group: 'g_engine', type: 'switch', name: 'Engine Room Switch', x: 560, y: 450, portCount: 8, interfaces: [] },
+            { id: 'v_scd', group: 'g_engine', type: 'custom', name: 'Engine SCADA',      x: 490, y: 570, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.20.20.10/24' }], gw: '172.20.20.1', ports: '502' },
+            { id: 'v_plc', group: 'g_engine', type: 'iot',    name: 'Engine PLC',        x: 600, y: 570, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.20.20.20/24' }], gw: '172.20.20.1', ports: '502' },
+            { id: 'v_ap',  group: 'g_mess', type: 'ap',     name: 'Crew Wi-Fi',        x: 820, y: 450, interfaces: [{ id: 'w1', name: 'wlan0', ip: '', radio: { standard: 'ac', bands: [{ band: '2.4', channel: 6, width: 20 }, { band: '5', channel: 40, width: 40 }] } }] },
+            { id: 'v_cph', group: 'g_mess', type: 'iot',    name: 'Crew Phone',        x: 820, y: 580, gw: '172.20.30.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '172.20.30.101/24', radio: { standard: 'ac' } }] }
         ],
         links: [
             { id: 've1', source: 'v_sat', target: 'v_mdm', targetIface: 'w', sourceIface: 'i1' },
@@ -686,7 +723,11 @@ const templatesData = {
             { id: 've11', source: 'v_ap', target: 'v_cph', medium: 'wireless', sourceIface: 'w1', targetIface: 'i1' }
         ]
     },
+    // The handhelds and the forklift on a scanners' SSID with 802.1X
+    // (WPA2-Enterprise), the usual for shared devices on a shop floor.
     warehouse: {
+        netNames: { '10.80.10.0/24': { name: 'Office', vlan: 10 }, '10.80.20.0/24': { name: 'Scanners', vlan: 20 } },
+        wifi: [{ id: 'wf_scan', ssid: 'Scanners', security: 'wpa2-ent', network: '10.80.20.0/24' }],
         nodes: [
             { id: 'wh_net', type: 'cloud',  name: 'Internet',       x: 480, y: 40,  interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] },
             { id: 'wh_rtr', type: 'router', name: 'Site Router',    x: 480, y: 150, nat: true, gw: '203.0.113.9', dns: '1.1.1.1',
@@ -697,11 +738,11 @@ const templatesData = {
             { id: 'wh_wms', type: 'server', name: 'WMS Server',     x: 130, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.80.10.10/24' }], gw: '10.80.10.1', ports: '443, 8080' },
             { id: 'wh_ofc', type: 'pc',     name: 'Office WS',      x: 240, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.80.10.50/24' }], gw: '10.80.10.1' },
             { id: 'wh_lp',  type: 'printer',name: 'Label Printer',  x: 350, y: 510, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.80.10.80/24' }], gw: '10.80.10.1', ports: '9100' },
-            { id: 'wh_ap1', type: 'ap',     name: 'Aisle AP 1',     x: 600, y: 390, interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
-            { id: 'wh_ap2', type: 'ap',     name: 'Aisle AP 2',     x: 800, y: 390, interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
-            { id: 'wh_h1',  type: 'iot',    name: 'Handheld Scanner 1', x: 540, y: 520, gw: '10.80.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.80.20.101/24' }] },
-            { id: 'wh_h2',  type: 'iot',    name: 'Handheld Scanner 2', x: 670, y: 520, gw: '10.80.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.80.20.102/24' }] },
-            { id: 'wh_fl',  type: 'iot',    name: 'Forklift Terminal',  x: 810, y: 520, gw: '10.80.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.80.20.103/24' }] }
+            { id: 'wh_ap1', type: 'ap',     name: 'Aisle AP 1',     x: 600, y: 390, interfaces: [{ id: 'w1', name: 'wlan0', ip: '', radio: { standard: 'ac', bands: [{ band: '2.4', channel: 1, width: 20 }, { band: '5', channel: 36, width: 40 }] } }] },
+            { id: 'wh_ap2', type: 'ap',     name: 'Aisle AP 2',     x: 800, y: 390, interfaces: [{ id: 'w1', name: 'wlan0', ip: '', radio: { standard: 'ac', bands: [{ band: '2.4', channel: 11, width: 20 }, { band: '5', channel: 149, width: 40 }] } }] },
+            { id: 'wh_h1',  type: 'iot',    name: 'Handheld Scanner 1', x: 540, y: 520, gw: '10.80.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.80.20.101/24', radio: { standard: 'ac' } }] },
+            { id: 'wh_h2',  type: 'iot',    name: 'Handheld Scanner 2', x: 670, y: 520, gw: '10.80.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.80.20.102/24', radio: { standard: 'ac' } }] },
+            { id: 'wh_fl',  type: 'iot',    name: 'Forklift Terminal',  x: 810, y: 520, gw: '10.80.20.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.80.20.103/24', radio: { standard: 'n', bands: [{ band: '2.4' }] } }] }
         ],
         links: [
             { id: 'wa1', source: 'wh_net', target: 'wh_rtr', targetIface: 'w', sourceIface: 'i1' },
@@ -723,6 +764,8 @@ const templatesData = {
     // them. Trace from either side and the other simply is not there — which is the
     // whole point of the drawing.
     military: {
+        netNames: { '10.90.10.0/24': { name: 'Command', vlan: 10 }, '10.90.20.0/24': { name: 'Logistics', vlan: 20 }, '10.90.30.0/24': { name: 'Perimeter', vlan: 30 }, '10.91.0.0/24': { name: 'SIPR' } },
+        wifi: [{ id: 'wf_motor', ssid: 'Motor Pool', security: 'wpa3-ent', network: '10.90.30.0/24' }],
         nodes: [
             // --- Unclassified enclave -----------------------------------------
             { id: 'm_net',  type: 'cloud', name: 'DISA NIPRNet',       x: 400,  y: 40,  interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.17/30' }] },
@@ -741,8 +784,8 @@ const templatesData = {
             { id: 'm_gate', type: 'custom', name: 'Gate Access Control', x: 580, y: 520, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.90.30.20/24' }], gw: '10.90.30.1', ports: '443' },
             { id: 'm_cm1',  type: 'camera', name: 'Perimeter Cam N',   x: 680,  y: 520, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.90.30.91/24' }], gw: '10.90.30.1', ports: '554' },
             { id: 'm_cm2',  type: 'camera', name: 'Perimeter Cam S',   x: 780,  y: 520, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.90.30.92/24' }], gw: '10.90.30.1', ports: '554' },
-            { id: 'm_ap',   type: 'ap',     name: 'Motor Pool Wi-Fi',  x: 900,  y: 390, interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
-            { id: 'm_hh',   type: 'iot',    name: 'Motor Pool Handheld', x: 900, y: 520, gw: '10.90.30.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.90.30.101/24' }] },
+            { id: 'm_ap',   type: 'ap',     name: 'Motor Pool Wi-Fi',  x: 900,  y: 390, interfaces: [{ id: 'w1', name: 'wlan0', ip: '', radio: { standard: 'ax', bands: [{ band: '2.4', channel: 6, width: 20 }, { band: '5', channel: 44, width: 80 }] } }] },
+            { id: 'm_hh',   type: 'iot',    name: 'Motor Pool Handheld', x: 900, y: 520, gw: '10.90.30.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.90.30.101/24', radio: { standard: 'ax' } }] },
 
             // --- Classified enclave: no path to anything above -----------------
             { id: 'm_snet', type: 'cloud', name: 'DISA SIPRNet',       x: 1260, y: 40,  interfaces: [{ id: 'i1', name: 'eth0', ip: '198.51.100.17/30' }] },
@@ -805,9 +848,24 @@ const templatesData = {
 // round to 'half', Review-Packs/Topo-groups.md "Round 2") drops every
 // rackDepth it meets, which here would turn a half-depth device full. It is
 // put back by id after the migration.
+// A sample may name its networks and give them a VLAN (netNames, by address:
+// { '10.5.10.0/24': { name: 'Voice', vlan: 10 } }), put on the networks the
+// migration declares, as the Wi-Fi networks' subnets are below. A zone then
+// reads "Voice · 10.5.10.0/24 · VLAN 10", which is how a site talks about it.
+function nameSampleNetworks(doc, names) {
+    (doc.networks || []).forEach((net) => {
+        const m = names && names[net.cidr];
+        if (!m) return;
+        if (m.name) net.name = m.name;
+        if (Number.isInteger(m.vlan)) net.vlan = m.vlan;
+    });
+    delete doc.netNames;
+    return doc;
+}
 Object.keys(templatesData).forEach((key) => {
     const half = new Set((templatesData[key].nodes || []).filter((n) => n.rackDepth === 'half').map((n) => n.id));
-    const doc = migrateDoc({ ...templatesData[key], v: 2 }).doc;
+    const names = templatesData[key].netNames;
+    const doc = nameSampleNetworks(migrateDoc({ ...templatesData[key], v: 2 }).doc, names);
     if (half.size) doc.nodes.forEach((n) => { if (half.has(n.id)) n.rackDepth = 'half'; });
     // A sample's Wi-Fi network names its subnet by address: the networks are
     // only declared (and given their ids) by the migration above.
@@ -859,8 +917,8 @@ const SNIPPET_META = [
     { key: 'webfarm',      icon: '🌐', name: 'Web Farm',        blurb: 'Load balancer + 3 servers' },
     { key: 'k8s',          icon: '☸️', name: 'Kubernetes',      blurb: 'Ingress, control plane, workers' },
     { key: 'homelab',      icon: '🧪', name: 'Homelab',         blurb: 'Hypervisor, VMs and a NAS' },
-    { key: 'vlan',         icon: '🔀', name: 'VLAN Segment',    blurb: 'Switch + 3 hosts' },
-    { key: 'wifi',         icon: '📶', name: 'Wireless Cell',   blurb: 'AP + 3 associated clients' },
+    { key: 'vlan',         icon: '🔀', name: 'VLAN Segment',    blurb: 'Gateway, switch + 3 hosts' },
+    { key: 'wifi',         icon: '📶', name: 'Wireless Cell',   blurb: 'Gateway, AP + 3 clients' },
     { key: 'iotseg',       icon: '🔌', name: 'Isolated IoT',    blurb: 'Firewall + AP + guest devices' },
     { key: 'voip',         icon: '📞', name: 'VoIP',            blurb: 'PBX, switch and phones' },
     { key: 'surveillance', icon: '📹', name: 'Surveillance',    blurb: 'NVR + PoE switch + 3 cameras' },
@@ -876,71 +934,77 @@ const SNIPPET_META = [
 // faults in both menus); it is a template only now. COMMON_ERRORS above
 // still holds it in block form, which commonErrorsTemplate() places.
 const SNIPPETS = {
-    dmz: { nodes: [
+    dmz: { netNames: { '10.20.0.0/24': { name: 'LAN' }, '10.20.10.0/24': { name: 'DMZ' } }, nodes: [
         { tid: 'fw', type: 'firewall', name: 'Edge FW', dx: 0, dy: -60, interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.1/30' }, { id: 'i2', name: 'eth1', ip: '10.20.0.1/24' }, { id: 'i3', name: 'eth2', ip: '10.20.10.1/24' }], dns: '1.1.1.1' },
         { tid: 'sw1', type: 'switch', name: 'LAN SW', dx: -120, dy: 60, portCount: 8, interfaces: [] },
         { tid: 'sw2', type: 'switch', name: 'DMZ SW', dx: 120, dy: 60, portCount: 8, interfaces: [] },
         { tid: 'srv', type: 'server', name: 'DMZ Server', dx: 120, dy: 180, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.10.10/24' }], gw: '10.20.10.1', ports: '80, 443' } ],
       links: [{ s: 'fw', t: 'sw1' }, { s: 'fw', t: 'sw2' }, { s: 'sw2', t: 'srv' }] },
-    dcpod: { nodes: [
-        { tid: 'core', type: 'l3switch', name: 'Pod Core L3', dx: 0, dy: -60, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.1/24' }], gw: '10.30.0.254' },
+    dcpod: { netNames: { '10.30.0.0/24': { name: 'Pod' } }, nodes: [
+        { tid: 'core', type: 'l3switch', name: 'Pod Core L3', dx: 0, dy: -60, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.1/24' }] },
         { tid: 's1', type: 'server', name: 'App Server', dx: -160, dy: 90, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.11/24' }], gw: '10.30.0.1', ports: '8080' },
         { tid: 's2', type: 'server', name: 'DB Server', dx: -40, dy: 90, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.12/24' }], gw: '10.30.0.1', ports: '5432' },
-        { tid: 'c1', type: 'container', name: 'Container', dx: 80, dy: 90, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.13/24' }], gw: '10.30.0.1', ports: '8080' },
-        { tid: 'vm1', type: 'vm', name: 'Worker VM', dx: 200, dy: 90, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.14/24' }], gw: '10.30.0.1' } ],
+        { tid: 'c1', type: 'container', name: 'Container', dx: 80, dy: 90, host: 's1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.13/24' }], gw: '10.30.0.1', ports: '8080' },
+        { tid: 'vm1', type: 'vm', name: 'Worker VM', dx: 200, dy: 90, host: 's1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.14/24' }], gw: '10.30.0.1' } ],
       links: [{ s: 'core', t: 's1' }, { s: 'core', t: 's2' }, { s: 'core', t: 'c1', attachment: 'bridged' }, { s: 'core', t: 'vm1', attachment: 'bridged' }] },
-    vlan: { nodes: [
+    vlan: { netNames: { '10.40.0.0/24': { name: 'Segment' } }, nodes: [
+        { tid: 'gw', type: 'router', name: 'Gateway', dx: 0, dy: -110, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.40.0.1/24' }] },
         { tid: 'sw', type: 'switch', name: 'VLAN SW', dx: 0, dy: 0, portCount: 8, interfaces: [] },
         { tid: 'p1', type: 'pc', name: 'Host 1', dx: -120, dy: 120, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.40.0.51/24' }], gw: '10.40.0.1' },
         { tid: 'p2', type: 'pc', name: 'Host 2', dx: 0, dy: 120, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.40.0.52/24' }], gw: '10.40.0.1' },
         { tid: 'p3', type: 'pc', name: 'Host 3', dx: 120, dy: 120, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.40.0.53/24' }], gw: '10.40.0.1' } ],
-      links: [{ s: 'sw', t: 'p1' }, { s: 'sw', t: 'p2' }, { s: 'sw', t: 'p3' }] },
-    wifi: { nodes: [
+      links: [{ s: 'gw', t: 'sw' }, { s: 'sw', t: 'p1' }, { s: 'sw', t: 'p2' }, { s: 'sw', t: 'p3' }] },
+    wifi: { netNames: { '10.50.0.0/24': { name: 'Wireless' } }, nodes: [
+        { tid: 'gw', type: 'router', name: 'Gateway', dx: 0, dy: -110, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.50.0.1/24' }] },
         { tid: 'ap', type: 'ap', name: 'Access Point', dx: 0, dy: 0, interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
         { tid: 'c1', type: 'iot', name: 'Phone', dx: -120, dy: 120, gw: '10.50.0.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.50.0.101/24' }] },
         { tid: 'c2', type: 'pc', name: 'Laptop', dx: 0, dy: 120, gw: '10.50.0.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.50.0.102/24' }] },
         { tid: 'c3', type: 'camera', name: 'WiFi Cam', dx: 120, dy: 120, gw: '10.50.0.1', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.50.0.103/24' }] } ],
-      links: [{ s: 'ap', t: 'c1', medium: 'wireless' }, { s: 'ap', t: 'c2', medium: 'wireless' }, { s: 'ap', t: 'c3', medium: 'wireless' }] },
+      links: [{ s: 'gw', t: 'ap' }, { s: 'ap', t: 'c1', medium: 'wireless' }, { s: 'ap', t: 'c2', medium: 'wireless' }, { s: 'ap', t: 'c3', medium: 'wireless' }] },
     hapair: { nodes: [
         { tid: 'f1', type: 'firewall', name: 'FW Primary', dx: -80, dy: 0, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.2/24' }], dns: '1.1.1.1' },
         { tid: 'f2', type: 'firewall', name: 'FW Standby', dx: 80, dy: 0, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.3/24' }], dns: '1.1.1.1' } ],
       links: [{ s: 'f1', t: 'f2' }] },
-    webfarm: { nodes: [
-        { tid: 'lb', type: 'loadbalancer', name: 'Web LB', dx: 0, dy: -60, nat: true, gw: '10.60.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.0.5/24' }, { id: 'i2', name: 'eth1', ip: '10.61.0.1/24' }], ports: '80, 443' },
+    webfarm: { netNames: { '10.61.0.0/24': { name: 'Web' } }, nodes: [
+        { tid: 'lb', type: 'loadbalancer', name: 'Web LB', dx: 0, dy: -60, nat: true, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.60.0.5/24' }, { id: 'i2', name: 'eth1', ip: '10.61.0.1/24' }], ports: '80, 443' },
         { tid: 'w1', type: 'server', name: 'Web 1', dx: -120, dy: 90, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.61.0.11/24' }], gw: '10.61.0.1', ports: '80, 443' },
         { tid: 'w2', type: 'server', name: 'Web 2', dx: 0, dy: 90, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.61.0.12/24' }], gw: '10.61.0.1', ports: '80, 443' },
         { tid: 'w3', type: 'server', name: 'Web 3', dx: 120, dy: 90, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.61.0.13/24' }], gw: '10.61.0.1', ports: '80, 443' } ],
       links: [{ s: 'lb', t: 'w1' }, { s: 'lb', t: 'w2' }, { s: 'lb', t: 'w3' }] },
-    vpnsite: { nodes: [
+    vpnsite: { netNames: { '10.70.0.0/24': { name: 'HQ' }, '10.71.0.0/24': { name: 'Branch' } }, nodes: [
         { tid: 'net', type: 'cloud', name: 'Internet', dx: 0, dy: -130, interfaces: [] },
-        { tid: 'g1', type: 'vpn', name: 'HQ VPN GW', dx: -150, dy: 0, nat: true, gw: '203.0.113.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.10/30' }, { id: 'i2', name: 'eth1', ip: '10.70.0.1/24' }], ports: '443, 500, 4500' },
-        { tid: 'g2', type: 'router', name: 'Branch GW', dx: 150, dy: 0, nat: true, gw: '198.51.100.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '198.51.100.10/30' }, { id: 'i2', name: 'eth1', ip: '10.71.0.1/24' }] },
+        { tid: 'g1', type: 'vpn', name: 'HQ VPN GW', dx: -150, dy: 0, nat: true, gw: '203.0.113.9', interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.10/30' }, { id: 'i2', name: 'eth1', ip: '10.70.0.1/24' }], ports: '443, 500, 4500' },
+        { tid: 'g2', type: 'router', name: 'Branch GW', dx: 150, dy: 0, nat: true, gw: '198.51.100.9', interfaces: [{ id: 'i1', name: 'eth0', ip: '198.51.100.10/30' }, { id: 'i2', name: 'eth1', ip: '10.71.0.1/24' }] },
         { tid: 'h1', type: 'pc', name: 'HQ Host', dx: -150, dy: 120, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.70.0.50/24' }], gw: '10.70.0.1' },
         { tid: 'h2', type: 'pc', name: 'Branch Host', dx: 150, dy: 120, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.71.0.50/24' }], gw: '10.71.0.1' } ],
       links: [{ s: 'net', t: 'g1' }, { s: 'net', t: 'g2' }, { s: 'g1', t: 'g2', medium: 'vpn' }, { s: 'g1', t: 'h1' }, { s: 'g2', t: 'h2' }] },
-    voip: { nodes: [
+    voip: { netNames: { '10.80.0.0/24': { name: 'Voice' } }, nodes: [
+        { tid: 'gw', type: 'router', name: 'Gateway', dx: 0, dy: -170, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.80.0.1/24' }] },
         { tid: 'sw', type: 'switch', name: 'Voice Switch', dx: 0, dy: -60, portCount: 8, interfaces: [] },
         { tid: 'pbx', type: 'custom', name: 'PBX', dx: -130, dy: 60, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.80.0.10/24' }], gw: '10.80.0.1', ports: '5060, 5061' },
         { tid: 'p1', type: 'voip', name: 'Phone 1', dx: 0, dy: 90, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.80.0.61/24' }], gw: '10.80.0.1', ports: '5060' },
         { tid: 'p2', type: 'voip', name: 'Phone 2', dx: 120, dy: 90, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.80.0.62/24' }], gw: '10.80.0.1', ports: '5060' } ],
-      links: [{ s: 'sw', t: 'pbx' }, { s: 'sw', t: 'p1' }, { s: 'sw', t: 'p2' }] },
-    surveillance: { nodes: [
+      links: [{ s: 'gw', t: 'sw' }, { s: 'sw', t: 'pbx' }, { s: 'sw', t: 'p1' }, { s: 'sw', t: 'p2' }] },
+    surveillance: { netNames: { '10.90.0.0/24': { name: 'Cameras' } }, nodes: [
+        { tid: 'gw', type: 'router', name: 'Gateway', dx: 140, dy: -70, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.90.0.1/24' }] },
         { tid: 'nvr', type: 'server', name: 'NVR', dx: 0, dy: -70, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.90.0.10/24' }], gw: '10.90.0.1', ports: '554, 80' },
         { tid: 'sw', type: 'switch', name: 'PoE Switch', dx: 0, dy: 30, portCount: 8, interfaces: [] },
         { tid: 'cam1', type: 'camera', name: 'Camera 1', dx: -130, dy: 150, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.90.0.91/24' }], gw: '10.90.0.1', ports: '554' },
         { tid: 'cam2', type: 'camera', name: 'Camera 2', dx: 0, dy: 150, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.90.0.92/24' }], gw: '10.90.0.1', ports: '554' },
         { tid: 'cam3', type: 'camera', name: 'Camera 3', dx: 130, dy: 150, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.90.0.93/24' }], gw: '10.90.0.1', ports: '554' } ],
-      links: [{ s: 'sw', t: 'nvr' }, { s: 'sw', t: 'cam1' }, { s: 'sw', t: 'cam2' }, { s: 'sw', t: 'cam3' }] },
-    storage: { nodes: [
+      links: [{ s: 'gw', t: 'sw' }, { s: 'sw', t: 'nvr' }, { s: 'sw', t: 'cam1' }, { s: 'sw', t: 'cam2' }, { s: 'sw', t: 'cam3' }] },
+    storage: { netNames: { '10.100.0.0/24': { name: 'Storage' } }, nodes: [
+        { tid: 'gw', type: 'router', name: 'Gateway', dx: 0, dy: -170, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.100.0.1/24' }] },
         { tid: 'sw', type: 'switch', name: 'Storage Switch', dx: 0, dy: -60, portCount: 8, interfaces: [] },
         { tid: 'nas', type: 'server', name: 'NAS', dx: -90, dy: 70, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.100.0.10/24' }], gw: '10.100.0.1', ports: '2049, 445' },
         { tid: 'bkp', type: 'server', name: 'Backup', dx: 90, dy: 70, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.100.0.11/24' }], gw: '10.100.0.1', ports: '873' } ],
-      links: [{ s: 'sw', t: 'nas' }, { s: 'sw', t: 'bkp' }] },
+      links: [{ s: 'gw', t: 'sw' }, { s: 'sw', t: 'nas' }, { s: 'sw', t: 'bkp' }] },
     // Medical imaging: US/CT/MR/CR/DX modalities send DICOM to a PACS,
     // with reading workstations and a DICOM film printer.
-    dicom: { nodes: [
+    dicom: { netNames: { '10.120.0.0/24': { name: 'Imaging' } }, nodes: [
         // 16, not 8: nine cables land here, and an explicit count is no longer
         // grown to fit them (js/model.js), so 8 drew a port-overflow finding.
+        { tid: 'gw', type: 'router', name: 'Gateway', dx: 0, dy: -210, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.120.0.1/24' }] },
         { tid: 'sw',   type: 'switch',  name: 'Imaging Switch',  dx: 0,    dy: -100, portCount: 16, interfaces: [] },
         { tid: 'pacs', type: 'server',  name: 'PACS Server',     dx: -240, dy: 20,  interfaces: [{ id: 'i1', name: 'eth0', ip: '10.120.0.10/24' }], gw: '10.120.0.1', ports: '104, 11112, 443' },
         { tid: 'prn',  type: 'printer', name: 'DICOM Printer',   dx: -120, dy: 20,  interfaces: [{ id: 'i1', name: 'eth0', ip: '10.120.0.80/24' }], gw: '10.120.0.1', ports: '104' },
@@ -951,39 +1015,42 @@ const SNIPPETS = {
         { tid: 'mr',   type: 'dicom',   name: 'MR Scanner',      dx: 0,    dy: 160, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.120.0.23/24' }], gw: '10.120.0.1', ports: '104' },
         { tid: 'cr',   type: 'dicom',   name: 'CR Unit',         dx: 80,   dy: 160, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.120.0.24/24' }], gw: '10.120.0.1', ports: '104' },
         { tid: 'dx',   type: 'dicom',   name: 'DX Unit',         dx: 160,  dy: 160, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.120.0.25/24' }], gw: '10.120.0.1', ports: '104' } ],
-      links: [{ s: 'sw', t: 'pacs' }, { s: 'sw', t: 'prn' }, { s: 'sw', t: 'ws1' }, { s: 'sw', t: 'ws2' }, { s: 'sw', t: 'us' }, { s: 'sw', t: 'ct' }, { s: 'sw', t: 'mr' }, { s: 'sw', t: 'cr' }, { s: 'sw', t: 'dx' }] },
+      links: [{ s: 'gw', t: 'sw' }, { s: 'sw', t: 'pacs' }, { s: 'sw', t: 'prn' }, { s: 'sw', t: 'ws1' }, { s: 'sw', t: 'ws2' }, { s: 'sw', t: 'us' }, { s: 'sw', t: 'ct' }, { s: 'sw', t: 'mr' }, { s: 'sw', t: 'cr' }, { s: 'sw', t: 'dx' }] },
     // Homelab: a hypervisor running VMs + a container, plus a NAS. The three
     // run on it (host, js/model.js "Hosts"), so the block shows the host
     // badge and its fold as it lands; insertBlockNow renames host to the copy.
-    homelab: { nodes: [
+    homelab: { netNames: { '10.110.0.0/24': { name: 'Lab' } }, nodes: [
+        { tid: 'gw', type: 'router', name: 'Gateway', dx: 0, dy: -180, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.1/24' }] },
         { tid: 'sw',  type: 'switch',    name: 'Lab Switch',        dx: 0,    dy: -70, portCount: 8, interfaces: [] },
         { tid: 'hv',  type: 'server',    name: 'Hypervisor (PVE)',  dx: -120, dy: 50,  interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.10/24' }], gw: '10.110.0.1', ports: '8006, 22' },
         { tid: 'nas', type: 'server',    name: 'NAS',               dx: 120,  dy: 50,  interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.20/24' }], gw: '10.110.0.1', ports: '2049, 445' },
         { tid: 'vm1', type: 'vm',        name: 'VM: Web',           dx: -60,  dy: 160, host: 'hv', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.21/24' }], gw: '10.110.0.1', ports: '80, 443' },
         { tid: 'vm2', type: 'vm',        name: 'VM: DB',            dx: 40,   dy: 160, host: 'hv', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.22/24' }], gw: '10.110.0.1', ports: '5432' },
         { tid: 'ct1', type: 'container', name: 'Container: App',    dx: 140,  dy: 160, host: 'hv', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.110.0.31/24' }], gw: '10.110.0.1', ports: '8080' } ],
-      links: [{ s: 'sw', t: 'hv' }, { s: 'sw', t: 'nas' }, { s: 'hv', t: 'vm1', attachment: 'bridged' }, { s: 'hv', t: 'vm2', attachment: 'bridged' }, { s: 'hv', t: 'ct1', attachment: 'bridged' }] },
+      links: [{ s: 'gw', t: 'sw' }, { s: 'sw', t: 'hv' }, { s: 'sw', t: 'nas' }, { s: 'hv', t: 'vm1', attachment: 'bridged' }, { s: 'hv', t: 'vm2', attachment: 'bridged' }, { s: 'hv', t: 'ct1', attachment: 'bridged' }] },
     // A complete small branch office behind its own NAT router.
-    branch: { nodes: [
+    branch: { netNames: { '172.16.9.0/24': { name: 'Branch' } }, nodes: [
+        { tid: 'net', type: 'cloud',   name: 'Internet',       dx: 0,    dy: -210, interfaces: [] },
         { tid: 'rtr', type: 'router',  name: 'Branch Router',  dx: 0,    dy: -100, nat: true, gw: '198.51.100.9', interfaces: [{ id: 'i1', name: 'eth0', ip: '198.51.100.10/30' }, { id: 'i2', name: 'eth1', ip: '172.16.9.1/24' }] },
         { tid: 'sw',  type: 'switch',  name: 'Branch Switch',  dx: 0,    dy: 10,  portCount: 8, interfaces: [] },
         { tid: 'pc1', type: 'pc',      name: 'Desk 1',         dx: -150, dy: 140, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.9.51/24' }], gw: '172.16.9.1' },
         { tid: 'pc2', type: 'pc',      name: 'Desk 2',         dx: -50,  dy: 140, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.9.52/24' }], gw: '172.16.9.1' },
         { tid: 'prn', type: 'printer', name: 'Printer',        dx: 50,   dy: 140, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.9.80/24' }], gw: '172.16.9.1', ports: '9100' },
         { tid: 'ph',  type: 'voip',    name: 'Desk Phone',     dx: 150,  dy: 140, interfaces: [{ id: 'i1', name: 'eth0', ip: '172.16.9.60/24' }], gw: '172.16.9.1', ports: '5060' } ],
-      links: [{ s: 'rtr', t: 'sw' }, { s: 'sw', t: 'pc1' }, { s: 'sw', t: 'pc2' }, { s: 'sw', t: 'prn' }, { s: 'sw', t: 'ph' }] },
+      links: [{ s: 'net', t: 'rtr' }, { s: 'rtr', t: 'sw' }, { s: 'sw', t: 'pc1' }, { s: 'sw', t: 'pc2' }, { s: 'sw', t: 'prn' }, { s: 'sw', t: 'ph' }] },
     // Kubernetes: control plane + worker pods behind an ingress load balancer.
-    k8s: { nodes: [
+    k8s: { netNames: { '10.130.0.0/24': { name: 'Cluster' } }, nodes: [
+        { tid: 'gw', type: 'router', name: 'Gateway', dx: 150, dy: -90, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.130.0.1/24' }] },
         { tid: 'lb', type: 'loadbalancer', name: 'Ingress LB',    dx: 0,    dy: -90, nat: true, gw: '10.130.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.130.0.5/24' }], ports: '80, 443' },
         { tid: 'sw', type: 'switch',       name: 'Cluster Switch',dx: 0,    dy: 10,  portCount: 8, interfaces: [] },
         { tid: 'cp', type: 'server',       name: 'Control Plane', dx: -150, dy: 140, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.130.0.10/24' }], gw: '10.130.0.1', ports: '6443' },
         { tid: 'w1', type: 'container',    name: 'Worker Pod 1',  dx: -40,  dy: 140, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.130.0.21/24' }], gw: '10.130.0.1', ports: '8080' },
         { tid: 'w2', type: 'container',    name: 'Worker Pod 2',  dx: 60,   dy: 140, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.130.0.22/24' }], gw: '10.130.0.1', ports: '8080' },
         { tid: 'w3', type: 'container',    name: 'Worker Pod 3',  dx: 160,  dy: 140, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.130.0.23/24' }], gw: '10.130.0.1', ports: '8080' } ],
-      links: [{ s: 'lb', t: 'sw' }, { s: 'sw', t: 'cp' }, { s: 'sw', t: 'w1' }, { s: 'sw', t: 'w2' }, { s: 'sw', t: 'w3' }] },
+      links: [{ s: 'gw', t: 'sw' }, { s: 'lb', t: 'sw' }, { s: 'sw', t: 'cp' }, { s: 'sw', t: 'w1' }, { s: 'sw', t: 'w2' }, { s: 'sw', t: 'w3' }] },
     // Isolated IoT / guest VLAN gated by its own firewall.
-    iotseg: { nodes: [
-        { tid: 'fw',  type: 'firewall', name: 'IoT Firewall',  dx: 0,    dy: -100, nat: true, gw: '10.0.0.1', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.9/24' }, { id: 'i2', name: 'eth1', ip: '10.140.0.1/24' }] },
+    iotseg: { netNames: { '10.140.0.0/24': { name: 'IoT' } }, nodes: [
+        { tid: 'fw',  type: 'firewall', name: 'IoT Firewall',  dx: 0,    dy: -100, nat: true, dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.9/24' }, { id: 'i2', name: 'eth1', ip: '10.140.0.1/24' }] },
         { tid: 'ap',  type: 'ap',       name: 'IoT AP',        dx: 0,    dy: 10,  interfaces: [{ id: 'w1', name: 'wlan0', ip: '' }] },
         { tid: 'hub', type: 'iot',      name: 'Smart Hub',     dx: -140, dy: 140, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.140.0.10/24' }], gw: '10.140.0.1', ports: '1883' },
         { tid: 'cam', type: 'camera',   name: 'WiFi Camera',   dx: -30,  dy: 140, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.140.0.90/24' }], gw: '10.140.0.1', ports: '554' },
@@ -991,12 +1058,13 @@ const SNIPPETS = {
         { tid: 'tv',  type: 'iot',      name: 'Smart TV',      dx: 180,  dy: 140, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.140.0.101/24' }], gw: '10.140.0.1' } ],
       links: [{ s: 'fw', t: 'ap' }, { s: 'ap', t: 'hub', medium: 'wireless' }, { s: 'ap', t: 'cam', medium: 'wireless' }, { s: 'ap', t: 'sen', medium: 'wireless' }, { s: 'ap', t: 'tv', medium: 'wireless' }] },
     // Out-of-band management / monitoring segment.
-    mgmt: { nodes: [
+    mgmt: { netNames: { '10.150.0.0/24': { name: 'Management' } }, nodes: [
+        { tid: 'gw', type: 'router', name: 'Gateway', dx: 0, dy: -180, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.150.0.1/24' }] },
         { tid: 'sw',   type: 'switch', name: 'Mgmt Switch',      dx: 0,    dy: -70, portCount: 8, interfaces: [] },
         { tid: 'mon',  type: 'server', name: 'Monitoring',       dx: -110, dy: 60,  interfaces: [{ id: 'i1', name: 'eth0', ip: '10.150.0.10/24' }], gw: '10.150.0.1', ports: '3000, 9090' },
         { tid: 'log',  type: 'server', name: 'Syslog / SIEM',    dx: 110,  dy: 60,  interfaces: [{ id: 'i1', name: 'eth0', ip: '10.150.0.11/24' }], gw: '10.150.0.1', ports: '514, 443' },
         { tid: 'jump', type: 'pc',     name: 'Jump Host',        dx: 0,    dy: 160, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.150.0.50/24' }], gw: '10.150.0.1', ports: '22' } ],
-      links: [{ s: 'sw', t: 'mon' }, { s: 'sw', t: 'log' }, { s: 'sw', t: 'jump' }] }
+      links: [{ s: 'gw', t: 'sw' }, { s: 'sw', t: 'mon' }, { s: 'sw', t: 'log' }, { s: 'sw', t: 'jump' }] }
 };
 
 // The shipped blocks as saved selections (plan R8): each is the same kind of
@@ -1018,5 +1086,5 @@ Object.keys(SNIPPETS).forEach((key) => {
         links: snip.links.map((l, i) => ({ id: `l${i + 1}`, source: l.s, target: l.t, attachment: l.attachment || null,
             medium: l.medium, sourceIface: l.si || null, targetIface: l.ti || null }))
     };
-    BUILTIN_BLOCKS[key] = migrateDoc(doc).doc;
+    BUILTIN_BLOCKS[key] = nameSampleNetworks(migrateDoc(doc).doc, snip.netNames);
 });

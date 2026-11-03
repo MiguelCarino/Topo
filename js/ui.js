@@ -518,18 +518,49 @@ function zonesNow(gv) {
         const nodes = visible(u.nodeIds.map(getNode).filter(Boolean));
         if (nodes.length) zones.push({ net: { id: `undeclared:${u.cidr}`, cidr: u.cidr }, nodes, auto: true });
     });
+    // A transit network (an auto zone whose devices are all routers,
+    // firewalls, load balancers: the link between the edge router and the
+    // firewall) is left out: its bubble only wrapped the cable that already
+    // says it, and a chain of them stacked over one rack. Its cable and its
+    // Subnets row still name it; set to draw, it is drawn.
+    const transit = (z) => z.auto && z.nodes.length && z.nodes.every((n) => n.type && isRoutingDevice(n.type));
     const count = new Map();
-    zones.forEach((z) => z.nodes.forEach((n) => count.set(n.id, (count.get(n.id) || 0) + 1)));
-    zones.forEach((z) => {
+    zones.forEach((z) => { if (!transit(z)) z.nodes.forEach((n) => count.set(n.id, (count.get(n.id) || 0) + 1)); });
+    // With group frames on the map, a network whose devices sit in two groups
+    // (the app servers in a rack, the jump host in the ops room) is one bubble
+    // per group: one box round both reached over everything between them.
+    const framesShown = typeof groupMapShown === 'function' && groupMapShown();
+    const groupIds = framesShown ? new Set(state.groups.map((g) => g.id)) : null;
+    const pieceOf = (n) => {
+        if (!framesShown) return '';
+        if (typeof n.id === 'string' && n.id.startsWith('group:')) return n.id;
+        return n.group && groupIds.has(n.group) ? n.group : '';
+    };
+    const pieces = [];
+    zones.filter((z) => !transit(z)).forEach((z) => {
         const own = z.nodes.filter((n) => count.get(n.id) === 1);
-        const framed = own.length ? own : z.nodes;
-        const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-        framed.forEach((n) => {
-            box.minX = Math.min(box.minX, n.x); box.minY = Math.min(box.minY, n.y);
-            box.maxX = Math.max(box.maxX, n.x); box.maxY = Math.max(box.maxY, n.y);
+        const framedAll = own.length ? own : z.nodes;
+        const byPiece = new Map();
+        framedAll.forEach((n) => { const k = pieceOf(n); if (!byPiece.has(k)) byPiece.set(k, []); byPiece.get(k).push(n); });
+        // The network's gateway in a group of its own (the load balancer in
+        // the network rack, its hosts in the compute rack) is no bubble of
+        // its own: the hosts' bubble is the network, and the gateway's
+        // cable leads to it. Only while there is such a bubble.
+        const routersOnly = (list) => list.every((n) => n.type && isRoutingDevice(n.type));
+        if (byPiece.size > 1 && [...byPiece.values()].some((list) => !routersOnly(list))) {
+            [...byPiece.keys()].forEach((k) => { if (routersOnly(byPiece.get(k))) byPiece.delete(k); });
+        }
+        byPiece.forEach((framed, k) => {
+            const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+            framed.forEach((n) => {
+                box.minX = Math.min(box.minX, n.x); box.minY = Math.min(box.minY, n.y);
+                box.maxX = Math.max(box.maxX, n.x); box.maxY = Math.max(box.maxY, n.y);
+            });
+            const nodes = byPiece.size > 1 ? z.nodes.filter((n) => pieceOf(n) === k) : z.nodes;
+            pieces.push(Object.assign({}, z, { nodes, box, framed, ids: new Set(nodes.map((n) => n.id)) }));
         });
-        Object.assign(z, { box, framed, ids: new Set(z.nodes.map((n) => n.id)) });
     });
+    zones.length = 0; zones.push(...pieces);
     // Inclusive: a row of hosts has no height, and two networks alternating
     // along one row is the commonest interleave there is. What counts is a
     // stranger inside the box as drawn: one of the other zone's framed
@@ -701,13 +732,16 @@ function cableLabelPlace(geo, text, avoid) {
 }
 
 // A subnet's ink on the dark and blueprint maps: light colours that read on
-// black and on blue (none of them blue), one per subnet drawn. The paper map's hue adds up the
-// address's characters, so 10.10.10.0/24, 10.10.20.0/24 and 10.10.30.0/24
-// came out one purple, and on blue that purple all but vanished. Each subnet
+// black and on blue (none of them blue), one per subnet drawn, and the
+// paper map's hue for the same slot (ZONE_HUES, the inks' own hues, darker
+// on white). The hue used to add up the address's characters, so
+// 10.10.10.0/24, 10.10.20.0/24 and 10.10.30.0/24 came out one purple, on
+// paper as on blue, where that purple all but vanished. Each subnet
 // takes the ink its address hashes to (FNV-1a), or the next one no other
 // zone on the map has: the same subnet keeps its colour from one redraw to
 // the next, and none repeats until all eight are in use.
 const ZONE_INKS = ['#67e8f9', '#fcd34d', '#f9a8d4', '#6ee7b7', '#fdba74', '#c4b5fd', '#bef264', '#fca5a5'];
+const ZONE_HUES = [189, 43, 330, 158, 25, 258, 84, 0];
 function zoneInkSlots(cidrs) {
     const hash = (str) => { let h = 0x811c9dc5; for (let i = 0; i < str.length; i += 1) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
     const out = new Map(), used = new Set();
@@ -717,6 +751,44 @@ function zoneInkSlots(cidrs) {
         used.add(i); out.set(c, i);
     });
     return out;
+}
+
+// Where a zone's name tab goes: `edge` is the zone's top edge (x1..x2 at
+// y1). Above it at the left corner first, as before; then just inside that
+// corner, at the right corner above and inside, the middle, and last higher
+// up over the left corner; the first spot clear of `avoid` wins (a device,
+// its name, a group's tab, another zone's tab). At the left corner alone a
+// zone whose top device sat under another zone's devices put its name on
+// their names, and zones meeting at one corner stacked their tabs into a
+// pile over whatever was above. None clear: the spot covered least. -> the text's
+// start and baseline.
+function zoneTagPlace(edge, words, avoid) {
+    const hit = (b) => avoid.some((o) => b.x1 < o.x2 && b.x2 > o.x1 && b.y1 < o.y2 && b.y2 > o.y1);
+    const w = words.length * 6.7;
+    const left = edge.x1 + 6, right = Math.max(left, edge.x2 - 6 - w), mid = Math.max(left, (edge.x1 + edge.x2 - w) / 2);
+    const above = edge.y1 - 8, inside = edge.y1 + 17;
+    const spots = [[left, above], [left, inside], [right, above], [right, inside], [mid, above], [mid, inside],
+        [left, above - 17], [right, above - 17], [left, above - 34]];
+    // How much of a spot is covered: none wins at once; on a crowded map
+    // (a rack's column, its rows close) the spot covered least.
+    const cover = (b) => avoid.reduce((sum, o) => sum + Math.max(0, Math.min(b.x2, o.x2) - Math.max(b.x1, o.x1)) * Math.max(0, Math.min(b.y2, o.y2) - Math.max(b.y1, o.y1)), 0);
+    let best = null;
+    for (const [x, y] of spots) {
+        const box = { x1: x - 5, y1: y - 12, x2: x + w + 5, y2: y + 4 };
+        if (!hit(box)) return { x, y };
+        const c = cover(box);
+        if (!best || c < best.c) best = { x, y, c };
+    }
+    return { x: best.x, y: best.y };
+}
+
+// A halo round a word on the map, of the map's ground: drawn first (paint
+// order), so the letters sit on it and what passes under them stops at it.
+function textHalo(el) {
+    el.setAttribute('paint-order', 'stroke');
+    el.setAttribute('stroke', '#ffffff');
+    el.setAttribute('stroke-width', '3');
+    el.setAttribute('stroke-linejoin', 'round');
 }
 
 // The look an element has when nothing is selected, kept on it so the export
@@ -737,7 +809,37 @@ function drawCanvas() {
     const gv = groupMapNow();
 
     // 1. Zone bubbles, one per network drawn (zonesToDraw above).
-    let labelOffsets = {};
+    // What a zone's name tab keeps off, listed when the first zone asks:
+    // every device drawn with its name and address, each group frame's tab,
+    // and the tabs already placed.
+    let tagAvoidList = null;
+    const tagAvoid = () => {
+        if (tagAvoidList) return tagAvoidList;
+        tagAvoidList = [];
+        state.nodes.forEach((n) => {
+            if (gv && (gv.hidden.has(n.id) || gv.guestHidden.has(n.id))) return;
+            // Its card, its name and up to three lines of addresses under it.
+            tagAvoidList.push({ x1: n.x - 46, y1: n.y - 28, x2: n.x + 46, y2: n.y + 66 });
+        });
+        ((gv && gv.frames) || []).forEach(({ group, rect, members }) => {
+            const w = `${groupLabel(group)} · ${(members || []).length}`;
+            tagAvoidList.push({ x1: rect.x, y1: rect.y - 12, x2: rect.x + 14 + 46 + w.length * 6, y2: rect.y + 12 });
+        });
+        ((gv && gv.folds) || []).forEach((f) => tagAvoidList.push({ x1: f.x - 50, y1: f.y - 30, x2: f.x + 50, y2: f.y + 56 }));
+        // Where a radio link's band chip may go (wifiChipPlace, drawn after
+        // the zones): a long tab with its name and VLAN across an AP's links
+        // left the chips nowhere clear, and they landed on it.
+        state.links.forEach((l) => {
+            if (gv && gv.covered.has(l.id)) return;
+            const a = getNode(l.source), b = getNode(l.target);
+            if (!a || !b || effectiveMedium(l, a, b) !== 'wireless') return;
+            WIFI_CHIP_AT.forEach((t) => {
+                const x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t;
+                tagAvoidList.push({ x1: x - 18, y1: y - 7, x2: x + 18, y2: y + 7 });
+            });
+        });
+        return tagAvoidList;
+    };
     // Where each zone's label tab landed, so a Wi-Fi band chip (below) can
     // keep off it: the chip is drawn over the zones and would bury the name.
     const zoneTagBoxes = [];
@@ -748,12 +850,12 @@ function drawCanvas() {
         const { minX, minY, maxX, maxY } = box;
 
         const padX = 45, padTop = 45, padBottom = 80;
-        const hue = Array.from(subnet).reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
+        const hue = ZONE_HUES[inks.get(subnet)];
 
         const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         g.setAttribute('class', 'zone-bubble');
-        // Its ink on the dark and blueprint maps (css/app.css); the paper colours below
-        // stay what the exports draw.
+        // Its ink on the dark and blueprint maps (css/app.css); the paper
+        // colours below, the same slot's hue, are what the exports draw.
         g.style.setProperty('--zc', ZONE_INKS[inks.get(subnet)]);
 
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -764,22 +866,18 @@ function drawCanvas() {
         rect.setAttribute('stroke-dasharray', '8 4'); rect.setAttribute('stroke-width', '2');
         g.appendChild(rect);
 
-        // Label sits as a "tab" ABOVE the zone's top edge so it is never
-        // hidden behind a node; stacked subnets at the same corner rise upward.
-        const labelPosKey = `${minX}_${minY}`;
-        const offsetIndex = labelOffsets[labelPosKey] || 0;
-        labelOffsets[labelPosKey] = offsetIndex + 1;
-
-        const lx = minX - padX + 6;
-        const ly = minY - padTop - 8 - (offsetIndex * 17);
+        // The name tab: on the zone's top edge, where no device, its name,
+        // a group's tab or another zone's tab is (zoneTagPlace).
+        const words = [isBlank(net.name) ? '' : net.name.trim(), subnet, Number.isInteger(net.vlan) ? `VLAN ${net.vlan}` : '']
+            .filter(Boolean).join(' · ');
+        const { x: lx, y: ly } = zoneTagPlace({ x1: minX - padX, y1: minY - padTop, x2: maxX + padX }, words, tagAvoid());
 
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         text.setAttribute('x', lx); text.setAttribute('y', ly);
         text.setAttribute('font-size', '11'); text.setAttribute('font-family', 'monospace');
         text.setAttribute('font-weight', 'bold'); text.setAttribute('fill', `hsla(${hue}, 70%, 34%, 1)`);
         // The address, and the name and VLAN when the network has them.
-        text.textContent = [isBlank(net.name) ? '' : net.name.trim(), subnet, Number.isInteger(net.vlan) ? `VLAN ${net.vlan}` : '']
-            .filter(Boolean).join(' · ');
+        text.textContent = words;
         // The tab goes in the labels layer, over the cables: in the zones'
         // own layer every cable crossing it was drawn through the name.
         const tagG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -800,7 +898,8 @@ function drawCanvas() {
             bg.setAttribute('fill', '#f8fafc'); bg.setAttribute('fill-opacity', '0.9');
             bg.setAttribute('stroke', `hsla(${hue}, 70%, 50%, 0.35)`); bg.setAttribute('stroke-width', '1');
             tagG.insertBefore(bg, text);
-            zoneTagBoxes.push({ x1: bb.x - 5, y1: bb.y - 2, x2: bb.x + bb.width + 5, y2: bb.y + bb.height + 2 });
+            const tb = { x1: bb.x - 5, y1: bb.y - 2, x2: bb.x + bb.width + 5, y2: bb.y + bb.height + 2 };
+            zoneTagBoxes.push(tb); tagAvoid().push(tb);
         } catch (e) { /* getBBox unavailable */ }
     });
 
@@ -1140,6 +1239,11 @@ function drawCanvas() {
         // page's CSS — renders in sans, not each engine's default serif.
         label.setAttribute('font-family', 'sans-serif');
         label.setAttribute('font-weight', '600'); label.setAttribute('fill', '#334155'); label.textContent = node.name; label.style.pointerEvents = 'none';
+        // A halo of the map's own ground round the words, as the cable labels
+        // have: a cable leaving the card downward (every one in a rack's
+        // column) ran through the name and the address under it. An attribute,
+        // so the exports carry it; the dark maps repaint it to their ground.
+        textHalo(label);
         g.appendChild(label);
 
         // "↗ Torre A" under a cloud that stands for another site. Drawn exactly
@@ -1153,6 +1257,7 @@ function drawCanvas() {
             ref.setAttribute('fill', '#64748b');
             ref.textContent = `↗ ${node.siteRef.name || node.siteRef.id}`;
             ref.style.pointerEvents = 'none';
+            textHalo(ref);
             g.appendChild(ref);
         }
 
@@ -1235,7 +1340,7 @@ function drawCanvas() {
                 ipLabel.setAttribute('text-anchor', 'middle'); ipLabel.setAttribute('y', String(48 + idx * 10));
                 ipLabel.setAttribute('font-size', '8'); ipLabel.setAttribute('font-family', 'monospace'); ipLabel.setAttribute('fill', '#64748b');
                 let text = ip; if (idx === 1 && validDisplayIps.length > 2) { text += ` (+${validDisplayIps.length - 2})`; }
-                ipLabel.textContent = text; ipLabel.style.pointerEvents = 'none'; g.appendChild(ipLabel);
+                ipLabel.textContent = text; ipLabel.style.pointerEvents = 'none'; textHalo(ipLabel); g.appendChild(ipLabel);
             });
         }
 
@@ -2309,9 +2414,40 @@ function focusOnMap(target) {
 // draws the rail for it: nothing, the one thing's editor, or — for several —
 // their counts, Delete, and a way to narrow a mixed set to one kind; a set of
 // devices alone, or of cables alone, also gets the bulk panel (js/bulk.js).
+// The rail's two halves (index.html): the library (Nodes, Templates,
+// Blocks) over the selection's panels. With nothing selected both share the
+// rail, as they always did. With something selected the library folds into
+// one row (#libWrapRow) and the panels take the whole rail: a device's
+// settings, its diagnostics, the subnets. A click on empty map clears the
+// selection and so brings the library back. A click on the row keeps the
+// library open whatever is selected, until the row is clicked again; that
+// choice is kept in this browser.
+const LIB_PIN_KEY = 'topo-lib-open';
+let _libPinned = (() => { try { return localStorage.getItem(LIB_PIN_KEY) === '1'; } catch (e) { return false; } })();
+const libraryPinned = () => _libPinned;
+function setLibraryPinned(on) {
+    _libPinned = !!on;
+    try { if (_libPinned) localStorage.setItem(LIB_PIN_KEY, '1'); else localStorage.removeItem(LIB_PIN_KEY); } catch (e) { /* private mode */ }
+    updateRailWrap();
+}
+function updateRailWrap() {
+    const rail = document.querySelector('.topo-rail');
+    const row = document.getElementById('libWrapRow');
+    if (!rail || !row) return;
+    const wrapped = state.selection.size > 0 && !_libPinned;
+    rail.classList.toggle('lib-wrapped', wrapped);
+    row.classList.toggle('hidden', !wrapped && !_libPinned);
+    row.setAttribute('aria-expanded', wrapped ? 'false' : 'true');
+    const caret = row.querySelector('.lw-caret'), hint = row.querySelector('.lw-hint');
+    if (caret) caret.textContent = wrapped ? '▸' : '▾';
+    if (hint) hint.textContent = t(wrapped ? 'Keep open' : 'Fold');
+    row.title = t(wrapped ? 'Show the library and keep it open' : 'Fold the library while something is selected');
+}
+
 function renderSelection() {
     const one = soleSelected(state.selection);
     if (state.selection.size <= 1) { select(one ? one.id : null, one ? one.type : null); return; }
+    updateRailWrap();
     state.linkSourceId = null;
     clearPropertyInputs();
     document.getElementById('propertiesPane').classList.add('hidden');
@@ -2389,6 +2525,7 @@ function centreOnNodes(nodes) {
 
 function select(id, type) {
     setSelectionEntries(id ? [{ type, id }] : []); state.linkSourceId = null;
+    updateRailWrap();
     // The set has ended: what was typed into the bulk panel for it goes too.
     if (typeof resetBulkDraft === 'function') resetBulkDraft();
     document.getElementById('multiSelectionPane').classList.add('hidden');

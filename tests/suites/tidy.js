@@ -184,6 +184,56 @@ window.addEventListener('load', () => { setTimeout(() => {
     const h = getNode('h'), v = getNode('v');
     ok('a VM cabled to a switch goes under its host, not with the switch\'s desks', v.y > h.y && Math.abs(v.x - h.x) <= 160, `host ${h.x},${h.y} vm ${v.x},${v.y}`);
     ok('the host stays on the switch\'s tier, over its VM', h.y > getNode('sw').y);
+
+    // 8. The ▾ menu: Tidy all ignores the selection; Tidy group arranges the
+    // selection's group (inner groups and guests included) where it stands.
+    const menuDoc = () => replaceDocument({ v: DOC_VERSION,
+      groups: [{ id: 'fl', name: 'Floor 1', kind: 'floor' }, { id: 'rm', name: 'Lab', kind: 'room', parent: 'fl' }, { id: 'o', name: 'Other', kind: 'room' }],
+      nodes: [
+        D('sw', 'switch', { group: 'fl', portCount: 24, interfaces: [], x: 3000, y: 3000 }),
+        D('a', 'pc', { group: 'rm', x: 3400, y: 3100 }), D('b', 'pc', { group: 'rm', x: 3010, y: 3600 }),
+        D('hv', 'server', { group: 'rm', x: 3700, y: 3700 }), D('vm', 'vm', { host: 'hv', x: 9000, y: 9000 }),
+        D('x', 'pc', { group: 'o', x: -500, y: -500 }), D('y', 'pc', { x: 7000, y: -200 })
+      ],
+      links: [{ id: 'm1', source: 'sw', target: 'a' }, { id: 'm2', source: 'sw', target: 'b' }, { id: 'm3', source: 'sw', target: 'hv' }] });
+    menuDoc();
+    const at = (ids) => ids.map((id) => `${getNode(id).x},${getNode(id).y}`).join(' ');
+    setSelectionEntries([{ type: 'node', id: 'a' }]);
+    ok('one device in a group: Tidy group is its own group', (tidyGroupOfSelection() || {}).id === 'rm');
+    setSelectionEntries([{ type: 'node', id: 'a' }, { type: 'node', id: 'sw' }]);
+    ok('devices in a group and the group around it: the one they share', (tidyGroupOfSelection() || {}).id === 'fl');
+    setSelectionEntries([{ type: 'node', id: 'a' }, { type: 'node', id: 'x' }]);
+    ok('devices in groups that share none: no Tidy group', tidyGroupOfSelection() === null);
+    setSelectionEntries([{ type: 'node', id: 'y' }]);
+    ok('a device in no group: no Tidy group', tidyGroupOfSelection() === null);
+    document.getElementById('tidyMenuBtn').click();
+    ok('so the menu does not offer it', document.getElementById('tidyGroupBtn').hidden && !document.getElementById('tidyMenu').hidden);
+    setSelectionEntries([{ type: 'node', id: 'b' }]);
+    document.getElementById('tidyMenuBtn').click(); document.getElementById('tidyMenuBtn').click();
+    ok('with a grouped device selected it does, named', !document.getElementById('tidyGroupBtn').hidden
+       && document.getElementById('tidyGroupName').textContent === 'Lab');
+    document.body.click();
+
+    const outside = at(['x', 'y', 'sw']);
+    const fl0 = { x: Math.min(...['a', 'b', 'hv'].map((id) => getNode(id).x)), y: Math.min(...['a', 'b', 'hv'].map((id) => getNode(id).y)) };
+    document.getElementById('tidyGroupBtn').click();
+    ok('Tidy group moves only that group: the rest stay', at(['x', 'y', 'sw']) === outside, at(['x', 'y', 'sw']));
+    ok('and keeps it where it stood (to the grid)', Math.abs(Math.min(...['a', 'b', 'hv'].map((id) => getNode(id).x)) - fl0.x) <= GRID_SNAP
+       && Math.abs(Math.min(...['a', 'b', 'hv'].map((id) => getNode(id).y)) - fl0.y) <= GRID_SNAP, at(['a', 'b', 'hv']));
+    ok('a VM on a host in the group goes with it', Math.abs(getNode('vm').x - getNode('hv').x) <= 160 && Math.abs(getNode('vm').y - getNode('hv').y) <= 200,
+       at(['hv', 'vm']));
+    undo();
+    ok('one undo step', at(['a', 'b', 'hv']) === '3400,3100 3010,3600 3700,3700');
+
+    menuDoc();
+    setSelectionEntries([{ type: 'node', id: 'a' }, { type: 'node', id: 'b' }]);
+    const before = at(['x', 'y']);
+    document.getElementById('tidyAllBtn').click();
+    ok('Tidy all arranges the whole map, whatever is selected', at(['x', 'y']) !== before, at(['x', 'y']));
+    menuDoc();
+    setSelectionEntries([{ type: 'node', id: 'a' }, { type: 'node', id: 'b' }]);
+    document.getElementById('tidyBtn').click();
+    ok('Tidy with a selection still arranges only that', at(['x', 'y']) === before);
   } catch (e) {
     ok('the suite ran to the end', false, String(e && e.stack || e).slice(0, 300));
   }
