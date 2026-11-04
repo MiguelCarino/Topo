@@ -1,0 +1,224 @@
+# Offline builds: the zip and the desktop apps, into one DRAFT release.
+#
+# Run it from Actions > Builds > Run workflow (or push a v* tag). It never
+# publishes: the owner reads the draft, then publishes it, which makes the tag.
+# Builds are unsigned (no signing secrets exist); see desktop/release-notes.md.
+#
+# Versions: a dispatch builds YY.M.RUN (26.11.37), which only grows and fits
+# an MSI (255.255.65535); a tag v1.2.3 builds 1.2.3.
+#
+# One release per tag: a re-run (all jobs or failed ones) reuses its own
+# draft and replaces the zip in it. A tag that already has a published
+# release builds nothing, so publishing a draft (which pushes its tag) does
+# not start a second build.
+name: Builds
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: builds-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Zip and draft release
+    runs-on: ubuntu-24.04
+    outputs:
+      release_id: ${{ steps.draft.outputs.id }}
+      version: ${{ steps.version.outputs.version }}
+      skip: ${{ steps.existing.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Version
+        id: version
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_TYPE" = tag ]; then
+            v="${REF_NAME#v}"
+          else
+            v="$(date -u +%y).$(date -u +%-m).$RUN_NUMBER"
+          fi
+          if ! printf '%s' "$v" | grep -Eq '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,5}$'; then
+            echo "::error::version '$v' is not MAJOR.MINOR.PATCH"; exit 1
+          fi
+          IFS=. read -r major minor patch <<< "$v"
+          if [ "$major" -gt 255 ] || [ "$minor" -gt 255 ] || [ "$patch" -gt 65535 ]; then
+            echo "::error::version '$v' does not fit an MSI (255.255.65535)"; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+
+      - name: Existing release for the tag
+        id: existing
+        uses: actions/github-script@v9
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        with:
+          script: |
+            const { TAG } = process.env;
+            const all = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const mine = all.filter((r) => r.tag_name === TAG);
+            const published = mine.find((r) => !r.draft);
+            if (published) {
+              core.notice(`${TAG} is already published (${published.html_url}); nothing to build.`);
+              core.setOutput('skip', 'true');
+              return;
+            }
+            core.setOutput('skip', 'false');
+            // The oldest draft for this tag, from an earlier attempt of this run.
+            const draft = mine.sort((a, b) => a.id - b.id)[0];
+            core.setOutput('draft_id', draft ? String(draft.id) : '');
+            if (draft) core.info(`Reusing draft ${draft.id} for ${TAG}.`);
+
+      - name: Check the stage script
+        if: steps.existing.outputs.skip != 'true'
+        run: node tests/stage-check.mjs
+
+      - name: Stage and zip
+        if: steps.existing.outputs.skip != 'true'
+        shell: bash
+        env:
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          ./desktop/stage.sh "desktop/out/Topo-$V"
+          cp desktop/zip-README.txt "desktop/out/Topo-$V/README.txt"
+          (cd desktop/out && zip -r -9 -X "Topo-$V-offline.zip" "Topo-$V")
+          ls -l desktop/out
+
+      - name: Draft release with the zip
+        id: draft
+        if: steps.existing.outputs.skip != 'true'
+        uses: actions/github-script@v9
+        env:
+          V: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          DRAFT_ID: ${{ steps.existing.outputs.draft_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { V, TAG, DRAFT_ID } = process.env;
+            const repo = { owner: context.repo.owner, repo: context.repo.repo };
+            const fields = {
+              target_commitish: context.sha,
+              name: 'Topo ' + TAG,
+              body: fs.readFileSync('desktop/release-notes.md', 'utf8'),
+              draft: true,
+            };
+            const { data } = DRAFT_ID
+              ? await github.rest.repos.updateRelease({ ...repo, release_id: Number(DRAFT_ID), tag_name: TAG, ...fields })
+              : await github.rest.repos.createRelease({ ...repo, tag_name: TAG, ...fields });
+            const name = `Topo-${V}-offline.zip`;
+            // A re-run replaces the zip it uploaded before.
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, { ...repo, release_id: data.id, per_page: 100 });
+            for (const a of assets.filter((x) => x.name === name)) {
+              await github.rest.repos.deleteReleaseAsset({ ...repo, asset_id: a.id });
+            }
+            await github.rest.repos.uploadReleaseAsset({
+              ...repo,
+              release_id: data.id,
+              name,
+              data: fs.readFileSync(`desktop/out/${name}`),
+              headers: { 'content-type': 'application/zip' },
+            });
+            core.setOutput('id', String(data.id));
+
+  desktop:
+    name: Desktop ${{ matrix.name }}
+    needs: release
+    if: needs.release.outputs.skip != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - name: macos-x64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+          # 22.04 for the lowest glibc the Linux builds then need.
+          - name: linux-x64
+            os: ubuntu-22.04
+            target: ''
+            args: ''
+          # Native Arm: an AppImage cannot be cross-built.
+          - name: linux-arm64
+            os: ubuntu-22.04-arm
+            target: ''
+            args: ''
+          - name: windows-x64
+            os: windows-latest
+            target: ''
+            args: ''
+          - name: windows-arm64
+            os: windows-latest
+            target: aarch64-pc-windows-msvc
+            args: --target aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Windows runners check out with core.autocrlf=true. .gitattributes
+      # already says LF; this keeps it so for anything it does not cover, so
+      # stage.sh runs in Git Bash and the app gets the website's bytes.
+      - name: Check out with LF line endings
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - uses: actions/checkout@v7
+
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential file libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'desktop/src-tauri -> target'
+          key: ${{ matrix.name }}
+
+      - name: Stage, icons, version
+        shell: bash
+        env:
+          V: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          npm install -g @tauri-apps/cli@2.12.4
+          ./desktop/stage.sh desktop/dist --desktop
+          (cd desktop && tauri icon ../logo.svg -o src-tauri/icons)
+          node desktop/set-version.mjs "$V"
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tauriScript: tauri
+          releaseId: ${{ needs.release.outputs.release_id }}
+          args: ${{ matrix.args }}
+          retryAttempts: 1

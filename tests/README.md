@@ -78,6 +78,7 @@ length a pixel under Chromium, and the strict assertion caught it.
 | `industry` | The industry templates (imaging, hotel, vessel, warehouse…) |
 | `military` | NIPR/SIPR air gap — asserted as a negative, in both directions |
 | `tabs` | Library tabs, keyboard shortcuts, settings persistence |
+| `desktop` | The page's side of the offline builds (`js/state.js` "Where this page lives" and "Saving a file", desktop/): `publicBaseFor` / `publicQueryFor` keeping the public site's and an intranet copy's own address and query, and giving the public site with only `profile` / `simple` from a file (the zip), `tauri://` and `http://tauri.localhost`; under run.sh a label's QR address, `publicBase()` and `publicQuery()` still this page's; `saveBlob` (an `<a download>` in the page and out again, the URL let go later, not at once) and `dataUrlToBlob` (base64 and plain); Export and a CSV download through it with their names and bytes; on the web the report preview still a blob: frame; Print with no `__TAURI__` printing the frame, an app answering true (macOS `host_print`, given the report and its file name) printing nothing itself, one answering false or failing printing the frame, the header stored either way. The stage script has its own check, `node tests/stage-check.mjs` (see "Desktop builds") |
 | `smoke` | Every template and shipped block loads, renders, traces, and stays clean |
 | `bonds` | NIC bonding: folding NICs into one MAC/IP, mode + member survival, the flapping cure |
 | `persistence` | A saved template (a library card flagged `template`) round-trips the network intact — portCount, socket bindings, and the nat field that used to invert |
@@ -177,6 +178,18 @@ length a pixel under Chromium, and the strict assertion caught it.
 | `hostmap` | VMs and containers on their hosts on the map, round 3 item 2 (`js/groupmap.js` "Hosts on the map" and "Onto a host"): a host's badge counts what runs on it (a VM's containers in); a click on the badge folds them into the host (not drawn, their cables drawn to it once per far end with ×N, a guest's cable to its own host not drawn, the host's own cable to the same far end joined to the line, a second card, the host not selected), and back; a view (no undo step, kept per document in this browser, not handed to another); reached through the host by the search, a selection and `mapPointOf`, Delete asking first; the export keeping the count and dropping the chevron; a VM dragged onto a server runs on it (ring, "Runs on …" label, toast, one undo step, into the host's group), a container is no host for a VM (the frame round it is the target), a PC is not a guest (over a server it is offered a new group instead, `grouppair`), a set of VMs goes together, a container onto a VM, a guest dragged elsewhere only moves; read-only; Spanish |
 | `hostfold` | A host's fold lasts only while something runs on it (`pruneHostFolds`, `js/groupmap.js`): the hosting undone, Runs on set to none, the guest deleted or retyped each drop the fold, so a click on the host's card selects it and a VM dropped on it later stays drawn (badge 1, unfolded); a redo brings the guest back unfolded; a stale fold stored by an older build is dropped on reading (and from the stored record); a host with nothing on it cannot be folded; the rack's place dialog offers no VM or container type; the Homelab block lands with its VMs and container running on its hypervisor |
 | `hostrack` | VMs and containers in their hosts in the rack view and the report, round 3 item 2 (`js/rackview.js` "VMs and containers in their hosts"): chips in the host's box (a VM's container marked), counted +N when a box has no room, none on its back; guests left out of Not placed yet, a VM's row with no Place but a hint; a chip click selects the guest, its bar's Select its host and Runs on nothing (one undo step); a VM dragged from Not placed yet or Other devices onto a placed device runs on it (lit as the host, toast, joins the rack), onto empty units refused with a hint, not offered by the place dialog; a chip dragged onto Runs on nothing, onto another device (its container with it), or let go elsewhere (nothing), by a finger too; a cable to a guest drawn to its host's box and labelled with it, one to its own host not drawn, a stub from a container naming it; the report's elevation and its Runs on lines, Not placed yet without guests; read-only; Spanish |
+
+## Desktop builds
+
+`run.sh` never builds the desktop apps or the zip. The `desktop` suite covers
+the page's side of them (the public link base, `saveBlob`, the macOS print
+hand-off) on the website, where each must change nothing.
+`desktop/stage.sh` checks its own output every time it runs (every file
+`index.html` points at is staged, byte for byte, nothing from another site,
+no `carino-diag.js`, the desktop CSP patch made exactly once), and
+`node tests/stage-check.mjs` checks the script itself, on this repo and on
+made-up trees that must fail. The Builds workflow runs that check before it
+stages, and CI is the only place the apps are built in full.
 
 ## The library's store under run.sh
 

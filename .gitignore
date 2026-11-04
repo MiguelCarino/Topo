@@ -5,3 +5,10 @@ tests/package-lock.json
 .crossrun.html
 .testprobe.js
 .crossprobe.js
+
+# Offline and desktop builds (desktop/stage.sh, tauri build, tauri icon).
+desktop/dist/
+desktop/out/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/icons/

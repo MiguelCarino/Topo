@@ -102,7 +102,9 @@ async function buildShareLink(mode, sealed, passphrase) {
     if (binder && frag.length > BINDER_URL_MAX) return null;
     // A network link keeps the query ('?profile=' composes with it), while a
     // binder link never did, because the shelf is not a view of the editor.
-    return `${location.origin}${location.pathname}${binder ? '' : location.search}#${frag}`;
+    // publicBase()/publicQuery() (js/state.js) are this page's address on the
+    // web, and the public site's from a file or the desktop app.
+    return `${publicBase()}${binder ? '' : publicQuery()}#${frag}`;
 }
 
 async function copyShareLink() {

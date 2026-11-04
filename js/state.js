@@ -168,3 +168,52 @@ function redrawCoalescer(draw) {
         waiting: () => pending
     };
 }
+
+// ---- Where this page lives, for links that leave it ----
+// A share link or a label's QR code points at this page when it is served
+// over http(s) (topo.carino.systems, or an intranet copy such as Offline's
+// topo.carino.internal), so a link made on the intranet opens the intranet.
+// Opened as a file (the offline zip) or inside the desktop app (tauri://, or
+// http://tauri.localhost on Windows), the page has no address anyone else can
+// open, so the link points at the public site instead, keeping only the
+// query that says which view it is.
+const PUBLIC_BASE = 'https://topo.carino.systems/';
+const servedOverWeb = (loc) => (loc.protocol === 'http:' || loc.protocol === 'https:') && loc.hostname !== 'tauri.localhost';
+function publicBaseFor(loc) {
+    return servedOverWeb(loc) ? loc.origin + loc.pathname : PUBLIC_BASE;
+}
+function publicQueryFor(loc) {
+    if (servedOverWeb(loc)) return loc.search;
+    const from = new URLSearchParams(loc.search), keep = new URLSearchParams();
+    ['profile', 'simple'].forEach((k) => { if (from.has(k)) keep.set(k, from.get(k)); });
+    const q = keep.toString();
+    return q ? '?' + q : '';
+}
+const publicBase = () => publicBaseFor(location);
+const publicQuery = () => publicQueryFor(location);
+
+// ---- Saving a file ----
+// One way to hand the visitor a file: a blob, an <a download> in the page, and
+// the URL let go a minute later. WebKit (Safari, the macOS and Linux desktop
+// apps) reads the blob after click() returns, so a URL revoked at once saves
+// an empty file; a blob also spares a multi-MB data: navigation.
+const SAVE_REVOKE_MS = 60000;
+function saveBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), SAVE_REVOKE_MS);
+    return url;
+}
+// A data: URL as a Blob, decoded here: fetch() of a data: URL is a connect,
+// and the CSP's connect-src does not allow data:.
+function dataUrlToBlob(dataUrl) {
+    const comma = dataUrl.indexOf(',');
+    const head = dataUrl.slice(5, comma), body = dataUrl.slice(comma + 1);
+    const type = head.split(';')[0] || 'application/octet-stream';
+    if (!/;base64$/i.test(head)) return new Blob([decodeURIComponent(body)], { type });
+    const bin = atob(body), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type });
+}

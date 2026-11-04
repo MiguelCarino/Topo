@@ -1,0 +1,216 @@
+// Topo as a desktop app: the website's own files (staged by desktop/stage.sh
+// into desktop/dist) in the system webview, with nothing added to the page.
+// What the app does here is what a browser does for the website and a bare
+// webview does not: links that leave the app open in the default browser,
+// downloads land in the Downloads folder, and on macOS a report prints from
+// the default browser (see host_print).
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+// The download handler (and its helpers) is not built on Windows; see main.
+#[cfg(not(target_os = "windows"))]
+use std::path::{Path, PathBuf};
+
+#[cfg(not(target_os = "windows"))]
+use tauri::webview::DownloadEvent;
+use tauri::webview::NewWindowResponse;
+#[cfg(not(target_os = "windows"))]
+use tauri::Manager;
+use tauri::{AppHandle, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_opener::OpenerExt;
+
+/// The page's own addresses: the bundled files (tauri:// on macOS and Linux,
+/// http(s)://tauri.localhost on Windows), and the frames and files it makes
+/// itself (blob:, data:, about:srcdoc).
+fn stays_in_app(url: &Url) -> bool {
+    match url.scheme() {
+        "tauri" | "blob" | "data" | "about" => true,
+        "http" | "https" => url.host_str() == Some("tauri.localhost"),
+        _ => false,
+    }
+}
+
+/// An address the default browser (or mail app, or dialer) should have.
+fn opens_outside(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https" | "mailto" | "tel")
+}
+
+fn open_outside(app: &AppHandle, url: &Url) {
+    if let Err(e) = app.opener().open_url(url.as_str(), None::<&str>) {
+        eprintln!("topo: could not open {url}: {e}");
+    }
+}
+
+/// A file name the page asked for, with no folder in it.
+#[cfg(not(target_os = "windows"))]
+fn clean_file_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\' | ':'))
+        .collect();
+    let cleaned = cleaned.trim().trim_start_matches('.').to_string();
+    if cleaned.is_empty() {
+        "download".to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// `name` in `dir`, or `name (1)`, `name (2)`, ... when it is taken, as a
+/// browser does.
+#[cfg(not(target_os = "windows"))]
+fn unique_path(dir: &Path, name: &str) -> PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let as_path = Path::new(name);
+    let stem = as_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| name.to_string());
+    let ext = as_path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    for n in 1..=9999 {
+        let candidate = dir.join(format!("{stem} ({n}){ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    first
+}
+
+/// macOS cannot print the report's preview frame (WKWebView prints only the
+/// main frame), so the report is written to a file and opened in the default
+/// browser, where its own Print button works (a saved file has no CSP).
+/// Everywhere else this answers false and the page prints its preview; the
+/// page asks host_prints first, so it sends the report only to macOS.
+#[tauri::command]
+fn host_print(app: AppHandle, html: String, name: String) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut safe: String = name
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ' ' | '-'))
+            .collect();
+        safe = safe.trim().trim_start_matches('.').to_string();
+        if safe.is_empty() {
+            safe = "report".to_string();
+        }
+        if !safe.to_ascii_lowercase().ends_with(".html") {
+            safe.push_str(".html");
+        }
+        let dir = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("print");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let path = dir.join(safe);
+        std::fs::write(&path, html).map_err(|e| e.to_string())?;
+        app.opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|e| e.to_string())?;
+        Ok(true)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, html, name);
+        Ok(false)
+    }
+}
+
+/// Whether host_print prints (macOS only). The page asks once, so on Windows
+/// and Linux a Print never sends the whole report across IPC.
+#[tauri::command]
+fn host_prints() -> bool {
+    cfg!(target_os = "macos")
+}
+
+fn main() {
+    // WebKitGTK's DMA-BUF renderer draws a blank window on NVIDIA's driver
+    // and inside many AppImage setups. Only when nobody chose otherwise.
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+            && (std::env::var_os("APPIMAGE").is_some()
+                || Path::new("/proc/driver/nvidia").exists())
+        {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+
+    tauri::Builder::default()
+        // Links are opened from the handlers below, so the plugin's own
+        // click listener (which goes through IPC) stays off.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
+        .invoke_handler(tauri::generate_handler![host_prints, host_print])
+        .setup(|app| {
+            let nav_handle = app.handle().clone();
+            let win_handle = app.handle().clone();
+            let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .title("Topo")
+                .inner_size(1280.0, 800.0)
+                .min_inner_size(360.0, 560.0)
+                .center()
+                // The page takes its own drops (the palette, files dropped on
+                // the landing page); the native handler would swallow them.
+                .disable_drag_drop_handler()
+                // The same window: the app's own pages stay, a link to the
+                // web (the brand, Legal) opens in the default browser.
+                .on_navigation(move |url| {
+                    if stays_in_app(url) {
+                        return true;
+                    }
+                    if opens_outside(url) {
+                        open_outside(&nav_handle, url);
+                    }
+                    false
+                })
+                // target="_blank" (GitHub, Issues, the licence, Netplan) opens
+                // in the default browser; window.open(blob:) of Print labels
+                // gets null back and the page saves the labels as a file.
+                .on_new_window(move |url, _features| {
+                    if matches!(url.scheme(), "http" | "https" | "mailto") {
+                        open_outside(&win_handle, &url);
+                    }
+                    NewWindowResponse::Deny
+                });
+            // macOS and Linux: a bare webview has no download list, so a file
+            // the page saves goes to Downloads under its own name (name (1)
+            // when taken), as a browser would. Windows gets no handler at
+            // all: WebView2 then saves to Downloads itself and shows its own
+            // downloads flyout, which a handler would hide (wry marks the
+            // download handled).
+            #[cfg(not(target_os = "windows"))]
+            let builder = builder.on_download(|webview, event| match event {
+                DownloadEvent::Requested { destination, .. } => {
+                    let asked = destination
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let name = clean_file_name(&asked);
+                    if let Ok(dir) = webview.path().download_dir() {
+                        *destination = unique_path(&dir, &name);
+                    }
+                    true
+                }
+                DownloadEvent::Finished { success, url, .. } => {
+                    if !success {
+                        eprintln!("topo: a download did not finish: {url}");
+                    }
+                    true
+                }
+                _ => true,
+            });
+            builder.build()?;
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running Topo");
+}

@@ -1,0 +1,10 @@
+# LF everywhere, on every checkout (Windows runners default to CRLF): the
+# offline builds ship these files byte for byte as the website serves them,
+# and desktop/stage.sh must run in Git Bash.
+* text=auto eol=lf
+*.woff2 binary
+*.png binary
+*.webp binary
+*.jpg binary
+*.ico binary
+*.icns binary

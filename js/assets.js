@@ -541,7 +541,9 @@ function assetLinkFallback() {
 // The address a label's QR code opens: this page, wherever it is served from
 // (topo.carino.systems, or an intranet copy such as Offline's
 // topo.carino.internal), so a label printed on the intranet opens the intranet.
-const assetLinkFor = (tag) => `${location.origin}${location.pathname}#asset/${encodeURIComponent(tag.trim())}`;
+// From the offline zip or the desktop app, the public site (publicBase,
+// js/state.js), since a file:// or tauri:// address opens nowhere else.
+const assetLinkFor = (tag) => `${publicBase()}#asset/${encodeURIComponent(tag.trim())}`;
 
 // The QR code as an SVG path, one square per dark module, with the quiet zone
 // the standard asks for. Level M: survives a scuffed label.

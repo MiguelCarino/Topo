@@ -101,6 +101,15 @@ Wi-Fi is recorded where it lives: the networks as a list of their own (the Wi-Fi
 - Every saved network records the version of the format it was written in. Older ones are upgraded when opened; one from a newer Topo opens read-only, so saving it here cannot drop what this version does not know. A read-only network can still be inspected, reported on and exported as it arrived.
 - Two tabs open on the library see each other's saves.
 
+## Offline and desktop
+
+- **The offline zip** is for desktop browsers: unzip it and double-click `index.html` (Chrome, Edge, Firefox or Safari). Nothing is installed and no connection is needed. Saved networks stay in that browser, for that folder. Share links and label QR codes point at topo.carino.systems, since a file on one computer opens nowhere else; the Topo name in the top bar opens the folder, so use Back to return.
+- **Windows** (x64, Arm): an installer (`-setup.exe` or `.msi`), using the system's WebView2.
+- **macOS** (Apple silicon, Intel): a `.dmg`, signed ad hoc only; Print opens the report in the default browser, which prints it.
+- **Linux** (x64, Arm): `.deb`, `.rpm` or `.AppImage`.
+- The apps keep their library in their own data folder, apart from the website's; save files to Downloads; open links to the web in the default browser. A network not kept is lost when the app quits.
+- **Phones and tablets** use the website: iOS Files and Android cannot run a local `index.html`, and there is no mobile app.
+
 ## Privacy
 
 Topo has no server and uploads nothing. Kept networks live in this browser's storage (IndexedDB, falling back to local storage where IndexedDB is not offered), and the network you are working on is held in the page's history, not in the URL. A share link carries the whole network and is locked with a passphrase by default (AES-GCM). A link that does not read as a network (cut short, mangled, or unlocked to something that is not one) says it is damaged and asks for it to be sent again: the network already open stays as it was, kept card and all, and on a fresh visit Topo opens as a bare visit would. Before a network leaves as a link or a report, Topo names any device whose notes look like they hold a password. A Wi-Fi network has no passphrase field, so a Wi-Fi key cannot travel in a file, a link or a sheet. Topo makes no outside requests at all: its Content-Security-Policy allows connections to this site only.

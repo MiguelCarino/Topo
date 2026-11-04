@@ -2071,12 +2071,8 @@ const pickSet = (meta) => { const out = {}; Object.keys(meta || {}).forEach((k) 
 // buildSiteReport). Labels still open as before, in a tab.
 function deliverReport(html, meta, kind = 'report', onKept = null) {
     if (kind !== 'report' && kind !== 'summary') return openReportTab(html, meta, kind);
-    const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
     const name = reportFileName(meta, kind);
-    const a = document.createElement('a');
-    a.href = url; a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    const url = saveBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), name);
     if (typeof onKept === 'function') onKept();
     return { url, name, opened: false, downloaded: true };
 }
@@ -2480,13 +2476,19 @@ async function refreshReportPreview() {
         catch (e) { console.warn('Report preview failed:', e); if (seq === _reportPv.seq) reportPreviewStatus('Could not build the report.'); return null; }
         if (seq !== _reportPv.seq || dialog.classList.contains('hidden')) return null;
         if (!b) { reportPreviewStatus('Nothing to report on yet — save a network first.'); return null; }
-        const url = URL.createObjectURL(new Blob([b.html], { type: 'text/html;charset=utf-8' }));
+        // Opened as a file (the offline zip), a blob: frame is another origin
+        // and its document cannot be read, so the report goes in as srcdoc,
+        // which shares this page's origin and CSP. On the web, and in the
+        // desktop app, the blob as before.
+        const inline = location.protocol === 'file:';
+        const url = inline ? null : URL.createObjectURL(new Blob([b.html], { type: 'text/html;charset=utf-8' }));
         const old = _reportPv.url;
+        const hadOne = !!(old || _reportPv.built);
         _reportPv.url = url; _reportPv.built = b;
         // Where the preview was, so a redraw does not send it back to the
         // top; after a change to the large map's grid, its overview instead.
         let was = 0;
-        try { was = old && frame.contentWindow ? frame.contentWindow.scrollY : 0; } catch (e) { /* not readable */ }
+        try { was = hadOne && frame.contentWindow ? frame.contentWindow.scrollY : 0; } catch (e) { /* not readable */ }
         const toLarge = _reportPv.focusLarge;
         _reportPv.focusLarge = false;
         // Resolved once the frame shows it, so Print prints this one.
@@ -2505,7 +2507,8 @@ async function refreshReportPreview() {
             };
             frame.onload = shown;
             setTimeout(shown, 5000);   // a frame that never says it loaded
-            frame.src = url;
+            if (inline) frame.srcdoc = b.html;
+            else frame.src = url;
         });
         if (seq !== _reportPv.seq) return null;
         const name = document.getElementById('reportPreviewName');
@@ -2544,12 +2547,12 @@ function fitReportPreview(frame) {
     Object.assign(frame.style, { flex: 'none', width: `${REPORT_PREVIEW_PAGE_PX}px`, height: `${Math.round(h / k)}px`,
         transform: `scale(${k})`, transformOrigin: '0 0' });
 }
-window.addEventListener('resize', () => { const f = document.getElementById('reportPreviewFrame'); if (f && _reportPv.url) fitReportPreview(f); });
+window.addEventListener('resize', () => { const f = document.getElementById('reportPreviewFrame'); if (f && (_reportPv.url || _reportPv.built)) fitReportPreview(f); });
 function dropReportPreview() {
     clearTimeout(_reportPv.timer);
     _reportPv.seq++;
     const frame = document.getElementById('reportPreviewFrame');
-    if (frame) { frame.onload = null; frame.removeAttribute('src'); }
+    if (frame) { frame.onload = null; frame.removeAttribute('src'); frame.removeAttribute('srcdoc'); }
     if (_reportPv.url) URL.revokeObjectURL(_reportPv.url);
     _reportPv.url = null; _reportPv.built = null; _reportPv.cache = null; _reportPv.pending = null;
     const name = document.getElementById('reportPreviewName');
@@ -2572,6 +2575,15 @@ async function downloadReportFromDialog() {
     closeReportDialog();
     return deliverReport(b.html, b.meta, b.kind, b.onKept);
 }
+// The desktop app's answer to "do you print reports yourself?", asked once
+// per app (an app with no such command, or none at all, does not).
+let _hostPrints = null;
+function hostPrintsReports(host) {
+    if (!_hostPrints || _hostPrints.host !== host) {
+        _hostPrints = { host, answer: Promise.resolve().then(() => host.invoke('host_prints')).then((v) => v === true, () => false) };
+    }
+    return _hostPrints.answer;
+}
 // Print: the preview redrawn with the stored header, then that frame printed
 // (or saved as PDF from the print dialog). The dialog stays, for a copy.
 async function printReportFromDialog() {
@@ -2580,6 +2592,16 @@ async function printReportFromDialog() {
     const frame = document.getElementById('reportPreviewFrame');
     if (!b || !frame || !frame.contentWindow) return false;
     if (typeof b.onKept === 'function') { try { b.onKept(); } catch (e) { console.warn('Report: could not record the hand-over.', e); } }
+    // The desktop app on macOS cannot print a frame (WKWebView), so the app
+    // opens the report in the default browser, where its own Print button
+    // works. The page asks once whether the app prints (host_prints), so the
+    // report crosses IPC only to an app that does. The website has no __TAURI__.
+    const host = window.__TAURI__ && window.__TAURI__.core;
+    if (host && typeof host.invoke === 'function' && await hostPrintsReports(host)) {
+        try {
+            if (await host.invoke('host_print', { html: b.html, name: reportFileName(b.meta, b.kind) })) return true;
+        } catch (e) { console.warn('Report: the app could not print, printing the preview.', e); }
+    }
     frame.contentWindow.focus();
     frame.contentWindow.print();
     return true;

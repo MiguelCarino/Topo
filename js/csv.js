@@ -481,10 +481,7 @@ const csvSheetLabel = (s) => (s.plain ? t(s.label) : s.label);
 function downloadCsv(key) {
     const sheet = CSV_SHEETS.find((s) => s.key === key);
     if (!sheet) return;
-    const blob = new Blob([CSV_BOM + csvText(sheet.build(), ',')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `${docFileStem()}-${key}.csv`; a.click();
-    URL.revokeObjectURL(url);
+    saveBlob(new Blob([CSV_BOM + csvText(sheet.build(), ',')], { type: 'text/csv;charset=utf-8' }), `${docFileStem()}-${key}.csv`);
 }
 
 async function copyTsv(key) {

@@ -44,6 +44,25 @@ Static files, no build step. `tests/run.sh` runs every suite in headless Chromiu
 
 **Related tools:** [Hardware](https://hardware.carino.systems/) · [Netplan](https://netplan.carino.systems/) · [Ping](https://ping.carino.systems/)
 
+## Offline and desktop builds
+
+Topo also comes as desktop apps (Windows, macOS and Linux, on x64 and Arm) and as a plain offline zip, from [GitHub Releases](https://github.com/MiguelCarino/Topo/releases). The `Builds` workflow (`.github/workflows/builds.yml`) makes all of them into one **draft** release; nothing is public until the owner publishes it.
+
+- **Zip:** unzip, open `index.html` in a desktop browser. It is the website's files byte for byte.
+- **Desktop apps** ([Tauri v2](https://v2.tauri.app/), the system webview): `.dmg` for macOS, `.msi` and `-setup.exe` for Windows, `.deb`, `.rpm` and `.AppImage` for Linux. They run the same files as the website; only the staged copy's CSP adds the app's IPC origins (`ipc:`, `http://ipc.localhost`).
+- **Unsigned.** macOS: the app is signed ad hoc; approve it under System Settings > Privacy & Security > Open Anyway, or run `xattr -dr com.apple.quarantine /Applications/Topo.app`. Windows: SmartScreen shows "More info > Run anyway"; WebView2 is needed and is downloaded only if missing. Linux: the AppImage needs FUSE, or `--appimage-extract-and-run`.
+- **Where work is kept.** The app keeps its library in its own data folder, separate from the website's. Uninstalling it (or the Windows uninstaller's "delete app data") can delete it: Export first. A network that has not been kept is lost when the app quits, because the live document lives in the page's history: keep it before quitting.
+- Saved files go to the Downloads folder. On macOS, Print opens the report in the default browser, which prints it. Share links and label QR codes open the website; the app cannot take links yet.
+
+Building locally (Rust, Node and the Tauri system packages; on Linux `webkit2gtk-4.1` and `libsoup-3.0` with their `-devel` packages):
+
+    desktop/stage.sh desktop/dist --desktop
+    cd desktop
+    npx @tauri-apps/cli@2.12.4 icon ../logo.svg -o src-tauri/icons
+    npx @tauri-apps/cli@2.12.4 build
+
+The icons are generated from `logo.svg` and never committed; `cargo check` needs them too, so stage and make the icons first. `desktop/stage.sh <dir>` alone makes the zip's folder. `node tests/stage-check.mjs` checks the stage script.
+
 ## Licensing
 
 **Mine — GNU Affero General Public License v3.0 or later.** Everything in this

@@ -2880,10 +2880,7 @@ function encodeCanvas(canvas, requested) {
 // serializer as everything else, wrapped in a tiny self-identifying envelope so
 // the file can be recognised and can carry a schema version later.
 function downloadJson(payload, filename) {
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
+    saveBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), filename);
 }
 
 // `version` is the envelope's own format and stays 1; the document's schema
@@ -3156,15 +3153,13 @@ function exportSvgFile() {
     let markup;
     try { markup = canvasSvgFile(); } catch (e) { console.warn('Could not build the SVG:', e); }
     if (!markup) { showToast(t('Could not export image.'), 'err'); return; }
-    const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }));
-    const a = document.createElement('a'); a.href = url; a.download = `${docFileStem()}.svg`; a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    saveBlob(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }), `${docFileStem()}.svg`);
 }
 
 function handleExport(format) {
     if (!state.nodes.length) { showToast(t('Nothing to export. Add at least one node first.')); return; }
     captureCanvasImage(format).then((out) => {
-        const a = document.createElement('a'); a.href = out.url; a.download = `${docFileStem()}.${out.ext}`; a.click();
+        saveBlob(dataUrlToBlob(out.url), `${docFileStem()}.${out.ext}`);
     }).catch(() => showToast(t('Could not export image.'), 'err'));
 }
 
