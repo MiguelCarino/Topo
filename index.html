@@ -90,6 +90,22 @@
      it is cleared unconditionally (in a finally) so a boot that throws leaves a
      usable editor rather than an invisible one. -->
 <body class="chrome-pending">
+<!-- Key words: the navbar shows them, translated, under its Language tab. -->
+<ul data-carino-words hidden>
+  <li>Devices</li>
+  <li>Cables</li>
+  <li>Groups</li>
+  <li>Diagnostics</li>
+  <li>Providers</li>
+  <li>Your networks</li>
+</ul>
+
+<!-- Bundled libraries: the navbar lists them in its About window, Licence tab. -->
+<ul data-carino-libs data-href="https://github.com/MiguelCarino/Topo/blob/main/vendor/README.md" hidden>
+  <li data-licence="MIT">ipaddr.js</li>
+  <li data-licence="MIT">qrcode-generator</li>
+</ul>
+
 
     <!-- The editor's controls. carino-navbar.js moves this node into the
          navbar (data-carino-actions); below 900px js/mobile.js folds it into
@@ -1060,7 +1076,6 @@
                         <div class="landing-chips-note" id="landingEmpty" data-i18n>Networks you save are kept in this browser, and show up here.</div>
                     </div>
 
-                    <p class="privacy-line landing-privacy"><span data-i18n>Runs in your browser. Nothing you add here is uploaded.</span></p>
 
                     <!-- A binder someone sent, decoded from a 'b~' link. Its own
                          section, never merged into "Your networks" until the visitor
