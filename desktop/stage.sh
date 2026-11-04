@@ -14,7 +14,8 @@
 # --desktop patches the copied index.html and nothing else: the meta CSP's
 # connect-src gains Tauri's IPC origins (ipc: on macOS and Linux,
 # http://ipc.localhost on Windows). The zip never gets them, because
-# *.localhost is loopback in a browser.
+# *.localhost is loopback in a browser. It also adds intro.html (from
+# desktop/), the app's intro animation, which the window opens first.
 #
 # Portable to macOS bash 3.2 and Git Bash: no arrays past the basics, no
 # sed -i, no GNU-only flags.
@@ -58,6 +59,7 @@ CSP_TO="connect-src 'self' ipc: http://ipc.localhost;"
 if [ "$DESKTOP" = 1 ]; then
     sed "s|$CSP_FROM|$CSP_TO|" "$OUT/index.html" > "$OUT/index.html.tmp"
     mv "$OUT/index.html.tmp" "$OUT/index.html"
+    cp "$SRC/desktop/intro.html" "$OUT/intro.html"
 fi
 
 fail=0
@@ -84,6 +86,10 @@ while IFS= read -r f; do
     rel="${f#"$OUT"/}"
     count=$((count + 1))
     if [ "$DESKTOP" = 1 ] && [ "$rel" = index.html ]; then continue; fi
+    if [ "$DESKTOP" = 1 ] && [ "$rel" = intro.html ]; then
+        cmp -s "$f" "$SRC/desktop/intro.html" || bad "intro.html differs from desktop/intro.html"
+        continue
+    fi
     cmp -s "$f" "$SRC/$rel" || bad "$rel differs from the source"
 done <<EOF_FILES
 $(find "$OUT" -type f)
@@ -95,8 +101,10 @@ if [ "$DESKTOP" = 1 ]; then
     [ "$n" = 1 ] || bad "the desktop CSP patch matched $n times, not once"
     m="$(grep -o "$CSP_FROM" "$SRC/index.html" | wc -l | tr -d ' ' || true)"
     [ "$m" = 1 ] || bad "the source CSP has connect-src 'self'; $m times, not once"
+    [ -e "$OUT/intro.html" ] || bad "the desktop intro was not staged"
 else
     cmp -s "$OUT/index.html" "$SRC/index.html" || bad "index.html is not the website's"
+    [ ! -e "$OUT/intro.html" ] || bad "the zip got the desktop intro"
 fi
 
 # 5. No script or stylesheet (or icon, preload, manifest) from another site.

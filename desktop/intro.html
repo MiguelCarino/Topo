@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Nothing leaves this page; Tauri sends no CSP header (csp: null), so
+       this is the only policy, as index.html's own is there. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'" />
+  <title>Topo</title>
+  <link rel="stylesheet" href="fonts/carino-fonts.css" />
+  <!-- The desktop app's intro, as Carino DICOM's loading screen: the mark's
+       network drawn in, a packet running down it, the name in gold. Only the
+       desktop app opens it (desktop/stage.sh --desktop stages it, the window
+       starts on it); it plays once and hands over to index.html with
+       location.replace, so Back never returns to it. A click or a key skips
+       it; reduced motion shows it still, briefly. -->
+  <style>
+    :root { --bg: #050505; --text: #f5f5f5; --muted: #8a8a8a; --ink: #eab308; --glow: rgba(234,179,8,.9);
+      --g1: #fef08a; --g2: #eab308; --g3: #b45309; color-scheme: dark; }
+    /* Colourful, as carino-theme.css has it: blue, light or dark. */
+    :root[data-carino-theme="color"] { --bg: #eef3fc; --text: #1f1f1f; --muted: #5f6368; --ink: #0b57d0; --glow: rgba(11,87,208,.55);
+      --g1: #4c8df6; --g2: #0b57d0; --g3: #0842a0; color-scheme: light; }
+    @media (prefers-color-scheme: dark) {
+      :root[data-carino-theme="color"] { --bg: #0e1420; --text: #e3e3e3; --muted: #9aa0a6; --ink: #a8c7fa; --glow: rgba(168,199,250,.8);
+        --g1: #d3e3fd; --g2: #a8c7fa; --g3: #7cacf8; color-scheme: dark; }
+    }
+    html, body { height: 100%; margin: 0; }
+    body { display: flex; align-items: center; justify-content: center; flex-direction: column;
+      background: var(--bg); color: var(--text); cursor: default; user-select: none;
+      font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+      transition: opacity .22s ease; }
+    body.out { opacity: 0; }
+    .net { width: 220px; height: 112px; overflow: visible; }
+    .net .faint line { stroke: var(--ink); stroke-width: 2; opacity: .12; }
+    .net .faint circle { fill: none; stroke: var(--ink); stroke-width: 2; opacity: .12; }
+    /* The links draw in, top to bottom (pathLength 1). */
+    .net .wire { stroke: var(--ink); stroke-width: 2.4; stroke-linecap: round;
+      stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw .34s ease-out forwards; }
+    .net .node { fill: var(--bg); stroke: var(--ink); stroke-width: 2.4;
+      transform-box: fill-box; transform-origin: center; transform: scale(0);
+      animation: pop .3s cubic-bezier(.3,1.6,.5,1) forwards; }
+    /* Packets: a bright dash running down each path, glowing. */
+    .net .packet { fill: none; stroke: var(--ink); stroke-width: 3; stroke-linecap: round;
+      stroke-dasharray: .14 1.2; stroke-dashoffset: .14; opacity: 0;
+      filter: drop-shadow(0 0 5px var(--glow));
+      animation: run .62s linear forwards; }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+    @keyframes pop { to { transform: scale(1); } }
+    @keyframes run { 0% { opacity: 1; stroke-dashoffset: .14; } 92% { opacity: 1; } 100% { opacity: 0; stroke-dashoffset: -1.06; } }
+    h1 { font-family: "Red Hat Display", "IBM Plex Sans", system-ui, sans-serif;
+      font-weight: 800; font-size: 1.6rem; letter-spacing: .01em; margin: 20px 0 6px;
+      background: linear-gradient(130deg, var(--g1) 0%, var(--g2) 50%, var(--g3) 100%);
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+      opacity: 0; transform: translateY(4px); animation: rise .4s ease-out .5s forwards; }
+    p { color: var(--muted); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .8rem; margin: 0;
+      opacity: 0; animation: rise .4s ease-out .7s forwards; }
+    @keyframes rise { to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) {
+      .net .wire, .net .node, h1, p { animation: none; stroke-dashoffset: 0; transform: none; opacity: 1; }
+      .net .packet { display: none; }
+    }
+  </style>
+  <script>
+    // The theme the app last used (carino-theme.js keeps it in this origin's
+    // localStorage), before the first paint.
+    try { if (localStorage.getItem('carino-theme') === 'color') document.documentElement.setAttribute('data-carino-theme', 'color'); } catch (e) { /* no storage */ }
+  </script>
+</head>
+<body>
+  <!-- An internet uplink, a router, a switch and three devices: the map Topo
+       draws, drawn in. The faint copy is the whole map from the start. -->
+  <svg class="net" viewBox="0 0 220 112" aria-hidden="true">
+    <g class="faint">
+      <line x1="110" y1="12" x2="110" y2="44" /><line x1="110" y1="44" x2="110" y2="72" />
+      <line x1="110" y1="72" x2="40" y2="100" /><line x1="110" y1="72" x2="110" y2="100" /><line x1="110" y1="72" x2="180" y2="100" />
+    </g>
+    <line class="wire" pathLength="1" x1="110" y1="12" x2="110" y2="44" style="animation-delay:.08s" />
+    <line class="wire" pathLength="1" x1="110" y1="44" x2="110" y2="72" style="animation-delay:.3s" />
+    <line class="wire" pathLength="1" x1="110" y1="72" x2="40" y2="100" style="animation-delay:.52s" />
+    <line class="wire" pathLength="1" x1="110" y1="72" x2="110" y2="100" style="animation-delay:.56s" />
+    <line class="wire" pathLength="1" x1="110" y1="72" x2="180" y2="100" style="animation-delay:.6s" />
+    <circle class="node" cx="110" cy="10" r="6" style="animation-delay:0s" />
+    <rect class="node" x="99" y="37" width="22" height="14" rx="3" style="animation-delay:.24s" />
+    <rect class="node" x="94" y="66" width="32" height="12" rx="3" style="animation-delay:.46s" />
+    <rect class="node" x="30" y="94" width="20" height="13" rx="2.5" style="animation-delay:.74s" />
+    <rect class="node" x="100" y="94" width="20" height="13" rx="2.5" style="animation-delay:.78s" />
+    <rect class="node" x="170" y="94" width="20" height="13" rx="2.5" style="animation-delay:.82s" />
+    <!-- From the uplink to each device, once the map is there. -->
+    <polyline class="packet" pathLength="1" points="110,12 110,72 40,100" style="animation-delay:.95s" />
+    <polyline class="packet" pathLength="1" points="110,12 110,72 110,100" style="animation-delay:1.02s" />
+    <polyline class="packet" pathLength="1" points="110,12 110,72 180,100" style="animation-delay:1.09s" />
+  </svg>
+  <h1>Topo</h1>
+  <p id="msg">Drawing your network…</p>
+
+  <script>
+    (function () {
+      // The app's language (carino-lang.js keeps it in this origin's
+      // localStorage), else the system's, by the same prefixes. One string.
+      var T = {
+        es: 'Dibujando tu red…',
+        'pt-BR': 'Desenhando a sua rede…',
+        ja: 'ネットワークを描いています…',
+        ru: 'Рисуем вашу сеть…'
+      };
+      var l = '';
+      try { l = localStorage.getItem('carino_lang') || ''; } catch (e) { /* no storage */ }
+      if (!l || l === 'auto') l = navigator.language || '';
+      l = String(l).toLowerCase();
+      var c = l.indexOf('es') === 0 ? 'es' : l.indexOf('pt') === 0 ? 'pt-BR' : l.indexOf('ja') === 0 ? 'ja' : l.indexOf('ru') === 0 ? 'ru' : '';
+      if (c) { document.documentElement.lang = c; document.getElementById('msg').textContent = T[c]; }
+
+      // Once, then the app. Reduced motion: a still frame, briefly.
+      var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var gone = false;
+      function go() {
+        if (gone) return;
+        gone = true;
+        document.body.classList.add('out');
+        setTimeout(function () { location.replace('index.html' + location.search + location.hash); }, still ? 0 : 220);
+      }
+      setTimeout(go, still ? 450 : 1850);
+      addEventListener('pointerdown', go);
+      addEventListener('keydown', go);
+    })();
+  </script>
+</body>
+</html>

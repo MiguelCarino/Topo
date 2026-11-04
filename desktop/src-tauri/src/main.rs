@@ -1,5 +1,7 @@
 // Topo as a desktop app: the website's own files (staged by desktop/stage.sh
 // into desktop/dist) in the system webview, with nothing added to the page.
+// The window opens on intro.html (desktop/intro.html, staged with
+// --desktop), a short animation that hands over to index.html.
 // What the app does here is what a browser does for the website and a bare
 // webview does not: links that leave the app open in the default browser,
 // downloads land in the Downloads folder, and on macOS a report prints from
@@ -15,6 +17,7 @@ use tauri::webview::DownloadEvent;
 use tauri::webview::NewWindowResponse;
 #[cfg(not(target_os = "windows"))]
 use tauri::Manager;
+use tauri::window::Color;
 use tauri::{AppHandle, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
@@ -153,8 +156,11 @@ fn main() {
         .setup(|app| {
             let nav_handle = app.handle().clone();
             let win_handle = app.handle().clone();
-            let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("intro.html".into()))
                 .title("Topo")
+                // The intro's own near-black, so the window never flashes
+                // white before the first paint.
+                .background_color(Color(5, 5, 5, 255))
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(360.0, 560.0)
                 .center()

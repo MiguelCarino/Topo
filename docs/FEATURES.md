@@ -104,9 +104,10 @@ Wi-Fi is recorded where it lives: the networks as a list of their own (the Wi-Fi
 ## Offline and desktop
 
 - **The offline zip** is for desktop browsers: unzip it and double-click `index.html` (Chrome, Edge, Firefox or Safari). Nothing is installed and no connection is needed. Saved networks stay in that browser, for that folder. Share links and label QR codes point at topo.carino.systems, since a file on one computer opens nowhere else; the Topo name in the top bar opens the folder, so use Back to return.
-- **Windows** (x64, Arm): an installer (`-setup.exe` or `.msi`), using the system's WebView2.
+- **Windows** (x64, Arm): an installer (`-setup.exe` or `.msi`), using the system's WebView2; the installer carries WebView2's offline installer and puts it in when it is missing, so it needs no internet (an intranet PC installs it as it is).
 - **macOS** (Apple silicon, Intel): a `.dmg`, signed ad hoc only; Print opens the report in the default browser, which prints it.
 - **Linux** (x64, Arm): `.deb`, `.rpm` or `.AppImage`.
+- **The apps open on a short intro**, as Carino DICOM's does: the map Topo draws (an uplink, a router, a switch and three devices) drawn in, a packet running down to each device, and the name in gold, in Gold or Colourful (light or dark) as the app was last left and in its language, about two seconds, then the editor. A click or a key skips it; with reduced motion it is a still frame for half a second. It is `desktop/intro.html`, staged only into the desktop apps (never the zip or the website), and the editor replaces it, so Back never returns to it.
 - The apps keep their library in their own data folder, apart from the website's; save files to Downloads; open links to the web in the default browser. A network not kept is lost when the app quits.
 - **Phones and tablets** use the website: iOS Files and Android cannot run a local `index.html`, and there is no mobile app.
 

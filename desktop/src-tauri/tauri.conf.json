@@ -35,6 +35,12 @@
       "../../vendor/LICENSE.ipaddr.js": "licenses/LICENSE.ipaddr.js",
       "../../vendor/LICENSE.qrcode-generator": "licenses/LICENSE.qrcode-generator"
     },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller",
+        "silent": true
+      }
+    },
     "macOS": {
       "signingIdentity": "-",
       "minimumSystemVersion": "11.3"

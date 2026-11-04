@@ -186,7 +186,8 @@ the page's side of them (the public link base, `saveBlob`, the macOS print
 hand-off) on the website, where each must change nothing.
 `desktop/stage.sh` checks its own output every time it runs (every file
 `index.html` points at is staged, byte for byte, nothing from another site,
-no `carino-diag.js`, the desktop CSP patch made exactly once), and
+no `carino-diag.js`, the desktop CSP patch made exactly once, the desktop
+intro `desktop/intro.html` as it is and only on `--desktop`), and
 `node tests/stage-check.mjs` checks the script itself, on this repo and on
 made-up trees that must fail. The Builds workflow runs that check before it
 stages, and CI is the only place the apps are built in full.
