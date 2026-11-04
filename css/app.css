@@ -265,7 +265,7 @@ body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .lib-item-del:hover { color: #ef4444; }
 
 /* Shortcut cheatsheet */
-#shortcutHelp kbd {
+.shortcut-body kbd {
     font-family: 'IBM Plex Mono', monospace; font-size: 10px;
     border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px;
     color: var(--accent); background: var(--bg-elev); white-space: nowrap;

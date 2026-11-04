@@ -173,8 +173,6 @@
                  the report's defaults, and About (js/settings.js). -->
             <button id="settingsBtn" type="button" class="cs-btn" data-i18n-title title="Settings: language, what the map shows, the report's defaults, and about Topo">⚙ Settings</button>
 
-            <div class="cs-vdiv"></div>
-            <button id="helpBtn" class="cs-btn" data-i18n-title data-i18n-aria-label title="How to use — mouse & keyboard (press ?)" aria-label="Help">?</button>
     </div>
 
     <!-- Workspace shell (carino-ui.css): the rail on the left, the canvas as
@@ -1634,14 +1632,10 @@
                 </div>
             </div>
 
-            <div id="shortcutHelp" class="hidden modal-scrim topo-dlg">
-                <div class="modal topo-card sm">
-                    <div class="dlg-headrow">
-                        <h4 class="dlg-title" data-i18n>How to use</h4>
-                        <button id="shortcutClose" class="modal-x" data-i18n-aria-label aria-label="Close">✕</button>
-                    </div>
-                    <div id="shortcutBody" class="shortcut-body"></div>
-                </div>
+            <!-- How to use: the navbar moves this into its About window (the How
+                 to use tab); js/app.js fills it and ? opens it there. -->
+            <div data-carino-howto hidden>
+                <div id="shortcutBody" class="shortcut-body"></div>
             </div>
 
     </div>

@@ -39,7 +39,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       { name: 'the share dialog', open: () => openShareDialog('doc'), isOpen: () => shown('shareDialog') },
       { name: 'the mode picker', open: () => openModePicker(), isOpen: () => shown('modePicker') },
       { name: 'the report dialog', open: () => openReportDialog(), isOpen: () => shown('reportDialog') },
-      { name: 'the shortcut list', open: () => toggleShortcutHelp(true), isOpen: () => shown('shortcutHelp') },
+      { name: 'the shortcut list', open: () => toggleShortcutHelp(true), isOpen: () => helpShown() },
       { name: 'the unlock dialog', open: () => { unlockAnswer = askPassphrase(); }, isOpen: () => shown('unlockDialog') }
   ];
 
@@ -104,11 +104,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     blur();
     toggleShortcutHelp(true);
     key('?');
-    ok('? closes the shortcut list when it is all that is open', !shown('shortcutHelp'));
+    ok('? closes the shortcut list when it is all that is open', !helpShown());
     key('?');
-    ok('and opens it again from the map', shown('shortcutHelp'));
+    ok('and opens it again from the map', helpShown());
     key('Escape');
-    ok('Esc closes it', !shown('shortcutHelp'));
+    ok('Esc closes it', !helpShown());
 
     // ---- 5: the rack view ----
     replaceDocument({ v: DOC_VERSION,
@@ -119,11 +119,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('the rack view shows the device', rackShown() && !!box());
     box().focus();
     keyOn(box(), '?');
-    ok('? on a racked device opens the shortcut list', shown('shortcutHelp'));
+    ok('? on a racked device opens the shortcut list', helpShown());
     keyOn(box(), 'ArrowUp');
     ok('an arrow behind the list does not move the device', getNode('srv').rackU === 10, String(getNode('srv').rackU));
     keyOn(box(), 'Escape');
-    ok('Esc closes the list over the rack', !shown('shortcutHelp'));
+    ok('Esc closes the list over the rack', !helpShown());
   } catch (e) {
     ok('the suite ran to its end', false, e && e.stack || String(e));
   } finally {

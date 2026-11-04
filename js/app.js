@@ -2242,7 +2242,22 @@ function setTraceMode(on) {
 // devices is one of those, but '#setup' opens it during boot, before
 // carino-ui.js has loaded, as a plain [hidden] scrim (js/add.js).
 function topoOverlayOpen() {
-    return landingIsOpen() || !!document.querySelector('.topo-dlg:not(.hidden)') || addDevicesOpen();
+    return landingIsOpen() || !!document.querySelector('.topo-dlg:not(.hidden)') || addDevicesOpen() || aboutOpen();
+}
+
+// The navbar's About window (carino-navbar.js). How to use is one of its tabs,
+// so the shortcut list is open when the window is and that tab is showing.
+function aboutOpen() {
+    const pop = document.getElementById('cnAbout');
+    return !!pop && !pop.hidden;
+}
+function helpShown() {
+    const tab = document.getElementById('cnTab-howto');
+    return aboutOpen() && !!tab && tab.getAttribute('aria-selected') === 'true';
+}
+function closeAbout() {
+    const x = document.querySelector('#cnAbout .cn-x');
+    if (aboutOpen() && x) x.click();
 }
 
 // May a key act on the map? Not while a question (CarinoUI.modal) or a Topo overlay covers it.
@@ -2255,16 +2270,18 @@ function closeTopoOverlay() {
     if (unlockDialogOpen()) { _answerUnlock(null); return; }
     if (shareDialogOpen()) { closeShareDialog(); return; }
     if (document.querySelector('.topo-dlg:not(.hidden)') || addDevicesOpen()) {
-        toggleShortcutHelp(false); closeModePicker(); closeReportDialog(); closeAddDevices();
+        closeModePicker(); closeReportDialog(); closeAddDevices();
         return;
     }
+    if (aboutOpen()) { closeAbout(); return; }
     if (landingIsOpen()) closeLanding();
 }
 
+// ? opens the About window on How to use, and closes it from there.
 function toggleShortcutHelp(force) {
-    const panel = document.getElementById('shortcutHelp');
-    const show = force !== undefined ? force : panel.classList.contains('hidden');
-    panel.classList.toggle('hidden', !show);
+    const show = force !== undefined ? force : !helpShown();
+    if (show) { if (window.CarinoNav && CarinoNav.about) CarinoNav.about('howto'); }
+    else if (helpShown()) closeAbout();
 }
 
 const SHORTCUTS = [
@@ -2335,6 +2352,8 @@ window.addEventListener('keydown', (event) => {
     // delete the selection behind it, nor F refit the map. CarinoUI.modal
     // handles Esc and Tab itself.
     if (window.CarinoUI && CarinoUI.modal.top()) { stopNativeUndo(event); return; }
+    // the navbar's Esc already closed its About window: that Esc is spent
+    if (event.key === 'Escape' && event.defaultPrevented) return;
     const activeTag = document.activeElement?.tagName || '';
     const inField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag);
 
@@ -2346,8 +2365,8 @@ window.addEventListener('keydown', (event) => {
     // native Undo would reach the sidebar field behind it (hasTextUndo).
     if (topoOverlayOpen()) {
         stopNativeUndo(event);
-        const onlyHelpOpen = !document.getElementById('shortcutHelp').classList.contains('hidden')
-            && !landingIsOpen() && !addDevicesOpen() && document.querySelectorAll('.topo-dlg:not(.hidden)').length === 1;
+        const onlyHelpOpen = helpShown()
+            && !landingIsOpen() && !addDevicesOpen() && !document.querySelector('.topo-dlg:not(.hidden)');
         if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); closeTopoOverlay(); }
         else if (event.key === '?' && !inField && onlyHelpOpen) { event.preventDefault(); toggleShortcutHelp(false); }
         return;
@@ -2387,7 +2406,7 @@ window.addEventListener('keydown', (event) => {
 
 // Mouse interactions used to live at the bottom of the Nodes palette, where they
 // were easy to miss and took space from the palette. They belong here, in the
-// one help surface, reachable from the ? button and the ? key.
+// one help surface: How to use in the About window, also opened by the ? key.
 const MOUSE_HINTS = [
     { icon: '🖱️', verb: 'Click', text: 'Select a node or link to edit it.' },
     { icon: '✋', verb: 'Drag', text: 'Move a node, or pan the empty canvas.' },
@@ -3286,11 +3305,6 @@ window.addEventListener('popstate', async () => {
 // (js/diagnostics.js, "The Findings tab").
 document.getElementById('conflictPill').onclick = () => openFindingsTab();
 
-document.getElementById('helpBtn').onclick = () => toggleShortcutHelp();
-document.getElementById('shortcutClose').onclick = () => toggleShortcutHelp(false);
-document.getElementById('shortcutHelp').onclick = (e) => {
-    if (e.target.id === 'shortcutHelp') toggleShortcutHelp(false); // click the backdrop to dismiss
-};
 
 // The Networks tab's own lists. Its saved templates are library cards, which
 // are not readable until boot has opened the store below; they are drawn

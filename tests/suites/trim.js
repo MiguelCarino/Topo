@@ -51,7 +51,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('the How to use dialog offers the simpler views instead', !!helpMode && !hidden(helpMode)
        && helpMode.textContent === 'Switch to a simpler view or the setup wizard');
     helpMode.click();
-    ok('and it opens the mode picker', el('shortcutHelp').classList.contains('hidden') && !el('modePicker').classList.contains('hidden'));
+    ok('and it opens the mode picker', !helpShown() && !el('modePicker').classList.contains('hidden'));
     closeModePicker();
     state.settings.advanced = false; applyProfile();
     showLibraryTab('nodes');

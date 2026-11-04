@@ -68,14 +68,15 @@ window.addEventListener('load', () => { setTimeout(() => {
   key('a'); ok('A opens the Findings tab', vis('cfgPanel-findings') && findingsTabShown());
   key('a'); ok('A again goes back to Configuration', vis('cfgPanel-config') && !findingsTabShown());
 
-  key('?'); ok('? opens the help panel', vis('shortcutHelp'));
-  key('Escape'); ok('Esc closes it', !vis('shortcutHelp'));
+  key('?'); ok('? opens How to use in the About window', helpShown());
+  key('Escape'); ok('Esc closes it', !helpShown());
 
-  // The ? header button opens the same panel — the help must be reachable by
-  // click, not only by a key you have to already know.
-  document.getElementById('helpBtn').click();
-  ok('the ? header button opens the help panel', vis('shortcutHelp'));
-  document.getElementById('shortcutClose').click();
+  // The help must be reachable by click, not only by a key you have to already
+  // know: the navbar's About button, then its How to use tab.
+  document.getElementById('cnLegal').click();
+  document.getElementById('cnTab-howto').click();
+  ok('About, then How to use, shows the help', helpShown() && document.getElementById('cnPanel-howto').contains(document.getElementById('shortcutBody')));
+  closeAbout();
 
   document.activeElement.blur();
   key('/');
