@@ -261,8 +261,10 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 8. Settings ----
     ok('the menu is Export, Settings beside it', /Export/.test(el('exportMenuBtn').textContent) && !/File/.test(el('exportMenuBtn').textContent) && /Settings/.test(el('settingsBtn').textContent));
     el('settingsBtn').click(); await tick();
-    ok('Settings opens, with the map, the reports and About', settingsOpen() && !!el('setProviderHover') && !!el('setEngineer') && /About/.test(el('setAboutHead').textContent)
-       && /Nothing you add here is uploaded/.test(el('settingsDialog').textContent) && new RegExp(`Document version ${DOC_VERSION}`).test(el('setVersion').textContent));
+    ok('Settings opens, with the map and the reports, and no About', settingsOpen() && !!el('setProviderHover') && !!el('setEngineer') && !el('setAboutHead') && !el('settingsLegalBtn'));
+    ok('what Topo is, the privacy line and the document version are in the About window', !!el('setVersion') && !el('settingsDialog').contains(el('setVersion'))
+       && new RegExp(`Document version ${DOC_VERSION}`).test(el('setVersion').textContent)
+       && /Nothing you add here is uploaded/.test(el('setVersion').parentElement.textContent) && /Topo documents a network/.test(el('setVersion').parentElement.textContent));
     ok('the provider on hover starts off', el('setProviderHover').checked === false);
     change(el('setProviderHover'), true);
     ok('ticked, it is this browser\'s setting, not the document\'s', state.settings.providerHover === true && !/providerHover/.test(JSON.stringify(saved()))

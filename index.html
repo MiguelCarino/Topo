@@ -170,8 +170,8 @@
             </div>
 
             <!-- This browser's preferences: the language, what the map shows,
-                 the report's defaults, and About (js/settings.js). -->
-            <button id="settingsBtn" type="button" class="cs-btn" data-i18n-title title="Settings: language, what the map shows, the report's defaults, and about Topo">⚙ Settings</button>
+                 and the report's defaults (js/settings.js). -->
+            <button id="settingsBtn" type="button" class="cs-btn" data-i18n-title title="Settings: language, what the map shows and the report's defaults">⚙ Settings</button>
 
     </div>
 
@@ -820,11 +820,15 @@
                 </div>
             </div>
 
-            <!-- The privacy notice, in the navbar's About popup (carino-navbar.js
-                 moves this node there): the canvas is someone's addressing
-                 plan. It contacts no outside host at all (connect-src 'self'). -->
+            <!-- The navbar's About window (carino-navbar.js moves this node
+                 there): what Topo is, the privacy notice (the canvas is
+                 someone's addressing plan; it contacts no outside host at all,
+                 connect-src 'self') and the document format version, which
+                 js/settings.js fills in. -->
             <div data-carino-about hidden>
+                <p data-i18n>Topo documents a network: its devices, cables, addressing, racks and who is responsible for what, and prints it as a report.</p>
                 <p><span data-i18n>Runs in your browser. Nothing you add here is uploaded.</span></p>
+                <p id="setVersion" class="mono"></p>
             </div>
         </aside>
 
@@ -1196,13 +1200,6 @@
                                 <input type="checkbox" id="setReportTechnical">
                                 <span data-i18n>Technical details ticked to start</span>
                             </label>
-                        </section>
-                        <section class="set-sec" aria-labelledby="setAboutHead">
-                            <h3 id="setAboutHead" class="set-head" data-i18n>About</h3>
-                            <p data-i18n>Topo documents a network: its devices, cables, addressing, racks and who is responsible for what, and prints it as a report.</p>
-                            <p class="dlg-dim"><span data-i18n>Runs in your browser. Nothing you add here is uploaded.</span></p>
-                            <p id="setVersion" class="dlg-dim mono"></p>
-                            <button type="button" id="settingsLegalBtn" class="btn" data-i18n>Licence, contact and legal notice</button>
                         </section>
                     </div>
                     <div class="modal-foot">

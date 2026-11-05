@@ -43,6 +43,11 @@ function renderSettings() {
     const sum = setEl('setReportSummary'), tech = setEl('setReportTechnical');
     if (sum) sum.checked = reportPartDefault('reportSummaryOn');
     if (tech) tech.checked = reportPartDefault('reportTechnicalOn');
+    fillDocVersion();
+}
+// The document format version, in the navbar's About window (index.html's
+// data-carino-about block): filled at start and again with each language.
+function fillDocVersion() {
     const ver = setEl('setVersion');
     if (ver) ver.textContent = t('Document version {v}', { v: DOC_VERSION });
 }
@@ -84,6 +89,7 @@ function onSettingsInput(e) {
 }
 
 (function wireSettings() {
+    fillDocVersion();
     const btn = setEl('settingsBtn');
     if (btn) btn.addEventListener('click', openSettings);
     const scrim = setEl('settingsDialog');
@@ -96,13 +102,4 @@ function onSettingsInput(e) {
         scrim.addEventListener('click', (e) => { if (e.target === scrim || e.target.closest('[data-close]')) closeSettings(); });
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && settingsOpen()) closeSettings(); });
     }
-    // The licence, contact and legal page: the navbar's About popup, which
-    // carino-navbar.js builds; this dialog closes first so the two are not
-    // stacked.
-    const legal = setEl('settingsLegalBtn');
-    if (legal) legal.addEventListener('click', () => {
-        const nav = document.getElementById('cnLegal');
-        closeSettings();
-        if (nav) nav.click();
-    });
 })();
