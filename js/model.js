@@ -12,7 +12,17 @@ const NO_LINKS = Object.freeze([]);
 const isVirtualType = (t) => t === 'vm' || t === 'container';
 
 // Architecture Helpers — routing family now includes the L3 derivatives.
-const isDumbDevice = (node) => ['switch', 'ap'].includes(node.type) && getValidIps(node).length === 0;
+// Two questions about a switch or an access point, kept apart (docs/BACKLOG.md
+// landing order step 6). isL2Forwarder: does it carry frames between its
+// ports? A switch or AP always does, whatever its address: a management
+// address only makes it a host on that subnet as well. isDumbDevice: does it
+// have no address of its own (an "L2 backplane")? The reachability walk, the
+// broadcast segment and the trace port's transit rule ask the first; the
+// gateway, DNS, interface and multi-homing checks, the trace count, the map's
+// address labels and the L2 loop check (a managed switch is where STP runs)
+// ask the second.
+const isL2Forwarder = (node) => !!node && ['switch', 'ap'].includes(node.type);
+const isDumbDevice = (node) => isL2Forwarder(node) && getValidIps(node).length === 0;
 const isRoutingDevice = (type) => ['router', 'firewall', 'cloud', 'loadbalancer', 'vpn', 'l3switch', 'edge'].includes(type);
 
 // ---- Interface / port binding model ----
@@ -70,14 +80,16 @@ const portCountOf = (node) => hasExplicitPortCount(node) ? node.portCount
 // file or link naming "p1000000000" would otherwise hang getInterfaces() just
 // as "portCount": 1e9 did. A port past the cap is not lost; getInterfaces()
 // lists it after the faceplate with the other extras.
-function highestPortInUse(node) {
+// links: a document's own cables instead of the open one's (uplinkOf on a
+// back-up or a copy).
+function highestPortInUse(node, links) {
     let max = 0;
     const take = (id) => {
         const m = PORT_ID_RE.exec(id || '');
         if (m && Number(m[1]) <= PORT_COUNT_MAX) max = Math.max(max, Number(m[1]));
     };
     (node.interfaces || []).forEach((i) => take(i.id));
-    (lookupPass ? linksAtNode(node.id) : (state.links || [])).forEach((l) => {
+    (links || (lookupPass ? linksAtNode(node.id) : (state.links || []))).forEach((l) => {
         if (l.source === node.id) take(l.sourceIface);
         if (l.target === node.id) take(l.targetIface);
     });
@@ -160,13 +172,20 @@ function ifaceLabel(node, ifaceId) {
 // way keeps every cable on the port it was on.
 //
 // What is written on or about one port is node.portAttrs, sparse, keyed by
-// pN: { label, vlan }. The label is the jack or the desk at the other end of
-// the run ("Reception 2", "PP-A:12"); the VLAN is the port's access VLAN, a
-// fact for the register and the report. Trunks, tagged VLANs and PoE are not
-// modelled, and nothing splits the L2 analysis by VLAN (plan, "Cut"): a
-// port's VLAN is what the technician wrote down, not something Topo reasons
-// with. A port nobody said anything about has no entry, so a 48-port switch
-// with three labels carries three.
+// pN: { label, vlan, tagged, poe }. The label is the jack or the desk at the
+// other end of the run ("Reception 2", "PP-A:12"). vlan is the port's
+// untagged VLAN: an access port's VLAN and a trunk's native VLAN are the same
+// fact, so the key kept its name when trunks came in (document v16,
+// docs/BACKLOG.md feature 4). tagged is the VLANs it carries tagged, as one
+// canonical text ("10,20,30-39", or "all": vlanListText below), and a port
+// with tagged VLANs is a trunk; there is no mode field. poe is what the port
+// can give a powered device: a standard's key ('af', 'at', 'bt3', 'bt4':
+// POE_CLASSES) or a number of watts at the switch. A port nobody said
+// anything about has no entry, so a 48-port switch with three labels carries
+// three. The checks read them (vlanFindings and poeFindings in
+// js/diagnostics.js, on vlanPath below), and a port or a NIC with no VLAN
+// recorded carries every VLAN (portVlans, endCarries), so a file that never said
+// anything about VLANs reads as it always did.
 const PORT_ID_RE = /^p([1-9]\d{0,3})$/;
 const PORT_PREFIX_MAX = 32;
 // One line, control characters out: it is printed on a report and a label.
@@ -200,6 +219,10 @@ function normalizePortAttrs(v) {
         if (label) rec.label = label;
         const vlan = asVlan(a.vlan);
         if (vlan !== undefined) rec.vlan = vlan;
+        const tagged = asVlanList(a.tagged);
+        if (tagged !== undefined) rec.tagged = tagged;
+        const poe = asPortPoe(a.poe);
+        if (poe !== undefined) rec.poe = poe;
         if (Object.keys(rec).length) out[k] = rec;
     });
     return Object.keys(out).length ? out : undefined;
@@ -211,18 +234,26 @@ function portNameOf(node, n) {
     const start = Number.isInteger(s.start) ? s.start : 1;
     return (typeof s.prefix === 'string' ? s.prefix : '') + String(start + n - 1);
 }
-// What is written about one port: { label: '', vlan: null } when nothing is.
+// What is written about one port: { label: '', vlan: null, tagged: null,
+// poe: null } when nothing is. vlan is the untagged VLAN, tagged the
+// canonical text of the tagged ones, poe a POE_CLASSES key or watts.
 function portAttrOf(node, portId) {
     const own = node && node.portAttrs && PORT_ID_RE.test(portId || '') && Object.prototype.hasOwnProperty.call(node.portAttrs, portId);
     const a = own ? node.portAttrs[portId] : null;
     const vlan = a ? asVlan(a.vlan) : undefined;
-    return { label: a && typeof a.label === 'string' ? a.label : '', vlan: vlan === undefined ? null : vlan };
+    const tagged = a ? asVlanList(a.tagged) : undefined;
+    const poe = a ? asPortPoe(a.poe) : undefined;
+    return { label: a && typeof a.label === 'string' ? a.label : '', vlan: vlan === undefined ? null : vlan,
+        tagged: tagged === undefined ? null : tagged, poe: poe === undefined ? null : poe };
 }
-const hasPortAttrs = (node, portId) => { const a = portAttrOf(node, portId); return !!a.label || a.vlan !== null; };
+// Whether anything is written about the port: the faceplate's dot, its
+// list's count and the report's free-port rows read this.
+const hasPortAttrs = (node, portId) => { const a = portAttrOf(node, portId); return !!a.label || a.vlan !== null || a.tagged !== null || a.poe !== null; };
 // Sets (or, with a blank value, clears) one fact of one port; the entry, and
 // then the whole map, go when they end up saying nothing.
+const PORT_ATTR_KEYS = ['label', 'vlan', 'tagged', 'poe'];
 function setPortAttr(node, portId, key, value) {
-    if (!node || !PORT_ID_RE.test(portId || '') || (key !== 'label' && key !== 'vlan')) return node;
+    if (!node || !PORT_ID_RE.test(portId || '') || !PORT_ATTR_KEYS.includes(key)) return node;
     const next = Object.assign({}, node.portAttrs || {});
     next[portId] = Object.assign({}, next[portId] || {}, { [key]: value });
     const norm = normalizePortAttrs(next);
@@ -535,6 +566,83 @@ const linksAtNode = (nodeId) => lookupPass ? (lookupPass.at.get(nodeId) || NO_LI
     : state.links.filter((l) => l.source === nodeId || l.target === nodeId);
 const linkOnIface = (nodeId, ifaceId) => linksAtNode(nodeId).find((l) => ifaceIdOn(l, nodeId) === ifaceId) || null;
 
+// Names in the order a person reads them: "SW 2" before "SW 10", any case.
+const naturalCompare = (a, b) => String(a || '').localeCompare(String(b || ''), undefined, { numeric: true, sensitivity: 'base' });
+
+// Where a device is patched in: of its links onto a faceplate (a switch or an
+// AP, hasPortGrid), the one onto the lowest-named such peer by naturalCompare,
+// then onto the lowest port there (a pN; a link on no numbered port comes
+// after every numbered one). Two peers whose names compare equal but are not
+// the same text keep the first met, in the order of the links. The devices
+// sheet's switch/port columns (csvUplink, js/csv.js) and the bulk panel's
+// "by switch port" order (patchPoint, js/bulk.js) both read it, so they
+// cannot disagree.
+// opts:
+//   skipNoPort: pass over a wired link with no port picked at the peer (the
+//     rack view's "no port" spot); a radio's association has no port at the
+//     AP by nature and still counts (the devices sheet, csvUplink forSheet);
+//   nameOrId: compare peers by name, else id, so unnamed switches still sort
+//     apart (patchPoint); without it by name alone (csvUplink);
+//   links, nodes: a document's own lists instead of the open one's (state),
+//     nodes as an array or a Map by id, so it works on a back-up or a copy.
+//     Either one alone still reads no state: the other counts as empty. In
+//     this form nothing of the open document is read, whatever ids it shares.
+// Returns { peer, link, portId, label, own } or null: peer the node, link the
+// cable, portId its end at the peer (a pN, or null), label that port's name
+// (ifaceLabel's answer; worked out only when read, as the bulk panel's sort
+// asks for this on every comparison and never reads it), own the device's
+// end (an interface id, or null).
+function uplinkOf(node, opts = {}) {
+    if (!node) return null;
+    const inDoc = !!(opts.links || opts.nodes);
+    const docLinks = opts.links || [], docNodes = opts.nodes || [];
+    const nodeOf = !inDoc ? getNode
+        : docNodes instanceof Map ? (id) => docNodes.get(id)
+        : (id) => docNodes.find((n) => n.id === id);
+    const at = inDoc ? docLinks.filter((l) => l.source === node.id || l.target === node.id) : linksAtNode(node.id);
+    const key = (peer) => (opts.nameOrId ? peer.name || peer.id : peer.name);
+    let best = null;
+    at.forEach((l) => {
+        const peerId = l.source === node.id ? l.target : l.source;
+        const peer = nodeOf(peerId);
+        if (!hasPortGrid(peer)) return;
+        const portId = ifaceIdOn(l, peerId);
+        // Both ends as this document has them: the device is the one passed
+        // in, and effectiveMedium is never left to look either up in state.
+        if (opts.skipNoPort && !portId && effectiveMedium(l, l.source === node.id ? node : peer, l.target === node.id ? node : peer) !== 'wireless') return;
+        const m = /^p(\d+)$/.exec(portId || '');
+        const here = { peer, link: l, portId, rank: m ? Number(m[1]) : Infinity, key: key(peer) };
+        if (!best || naturalCompare(here.key, best.key) < 0 || (here.key === best.key && here.rank < best.rank)) best = here;
+    });
+    if (!best) return null;
+    const { peer, link, portId } = best;
+    let label;
+    return {
+        peer, link, portId,
+        get label() {
+            if (label === undefined) label = inDoc ? docPortLabel(peer, portId, docLinks) : ifaceLabel(peer, portId);
+            return label;
+        },
+        own: ifaceIdOn(link, node.id) || null
+    };
+}
+// ifaceLabel(peer, portId) for a faceplate peer of a document that is not
+// the open one: the same answer, with the faceplate's size (getInterfaces,
+// portCountOf) read from that document's own cables.
+function docPortLabel(peer, portId, links) {
+    let own = null;
+    (peer.interfaces || []).forEach((i) => { if (i.id === portId) own = i; });   // getInterfaces keeps the last
+    const m = /^p(\d+)$/.exec(portId || '');
+    const n = m ? Number(m[1]) : 0;
+    if (own && n >= 1 && portId === 'p' + n) {
+        const total = hasExplicitPortCount(peer) ? peer.portCount : Math.max(DEFAULT_PORT_COUNT[peer.type] ?? 0, highestPortInUse(peer, links));
+        // On the faceplate a bare number reads by the scheme; past it, as written.
+        if (n <= total) return own.name && own.name !== String(n) ? own.name : portNameOf(peer, n);
+    }
+    if (own && own.name) return own.name;
+    return m ? portNameOf(peer, n) : portId || '—';
+}
+
 function ifaceIsOccupied(nodeId, ifaceId, excludeLinkId) {
     return linksAtNode(nodeId).some((l) => l.id !== excludeLinkId && ifaceIdOn(l, nodeId) === ifaceId && isExclusiveLink(l));
 }
@@ -785,8 +893,8 @@ function applyLinkGeometry(el, geo) {
 
 // ---- L2 topology analysis ----
 
-// Broadcast domain reachable from a node by hopping dumb switches/APs and
-// VM passthrough links. Mirrors getL2Domain() inside calculateReachability(),
+// Broadcast domain reachable from a node by hopping switches/APs (managed
+// or not: isL2Forwarder) and VM passthrough links. Mirrors getL2Domain() inside calculateReachability(),
 // but callable from diagnostics.
 function l2DomainOf(originId) {
     const nodes = new Set([originId]), queue = [originId], seen = new Set();
@@ -800,7 +908,7 @@ function l2DomainOf(originId) {
             const nextNodeId = link.source === currentId ? link.target : link.source;
             const next = getNode(nextNodeId);
             if (!next) return;
-            if (isDumbDevice(next) || link.attachment === 'passthrough') {
+            if (isL2Forwarder(next) || link.attachment === 'passthrough') {
                 if (!nodes.has(nextNodeId)) { nodes.add(nextNodeId); queue.push(nextNodeId); }
             }
         });
@@ -809,12 +917,13 @@ function l2DomainOf(originId) {
 }
 
 // Canonical id for the broadcast segment a link drops into, seen from one end.
-// Through a dumb switch it is the whole switched fabric (so two NICs landing on
-// trunked switches share a key); on a direct cable it is just that cable.
+// Through a switch (managed or not) it is the whole switched fabric (so two
+// NICs landing on trunked switches share a key); on a direct cable it is just
+// that cable.
 function segmentKeyOf(link, fromNodeId) {
     const otherId = link.source === fromNodeId ? link.target : link.source;
     const other = getNode(otherId);
-    if (!other || !isDumbDevice(other)) return `link:${link.id}`;
+    if (!other || !isL2Forwarder(other)) return `link:${link.id}`;
     return `seg:${[...l2DomainOf(otherId)].sort().join(',')}`;
 }
 
@@ -880,7 +989,8 @@ function withLookupPass(fn, diag) {
     // js/diagnostics.js), whose memo key serializes the whole document, so
     // it is asked once per pass rather than once per row or badge.
     // rackLinks: each rack's cables (rackCableLinks), built on first use.
-    lookupPass = { refs, byId, linkById, at, cidr: new Map(), ips: new Map(), nets: null, eff: new Map(), ifx: new Map(), pairs: null, diag: diag || null, rackLinks: null };
+    // locate: each device's locatePath, built on first use.
+    lookupPass = { refs, byId, linkById, at, cidr: new Map(), ips: new Map(), nets: null, eff: new Map(), ifx: new Map(), pairs: null, diag: diag || null, rackLinks: null, locate: null };
     try { return fn(); } finally { lookupPass = outer; }
 }
 // For code that swaps the document in and must not read the live one's
@@ -913,6 +1023,7 @@ function lookupPassAddLink(l) {
     lookupPass.pairs = null;
     lookupPass.diag = null;
     lookupPass.rackLinks = null;
+    lookupPass.locate = null;
     if (!lookupPass.linkById.has(l.id)) lookupPass.linkById.set(l.id, l);
     const touch = (id) => { const list = lookupPass.at.get(id); if (list) list.push(l); else lookupPass.at.set(id, [l]); };
     touch(l.source);
@@ -1133,6 +1244,8 @@ function getPortStatus(node, portQuery) {
         };
     }
 
+    // An addressed switch/AP is an endpoint for its own services (DNS, the
+    // trace port asked of it), so only an unaddressed one is pure transit.
     if (!node || isDumbDevice(node) || isRoutingDevice(node.type)) {
         return {
             ok: true,
@@ -1375,6 +1488,18 @@ const IFACE_FIELDS = [
           const [mode, ...members] = String(text == null ? '' : text).trim().split(/[\s,;]+/).filter(Boolean);
           return mode && Object.prototype.hasOwnProperty.call(BOND_MODES, mode) && members.length ? { mode, members } : null;
       } },
+    // A wired interface's untagged VLAN when its address does not say it
+    // (the declared network's VLAN is the default: portVlans), and the VLANs
+    // it carries tagged, as the canonical text a port's are (document v16,
+    // docs/BACKLOG.md feature 4): a router on a stick, a hypervisor's uplink.
+    // Read and written on a wired interface only, as the radio is only a
+    // wireless one's.
+    { key: 'vlan', kind: 'raw', omit: true, label: 'VLAN', csv: 'untagged_vlan',
+      read: (v, src) => (ifaceIsWireless(src) ? undefined : asVlan(v)),
+      write: (v, rec) => (rec && !ifaceIsWireless(rec) ? asVlan(v) : undefined) },
+    { key: 'tagged', kind: 'raw', omit: true, label: 'Tagged VLANs', csv: 'tagged_vlans',
+      read: (v, src) => (ifaceIsWireless(src) ? undefined : asVlanList(v)),
+      write: (v, rec) => (rec && !ifaceIsWireless(rec) ? asVlanList(v) : undefined) },
     // The radio's standard, bands, channels and broadcast SSIDs ("Wi-Fi"
     // below; document v12). Read and written on a wireless interface only,
     // as a faceplate's port names are only a switch's: a NIC made wired in
@@ -1395,11 +1520,22 @@ const NODE_FIELDS = [
       report: { key: 'gw', column: 'Gateway', mono: true } },
     { key: 'dns', kind: 'text', label: 'DNS', csv: 'dns', bulk: true, table: 'edit', validate: fieldOk.ipList,
       report: { key: 'dns', column: 'DNS', mono: true } },
-    // Relabelled "Model / firmware" with the Asset group (plan section 4): it
-    // was always where people wrote the model as well as the OS. The key and
-    // the csv name stay `os`, so files and sheets from before still read.
-    { key: 'os', kind: 'text', label: 'Model / firmware', csv: 'os', bulk: true, table: 'edit',
-      report: { key: 'os', column: 'Model / firmware' } },
+    // Who made the box and which model it is (document v16, docs/BACKLOG.md
+    // feature 3): free text, omitted when blank, so a device that never used
+    // them serializes byte for byte as before. The report prints them as one
+    // "Model" column, vendor then model (reportColumns, js/report.js).
+    { key: 'vendor', kind: 'text', omit: true, read: asOmittedText, label: 'Vendor', csv: 'vendor', bulk: true, table: 'edit',
+      report: { key: 'vendor' } },
+    { key: 'model', kind: 'text', omit: true, read: asOmittedText, label: 'Model', csv: 'model', bulk: true, table: 'edit',
+      report: { key: 'model', column: 'Model' } },
+    // The old OS field, relabelled "Model / firmware" with the Asset group
+    // (plan section 4) and "Firmware / OS" once the model had a field of its
+    // own (document v16). The key and the csv name stay `os`, so files, sealed
+    // links and sheets from before still read; text written under the old
+    // label stays where it is (nothing is split by the upgrade). Still
+    // written when empty, as it always was.
+    { key: 'os', kind: 'text', label: 'Firmware / OS', csv: 'os', bulk: true, table: 'edit',
+      report: { key: 'os', column: 'Firmware / OS' } },
     { key: 'ports', kind: 'text', label: 'Allowed Ports', csv: 'allowed_ports', bulk: true, table: 'edit', validate: fieldOk.ports,
       report: { key: 'allowedPorts' } },
     { key: 'notes', kind: 'text', label: 'Notes', csv: 'notes', bulk: true, table: 'edit', report: { key: 'notes' } },
@@ -1441,14 +1577,30 @@ const NODE_FIELDS = [
           const m = /^(.*?)(\d+)\s*$/.exec(String(text == null ? '' : text));
           return m && !/^0\d/.test(m[2]) ? { prefix: m[1], start: Number(m[2]) } : null;
       } },
-    { key: 'portAttrs', kind: 'raw', label: 'Port labels and VLANs',
+    { key: 'portAttrs', kind: 'raw', label: 'Port labels, VLANs and PoE',
       read: (v, src) => (hasPortGrid(src) ? normalizePortAttrs(v) : undefined),
       write: (v, src) => (hasPortGrid(src) ? normalizePortAttrs(v) : undefined) },
+    // PoE (document v16, docs/BACKLOG.md feature 4): what a switch or an AP
+    // can give all its PoE ports together, in watts, and what a powered
+    // device draws, which is what makes it powered by its cable. Both left
+    // out when unset, so a device without them saves as before; the budget
+    // only on a box with a faceplate (as its port facts), the draw on
+    // anything but a cloud, a VM or a container. fromText reads what a sheet
+    // holds ("12,5", "12 W", and for a draw "class 4").
+    { key: 'poeBudget', kind: 'raw', label: 'PoE budget (W)', csv: 'poe_budget', bulk: true, table: 'edit',
+      read: (v, src) => (hasPortGrid(src) ? asPoeBudget(v) : undefined),
+      write: (v, src) => (hasPortGrid(src) ? asPoeBudget(v) : undefined),
+      fromText: (text) => poeBudgetFromText(text) },
+    { key: 'poeDraw', kind: 'raw', label: 'PoE draw (W)', csv: 'poe_draw', bulk: true, table: 'edit',
+      read: (v, src) => (src && canDrawPoe(src.type) ? asPoeDraw(v) : undefined),
+      write: (v, src) => (src && canDrawPoe(src.type) ? asPoeDraw(v) : undefined),
+      fromText: (text) => poeDrawFromText(text) },
     { key: 'interfaces', kind: 'raw', label: 'Interfaces', read: (v, src) => normalizeNodeInterfaces(src),
       write: (list) => (list || []).map((i) => writeFields(IFACE_FIELDS, i)) },
     // ---- The Asset group (plan section 4, document v4) ----
     // What a register holds about the box rather than its addressing. The
-    // model is `os` above; the notes are `notes`. All omitted when empty, so a
+    // vendor, model and firmware are above (vendor, model, os); the notes are
+    // `notes`. All omitted when empty, so a
     // device that never used them serializes as it did before they existed.
     // Serial and asset tag name one box each, so the bulk panel does not set
     // them on many (a duplicate tag is a finding instead); location and status
@@ -1742,6 +1894,329 @@ const asVlan = (v) => {
     const n = typeof v === 'string' && /^\s*\d+\s*$/.test(v) ? Number(v) : v;
     return Number.isInteger(n) && n >= 1 && n <= 4094 ? n : undefined;
 };
+
+// ---- VLAN lists and PoE (document v16, docs/BACKLOG.md feature 4) ----
+// A list of VLANs as a person or a switch writes it: "10,20,30-39" (commas,
+// semicolons or spaces between, a range a-b with a <= b), or "all". ->
+// { all: true } | Set of numbers | null when it is empty or anything in it
+// is not a VLAN (0, 4095, a word, a reversed range): refused whole, never
+// read in part, so a slip says so instead of trunking half the list.
+const VLAN_LIST_MAX = 4094;
+function parseVlanList(text) {
+    if (Array.isArray(text)) text = text.join(',');
+    else if (typeof text === 'number') text = String(text);
+    if (typeof text !== 'string') return null;
+    const v = text.trim().toLowerCase();
+    if (!v) return null;
+    if (v === 'all' || v === 'any') return { all: true };
+    const out = new Set();
+    // "10 - 20" is a range: the spaces round its hyphen go before the split.
+    for (const part of v.replace(/\s*-\s*/g, '-').split(/[\s,;]+/).filter(Boolean)) {
+        const r = /^(\d{1,4})(?:\s*-\s*(\d{1,4}))?$/.exec(part);
+        if (!r) return null;
+        const a = asVlan(Number(r[1])), b = r[2] === undefined ? a : asVlan(Number(r[2]));
+        if (a === undefined || b === undefined || b < a) return null;
+        for (let n = a; n <= b; n++) out.add(n);
+    }
+    return out.size ? out : null;
+}
+// The canonical text of a list: "all", or the numbers sorted, each once,
+// three or more in a row as a range ("10,11,20-23"). '' for none.
+function vlanListText(list) {
+    if (!list) return '';
+    if (list.all) return 'all';
+    const nums = [...list].filter((n) => asVlan(n) !== undefined).sort((a, b) => a - b);
+    const out = [];
+    for (let i = 0; i < nums.length;) {
+        let j = i;
+        while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+        if (j - i >= 2) out.push(nums[i] + '-' + nums[j]);
+        else for (let k = i; k <= j; k++) out.push(String(nums[k]));
+        i = j + 1;
+    }
+    return out.join(',');
+}
+// What the record holds: the canonical text, or undefined for no list.
+const asVlanList = (v) => { const l = parseVlanList(v); return l ? vlanListText(l) : undefined; };
+// Whether a list (as parseVlanList reads it) holds VLAN n.
+const vlanListHas = (list, n) => !!list && (list.all === true || (list instanceof Set && list.has(n)));
+
+// What a PoE port gives, by standard: watts at the switch (pse) and what is
+// left at the device after the cable (pd).
+const POE_CLASSES = {
+    af: { name: '802.3af', pse: 15.4, pd: 12.95 },
+    at: { name: '802.3at (PoE+)', pse: 30, pd: 25.5 },
+    bt3: { name: '802.3bt Type 3', pse: 60, pd: 51 },
+    bt4: { name: '802.3bt Type 4', pse: 90, pd: 71.3 }
+};
+// A number of watts held to `places` decimals, inside [min, max]; digits as
+// text are read as their number (a hand-edited file). Else undefined.
+const asWatts = (v, min, max, places) => {
+    const n = typeof v === 'string' && /^\s*\d+(?:\.\d+)?\s*$/.test(v) ? Number(v) : v;
+    if (typeof n !== 'number' || !Number.isFinite(n)) return undefined;
+    const r = Math.round(n * 10 ** places) / 10 ** places;
+    return r >= min && r <= max ? r : undefined;
+};
+// A port's PoE: a standard's key, or watts at the switch for a port that is
+// none of them (0.5 to 100 W, one decimal).
+const asPortPoe = (v) => {
+    if (typeof v === 'string' && Object.prototype.hasOwnProperty.call(POE_CLASSES, v.trim().toLowerCase())) return v.trim().toLowerCase();
+    return asWatts(v, 0.5, 100, 1);
+};
+// A typed or imported number of watts: "12", "12,5", "12.5 W", with at most
+// `places` decimals (more is refused rather than rounded away). -> n | null.
+function wattsFromText(text, min, max, places) {
+    const r = /^(\d{1,5})(?:[.,](\d+))?\s*(?:w|watts?)?$/i.exec(String(text == null ? '' : text).trim());
+    if (!r || (r[2] && r[2].length > places)) return null;
+    const v = asWatts(Number(r[1] + '.' + (r[2] || '0')), min, max, places);
+    return v === undefined ? null : v;
+}
+// A port's PoE as a sheet or a person writes it: the key, the standard
+// (802.3af, 802.3at, 802.3bt type 3 / 4), the trade's names (PoE, PoE+,
+// PoE++) or bare watts at the switch. -> a key, watts, or null.
+const POE_WORDS = { af: 'af', poe: 'af', 'type 1': 'af', at: 'at', 'poe+': 'at', 'poe plus': 'at', 'type 2': 'at',
+    bt3: 'bt3', 'poe++': 'bt3', 'type 3': 'bt3', 'bt type 3': 'bt3', bt4: 'bt4', 'type 4': 'bt4', 'bt type 4': 'bt4' };
+function portPoeFromText(text) {
+    const v = String(text == null ? '' : text).trim().toLowerCase().replace(/\s+/g, ' ').replace(/^(?:ieee )?802\.3 ?/, '');
+    if (!v) return null;
+    if (Object.prototype.hasOwnProperty.call(POE_WORDS, v)) return POE_WORDS[v];
+    const named = Object.keys(POE_CLASSES).find((k) => POE_CLASSES[k].name.toLowerCase() === String(text).trim().toLowerCase());
+    if (named) return named;
+    return wattsFromText(v, 0.5, 100, 1);
+}
+// A switch's PoE budget (1 to 10000 W, one decimal) and a powered device's
+// draw (0.1 to 100 W, two decimals: class 1 is 3.84 W).
+const asPoeBudget = (v) => asWatts(v, 1, 10000, 1);
+const asPoeDraw = (v) => asWatts(v, 0.1, 100, 2);
+const poeBudgetFromText = (text) => wattsFromText(text, 1, 10000, 1);
+// A draw is watts, or a class ("class 4"), held as the most a device of
+// that class may draw.
+const POE_CLASS_DRAW = [13, 3.84, 6.49, 13, 25.5, 40, 51, 62, 71.3];
+function poeDrawFromText(text) {
+    const c = /^class\s*([0-8])$/i.exec(String(text == null ? '' : text).trim());
+    return c ? POE_CLASS_DRAW[Number(c[1])] : wattsFromText(text, 0.1, 100, 2);
+}
+// Who may hold a draw: anything with a socket for a cable that can carry
+// power, so not a cloud (another site, the internet), a VM or a container.
+const canDrawPoe = (type) => type !== 'cloud' && !isVirtualType(type);
+// How a port's PoE is said in one line (a tooltip, the rack tip, the port
+// map): the trade's name and the watts at the switch, "PoE+ 30 W", or for a
+// port that is none of the standards "PoE 25 W". '' for none. The names and
+// the units stay English (FEATURES.md: the Full editor's vocabulary); the
+// number takes the page's decimal mark (wattsText).
+const POE_SHORT = { af: 'PoE', at: 'PoE+', bt3: 'PoE++ Type 3', bt4: 'PoE++ Type 4' };
+const wattsText = (n) => {
+    const loc = window.CarinoI18N && typeof CarinoI18N.current === 'function' ? CarinoI18N.current() : 'en';
+    return String(n).replace('.', loc === 'es' || loc === 'pt-BR' || loc === 'ru' ? ',' : '.');
+};
+function poeText(poe) {
+    const v = asPortPoe(poe);
+    if (v === undefined) return '';
+    return typeof v === 'string' ? `${POE_SHORT[v]} ${wattsText(POE_CLASSES[v].pse)} W` : `PoE ${wattsText(v)} W`;
+}
+// One end's VLANs in words, as a list of parts: ['VLAN 10'] on an access
+// port (as before trunks), ['Untagged 1', 'Tagged 10,20'] on a trunk, [] for
+// nothing. VLAN stays English; Untagged and Tagged are translated.
+function portVlanFacts(vlan, tagged) {
+    const has = (v) => v !== null && v !== undefined && v !== '';
+    if (!has(tagged)) return has(vlan) ? [`VLAN ${vlan}`] : [];
+    return [has(vlan) ? `${t('Untagged')} ${vlan}` : '', `${t('Tagged')} ${tagged}`].filter(Boolean);
+}
+// What a switch's or an AP's PoE ports are asked for: the draw of every
+// device in service or planned cabled (isExclusiveLink) into a port that
+// records PoE, each device once, against the box's budget. Only a device
+// that may hold a draw (canDrawPoe): a camera retyped as a VM keeps its
+// draw in memory until it is saved, and is not charged. A device cabled to
+// the PoE ports of two boxes is charged in full to each, on purpose: Topo
+// does not know which one feeds it, and each must be able to when the
+// other is down. A device on a
+// port that records no PoE is not counted here (the poe-none check,
+// poeFindings in js/diagnostics.js, is about it). -> { budget: n | null, used: n, devices: [ids], ports: how
+// many ports record PoE }, or null for a box that records neither a budget
+// nor a PoE port, so a file that never said anything about PoE shows none.
+function poeLoad(node) {
+    if (!node || !hasPortGrid(node)) return null;
+    const budget = asPoeBudget(node.poeBudget);
+    const ports = Object.keys(node.portAttrs || {}).filter((id) => portAttrOf(node, id).poe !== null).length;
+    if (budget === undefined && !ports) return null;
+    const seen = new Set();
+    let used = 0;
+    linksAtNode(node.id).forEach((l) => {
+        if (!isExclusiveLink(l)) return;
+        const mine = ifaceIdOn(l, node.id);
+        if (!PORT_ID_RE.test(mine || '') || portAttrOf(node, mine).poe === null) return;
+        const far = getNode(l.source === node.id ? l.target : l.source);
+        if (!far || far.id === node.id || seen.has(far.id) || isRetired(far) || !canDrawPoe(far.type)) return;
+        const draw = asPoeDraw(far.poeDraw);
+        if (draw === undefined) return;
+        seen.add(far.id);
+        used += draw;
+    });
+    return { budget: budget === undefined ? null : budget, used: Math.round(used * 100) / 100, devices: [...seen], ports };
+}
+// The live line under the budget and the port map's heading: "PoE: 47 of
+// 120 W", or with no budget recorded "PoE: 47 W drawn".
+function poeLoadText(load) {
+    if (!load) return '';
+    return load.budget === null ? t('PoE: {used} W drawn', { used: wattsText(load.used) })
+        : t('PoE: {used} of {budget} W', { used: wattsText(load.used), budget: wattsText(load.budget) });
+}
+
+// The VLANs one end of a cable says it carries: a faceplate port (pN on a
+// switch or an AP) by its portAttrs, any other interface by its own vlan and
+// tagged, a bond member by its bond's. An interface with no vlan of its own
+// is on its address's declared network's VLAN. -> { untagged: n | null,
+// tagged: Set | 'all' | null, known, derived }: known is false when nothing
+// is recorded, and such an end carries every VLAN (endCarries), so a file
+// that never said anything about VLANs has nothing to disagree about.
+// derived is true when the untagged VLAN is only the address's subnet's
+// (nothing typed on the interface): what that NIC sends, but no fact anyone
+// recorded about the cable, so vlanPath walks through such an end.
+function portVlans(node, ifaceId) {
+    const none = { untagged: null, tagged: null, known: false };
+    if (!node) return none;
+    const read = (untagged, taggedText, derived) => {
+        const list = taggedText ? parseVlanList(taggedText) : null;
+        const tagged = list ? (list.all ? 'all' : list) : null;
+        const has = untagged !== undefined && untagged !== null;
+        return { untagged: has ? untagged : null, tagged, known: has || !!tagged, derived: !!derived && has };
+    };
+    // A bond member reads its bond's VLANs when the bond records any: a
+    // switch's LAG is a bond whose members are its pN ports, and a member port
+    // with facts of its own but a silent bond keeps its own.
+    const bond = bondOf(node, ifaceId);
+    const bondSays = !!bond && !ifaceIsWireless(bond) && (asVlan(bond.vlan) !== undefined || asVlanList(bond.tagged) !== undefined);
+    if (!bondSays && hasPortGrid(node) && PORT_ID_RE.test(ifaceId || '')) {
+        const a = portAttrOf(node, ifaceId);
+        return read(a.vlan === null ? undefined : a.vlan, a.tagged);
+    }
+    const iface = bond || ifaceOn(node, ifaceId);
+    if (!iface || ifaceIsWireless(iface)) return none;
+    let untagged = asVlan(iface.vlan);
+    const taggedText = asVlanList(iface.tagged);
+    const derived = untagged === undefined;
+    if (untagged === undefined) {
+        const p = parseValidCIDR(typeof iface.ip === 'string' ? iface.ip.trim() : '');
+        const net = p ? networkOfIp(p.ip) : null;
+        untagged = net ? asVlan(net.vlan) : undefined;
+        // An address on a VLAN the interface lists as tagged is an SVI on a
+        // trunk (an L3 switch's uplink, a router on a stick): that VLAN
+        // travels tagged, so the subnet says nothing about the native one.
+        if (untagged !== undefined && taggedText && vlanListHas(parseVlanList(taggedText), untagged)) untagged = undefined;
+    }
+    return read(untagged, taggedText, derived);
+}
+// Whether that end carries VLAN v: it records nothing, it is v untagged, or
+// v is among its tagged ones.
+function endCarries(node, ifaceId, v) {
+    const e = portVlans(node, ifaceId);
+    return !e.known || e.untagged === v || e.tagged === 'all' || (e.tagged instanceof Set && e.tagged.has(v));
+}
+
+// Whether an end lets VLAN v through when a walk crosses it (vlanPath, and
+// the Trace's VLAN tick in reachL2Domain, js/diagnostics.js): as endCarries,
+// and also when its only VLAN is its address's subnet's (nothing typed on
+// it, no tagged list): that records nothing about the cable (a router drawn
+// with one cable for several subnets, as many files are), so it lets every
+// VLAN through, as an unknown end does.
+function endPassesVlan(node, ifaceId, v) {
+    return vlansPass(portVlans(node, ifaceId), v);
+}
+// The same, on what portVlans read for the end (so a walk can keep it).
+function vlansPass(e, v) {
+    if (!e.known || (e.derived && e.tagged === null)) return true;
+    return e.untagged === v || e.tagged === 'all' || (e.tagged instanceof Set && e.tagged.has(v));
+}
+
+// ---- vlanPath (docs/BACKLOG.md feature 4, stage 2a) ----
+// Whether VLAN v gets from one device to another over the switched fabric:
+// a breadth-first walk from fromId over cables and radio links (not VPN
+// tunnels) into switches and access points, managed or not (isL2Forwarder:
+// a management address never stops the walk), and over passthrough links,
+// as l2DomainOf walks them. A link is crossed only when both its ends carry
+// v (as endCarries reads them: an end that records nothing carries every
+// VLAN, and so does a NIC whose only VLAN is its subnet's, so a file with no
+// VLAN facts on its ports and interfaces walks as l2DomainOf does). It succeeds on reaching
+// toId through an end of toId's that carries v. A retired device forwards
+// nothing. -> { ok: true } | { ok: false, link, near, far }: the link that
+// alone keeps v from toId (a trunk first; else the first link on the
+// shortest VLAN-blind path that does not carry v; near is the end the VLAN
+// still reaches) | null when not even a VLAN-blind path leads
+// there (not a VLAN question, so the caller says nothing). No DOM.
+function vlanPath(fromId, v, toId) {
+    if (fromId === toId) return { ok: true };
+    const hop = (link, curId) => {
+        if (link.source === link.target || effectiveMedium(link) === 'vpn') return null;
+        const farId = link.source === curId ? link.target : link.source;
+        const far = getNode(farId);
+        if (!far || isRetired(far)) return null;
+        const through = link.attachment === 'passthrough';
+        if (farId !== toId && !isL2Forwarder(far) && !through) return null;
+        return { farId, far };
+    };
+    // An end whose only VLAN is its address's subnet's records nothing
+    // about the cable (a router drawn with one cable for several subnets,
+    // as many files are): it lets every VLAN through, as an unknown end does.
+    const endOk = (node, ifaceId) => endPassesVlan(node, ifaceId, v);
+    const carries = (link, curId, farId) => endOk(getNode(curId), ifaceIdOn(link, curId)) && endOk(getNode(farId), ifaceIdOn(link, farId));
+    // A walk from startId: aware crosses only links that carry v. -> the
+    // parent map, and whether goal was reached (it stops there).
+    const walk = (aware, startId, goal, hopOf) => {
+        const parent = new Map([[startId, null]]);
+        const queue = [startId];
+        for (let i = 0; i < queue.length; i++) {
+            const curId = queue[i];
+            for (const link of linksAtNode(curId)) {
+                const h = hopOf(link, curId);
+                if (!h || parent.has(h.farId)) continue;
+                if (aware && !carries(link, curId, h.farId)) continue;
+                parent.set(h.farId, { link, from: curId });
+                if (h.farId === goal) return { parent, reached: true };
+                queue.push(h.farId);
+            }
+        }
+        return { parent, reached: false };
+    };
+    const start = getNode(fromId);
+    if (!start || isRetired(start)) return null;
+    const near = walk(true, fromId, toId, hop);
+    if (near.reached) return { ok: true };
+    const blind = walk(false, fromId, toId, hop);
+    if (!blind.reached) return null;
+    // Where it stops: a link that would close the gap on its own, between
+    // what v reaches from the start and what reaches toId carrying v (the
+    // walk from toId's side, through forwarders, back to fromId). Among
+    // those, a trunk (an end with a tagged list) before a cable set up as an
+    // access link for another VLAN: that is the one meant to carry several.
+    // Failing that, the first link on the shortest VLAN-blind path that
+    // does not carry v.
+    const back = (link, curId) => {
+        if (link.source === link.target || effectiveMedium(link) === 'vpn') return null;
+        const farId = link.source === curId ? link.target : link.source;
+        const far = getNode(farId);
+        if (!far || isRetired(far)) return null;
+        if (farId !== fromId && !isL2Forwarder(far) && link.attachment !== 'passthrough') return null;
+        return { farId, far };
+    };
+    const far = walk(true, toId, fromId, back).parent;
+    const trunkish = (link) => [link.source, link.target].some((id) => { const e = portVlans(getNode(id), ifaceIdOn(link, id)); return e.tagged !== null; });
+    let gap = null;
+    for (const curId of near.parent.keys()) {
+        for (const link of linksAtNode(curId)) {
+            const h = hop(link, curId);
+            if (!h || !far.has(h.farId) || near.parent.has(h.farId) || carries(link, curId, h.farId)) continue;
+            const pick = { link, near: curId, far: h.farId, trunk: trunkish(link) };
+            if (!gap || (pick.trunk && !gap.trunk)) gap = pick;
+        }
+        if (gap && gap.trunk) break;
+    }
+    if (gap) return { ok: false, link: gap.link, near: gap.near, far: gap.far };
+    const steps = [];
+    for (let at = toId; blind.parent.get(at); at = blind.parent.get(at).from) steps.unshift(Object.assign({ to: at }, blind.parent.get(at)));
+    const stop = steps.find((s) => !carries(s.link, s.from, s.to));
+    return stop ? { ok: false, link: stop.link, near: stop.from, far: stop.to } : { ok: true };
+}
+
 const parseIpText = (s) => {
     const text = typeof s === 'string' ? s.trim() : '';
     if (!text || !isIpText(text)) return null;
@@ -1766,6 +2241,14 @@ const NETWORK_FIELDS = [
     // DHCP is served on this network: a fact for the register and the report.
     // Nothing infers addresses from it.
     { key: 'dhcp', kind: 'flag', label: 'DHCP', csv: 'dhcp', table: 'edit' },
+    // The DHCP pool, its first and last address (document v16, docs/BACKLOG.md
+    // feature 2): typed text, kept as written the way a bad gateway is, so
+    // nothing is lost on save; absent is no pool. What it means is
+    // dhcpPoolOf()'s: counted only with DHCP on and both ends sound. Add
+    // devices still hands out addresses from the bottom of the subnet, pool
+    // or not (docs/BACKLOG.md "Decisions taken").
+    { key: 'dhcpFirst', kind: 'text', omit: true, label: 'DHCP first', csv: 'dhcp_first', table: 'edit', validate: fieldOk.ip },
+    { key: 'dhcpLast', kind: 'text', omit: true, label: 'DHCP last', csv: 'dhcp_last', table: 'edit', validate: fieldOk.ip },
     // Tri-state, as the interface flag it replaces was: unset draws the zone
     // of a private network and not of a public one.
     { key: 'drawZone', kind: 'tristate', label: 'Zone', csv: 'draw_zone' }
@@ -2096,41 +2579,362 @@ function freeAddresses(cidr, count, net = networkOfIp(String(cidr || '').split('
     return out;
 }
 
+// The device types that keep one address for good, which a DHCP server must
+// never hand to somebody else: the routing and infrastructure gear (routers,
+// firewalls, layer-3 switches, edge and VPN gateways, load balancers, the
+// cloud), switches and access points (their management address), servers,
+// printers, cameras and imaging modalities (a DICOM node is configured by its
+// address on the PACS). Everything else (PCs, phones, IoT, VoIP handsets, VMs,
+// containers, custom devices) is a client that may take a pool address.
+// The owner's option C (docs/BACKLOG.md "Decisions taken", 2026-11-05).
+const FIXED_ADDRESS_TYPES = new Set(['router', 'firewall', 'l3switch', 'edge', 'vpn', 'loadbalancer', 'cloud',
+    'switch', 'ap', 'server', 'printer', 'camera', 'dicom']);
+const keepsFixedAddress = (type) => FIXED_ADDRESS_TYPES.has(type);
+
+// Hands out a subnet's free addresses one at a time, stepping round its
+// declared DHCP pool for the devices that keep a fixed address: what Add
+// devices, bulk Move and a single device dropped onto a switch use when the
+// subnet's network records a pool that counts (dhcpPoolOf().valid). null
+// when it records none, or one that does not count: the callers then hand
+// out from the bottom exactly as freeAddresses() always has.
+//   next(fixed) -> { ip, kept, pooled } | null
+//     A client (fixed false) takes the lowest free address, pool or not. A
+//     fixed device takes the lowest free one too when that is outside the
+//     pool; when it is inside, the lowest free one outside instead (kept),
+//     and when none is left outside, the lowest free one inside (pooled).
+//   pool: the dhcpPoolOf() description, for the preview's words.
+// opts.exclude: addresses already promised (Add devices' cabled ones, which
+// its radio ones must not be handed again). Bounded like freeAddresses: each
+// cursor looks at no more than 65536 addresses, and the pool is jumped over,
+// never walked.
+function poolDealer(cidr, opts = {}) {
+    const p = parseValidCIDR(cidr);
+    if (!p) return null;
+    const net = opts.net !== undefined ? opts.net : networkOfIp(String(cidr || '').split('/')[0]);
+    const own = net && net.cidr === p.networkStr ? net : null;
+    const def = own ? dhcpPoolOf(own, p) : null;
+    if (!def || !def.valid) return null;
+    const taken = takenAddresses(own);
+    (opts.exclude || []).forEach((ip) => taken.add(ip));
+    const { first, last } = usableRange(p);
+    const inPool = (h) => h >= def.firstBig && h <= def.lastBig;
+    let any = first, anyTries = 0, out = first, outTries = 0;
+    const lowest = () => {
+        for (; any <= last && anyTries < 65536; any++, anyTries++) {
+            if (!taken.has(bigToIp(any, p.kind).toString())) return any;
+        }
+        return null;
+    };
+    const lowestOutside = () => {
+        for (; out <= last && outTries < 65536; out++, outTries++) {
+            if (inPool(out)) { out = def.lastBig; continue; }
+            if (!taken.has(bigToIp(out, p.kind).toString())) return out;
+        }
+        return null;
+    };
+    const take = (h, extra) => { const ip = bigToIp(h, p.kind).toString(); taken.add(ip); return { ip, kept: false, pooled: false, ...extra }; };
+    return {
+        pool: def,
+        next(fixed) {
+            const low = lowest();
+            if (low === null) return null;
+            if (!fixed || !inPool(low)) return take(low);
+            const away = lowestOutside();
+            return away !== null ? take(away, { kept: true }) : take(low, { pooled: true });
+        }
+    };
+}
+// A pool as the preview writes it: "10.0.1.100–10.0.1.199".
+const poolRangeText = (def) => `${def.first}–${def.last}`;
+
 // The next `count` faceplate ports a new cable could take on a switch or an
 // AP, in port order: the free ones on the faceplate first, then the ones past
 // it. `past` is how many of those lie beyond an explicit faceplate, which the
 // findings report as a port overflow; an implicit faceplate grows by being
 // plugged into (DEFAULT_PORT_COUNT), so nothing is past it.
+// The faceplate's free ones are portCapacity()'s, so what Add devices hands
+// out is what the panel, the inventory and the port map call free.
 function freePorts(node, count) {
-    const ids = [];
-    if (!hasPortGrid(node) || !(count > 0)) return { ids, past: 0 };
-    const total = portCountOf(node);
-    for (let p = 1; p <= total && ids.length < count; p++) {
-        const id = `p${p}`;
-        if (!ifaceIsOccupied(node.id, id) && !isBond(explicitIface(node, id))) ids.push(id);
-    }
+    if (!hasPortGrid(node) || !(count > 0)) return { ids: [], past: 0 };
+    const cap = portCapacity(node);
+    const total = cap.total;
+    const ids = cap.freeIds.slice(0, count);
     let next = Math.max(total, highestPortInUse(node));
     let past = 0;
     while (ids.length < count) { ids.push(`p${++next}`); if (hasExplicitPortCount(node)) past++; }
     return { ids, past };
 }
 
-// The numbers the Subnets tab shows for one network.
+// How full a faceplate is: the one count of a switch's or an AP's ports that
+// the node panel (evaluatePorts, js/diagnostics.js), the inventory
+// (portUsage) and the port map (reportPortMaps, js/report.js) all print, so a
+// "used port" means the same in each. A faceplate port is used when a link
+// lands on it, whatever its medium (a numbered port is a socket: a link bound
+// to one is a cable there, even one an AP-to-client guess would call radio),
+// or it is a bond or a bond's member (portUsedTest); it is free otherwise, which is
+// exactly what freePorts() hands out, in the same order (freeIds). Wireless
+// clients on an AP's radio are not ports. A link past the faceplate (a count
+// lowered by an older build, an overflow) is counted in `used` and in `past`,
+// so used can exceed total, and free never goes below 0.
+//   explicit   the count was set; an implicit one is max(default, highest
+//              port in use), grows by being plugged into, and so is never
+//              nearly full or full (its real size is not known);
+//   nearlyFull an explicit faceplate of at least PORT_CAPACITY_MIN ports with
+//              at most max(1, floor(total / 10)) free;
+//   full       an explicit faceplate with none free.
+// null for a device without a port grid.
+const PORT_CAPACITY_MIN = 4;
+// The "used port" test itself, for one node, read off its links once: a link
+// lands on the port, or the port is a bond or a bond's member (a LAG's ports
+// are taken by the LAG, cabled yet or not). portCapacity() counts with it and
+// bulk Move to switch (js/bulk.js) hands out ports by it, so neither gives
+// out a port the other calls used.
+function portUsedTest(node) {
+    const busy = new Set();
+    linksAtNode(node.id).forEach((l) => busy.add(ifaceIdOn(l, node.id)));
+    const test = (id) => busy.has(id) || isBond(explicitIface(node, id)) || isBondMember(node, id);
+    test.busy = busy;
+    return test;
+}
+function portCapacity(node) {
+    if (!hasPortGrid(node)) return null;
+    const total = portCountOf(node);
+    const explicit = hasExplicitPortCount(node);
+    const isUsed = portUsedTest(node);
+    const freeIds = [];
+    let used = 0, cabledIn = 0;
+    for (let p = 1; p <= total; p++) {
+        const id = `p${p}`;
+        if (isUsed.busy.has(id)) cabledIn++;
+        if (isUsed(id)) used++; else freeIds.push(id);
+    }
+    let past = 0;
+    isUsed.busy.forEach((id) => { const m = /^p(\d+)$/.exec(id || ''); if (m && Number(m[1]) > total) past++; });
+    const free = freeIds.length;
+    const nearlyFull = explicit && total >= PORT_CAPACITY_MIN && free <= Math.max(1, Math.floor(total / 10));
+    // cables: the numbered ports a link lands on, on the faceplate or past it,
+    // bonds left out: the number the port-overflow finding prints as cables.
+    return { total, explicit, used: used + past, past, cables: cabledIn + past, free, freeIds, nearlyFull, full: explicit && free === 0 };
+}
+// Whether a switch or an AP gets the port-capacity note (capacityFindings,
+// js/diagnostics.js), which the report's Capacity section, the Simple
+// summary's Room to grow line and has:full (js/query.js) read too: in service
+// or planned (a retired box is off the network), its faceplate explicit and
+// nearly full or full (portCapacity), and not already past it. A cable past
+// the faceplate, or more cables than ports, is evaluatePorts' critical
+// finding, and one problem gets one finding. Its portCapacity(), or null.
+function portCapacityNote(node) {
+    if (!node || isRetired(node)) return null;
+    const cap = portCapacity(node);
+    return cap && cap.nearlyFull && !cap.past && cap.cables <= cap.total ? cap : null;
+}
+// Port numbers as ranges, the way the box names them: "3, 5–8". The port
+// map's Free line and the capacity note write free ports this way.
+function portRangeText(node, nums) {
+    const runs = [];
+    [...nums].sort((a, b) => a - b).forEach((n) => {
+        const last = runs[runs.length - 1];
+        if (last && last[1] === n - 1) last[1] = n; else if (!last || last[1] !== n) runs.push([n, n]);
+    });
+    return runs.map(([a, b]) => (a === b ? portNameOf(node, a) : `${portNameOf(node, a)}–${portNameOf(node, b)}`)).join(', ');
+}
+
+// How much of a subnet is used and free, counted the way freeAddresses()
+// hands addresses out, so "free" is what Add devices can really give: an
+// address is used when an in-service device anywhere on the map holds it
+// (a member, or a device of a network declared inside this one) or it is the
+// network's own gateway or a DNS server, which is often not drawn (the
+// takenAddresses rule). Only the usable range counts (usableRange: not the
+// network or broadcast address). `reserved` lists the gateway and DNS
+// addresses inside the range that no in-service device holds: the ones that
+// made "free" one too high before. Takes a declared network, or an implied
+// subnet's CIDR (the network declared with exactly that range lends its
+// gateway and DNS, as in freeAddresses). Counted with a set and range
+// arithmetic, never by walking the addresses, so a /8 costs what a /24 does.
+// size and free are null past 2^24 addresses (an IPv6 /64 is shown as 2^64).
+// pool is the DHCP pool's split (dhcpPoolOf), null when the network records
+// none: { first, last, valid, problem } as dhcpPoolOf says, and when it is
+// valid also its size, how many of its addresses are recorded as used
+// (devices and the network's own gateway and DNS: recorded, never leases,
+// which Topo cannot see) and how many are free; fixed is the part outside a
+// valid pool, which is the whole subnet while there is none or it does not
+// count. null when the range does not parse.
+const SUBNET_COUNTABLE_MAX = 1n << 24n;
+function subnetCapacity(netOrCidr) {
+    const cidr = typeof netOrCidr === 'string' ? netOrCidr : netOrCidr && netOrCidr.cidr;
+    const p = parseValidCIDR(cidr);
+    if (!p) return null;
+    let net = typeof netOrCidr === 'string' ? networkOfIp(String(cidr).split('/')[0]) : netOrCidr;
+    if (net && parseValidCIDR(net.cidr)?.networkStr !== p.networkStr) net = null;
+    const range = usableRange(p);
+    const bigIn = (ip) => {
+        if (!ip || ip.kind() !== p.kind) return null;
+        const big = ipToBig(ip);
+        return big >= range.first && big <= range.last ? big : null;
+    };
+    const held = new Map();   // address text -> its number, in the usable range
+    state.nodes.forEach((n) => { if (!isRetired(n)) getValidIps(n).forEach((a) => { const big = bigIn(a.ip); if (big !== null) held.set(a.ip.toString(), big); }); });
+    const reserved = [], reservedBig = [];
+    if (net) [net.gateway, ...parseDnsList(net.dns)].forEach((text) => {
+        const ip = parseIpText(text);
+        const big = bigIn(ip);
+        if (big === null) return;
+        const key = ip.toString();
+        if (!held.has(key) && !reserved.includes(key)) { reserved.push(key); reservedBig.push(big); }
+    });
+    const used = held.size + reserved.length;
+    const countable = range.size <= SUBNET_COUNTABLE_MAX;
+    const size = countable ? Number(range.size) : null;
+    const free = countable ? Math.max(0, size - used) : null;
+    const def = net ? dhcpPoolOf(net, p) : null;
+    if (!def || !def.valid) return { size, used, free, reserved, pool: def ? poolFacts(def) : null, fixed: { size, used, free } };
+    // A valid pool: its part of the count, by range arithmetic on what is
+    // held, never by walking it.
+    let inPool = 0;
+    const inside = (big) => big >= def.firstBig && big <= def.lastBig;
+    held.forEach((big) => { if (inside(big)) inPool++; });
+    reservedBig.forEach((big) => { if (inside(big)) inPool++; });
+    const poolBig = def.lastBig - def.firstBig + 1n;
+    const poolSize = poolBig <= SUBNET_COUNTABLE_MAX ? Number(poolBig) : null;
+    const pool = Object.assign(poolFacts(def), { size: poolSize, used: inPool, free: poolSize === null ? null : Math.max(0, poolSize - inPool) });
+    const fixedSize = countable && poolSize !== null ? size - poolSize : null;
+    const fixedUsed = used - inPool;
+    return { size, used, free, reserved, pool,
+        fixed: { size: fixedSize, used: fixedUsed, free: fixedSize === null ? null : Math.max(0, fixedSize - fixedUsed) } };
+}
+const poolFacts = (def) => ({ first: def.first, last: def.last, valid: def.valid, problem: def.problem });
+
+// A declared network's DHCP pool (NETWORK_FIELDS dhcpFirst, dhcpLast;
+// document v16), or null when it records neither end. It counts (valid)
+// only when DHCP is on, both ends are addresses of the subnet's family,
+// both lie in its usable range (not the network or broadcast address) and
+// the first is not after the last. Otherwise `problem` says why, first
+// match in this order:
+//   'off'       DHCP is not ticked: the pool is kept but not counted;
+//   'nocidr'    the subnet's own CIDR does not parse: its own finding says
+//               so, and the pool raises nothing until it does;
+//   'half'      only one end is written;
+//   'unreadable' an end is not an address;
+//   'family'    an end is not the subnet's address family;
+//   'outside'   an end is outside the subnet;
+//   'edge'      it takes in the network or broadcast address;
+//   'reversed'  it ends before it starts.
+// first and last are the addresses as written (trimmed); firstBig and
+// lastBig their numbers when they parse. p: the subnet parsed, when the
+// caller has it.
+function dhcpPoolOf(net, p = net && parseValidCIDR(net.cidr)) {
+    if (!net || (isBlank(net.dhcpFirst) && isBlank(net.dhcpLast))) return null;
+    const first = isBlank(net.dhcpFirst) ? '' : net.dhcpFirst.trim();
+    const last = isBlank(net.dhcpLast) ? '' : net.dhcpLast.trim();
+    const a = parseIpText(first), b = parseIpText(last);
+    const out = { first, last, firstBig: a ? ipToBig(a) : null, lastBig: b ? ipToBig(b) : null, valid: false, problem: null };
+    const say = (problem) => Object.assign(out, { problem });
+    if (!first || !last) return say(net.dhcp ? 'half' : 'off');
+    if (!a || !b) return say(net.dhcp ? 'unreadable' : 'off');
+    if (!net.dhcp) return say('off');
+    if (!p) return say('nocidr');
+    if (a.kind() !== p.kind || b.kind() !== p.kind) return say('family');
+    if (!ipInParsed(a, p) || !ipInParsed(b, p)) return say('outside');
+    const range = usableRange(p);
+    const lo = out.firstBig < out.lastBig ? out.firstBig : out.lastBig;
+    const hi = out.firstBig < out.lastBig ? out.lastBig : out.firstBig;
+    if (lo < range.first || hi > range.last) return say('edge');
+    if (out.firstBig > out.lastBig) return say('reversed');
+    out.valid = true;
+    return out;
+}
+// The network's own gateway and DNS servers that lie inside its valid DHCP
+// pool, as [{ role: 'gateway' | 'dns', ip }]: the classic way a server hands
+// out the router's address. [] when there is no valid pool.
+function poolClashes(net, def = dhcpPoolOf(net)) {
+    if (!def || !def.valid) return [];
+    const out = [];
+    const check = (role, text) => {
+        const ip = parseIpText(text);
+        if (!ip || ip.kind() !== parseValidCIDR(net.cidr).kind) return;
+        const big = ipToBig(ip);
+        if (big >= def.firstBig && big <= def.lastBig && !out.some((c) => c.ip === ip.toString())) out.push({ role, ip: ip.toString() });
+    };
+    check('gateway', net.gateway);
+    parseDnsList(net.dns).forEach((s) => check('dns', s));
+    return out;
+}
+// What is wrong with a network's DHCP pool, in sentences, for the Subnets
+// card's advice line and the 'dhcp-pool' finding's detail (one wording for
+// both): its problem (dhcpPoolOf; 'off' is the card's own line, never a
+// finding), then every gateway or DNS server inside it. [] when it is sound.
+function poolProblemTexts(net, def = dhcpPoolOf(net)) {
+    if (!def) return [];
+    const range = `${def.first || '?'}–${def.last || '?'}`;
+    const cidr = net.cidr;
+    const said = {
+        half: () => t('The DHCP pool of {cidr} needs both its first and its last address.', { cidr }),
+        unreadable: () => t('The DHCP pool {range} has an end that is not an address.', { range }),
+        family: () => t('The DHCP pool {range} is not the same address family as {cidr}.', { range, cidr }),
+        outside: () => t('The DHCP pool {range} is outside {cidr}.', { range, cidr }),
+        edge: () => t('The DHCP pool {range} takes in the network or broadcast address of {cidr}.', { range, cidr }),
+        reversed: () => t('The DHCP pool {range} ends before it starts.', { range })
+    };
+    if (def.problem && said[def.problem]) return [said[def.problem]()];
+    return poolClashes(net, def).map((c) => (c.role === 'gateway'
+        ? t('The gateway {ip} is inside the DHCP pool {range}.', { ip: c.ip, range })
+        : t('The DNS server {ip} is inside the DHCP pool {range}.', { ip: c.ip, range })));
+}
+
+// Whether a subnet gets the address-capacity note (capacityFindings,
+// js/diagnostics.js), which the report's Capacity section, the Simple
+// summary's Room to grow line and the table's Subnets tab read too: a
+// countable IPv4 subnet (IPv6 never runs out by hand) of at least
+// ADDRESS_CAPACITY_MIN usable addresses (a /29 or smaller is a transit link,
+// full by design), with at most max(2, ceil(size / 10)) of them free: 26 of
+// a /24, 2 of a /28. It measures the part outside the DHCP pool (fixed),
+// which is the whole subnet while it has no valid pool; a subnet the pool
+// fills completely has no fixed part to run out of, and one whose pool
+// leaves fewer than ADDRESS_CAPACITY_MIN fixed addresses is full by design. Never a note on how
+// full a pool is: Topo cannot see leases. Its subnetCapacity(), or null.
+const ADDRESS_CAPACITY_MIN = 8;
+// cap: its subnetCapacity() when the caller has it already.
+function addressCapacityNote(netOrCidr, cap) {
+    const cidr = typeof netOrCidr === 'string' ? netOrCidr : netOrCidr && netOrCidr.cidr;
+    const p = parseValidCIDR(cidr);
+    if (!p || p.kind !== 'ipv4') return null;
+    if (cap === undefined) cap = subnetCapacity(netOrCidr);
+    if (!cap || cap.size === null || cap.size < ADDRESS_CAPACITY_MIN) return null;
+    const part = cap.fixed;
+    if (!part.size) return null;
+    // A fixed part under ADDRESS_CAPACITY_MIN beside a valid pool (gateway
+    // .1, pool .2-.254) is full by design, like a /29 transit link.
+    if (cap.pool && cap.pool.valid && part.size < ADDRESS_CAPACITY_MIN) return null;
+    return part.free <= Math.max(2, Math.ceil(part.size / 10)) ? cap : null;
+}
+// The in-service devices holding an address in a subnet's usable range, in
+// map order: what subnetCapacity() counts as used, by device. The
+// address-capacity note names them, so accepting it reopens when another
+// device joins.
+function subnetHolders(cidr) {
+    const p = parseValidCIDR(cidr);
+    if (!p) return [];
+    const range = usableRange(p);
+    return state.nodes.filter((n) => !isRetired(n) && getValidIps(n).some((a) => {
+        if (a.ip.kind() !== p.kind) return false;
+        const big = ipToBig(a.ip);
+        return big >= range.first && big <= range.last;
+    }));
+}
+
+// The numbers the Subnets tab shows for one network: subnetCapacity()'s, so
+// the card's "free" is what Add devices can hand out (its gateway and DNS
+// count as used, drawn or not).
 function networkStats(net) {
     const p = parseValidCIDR(net.cidr);
     const members = networkMembers(net);
-    const used = new Set();
-    // Used and free count what is in service: a retired member is still
-    // listed, but its address is free again (takenAddresses).
-    members.forEach((m) => { if (!isRetired(m.node)) m.addrs.forEach((a) => used.add(a.ip.toString())); });
-    const range = p ? usableRange(p) : null;
-    // IPv6 sizes are not counts anyone reads: a /64 is shown as 2^64.
-    const countable = range && range.size <= 1n << 24n;
+    const cap = p ? subnetCapacity(net) : null;
     return {
-        parsed: p, members, used: used.size,
-        size: countable ? Number(range.size) : null,
-        free: countable ? Math.max(0, Number(range.size) - used.size) : null,
+        parsed: p, members, used: cap ? cap.used : 0,
+        size: cap ? cap.size : null,
+        free: cap ? cap.free : null,
         bits: p ? hostBits(p) : 0,
+        pool: cap ? cap.pool : null, fixed: cap ? cap.fixed : null,
         next: p ? nextFreeAddress(net.cidr, net) : null
     };
 }
@@ -2238,6 +3042,29 @@ function planRenumber(netId, cidrText) {
     };
     state.nodes.forEach((n) => { ref(n, 'gw', false); ref(n, 'dns', true); });
     state.networks.forEach((n) => { ref(n, 'gateway', false); ref(n, 'dns', true); });
+    // The DHCP pool's ends too (document v16), so it keeps its host bits.
+    // A pool end is a range boundary, not an address anybody holds, so it
+    // never goes through move(): it cannot refuse the renumber, clash with a
+    // device, or count as a moved address. Both ends move together, or, when
+    // either would not fit or would land on the network or broadcast
+    // address, both stay as written and the dhcp-pool finding says so after.
+    const poolEnd = (ip) => {
+        if (!inFrom(ip)) return null;
+        const offset = ipToBig(ip) - fromBase;
+        if (offset >= room) return null;
+        const big = toBase + offset;
+        return big < toRange.first || big > toRange.last ? null : bigToIp(big, to.kind).toString();
+    };
+    state.networks.forEach((n) => {
+        if (isBlank(n.dhcpFirst) && isBlank(n.dhcpLast)) return;
+        const ends = ['dhcpFirst', 'dhcpLast'].filter((k) => !isBlank(n[k]))
+            .map((k) => ({ key: k, ip: parseIpText(String(n[k]).trim()) }))
+            .filter((e) => inFrom(e.ip));
+        if (!ends.length) return;
+        const out = ends.map((e) => poolEnd(e.ip));
+        if (out.some((v) => !v)) return;
+        ends.forEach((e, i) => plan.refs.push({ obj: n, key: e.key, value: out[i] }));
+    });
     // A rewritten reference can land on somebody too: a gateway nobody drew
     // (10.0.1.1) moves to 10.0.9.1, which a device outside the network may
     // already hold. Members' own addresses were checked above; this is every
@@ -3001,7 +3828,8 @@ function rackPortsFace(node) {
 //                       cables go). A bond's members are drawn together where
 //                       the first of them is, marked with the bond, so the
 //                       pair reads as one.
-// Each: { id, name, label, vlan, links (the cables on it: isExclusiveLink,
+// Each: { id, name, label, vlan, tagged, poe (portAttrOf's; null on a NIC),
+// links (the cables on it: isExclusiveLink,
 // so not a radio's association, a VPN riding a cable, nor a VM's bridge onto
 // its host's NIC), past (a faceplate port beyond the count), bond: { id,
 // name } | null }. Pure but for the document it reads.
@@ -3023,7 +3851,7 @@ function rackPortsOf(node) {
         return faceplatePortIds(node).map((id) => {
             const n = Number(id.slice(1));
             const a = portAttrOf(node, id);
-            return { id, name: ifaceLabel(node, id), label: a.label, vlan: a.vlan, links: cables(id), past: n > total, doubled: doubled(id), bond: null };
+            return { id, name: ifaceLabel(node, id), label: a.label, vlan: a.vlan, tagged: a.tagged, poe: a.poe, links: cables(id), past: n > total, doubled: doubled(id), bond: null };
         });
     }
     const list = getInterfaces(node).filter((i) => !ifaceIsWireless(i));
@@ -3032,7 +3860,7 @@ function rackPortsOf(node) {
     const one = (i, bond) => {
         if (done.has(i.id)) return;
         done.add(i.id);
-        out.push({ id: i.id, name: i.name || i.id, label: '', vlan: null, links: cables(i.id), past: false, doubled: doubled(i.id), bond });
+        out.push({ id: i.id, name: i.name || i.id, label: '', vlan: null, tagged: null, poe: null, links: cables(i.id), past: false, doubled: doubled(i.id), bond });
     };
     list.forEach((i) => {
         if (isBond(i)) return;
@@ -3288,6 +4116,389 @@ function nodePlaceText(node, groups = state.groups) {
     if (!path) return node && typeof node.location === 'string' ? node.location.trim() : '';
     const span = rackSpanText(node, groups);
     return span ? `${path} · ${span}` : path;
+}
+
+// ---- Locate: where a device is physically plugged in (docs/BACKLOG.md, feature 1) ----
+// Worked out from what the register already holds: no field, no store, no
+// guess. Stage 1 is this pure core; the panel, the search button, the Simple
+// sentence and the print sheet (later stages) only read it.
+//
+// locatePath(node, {nodes, links, groups}) -> { start, legs, gaps }. The lists
+// default to the open document's; given, nothing of the open one is read
+// (getNode, linksAtNode, hostOf and the rest), so a back-up or a copy can be
+// located the same way. Inside a lookup pass over the open document's own
+// lists the answer is kept per device (lookupPass.locate), so a page of
+// devices asks each once; callers only read it.
+//
+//   start  { node, hosts, place, retired }: the device, and for a VM or a
+//          container its hosts, innermost first (hostChainOf's chain read in
+//          these lists); place is where its outermost host is (a guest has no
+//          units of its own, as rackSpanText says).
+//   legs   [{ hops, stop, primary }], one per cable: every wired or wireless
+//          link at the device (a guest's own, then each host's out to the
+//          outermost one),
+//          the one uplinkOf names first (skipNoPort, as the devices sheet's
+//          switch/port columns read it, else without), the rest in the
+//          document's order. Left out: VPN tunnels, a link between a guest
+//          and its own host, a self-loop, and on a switch, an AP or a routing
+//          device the links that hang below it (to a device that is none of
+//          them, an AP below a switch or a router, by cable or by radio, a
+//          Wi-Fi client it serves), since those are not where it is plugged
+//          in. An AP's cable comes before its radio links. A bond's two
+//          cables are two legs.
+//   hops   [hop], the cables walked, the first the leg's own:
+//          { from, nic, nicId, bond, link, cable: {tag, color, length, via},
+//            far, farPort, farPortId, jack, vlan, tagged, overflow, medium,
+//            wifi: {ssid, band, signal, ssidInferred, bandInferred} | null,
+//            place: {groups, rack, units, location, host}, retired }
+//          nic/farPort are the ports' names ('' where none is picked), jack,
+//          vlan (untagged) and tagged (canonical text, or null) what
+//          portAttrs says of the far port (a faceplate's pN only), overflow a port past an explicit faceplate. The cable's
+//          text is as typed, never trimmed, split or reordered: Topo cannot
+//          know which end of "PP-A:12 > WJ-3B" faces the device. The Wi-Fi
+//          SSID and band are the link's own, else, on the open document,
+//          what linkWifiSsid / linkWifiBand work out (flagged inferred).
+//   stop   { reason, node }: why the walk ended, at which device:
+//            faceplate   a switch or an AP reached by a cable (the port is
+//                        the answer; switch-to-switch is topology, never walked)
+//            routing     a router, firewall, l3switch and the like
+//            depth       LOCATE_HOPS_MAX cables walked
+//            loop        the next device was already on this leg
+//            apUpstream  a radio link between two ends that both serve radio
+//                        (AP to AP, a mesh or a bridge; an AP on a router's
+//                        radio): which side is upstream is not recorded
+//            radioUnknown a radio link with neither end an AP or a routing
+//                        device: which side serves is not recorded
+//            several     a device with more than one cable onward and none
+//                        onto a faceplate: which one leads on is not recorded
+//            end         nothing recorded leads up from it (a noUplink gap)
+//   gaps   [{ code, leg, hop, node, link, portId, text }], typed, never
+//          filled in: leg/hop index the hop (-1 for the device itself);
+//            noCable      the device has no link recorded at all
+//            noUplink     it has links, but none recorded leads up: all hang
+//                         below it (a core switch), or the walk ran out at a
+//                         device with nothing further
+//            noPort       a cable onto a faceplate with no port picked there
+//                         (the rack view's no-port spot; Pick a port)
+//            noJack       a faceplate port with no label
+//            noVia        a cable with no via written
+//            notGrouped   the far device is in no group; text is the location
+//                         typed on it, '' when none (shown as typed text)
+//            notPlaced    in a rack with no unit set
+//            radioUnknown a radio link with neither end an AP or a routing device
+//            apUpstream   which access point is upstream is not recorded
+//            retired      the device or a hop is retired: shown dimmed, and the
+//                         walk goes on, as a retired box still has a place
+//
+// Multi-hop: from a far device that is no faceplate (a PC behind an IP
+// phone), or from an AP reached by radio, the walk follows that device's own
+// uplinkOf over the links that may lead up; from an AP reached by radio only
+// over its cables, never on by radio and never down to a device below it.
+// A device with no faceplate peer goes on only when exactly one cable leads
+// on, and that hop stands only if the walk then gets somewhere (a faceplate,
+// a routing device, a radio-serving pair, a loop or the depth cap): one that
+// runs out at a dead end or a fork went down, not up, and is taken back.
+const LOCATE_HOPS_MAX = 4;
+const LOCATE_GAPS = ['noCable', 'noUplink', 'noPort', 'noJack', 'noVia', 'notGrouped', 'notPlaced', 'radioUnknown', 'apUpstream', 'retired'];
+function locatePath(node, opts = {}) {
+    // As uplinkOf: once any list is given, a missing one counts as empty,
+    // never as the open document's.
+    const inDoc = !!(opts.nodes || opts.links || opts.groups);
+    const nodes = (inDoc ? opts.nodes : state.nodes) || [];
+    const links = (inDoc ? opts.links : state.links) || [];
+    const groups = (inDoc ? opts.groups : state.groups) || [];
+    const live = nodes === state.nodes && links === state.links;
+    // The open pass's indexes only when it is over these very lists.
+    const pass = lookupPass && lookupPass.refs[0] === nodes && lookupPass.refs[1] === links ? lookupPass : null;
+    if (pass && pass.refs[3] === groups && node && inLookupDoc(node)) {
+        const m = pass.locate || (pass.locate = new Map());
+        if (!m.has(node)) m.set(node, locatePathNow(node, nodes, links, groups, live, pass));
+        return m.get(node);
+    }
+    return locatePathNow(node, nodes, links, groups, live, pass);
+}
+function locatePathNow(node, nodes, links, groups, live, pass) {
+    const out = { start: null, legs: [], gaps: [] };
+    if (!node) return out;
+    // The lists, indexed once: by id (the first holder, as find() answers)
+    // and the cables at each device.
+    let byId, at;
+    if (pass) { byId = pass.byId; at = pass.at; } else {
+        byId = new Map(); at = new Map();
+        nodes.forEach((n) => { if (n && !byId.has(n.id)) byId.set(n.id, n); });
+        const touch = (id, l) => { if (!at.has(id)) at.set(id, []); at.get(id).push(l); };
+        links.forEach((l) => { if (!l) return; touch(l.source, l); if (l.target !== l.source) touch(l.target, l); });
+    }
+    const linksOf = (n) => at.get(n.id) || NO_LINKS;
+    const other = (l, n) => byId.get(l.source === n.id ? l.target : l.source) || null;
+    const ends = (l) => [byId.get(l.source) || null, byId.get(l.target) || null];
+    const mediumOf = (l) => { const [s, d] = ends(l); return s && d ? effectiveMedium(l, s, d) : (l.medium || 'utp'); };
+    // hostChainOf, read in these lists.
+    const hostsOf = (n) => {
+        const chain = [], seen = new Set([n.id]);
+        for (let h = n.host ? byId.get(n.host) : null; h && !seen.has(h.id) && chain.length < HOST_DEPTH_MAX; h = h.host ? byId.get(h.host) : null) { seen.add(h.id); chain.push(h); }
+        return chain;
+    };
+    const rootOf = (n) => { const c = hostsOf(n); return c.length ? c[c.length - 1] : n; };
+    // Host and guest of each other, at any depth: not a cable in the rack sense.
+    const kin = (a, b) => hostsOf(a).includes(b) || hostsOf(b).includes(a);
+    const portName = (n, id) => (!id ? '' : hasPortGrid(n) ? docPortLabel(n, id, linksOf(n)) : ifaceLabel(n, id));
+    const placeOf = (n) => {
+        const root = rootOf(n);
+        const g = groupOfNode(root, groups);
+        const rack = rackOfNode(root, groups);
+        const units = rack && Number.isInteger(root.rackU)
+            ? `${rackUnitsText(rack, root.rackU, root.rackU + rackHeightOf(root) - 1)} ${t(rackFaceOf(root) === 'rear' ? 'rear' : 'front')}${rackFullDepth(root) ? '' : `, ${t('half depth')}`}`
+            : '';
+        const typed = (x) => (x && typeof x.location === 'string' ? x.location.trim() : '');
+        return { groups: g ? groupChain(g, groups) : [], rack, units, location: typed(n) || (root !== n ? typed(root) : ''), host: root !== n ? root : null };
+    };
+    const gap = (code, leg, hop, n, extra = {}) => out.gaps.push(Object.assign({ code, leg, hop, node: n, link: null, portId: null, text: '' }, extra));
+
+    const hosts = hostsOf(node);
+    const root = hosts.length ? hosts[hosts.length - 1] : node;
+    out.start = { node, hosts, place: placeOf(node), retired: isRetired(node) };
+    [node, ...hosts].forEach((n) => { if (isRetired(n)) gap('retired', -1, -1, n); });
+
+    // Which devices' cables are the device's own: a guest's, then each host's
+    // in turn up to the outermost one (the box that is somewhere).
+    const infra = (n) => hasPortGrid(n) || isRoutingDevice(n.type);
+    // Whether a link at `from` may lead up from it, at the start and on the
+    // walk alike. A Wi-Fi client it serves hangs below it. Up from a switch,
+    // an AP or a routing device only to a switch or a routing device (an AP
+    // is below them), by cable or by radio; from an AP, another AP too (a
+    // mesh or a bridge), and a routing device's radio (an AP on a home
+    // router's radio): which of two radio-serving ends is upstream is not
+    // recorded, so that leg ends in apUpstream.
+    const upFrom = (l, from, far, medium) => {
+        if (medium === 'wireless') {
+            const e = wifiLinkEnds(l, ...ends(l));
+            if (e && e.ap && e.ap.node === from && !radioServes(far)) return false;
+        }
+        return !infra(from) || far.type === 'switch' || isRoutingDevice(far.type) || (from.type === 'ap' && far.type === 'ap');
+    };
+    const candidate = (l, from) => {
+        if (l.source === l.target) return false;
+        const far = other(l, from);
+        if (!far || kin(from, far) || far === node || hosts.includes(far)) return false;
+        const medium = mediumOf(l);
+        if (medium === 'vpn') return false;
+        return upFrom(l, from, far, medium);
+    };
+    // uplinkOf's pick; an AP's cable before its radio links, as from an AP
+    // only a wired uplink is known to lead up.
+    const firstOf = (n, list) => {
+        const pick = (ls) => {
+            const opt = { links: ls, nodes: byId };
+            const u = uplinkOf(n, Object.assign({ skipNoPort: true }, opt)) || uplinkOf(n, opt);
+            return u ? u.link : null;
+        };
+        const wiredFirst = n.type === 'ap' ? pick(list.filter((l) => mediumOf(l) !== 'wireless')) : null;
+        return wiredFirst || pick(list);
+    };
+    const starts = [];
+    [node, ...hosts].forEach((from) => {
+        const own = linksOf(from).filter((l) => candidate(l, from));
+        const first = firstOf(from, own);
+        if (first) starts.push({ from, link: first });
+        own.forEach((l) => { if (l !== first) starts.push({ from, link: l }); });
+    });
+    if (!starts.length) {
+        // No cable at all, or cables that all hang below it (a core switch,
+        // the root router): the second is no missing cable.
+        const any = [node, ...hosts].some((n) => linksOf(n).some((l) => {
+            const far = l.source !== l.target && other(l, n);
+            return !!far && !kin(n, far) && mediumOf(l) !== 'vpn';
+        }));
+        gap(any ? 'noUplink' : 'noCable', -1, -1, root);
+    }
+
+    starts.forEach((s, li) => {
+        const leg = { hops: [], stop: null, primary: li === 0 };
+        out.legs.push(leg);
+        const seen = new Set([node.id, ...hosts.map((h) => h.id)]);
+        let from = s.from, link = s.link;
+        // A hop taken only because it was the one cable on (no uplinkOf
+        // answer) stands only if the walk then reaches somewhere up; a walk
+        // that runs out at a dead end or a fork from there went down, not
+        // up, so it is taken back to the device before it (guessed: the hop
+        // index, gapAt: out.gaps' length as each hop began).
+        let guessed = -1;
+        const gapAt = [];
+        for (;;) {
+            const hi = leg.hops.length;
+            gapAt.push(out.gaps.length);
+            const far = other(link, from);
+            const medium = mediumOf(link);
+            const wired = medium !== 'wireless';
+            const nicId = ifaceIdOn(link, from.id) || null;
+            const farPortId = ifaceIdOn(link, far.id) || null;
+            const grid = hasPortGrid(far);
+            const pn = PORT_ID_RE.exec(farPortId || '');
+            const attrs = grid && pn ? portAttrOf(far, farPortId) : { label: '', vlan: null, tagged: null };
+            const bond = nicId ? bondOf(from, nicId) : null;
+            let wifi = null, e = null;
+            if (!wired) {
+                e = wifiLinkEnds(link, ...ends(link));
+                const ssid = linkWifiOf(link, 'ssid'), band = linkWifiOf(link, 'band');
+                const ssidIn = ssid === undefined && live ? linkWifiSsid(link) : null;
+                const bandIn = band === undefined && live ? linkWifiBand(link) : null;
+                wifi = { ssid: ssid !== undefined ? ssid : ssidIn, band: band !== undefined ? band : bandIn,
+                    signal: linkWifiOf(link, 'signal') ?? null, ssidInferred: ssid === undefined && ssidIn != null, bandInferred: band === undefined && bandIn != null };
+            }
+            const place = placeOf(far);
+            const hop = { from, nic: portName(from, nicId), nicId, bond: bond ? (bond.name || bond.id) : '', link,
+                cable: { tag: cableOf(link, 'label'), color: cableOf(link, 'color'), length: cableOf(link, 'length'), via: cableOf(link, 'via') },
+                far, farPort: portName(far, farPortId), farPortId, jack: attrs.label, vlan: attrs.vlan, tagged: attrs.tagged,
+                overflow: !!(grid && pn && hasExplicitPortCount(far) && Number(pn[1]) > far.portCount),
+                medium, wifi, place, retired: isRetired(far) };
+            leg.hops.push(hop);
+            seen.add(far.id);
+            const here = { link };
+            if (wired) {
+                if (grid && !farPortId) gap('noPort', li, hi, far, here);
+                if (grid && pn && !attrs.label) gap('noJack', li, hi, far, { link, portId: farPortId });
+                if (!hop.cable.via.trim()) gap('noVia', li, hi, far, here);
+            }
+            if (!place.groups.length) gap('notGrouped', li, hi, far, { link, text: place.location });
+            else if (place.rack && !place.units) gap('notPlaced', li, hi, far, here);
+            if (hop.retired) gap('retired', li, hi, far, here);
+            const stop = (reason, n = far) => { leg.stop = { reason, node: n }; };
+            // Nothing leads up from here: the dead end, unless it was reached
+            // over a guessed hop, which is then taken back.
+            const deadEnd = (reason) => {
+                if (guessed > 0) {
+                    leg.hops.length = guessed;
+                    out.gaps.length = gapAt[guessed];
+                    const back = leg.hops[guessed - 1];
+                    gap('noUplink', li, guessed - 1, back.far, { link: back.link });
+                    stop('end', back.far);
+                    return;
+                }
+                if (reason === 'end') gap('noUplink', li, hi, far, here);
+                stop(reason);
+            };
+            // Why the walk ends here, or where it goes on.
+            if (!wired && (!e || !e.ap)) { gap('radioUnknown', li, hi, far, here); stop('radioUnknown'); break; }
+            // Two ends that both serve radio (AP to AP, an AP on a router's radio).
+            if (!wired && radioServes(e.client.node)) { gap('apUpstream', li, hi, far, here); stop('apUpstream'); break; }
+            if (isRoutingDevice(far.type)) { stop('routing'); break; }
+            if (grid && wired) { stop('faceplate'); break; }
+            // Onward from the far device: an AP reached by radio over its
+            // cables up only; anything else over every link up but the one it
+            // came by.
+            const byRadio = far.type === 'ap' && !wired;
+            const onward = linksOf(far).filter((l) => l !== link && l.source !== l.target && candidateOnward(l, far, byRadio));
+            const known = firstOf(far, onward);
+            const next = known || (onward.length === 1 ? onward[0] : null);
+            if (!next) {
+                if (onward.length > 1) { deadEnd('several'); break; }
+                // An AP whose only way on is by radio to another radio-serving
+                // device: a mesh hop, or an AP on a router's radio.
+                const meshOnly = byRadio && linksOf(far).some((l) => l !== link && mediumOf(l) === 'wireless' && radioServes(other(l, far)));
+                if (meshOnly) { gap('apUpstream', li, hi, far, here); stop('apUpstream'); break; }
+                deadEnd('end'); break;
+            }
+            const after = other(next, far);
+            if (!after || seen.has(after.id)) { stop('loop', after || far); break; }
+            if (leg.hops.length >= LOCATE_HOPS_MAX) { stop('depth'); break; }
+            if (!known && guessed < 0) guessed = leg.hops.length;
+            from = far; link = next;
+        }
+    });
+    return out;
+
+    function candidateOnward(l, n, wiredOnly) {
+        const far = other(l, n);
+        if (!far || kin(n, far)) return false;
+        const medium = mediumOf(l);
+        if (medium === 'vpn') return false;
+        if (medium === 'wireless') {
+            if (wiredOnly) return false;
+            const e = wifiLinkEnds(l, ...ends(l));
+            // Only up to the side that serves it, never down to a client.
+            if (!(e && e.ap && e.ap.node === far)) return false;
+        }
+        // From an AP reached by radio, never down its cables to a device
+        // below it (the start's own rule).
+        return upFrom(l, n, far, medium);
+    }
+}
+
+// ---- Locate in plain words (docs/BACKLOG.md, feature 1, stage 4) ----
+// The Simple view's answer to "where is it plugged in", read from the same
+// locatePath: one short sentence per step (Japanese and Russian read better
+// that way than as one long chain), only the primary cable, no via, no VLAN
+// and no rack units. The switch's port is a "socket", its jack label the
+// "wall socket". Groups are named, never their kind: Simple has no Groups
+// tab, but a document made in the Full editor still shows its rooms. A gap is
+// said in plain words ("Which socket is not written down."), never guessed.
+// Names, port names and jack labels are data and are never translated.
+const locPlainName = (n) => (n && n.name && String(n.name).trim()) || (n ? n.id : '');
+function locatePlainSentence(path) {
+    if (!path || !path.start) return '';
+    const out = [];
+    const hosts = path.start.hosts;
+    if (hosts.length) out.push(t('Runs on {host}.', { host: locPlainName(hosts[hosts.length - 1]) }));
+    const leg = path.legs[0];
+    if (!leg) {
+        const g = path.gaps.find((x) => x.code === 'noCable' || x.code === 'noUplink');
+        out.push(t(g && g.code === 'noUplink' ? 'What it is plugged into is not written down.' : 'Not plugged into anything yet.'));
+        return out.join(' ');
+    }
+    leg.hops.forEach((h, i) => {
+        const who = locPlainName(h.from), far = locPlainName(h.far);
+        const gapHere = (code) => path.gaps.some((g) => g.leg === 0 && g.hop === i && g.code === code);
+        // The subject-less form only for the device itself: a VM's first
+        // step starts from its host, which is then named.
+        const own = h.from === path.start.node;
+        if (h.medium === 'wireless') {
+            const unknown = gapHere('radioUnknown');
+            // Two ends that both serve radio (AP to AP, an AP on a router's
+            // radio): which side is upstream is not held, so no "through".
+            const peers = !unknown && gapHere('apUpstream') && radioServes(h.from) && radioServes(h.far);
+            if (unknown || peers) out.push(own ? t('On Wi-Fi with {device}.', { device: far }) : t('{device} is on Wi-Fi with {other}.', { device: who, other: far }));
+            else out.push(own ? t('On Wi-Fi through {ap}.', { ap: far }) : t('{device} is on Wi-Fi through {ap}.', { device: who, ap: far }));
+            if (unknown) out.push(t('Which access point it uses is not written down.'));
+        } else {
+            // A "socket" is a switch's, an AP's or a router's port; a NIC on
+            // a phone or a PC passed through is no socket anyone looks for.
+            const k = h.farPort && (hasPortGrid(h.far) || isRoutingDevice(h.far.type)) ? (h.jack ? 'jack' : 'port') : 'none';
+            const v = { device: who, switch: far, port: h.farPort, jack: h.jack };
+            const first = { jack: 'Plugged into {switch}, socket {port} (wall socket {jack}).', port: 'Plugged into {switch}, socket {port}.', none: 'Plugged into {switch}.' };
+            const later = { jack: '{device} is plugged into {switch}, socket {port} (wall socket {jack}).', port: '{device} is plugged into {switch}, socket {port}.', none: '{device} is plugged into {switch}.' };
+            out.push(t((own ? first : later)[k], v));
+            if (gapHere('noPort')) out.push(t('Which socket is not written down.'));
+        }
+        // A device on the path that is out of service, as Full flags it.
+        if (gapHere('retired')) out.push(t('{device} is retired.', { device: far }));
+    });
+    const last = leg.hops[leg.hops.length - 1];
+    if (last && last.place.groups.length) out.push(t('{device} is in {place}.', { device: locPlainName(last.far), place: last.place.groups.map((g) => g.name || '').filter(Boolean).join(' › ') }));
+    // Why the walk ended short of a socket, where that is worth a line.
+    const s = leg.stop;
+    if (s && s.reason === 'apUpstream') out.push(t('Which access point is upstream is not written down.'));
+    else if (s && ['end', 'several', 'loop'].includes(s.reason)) out.push(t('What {device} is plugged into is not written down.', { device: locPlainName(s.reason === 'loop' ? last.far : s.node) }));
+    else if (s && s.reason === 'depth') out.push(t(leg.hops.length === 1 ? 'Stopped after {n} step.' : 'Stopped after {n} steps.', { n: leg.hops.length }));
+    return out.join(' ');
+}
+
+// The socket an end device is plugged into, for the Simple summary's Where
+// cell: "Office switch, socket 12 (Reception 2)", or '' when the register
+// does not hold one. Only a cable path (a device on Wi-Fi is in no socket)
+// that ends on a port that is picked, at a switch, an AP or a routing device.
+// A switch, an AP or a routing device itself gets none: its uplink is
+// topology, which the map shows. -> string
+function locateSocketText(node, opts) {
+    if (!node || hasPortGrid(node) || isRoutingDevice(node.type)) return '';
+    const leg = locatePath(node, opts).legs[0];
+    if (!leg || !leg.stop || !['faceplate', 'routing'].includes(leg.stop.reason)) return '';
+    if (leg.hops.some((h) => h.medium === 'wireless')) return '';
+    const h = leg.hops[leg.hops.length - 1];
+    if (!h.farPort) return '';
+    // A switch out of service says so: the socket is no working one.
+    const v = { switch: locPlainName(h.far) + (h.retired ? ' (' + statusName('retired') + ')' : ''), port: h.farPort, jack: h.jack };
+    return h.jack ? t('{switch}, socket {port} ({jack})', v) : t('{switch}, socket {port}', v);
 }
 
 // ---- Places typed as text ----
@@ -3791,6 +5002,111 @@ function providerCovers(id, ctx = {}) {
 }
 
 // ============================================================================
+// Saved searches (document v16)
+// ============================================================================
+// A search typed in the full editor's box, kept under a name in the network
+// (doc.searches; docs/BACKLOG.md feature 6), with the Devices columns to
+// print, an optional sort and whether the site report prints it. It is a
+// view of the register, not a fact about the network: no finding reads it
+// and the changes since the last back-up do not count it. It is the
+// document's all the same, so it travels in the file, the link and the
+// binder. Named apart from doc.report, which is the report's header.
+//   id       'sq_…', minted when missing, one record per id;
+//   name     one line, 1 to SEARCH_NAME_MAX characters, unique in any case
+//            (a later duplicate is dropped, as a custom column's is);
+//   query    the search language as typed, 1 to SEARCH_QUERY_MAX
+//            characters. The prefixes are syntax, so it is never
+//            translated. One that does not parse today is kept: a newer
+//            Topo may know its prefixes. Longer than the limit it is
+//            dropped, not cut, because a cut query matches something else;
+//   columns  the Devices column keys to print after the device's name
+//            (TABLE_VIEW_KEY_RE, no repeat, at most SEARCH_COLUMNS_MAX;
+//            'name' is never stored, it always comes first). Absent: the
+//            columns as the Devices table shows them;
+//   sort     a column key ('name' too); absent: the document's order;
+//   desc     true for descending; only with a sort;
+//   print    true when the site report prints it by default.
+const SEARCH_MAX = 30;            // per network (docs/BACKLOG.md "Decisions taken")
+const SEARCH_NAME_MAX = 60;
+const SEARCH_QUERY_MAX = 500;
+const SEARCH_COLUMNS_MAX = 20;
+const searchKeyOf = (v) => (typeof v === 'string' && TABLE_VIEW_KEY_RE.test(v) ? v : undefined);
+const searchName = (v) => { const x = portText(v).replace(/\s+/g, ' ').trim().slice(0, SEARCH_NAME_MAX); return x || undefined; };
+// As typed, but on one line and trimmed; over the limit is no query.
+const searchQuery = (v) => { const x = portText(v).trim(); return x && x.length <= SEARCH_QUERY_MAX ? x : undefined; };
+const searchColumns = (v) => {
+    const keys = [...new Set((Array.isArray(v) ? v : []).map(searchKeyOf).filter((k) => k && k !== 'name'))].slice(0, SEARCH_COLUMNS_MAX);
+    return keys.length ? keys : undefined;
+};
+const searchFlag = (v) => (v === true ? true : undefined);
+// The order is the key order of the JSON.
+const SEARCH_FIELDS = [
+    // No id is minted here: normalizeSearches mints a missing one by place.
+    { key: 'id', kind: 'raw', read: asGroupRef, label: 'ID', csv: 'search_id' },
+    { key: 'name', kind: 'raw', read: searchName, write: searchName, label: 'Name', csv: 'name' },
+    { key: 'query', kind: 'raw', read: searchQuery, write: searchQuery, label: 'Search', csv: 'query' },
+    { key: 'columns', kind: 'raw', read: searchColumns, write: searchColumns, label: 'Columns', csv: 'columns' },
+    { key: 'sort', kind: 'raw', read: searchKeyOf, write: searchKeyOf, label: 'Sort by', csv: 'sort' },
+    { key: 'desc', kind: 'raw', read: (v, s) => (searchKeyOf(s && s.sort) ? searchFlag(v) : undefined),
+      write: (v, s) => (searchKeyOf(s && s.sort) ? searchFlag(v) : undefined), label: 'Descending', csv: 'descending' },
+    { key: 'print', kind: 'raw', read: searchFlag, write: searchFlag, label: 'Print in the site report', csv: 'in_report' }
+];
+// Load: coerced through the table; an entry with no name or no query, or
+// that is no record, is dropped, and so is a later one whose name another
+// already has in any case; at most SEARCH_MAX. A missing or repeated id is
+// minted sq_1, sq_2... (the first free one), not from the clock, so the same
+// hand-written file read twice gives the same searches and Update does not
+// count a change that is not there (docChangeCount compares the list whole),
+// as legacyNodeShape's i1, i2 do. Mutates nothing it is given.
+function normalizeSearches(list) {
+    const names = new Set();
+    const kept = (Array.isArray(list) ? list : [])
+        .filter((s) => s && typeof s === 'object' && !Array.isArray(s))
+        .map((s) => readFields(SEARCH_FIELDS, s))
+        .filter((s) => {
+            if (!s.name || !s.query || names.has(s.name.toLowerCase())) return false;
+            names.add(s.name.toLowerCase());
+            return true;
+        })
+        .slice(0, SEARCH_MAX);
+    const taken = new Set(kept.map((s) => s.id).filter(Boolean));
+    const seen = new Set();
+    let n = 0;
+    return kept.map((s) => {
+        let id = s.id;
+        if (!id || seen.has(id)) {
+            do { n++; id = 'sq_' + n; } while (taken.has(id));
+            taken.add(id);
+        }
+        seen.add(id);
+        const { id: _drop, ...rest } = s;
+        return { id, ...rest };
+    });
+}
+// Save: no key at all when there are none, so a network with no saved
+// search serializes as it did before they existed, and its link is no longer.
+const serializeSearches = (list) => (list && list.length ? list.map((s) => writeFields(SEARCH_FIELDS, s)) : undefined);
+const makeSearch = (fields) => readFields(SEARCH_FIELDS, Object.assign({ id: nextId('sq') }, fields));
+const searchById = (id, searches = state.searches) => (id ? (searches || []).find((s) => s.id === id) || null : null);
+// A custom column's key (x:<id>) names a column the document defines; one
+// whose column is gone is dropped from every search's columns and sort (and
+// the sort's direction with it). Topo's own keys stay, known or not: one this
+// build does not draw is skipped when printed, as the table view's are. In
+// place; on every load, and when a custom column is deleted.
+function normalizeSearchRefs(searches = state.searches, columns = state.columns) {
+    const ids = new Set((columns || []).map((c) => c.id));
+    const gone = (k) => typeof k === 'string' && k.startsWith('x:') && !ids.has(k.slice(2));
+    (searches || []).forEach((s) => {
+        if (!s) return;
+        if (Array.isArray(s.columns)) {
+            const keep = s.columns.filter((k) => !gone(k));
+            if (keep.length) s.columns = keep; else delete s.columns;
+        }
+        if (gone(s.sort)) { delete s.sort; delete s.desc; }
+    });
+}
+
+// ============================================================================
 // Document versions and migrations
 // ============================================================================
 // The document carries its own schema version, `v`. Before it did, every load,
@@ -3873,6 +5189,45 @@ function providerCovers(id, ctx = {}) {
 //                   Topo's usual (doc.expectedLife).
 //                   Nothing to convert; a v13 build would drop all of it on
 //                   its next save, and read a schedule as accepted for good.
+//   v 15            providers ("Providers" above): who is responsible for
+//                   what, a list of its own (doc.providers: a name, a
+//                   service, contact details, support hours, notes) and the
+//                   references to one by id from a device, a cable and a
+//                   group (node.provider, link.provider, group.provider).
+//                   Nothing to convert; a v14 build would drop the list and
+//                   every reference on its next save.
+//   v 16            a network's DHCP pool (networks[].dhcpFirst and
+//                   dhcpLast, docs/BACKLOG.md feature 2): its first and last
+//                   address, as typed. Nothing to convert: a network from
+//                   before has no pool, and saves byte for byte as it did.
+//                   Saved searches too (doc.searches, "Saved searches"
+//                   above, docs/BACKLOG.md feature 6), folded into this
+//                   step because they landed in the same unpushed series: a
+//                   list of its own (a name, a query, the columns to print,
+//                   a sort, whether the report prints it). Nothing to
+//                   convert: a document from before has none, and writes no
+//                   key. A v15 build would drop both ends and every saved
+//                   search on its next save.
+//                   A device's vendor and model too (node.vendor, node.model,
+//                   docs/BACKLOG.md feature 3), folded in for the same
+//                   reason, with `os` relabelled "Firmware / OS". Nothing to
+//                   convert: text typed under the old "Model / firmware"
+//                   label stays in `os` (as the v7 locations did, splitting
+//                   it is a step the user takes), and a device with neither
+//                   writes neither key.
+//                   VLANs, trunks and PoE too (docs/BACKLOG.md feature 4),
+//                   folded in for the same reason: a port's tagged VLANs and
+//                   PoE (node.portAttrs.pN.tagged, .poe; its vlan now reads
+//                   as the untagged VLAN, which is what an access VLAN is), a
+//                   wired interface's own untagged and tagged VLANs
+//                   (interfaces[].vlan, .tagged) and a switch's PoE budget
+//                   and a device's PoE draw (node.poeBudget, node.poeDraw).
+//                   Nothing to convert: a port, an interface or a device
+//                   from before has none of them and writes no key, and an
+//                   end with no VLAN recorded carries every VLAN. A v15
+//                   build would drop the pool, the saved searches, every
+//                   vendor and model and every tagged list, PoE fact and
+//                   budget, so it opens a v16 document read-only.
 //
 // A document with a higher `v` was written by a newer Topo. Its unknown fields
 // cannot be kept — the serializer is an allowlist, and that is a privacy rule,
@@ -4224,7 +5579,7 @@ function serializeTableView(v) {
     return n.devices ? n : undefined;
 }
 
-const DOC_VERSION = 15;
+const DOC_VERSION = 16;
 
 // A document's outline: an object whose lists, where present, are lists. The
 // loader tolerates a missing list (a bare { nodes } file is a document), but a
@@ -4235,7 +5590,7 @@ const DOC_VERSION = 15;
 const DOC_VERSION_RE = /^\s*[1-9]\d*\s*$/;
 const isDocShape = (doc) => !!doc && typeof doc === 'object' && !Array.isArray(doc)
     && (doc.v === undefined || (Number.isInteger(doc.v) && doc.v >= 1) || (typeof doc.v === 'string' && DOC_VERSION_RE.test(doc.v)))
-    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations', 'columns', 'pinned', 'accepted'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
+    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations', 'columns', 'pinned', 'accepted', 'searches'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
 
 // A version written as text ("14", a hand-edited file) is that version.
 const docVersionOf = (doc) => {
@@ -4368,7 +5723,12 @@ const MIGRATIONS = [
     // A device's service dates and interval are new keys, not a new shape.
     { from: 13, to: 14, run: (doc) => ({ ...doc, v: 14 }) },
     // Providers and the references to them are new keys, not a new shape.
-    { from: 14, to: 15, run: (doc) => ({ ...doc, v: 15 }) }
+    { from: 14, to: 15, run: (doc) => ({ ...doc, v: 15 }) },
+    // A network's DHCP pool is two new keys, the saved searches a new list,
+    // a device's vendor and model two more keys, and the tagged VLANs and
+    // PoE facts of ports, interfaces and devices more keys again (folded in:
+    // same unpushed series), not a new shape.
+    { from: 15, to: 16, run: (doc) => ({ ...doc, v: 16 }) }
 ];
 
 // The v2 interface zone flags of `src`, put back on the same node as written.

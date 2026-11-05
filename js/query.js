@@ -16,9 +16,12 @@
 //   ip:          an address (exact), a network (10.10.30.0/24: every address
 //                inside it) or the start of one as typed so far (10.10.)
 //   mac:         hex digits, separators ignored, or the vendor the OUI decodes
-//   vlan:        the VLAN of a declared network the address is on, or the
-//                access VLAN of a switch port (node.portAttrs): the switch
-//                with such a port, and the device cabled into it
+//   vlan:        a VLAN an interface or a switch port carries, untagged or
+//                tagged (portVlans, js/model.js): an interface by its own
+//                untagged VLAN, else its declared network's, or its tagged
+//                list; a port by its untagged VLAN or its tagged list
+//                (node.portAttrs, "all" carrying every one): the switch with
+//                such a port, and the device cabled into it
 //   switch:      cabled straight into a switch of that name (and the switch)
 //   loc:/status: the Asset group's location and status (js/assets.js):
 //                status:retired, loc:"rack 2". loc: reads where the device
@@ -34,6 +37,10 @@
 //                id (host:esx-01): the devices on it, and a container on a
 //                VM on it too, as group: takes the groups inside
 //   tag:         the asset tag
+//   vendor:      the vendor as typed (alias make:); mac:dell finds by the
+//                vendor the OUI decodes instead
+//   model:       the model as typed
+//   fw:          the firmware / OS text (aliases firmware:, os:)
 //   ssid:        the SSID (or its id) an AP broadcasts or a client's link
 //                is on, as inferred when nobody picked it (js/model.js
 //                "Wi-Fi"): ssid:guest
@@ -41,9 +48,25 @@
 //                on it (its own, or the best band both ends share)
 //   wifi:        a radio's standard: wifi:6e, wifi:ax, wifi:7, wifi:5
 //   channel:     a radio on that channel, and a link through it
-//   has:         finding, critical, advisory, ip, mac, gateway, dns, os,
-//                notes, tag, cable, group, host (runs on a device), guests
-//                (something runs on it), wifi (a radio or an association)
+//   has:         finding, critical, advisory, ip, mac, gateway, dns, os
+//                (alias fw, firmware), vendor, model, notes, tag, cable, group, host (runs on a device), guests
+//                (something runs on it), wifi (a radio or an association),
+//                full (a switch or AP almost out of free ports: the
+//                port-capacity note, portCapacityNote in js/model.js), so
+//                type:switch has:full lists them, trunk (a port or a wired
+//                interface with tagged VLANs, and the device holding one),
+//                poe (a port with PoE, a switch with a PoE budget, a device
+//                with a PoE draw), history (any past value
+//                in this browser's address history, js/trail.js)
+//   was:         a value a device held at an earlier back-up or report and
+//                holds no more, from that same history: an address or a
+//                network (was:10.0.0.0/24), a MAC with any separators, or
+//                text of a switch port, a group's path or a name. Only this
+//                browser knows it, so was: and has:history are browser-local
+//                (queryLocalTerms): a saved search cannot use them and no
+//                report prints them. A removed device that held it is named
+//                under the box (it cannot be drawn); on a network not kept
+//                here they match nothing and the line under the box says so.
 //
 // A cable's own facts (link.cable: its label, length, colour, via) are plain
 // text of the cable, so "WS-3B" finds the run with that label. A port's
@@ -191,6 +214,8 @@ const Q_HAS = {
     gateway: (n) => !!effectiveGw(n),
     dns: (n) => !!effectiveDns(n),
     os: (n) => !isBlank(n.os),
+    vendor: (n) => !isBlank(n.vendor),
+    model: (n) => !isBlank(n.model),
     notes: (n) => !isBlank(n.notes),
     tag: (n) => !isBlank(n.assetTag),
     cable: (n) => linksAtNode(n.id).length > 0,
@@ -198,10 +223,21 @@ const Q_HAS = {
     host: (n) => !!hostOf(n),
     guests: (n) => guestsOf(n).length > 0,
     // A radio, or an association: an AP, a laptop, a phone on Wi-Fi.
-    wifi: (n) => qRadios(n).length > 0 || qWifiLinks(n).length > 0
+    wifi: (n) => qRadios(n).length > 0 || qWifiLinks(n).length > 0,
+    // Almost out of free ports, or out of them: the port-capacity note's test.
+    full: (n) => !!portCapacityNote(n),
+    // Tagged VLANs on a port or a wired interface (document v16).
+    trunk: (n) => qPortIds(n).some((id) => qPortTrunk(n, id)) || qIfaces(n).some(qIfaceTrunk),
+    // PoE on a port, a PoE budget, or a PoE draw.
+    poe: (n) => qPortIds(n).some((id) => qPortPoe(n, id)) || (hasPortGrid(n) && asPoeBudget(n.poeBudget) !== undefined)
+        || (canDrawPoe(n.type) && asPoeDraw(n.poeDraw) !== undefined),
+    // Any past value in this browser's trail (js/trail.js): browser-local.
+    history: (n) => qHasHistory(n)
 };
+// has: values that read this browser's trail, never the document.
+const Q_HAS_LOCAL = ['history'];
 const Q_HAS_ALIAS = { findings: 'finding', problem: 'finding', warning: 'advisory', gw: 'gateway', address: 'ip', cables: 'cable', note: 'notes', groups: 'group',
-    guest: 'guests', 'wi-fi': 'wifi', wireless: 'wifi', radio: 'wifi' };
+    fw: 'os', firmware: 'os', guest: 'guests', 'wi-fi': 'wifi', wireless: 'wifi', radio: 'wifi' };
 const Q_HAS_LINK = {
     finding: (l) => !!qLinkSeverity(l),
     critical: (l) => qLinkSeverity(l) === 'bad',
@@ -209,7 +245,9 @@ const Q_HAS_LINK = {
     wifi: (l) => !!wifiLinkEnds(l)
 };
 // An interface row asks its own address and MAC, not its device's.
-const Q_HAS_IFACE = { ip: (n, i) => !!qAddrOf(i.ip), mac: (n, i) => hasMac(i), wifi: (n, i) => ifaceIsWireless(i) };
+const Q_HAS_IFACE = { ip: (n, i) => !!qAddrOf(i.ip), mac: (n, i) => hasMac(i), wifi: (n, i) => ifaceIsWireless(i), trunk: (n, i) => qIfaceTrunk(i) };
+// A port row (the table's Ports tab) asks its own facts for these.
+const Q_HAS_PORT = { trunk: (p) => qPortTrunk(p.node, p.portId), poe: (p) => qPortPoe(p.node, p.portId) };
 
 // ---- ip: ----
 function qIpPrep(v) {
@@ -251,13 +289,36 @@ function qMacMatch(iface, q) {
 }
 
 // ---- vlan: and switch: ----
+// An interface by the VLAN it is on untagged (its own, else its declared
+// network's) or carries tagged. Only what is recorded: an interface that says
+// nothing matches no VLAN, though endCarries treats it as carrying them all.
 function qIfaceVlan(iface, vlan) {
-    const addr = qAddrOf(iface.ip);
-    const net = addr && networkOfIp(addr);
-    return !!net && net.vlan === vlan;
+    if (!iface) return false;
+    const wired = !ifaceIsWireless(iface);
+    const own = wired ? asVlan(iface.vlan) : undefined;
+    if (own !== undefined) { if (own === vlan) return true; }
+    else {
+        const addr = qAddrOf(iface.ip);
+        const net = addr && networkOfIp(addr);
+        if (net && net.vlan === vlan) return true;
+    }
+    return wired && vlanListHas(parseVlanList(asVlanList(iface.tagged)), vlan);
 }
-// A port's access VLAN, and a device by the ports it holds or is cabled into.
-const qPortVlan = (node, portId, vlan) => hasPortGrid(node) && portAttrOf(node, portId).vlan === vlan;
+// A port's untagged VLAN or a tagged one it carries, and a device by the
+// ports it holds or is cabled into.
+// Read through portVlans, so a LAG member port answers by its bond's VLANs
+// when the bond records any, as the checks will.
+const qPortVlan = (node, portId, vlan) => {
+    if (!hasPortGrid(node)) return false;
+    const e = portVlans(node, portId);
+    return e.untagged === vlan || e.tagged === 'all' || (e.tagged instanceof Set && e.tagged.has(vlan));
+};
+// has:trunk and has:poe, by a port's own facts (or its LAG's VLANs) and a
+// wired interface's.
+const qPortTrunk = (node, portId) => hasPortGrid(node) && portVlans(node, portId).tagged !== null;
+const qPortPoe = (node, portId) => hasPortGrid(node) && portAttrOf(node, portId).poe !== null;
+const qPortIds = (n) => (hasPortGrid(n) && n.portAttrs && typeof n.portAttrs === 'object' ? Object.keys(n.portAttrs) : []);
+const qIfaceTrunk = (i) => !!i && !ifaceIsWireless(i) && asVlanList(i.tagged) !== undefined;
 function qNodeVlan(n, vlan) {
     if (qIfaces(n).some((i) => qIfaceVlan(i, vlan))) return true;
     if (hasPortGrid(n) && n.portAttrs && Object.keys(n.portAttrs).some((id) => qPortVlan(n, id, vlan))) return true;
@@ -298,6 +359,97 @@ const qNodeInGroup = (n, v) => qGroupHas(groupOfNode(n), v);
 // the free text, which a grouped device keeps and a search still finds.
 const qNodeLoc = (n, v) => qHas(n.location, v) || qHas(nodePlaceText(n), v);
 
+// ---- was: and has:history (docs/BACKLOG.md feature 5, stage 3) ----
+// What a device held at earlier back-ups and reports, from the trail this
+// browser keeps beside the card (js/trail.js), never from the document. So
+// both are browser-local (def.local, q.local): a saved search may not use
+// them (queryLocalTerms), and nothing printed asks them.
+// The trail of the open network, or null: a network not kept here, or a
+// read-only one, has none, and was: is understood and matches nothing.
+// Read once per lookup pass (the card's entry is parsed to ask).
+function qTrailNow() {
+    const read = () => {
+        const id = typeof historyCardId === 'function' ? historyCardId() : null;
+        return id && typeof _trails !== 'undefined' ? _trails.get(id) || null : null;
+    };
+    if (!lookupPass) return read();
+    if (lookupPass.trail === undefined) lookupPass.trail = read();
+    return lookupPass.trail;
+}
+// The value as the recorder keeps it (js/trail.js observeNode): spaces out,
+// lower case, and cut where trailText cuts it, so a long name now still reads
+// as the one recorded.
+const qTrailCut = (v) => (typeof trailText === 'function' ? trailText(v) : String(v));
+const qTrailIp = (v) => qTrailCut(String(v || '').replace(/\s+/g, '').toLowerCase());
+// The same address, whatever its prefix length or spelling: '192.168.1.20',
+// '/24' and '/23' are one address on the wire (the History section's reuse
+// hint reads them so too), and so are '2001:db8:0::1' and '2001:db8::1'.
+function qTrailSameIp(now, val) {
+    if (qTrailIp(now) === val) return true;
+    const a = qAddrOf(String(now || '').replace(/\s+/g, '')), b = qAddrOf(val);
+    return !!a && !!b && qSameKind(a, b) && a.toString() === b.toString();
+}
+// Does the device still hold what span s recorded? An address (by the address,
+// not its prefix) or a MAC on any of its NICs (one moved to another NIC is not
+// gone), the same group (by id, so a group renamed is not a move), the same
+// name, or a cable still on that switch port (any of its uplinks: a device on
+// two switches, observeNode's alts). `ctx` keeps the uplinks for one device's
+// spans.
+function qTrailHeld(n, s, ctx) {
+    if (s.f === 'ip') return qIfaces(n).some((i) => !!String(i.ip || '').trim() && qTrailSameIp(i.ip, s.val));
+    if (s.f === 'mac') return qIfaces(n).some((i) => !!i.mac && qTrailCut(normMac(String(i.mac).trim())) === s.val);
+    if (s.f === 'group') return n.group === s.val;
+    if (s.f === 'name') return qTrailCut(String(n.name || '').trim()) === s.val;
+    if (s.f === 'port') {
+        if (!ctx.alts) ctx.alts = typeof uplinkAlts === 'function' ? uplinkAlts(n, { skipNoPort: true }) : [];
+        return ctx.alts.some((a) => a.val === s.val);
+    }
+    return false;
+}
+// The value is read the way plain text is: a whole address or a network as an
+// address (ip spans only). Anything else is text of a switch port, a group's
+// path or a name, and also, when it could be one, the start of an address (a
+// dotted or a colon fragment: ip spans) or part of a MAC (hex with
+// separators, or six to twelve bare hex digits: mac spans). A past name
+// 'DC-01', a group 'A-1' or '1.2' is hex-like too, so it is never read as
+// an address or a MAC alone, or its own History button would find nothing.
+const Q_WAS_DOTTED = /^\d{1,3}(?:\.\d{0,3}){1,3}$/;
+const Q_WAS_COLON = /^[0-9a-f:.]*:[0-9a-f:.]*$/i;
+const Q_WAS_MAC = /^[0-9a-f]{1,4}(?:[:.\-][0-9a-f]{1,4})+[:.\-]?$|^[0-9a-f]{6,12}$/i;
+function qWasPrep(v) {
+    if (v.includes('/') && /^[0-9a-f:.]+\/\d*$/i.test(v)) {
+        const p = parseValidCIDR(v);
+        return p ? { ip: { cidr: p }, local: true } : { error: true };
+    }
+    const addr = parseIpText(v);
+    if (addr) return { ip: { addr }, local: true };
+    const q = { v, local: true };
+    if (Q_WAS_DOTTED.test(v) || Q_WAS_COLON.test(v)) q.ip = { part: v };
+    if (!Q_WAS_DOTTED.test(v) && Q_WAS_MAC.test(v) && qHex(v)) q.mac = qHex(v);
+    return q;
+}
+function qWasSpan(s, q) {
+    if (s.f === 'ip') return !!q.ip && qIpMatch(s.val, q.ip);
+    if (s.f === 'mac') return !!q.mac && qMacHas(s.val, q.mac);
+    return !!q.v && (s.f === 'port' || s.f === 'group' || s.f === 'name') && qHas(s.txt, q.v);
+}
+// A device on the map whose trail holds a matching value it no longer holds.
+function qWasNode(n, q) {
+    const rec = qTrailNow();
+    const dev = rec && n && n.id ? rec.devices[n.id] : null;
+    if (!dev) return false;
+    const ctx = {};
+    return dev.spans.some((s) => qWasSpan(s, q) && !qTrailHeld(n, s, ctx));
+}
+// Any past value at all.
+function qHasHistory(n) {
+    const rec = qTrailNow();
+    const dev = rec && n && n.id ? rec.devices[n.id] : null;
+    if (!dev) return false;
+    const ctx = {};
+    return dev.spans.some((s) => !qTrailHeld(n, s, ctx));
+}
+
 // The prefixes. A term defines what it can say about each kind of row; what
 // it does not define falls back (qTerm* below): a device by its interfaces,
 // an interface by its device, a cable by its two ends, a subnet by the
@@ -311,7 +463,7 @@ const Q_PREFIXES = {
     vlan: { prep: (v) => { const vlan = asVlan(v); return vlan === undefined ? { error: true } : { vlan }; },
             node: (n, q) => qNodeVlan(n, q.vlan),
             iface: (n, i, q) => { if (qIfaceVlan(i, q.vlan)) return true; const l = linkOnIface(n.id, i.id); const peer = l && qPeer(l, n.id); return !!peer && qPortVlan(peer, ifaceIdOn(l, peer.id), q.vlan); },
-            port: (p, q) => portAttrOf(p.node, p.portId).vlan === q.vlan,
+            port: (p, q) => qPortVlan(p.node, p.portId, q.vlan),
             net: (s, q) => !!s.net && s.net.vlan === q.vlan },
     switch: { node: (n, q) => qIsSwitch(n, q.v) || linksAtNode(n.id).some((l) => qIsSwitch(qPeer(l, n.id), q.v)),
               iface: (n, i, q) => { if (qIsSwitch(n, q.v)) return true; const l = linkOnIface(n.id, i.id); return !!l && qIsSwitch(qPeer(l, n.id), q.v); },
@@ -320,6 +472,11 @@ const Q_PREFIXES = {
     group: { field: 'group', node: (n, q) => qNodeInGroup(n, q.v), grp: (g, q) => qGroupHas(g, q.v) },
     status: { field: 'status', node: (n, q) => qLower(n.status) === q.v || qHas(n.status, q.v) },
     tag: { field: 'assetTag', node: (n, q) => qHas(n.assetTag, q.v) },
+    // What was typed only (document v16): vendor:dell does not match a Dell
+    // MAC on a device with no vendor; mac:dell does.
+    vendor: { field: 'vendor', node: (n, q) => qHas(n.vendor, q.v) },
+    model: { field: 'model', node: (n, q) => qHas(n.model, q.v) },
+    fw: { field: 'os', node: (n, q) => qHas(n.os, q.v) },
     host: { field: 'host', node: (n, q) => hostChainOf(n).some((h) => qHas(h.name, q.v) || qLower(h.id) === q.v) },
     ssid: { node: (n, q) => qNodeSsid(n, q.v),
             iface: (n, i, q) => (ifaceIsWireless(i) && (n.type === 'ap' || isRoutingDevice(n.type)) && apSsids(radioOf(i)).some((id) => qSsidHas(id, q.v)))
@@ -341,16 +498,20 @@ const Q_PREFIXES = {
                node: (n, q) => qRadios(n).some((i) => qRadioChannel(i, q.ch)),
                iface: (n, i, q) => qRadioChannel(i, q.ch),
                link: (l, q) => qLinkChannel(l, q.ch) },
-    has: { prep: (v) => { const k = Q_HAS_ALIAS[v] || v; return Q_HAS[k] ? { has: k } : { error: true }; },
+    // What a device had before (this browser's trail): was:192.168.1.20,
+    // was:10.0.0.0/24, was:aa-bb-cc-00-11-22, was:"rack 3". Browser-local.
+    was: { local: true, prep: qWasPrep, node: (n, q) => qWasNode(n, q) },
+    has: { prep: (v) => { const k = Q_HAS_ALIAS[v] || v; return Q_HAS[k] ? (Q_HAS_LOCAL.includes(k) ? { has: k, local: true } : { has: k }) : { error: true }; },
            node: (n, q) => Q_HAS[q.has](n),
            iface: (n, i, q) => (Q_HAS_IFACE[q.has] ? Q_HAS_IFACE[q.has](n, i) : Q_HAS[q.has](n)),
+           port: (p, q) => (Q_HAS_PORT[q.has] ? Q_HAS_PORT[q.has](p) : Q_HAS[q.has](p.node) || (!!p.peer && Q_HAS[q.has](p.peer))),
            // A cable by a finding naming it (a loop) or by either end.
            link: (l, q) => {
                const own = Q_HAS_LINK[q.has] && Q_HAS_LINK[q.has](l);
                return !!own || [l.source, l.target].some((id) => { const n = getNode(id); return !!n && Q_HAS[q.has](n); });
            } }
 };
-const Q_ALIAS = { location: 'loc', grp: 'group' };
+const Q_ALIAS = { location: 'loc', grp: 'group', make: 'vendor', firmware: 'fw', os: 'fw' };
 const qKnown = (key) => {
     const k = Object.prototype.hasOwnProperty.call(Q_ALIAS, key) ? Q_ALIAS[key] : key;
     const def = k && Object.prototype.hasOwnProperty.call(Q_PREFIXES, k) ? Q_PREFIXES[k] : null;
@@ -437,6 +598,77 @@ function queryMatch(query, kind, ...args) {
     return query.terms.every((term) => test(term, ...args) !== term.neg);
 }
 
+// ---- A saved search's matches (docs/BACKLOG.md feature 6) ----
+// Asked of a query's text, never of state.query, so a saved search counts the
+// same in the Saved menu, in a reduced view (where activeQuery() is null) and
+// in the report. One lookup pass for the lot when the caller holds one.
+// -> the ids of the devices the text matches; none when it is not understood.
+function querySavedMatches(text, query = parseQuery(text)) {
+    if (!query.terms.length || query.errors.length) return [];
+    // A browser-local term never counts for a saved search, however it came.
+    if (qQueryIsLocal(query)) return [];
+    return withLookupPass(() => state.nodes.filter((n) => queryMatch(query, 'node', n)).map((n) => n.id));
+}
+const queryMatchCount = (text, query) => querySavedMatches(text, query).length;
+
+// Terms only this browser can answer: was: (an address or place a device
+// had, from the history trail) and has:history (docs/BACKLOG.md feature 5).
+// The trail lives in this browser and never in the file, so a saved search
+// that used one would match differently on every computer the network is
+// opened on. Found by the words themselves, before the prefixes are known,
+// so they are refused whether or not this build understands them yet.
+// -> the words as typed, [] when there are none.
+// Since stage 3 of feature 5 this build understands them too: a word is also
+// local when its parsed term says so (def.local: was:; q.local: has:history),
+// so an alias added later is refused with them.
+function queryLocalTerms(text) {
+    const words = String(text == null ? '' : text).match(/(?:[^\s"]+|"[^"]*"?)+/g) || [];
+    return words.filter((raw) => {
+        const m = /^[-!]?([a-z]+):(.*)$/i.exec(raw);
+        if (!m) return false;
+        const key = m[1].toLowerCase(), value = m[2].replace(/"/g, '').trim().toLowerCase();
+        if (key === 'was' || (key === 'has' && value === 'history')) return true;
+        return qQueryIsLocal(parseQuery(raw));
+    });
+}
+const qTermIsLocal = (term) => !!(term && ((term.def && term.def.local) || (term.q && term.q.local)));
+const qQueryIsLocal = (query) => !!query && query.terms.some(qTermIsLocal);
+
+// The line under the box for was: and has:history (updateQueryBar): on a
+// network with no history here, that none is kept; else each removed device
+// whose trail holds a value a was: term matches, which cannot be drawn and so
+// is no match on the map. -> the sentence, or ''.
+function queryTrailNote(query) {
+    if (!query || query.errors.length) return '';
+    const local = query.terms.filter((term) => qTermIsLocal(term) && !term.neg);
+    if (!local.length) return '';
+    const rec = qTrailNow();
+    if (!rec) return typeof historyCardId === 'function' && historyCardId() ? '' : t('No history is kept for this network.');
+    const was = local.filter((term) => term.def === Q_PREFIXES.was);
+    if (!was.length) return '';
+    // A removed device has only its trail to ask: only a query of nothing but
+    // was: and has:history can be answered of it, each term by any of its
+    // spans (as the map asks each term of the whole device).
+    const isHist = (term) => term.def === Q_PREFIXES.has && term.q.has === 'history';
+    if (!query.terms.every((term) => term.def === Q_PREFIXES.was || isHist(term))) return '';
+    if (query.terms.some((term) => isHist(term) && term.neg)) return '';
+    const notWas = query.terms.filter((term) => term.def === Q_PREFIXES.was && term.neg);
+    const gone = [];
+    Object.keys(rec.devices).forEach((id) => {
+        if (getNode(id)) return;
+        const dev = rec.devices[id];
+        if (!was.every((term) => dev.spans.some((s) => qWasSpan(s, term.q)))) return;
+        if (notWas.some((term) => dev.spans.some((s) => qWasSpan(s, term.q)))) return;
+        const hits = dev.spans.filter((s) => was.some((term) => qWasSpan(s, term.q)));
+        gone.push({ name: String(dev.name || '').trim() || id, until: hits.reduce((m, s) => Math.max(m, s.last), -Infinity) });
+    });
+    gone.sort((a, b) => b.until - a.until);
+    const shown = gone.slice(0, 3).map((g) => t('Also held by removed device {name} until {date}.', { name: g.name, date: localDateOf(g.until) }));
+    // Past three, the rest as a count ("label: n" reads in every locale's plural).
+    if (gone.length > 3) shown.push(t('Other removed devices that held it: {n}.', { n: gone.length - 3 }));
+    return shown.join(' ');
+}
+
 let _queryMemo = { text: null, query: null };
 // The query in force, or null when there is none to apply.
 function activeQuery() {
@@ -473,6 +705,8 @@ function queryKeepsRow(row, q = activeQuery()) {
     if (row.rec === 'link') return queryMatch(q, 'link', getLink(row.ref.linkId));
     if (row.rec === 'group') return queryMatch(q, 'grp', groupById(row.ref.groupId));
     if (row.rec === 'wifi') return queryMatch(q, 'wifi', wifiById(row.ref.wifiId));
+    // An Inventory row (js/table.js) stays while one of its devices matches.
+    if (row.rec === 'inv') return row.data.nodeIds.some((id) => { const n = getNode(id); return !!n && queryMatch(q, 'node', n); });
     if (row.rec === 'port') {
         const node = getNode(row.ref.nodeId);
         return !!node && queryMatch(q, 'port', { node, portId: row.ref.portId, peer: row.data.peerId ? getNode(row.data.peerId) : null });
@@ -517,6 +751,28 @@ function selectQueryMatches() {
     selectEntries(entries);
 }
 
+// Locate from the box (docs/BACKLOG.md, feature 1, stage 3): the devices
+// the Locate button counts, or null where it has no say (the table's other
+// tabs, whose rows are not devices). The map's and the rack view's matches
+// are the drawn ones (queryMapMatches); the Devices tab's are its rows, so
+// the button agrees with the count beside it.
+function queryLocateIds() {
+    if (!activeQuery()) return null;
+    if (tableShown()) {
+        if (_tv.tab !== 'devices') return null;
+        return _tv.rows.filter((r) => !r.sub && r.rec === 'node').map((r) => r.ref.nodeId);
+    }
+    return _queryLastMap ? [..._queryLastMap.nodes] : [];
+}
+// The one device the search names, selected with its Locate section open
+// (openLocate, js/locate.js). Several matches: nothing, never the first.
+function locateQueryMatch() {
+    const ids = queryLocateIds();
+    if (!ids || ids.length !== 1 || !getNode(ids[0])) return false;
+    select(ids[0], 'node');
+    return openLocate();
+}
+
 // A match folded into a collapsed group is framed by the group's node, which
 // the map lights for it (mapPointsOf, js/groupmap.js).
 function zoomToQueryMatches() {
@@ -558,17 +814,34 @@ function updateQueryBar() {
         err.classList.add('hidden');
         if (input) input.classList.remove('bad');
     }
+    // was: and has:history: a removed holder, or no history kept here.
+    const note = qEl('queryNote');
+    const noteText = note ? queryTrailNote(q) : '';
+    if (note) {
+        if (note.textContent !== noteText) note.textContent = noteText;
+        note.classList.toggle('hidden', !noteText);
+    }
     const any = !!q && n > 0;
     qEl('querySelectBtn').disabled = !any;
     qEl('queryZoomBtn').disabled = !any;
     // Nothing to zoom over the table or the rack view (js/rackview.js).
     qEl('queryZoomBtn').classList.toggle('hidden', table || rackShown());
+    // Locate: on exactly one device; on several, disabled and saying why.
+    const loc = qEl('queryLocateBtn');
+    if (loc) {
+        const ids = queryLocateIds();
+        loc.classList.toggle('hidden', !ids);
+        loc.disabled = !ids || ids.length !== 1;
+        loc.title = t(ids && ids.length > 1 ? 'Narrow the search to one device' : 'Where is it plugged in?');
+    }
     const clear = !(state.query || '').length;
     qEl('queryClearBtn').classList.toggle('hidden', clear);
+    // The saved searches' ☆ in the card and ▾ in the box (js/searches.js).
+    const saved = typeof updateSavedSearchBar === 'function' ? updateSavedSearchBar(q) : false;
     // The row's height changes only when one of these flips; the observer
     // below catches the rest, so an unchanged bar measures nothing.
-    const shape = { on: !!q, none: !!q && !n, err: err.classList.contains('hidden'), clear };
-    if (!_barShape || ['on', 'none', 'err', 'clear'].some((k) => _barShape[k] !== shape[k])) {
+    const shape = { on: !!q, none: !!q && !n, err: err.classList.contains('hidden'), clear, saved, note: !!noteText };
+    if (!_barShape || ['on', 'none', 'err', 'clear', 'saved', 'note'].some((k) => _barShape[k] !== shape[k])) {
         _barShape = shape;
         syncTopbarHeight();
     }
@@ -615,6 +888,7 @@ function flushQuery() {
     qEl('queryClearBtn').addEventListener('click', () => { setQuery(''); input.focus(); });
     qEl('querySelectBtn').addEventListener('click', () => { if (flushQuery()) selectQueryMatches(); });
     qEl('queryZoomBtn').addEventListener('click', () => { if (flushQuery()) zoomToQueryMatches(); });
+    qEl('queryLocateBtn').addEventListener('click', () => { if (flushQuery()) locateQueryMatch(); });
 })();
 
 // How far down the pane the top row reaches, as --topbar-h on the body, for

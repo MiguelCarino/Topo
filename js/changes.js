@@ -197,6 +197,10 @@ function takeSnapshot(id, kind, doc) {
     const now = Date.now();
     _snapshots.set(id, { at: prev && prev.at >= now ? prev.at + 1 : now, kind, doc: copy });
     writeSnapshot(id);
+    // The same moment notes each device's addresses, switch port, group and
+    // name in the card's trail (js/trail.js), so every back-up and report
+    // caller records with no call of its own.
+    if (typeof recordPoint === 'function') recordPoint(id, kind, doc);
     return true;
 }
 

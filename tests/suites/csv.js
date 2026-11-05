@@ -148,7 +148,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
     // ---- 5: only mapped columns; blank leaves ----
     plan = planOf('name,os,gateway,notes\nPC-1,Win 11,,');
-    ok('only what the row says changes', plan.rows[0].changes.length === 1 && plan.rows[0].changes[0].field === 'Model / firmware', JSON.stringify(plan.rows[0].changes));
+    ok('only what the row says changes', plan.rows[0].changes.length === 1 && plan.rows[0].changes[0].field === 'Firmware / OS', JSON.stringify(plan.rows[0].changes));
     s = sheetOf('name,os,notes\nPC-1,Win 11,new note');
     plan = csvPlan(s, ['name', 'os', '']);
     applyCsvPlan(plan);
@@ -159,7 +159,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     plan = planOf('name,os,gateway\nPC-1,Win 11,10.0.0');
     ok('an invalid value makes the row a conflict', plan.rows[0].status === 'conflict' && /10\.0\.0 is not a valid Gateway/.test(plan.rows[0].why) && !plan.ops.length, plan.rows[0].why);
     plan = planOf('name,os\nPC-1,A\npc-1,B');
-    ok('a field another row sets differently is a conflict', statuses(plan) === 'change,conflict' && /Another row sets Model \/ firmware to A/.test(plan.rows[1].why), plan.rows[1].why);
+    ok('a field another row sets differently is a conflict', statuses(plan) === 'change,conflict' && /Another row sets Firmware \/ OS to A/.test(plan.rows[1].why), plan.rows[1].why);
     plan = planOf('name,nat\nPC-1,yes');
     ok('NAT on a host is said and left', plan.rows[0].status === 'same' && /Only a routing device does NAT/.test(plan.rows[0].notes.join(' ')));
 
@@ -416,11 +416,15 @@ window.addEventListener('load', () => { setTimeout(async () => {
     Object.keys(templatesData).forEach((key) => {
       loadDocState(cloneData(templatesData[key])); autoBindLinks();
       const want = { nodes: state.nodes.map((n) => `${n.id}:${n.type}`).sort().join(), cables: cableSig(), findings: fkeys() };
-      const sheets = { P: csvText(csvProvidersSheet()), S: csvText(csvSubnetsSheet()), W: csvText(csvWifiSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
+      const sheets = { P: csvText(csvProvidersSheet()), S: csvText(csvSubnetsSheet()), W: csvText(csvWifiSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()), T: csvText(csvPortsSheet()) };
       const first = wifiFirst();
+      // ports.csv last where a template records port facts (the Showcase's
+      // PoE since VLAN/PoE stage 2b): the three sheets do not carry them, and
+      // losing them would raise the PoE checks.
+      const ports = state.nodes.some((n) => n.portAttrs) ? 'T' : '';
       orders.forEach((order) => {
         blank();
-        const conflicts = importAll([...(first + order)].map((k) => sheets[k]));
+        const conflicts = importAll([...(first + order + ports)].map((k) => sheets[k]));
         const got = { nodes: state.nodes.map((n) => `${n.id}:${n.type}`).sort().join(), cables: cableSig(), findings: fkeys() };
         const diff = ['nodes', 'cables', 'findings'].filter((k) => got[k] !== want[k]);
         // The findings that differ, said, so a failure names them.
@@ -449,14 +453,17 @@ window.addEventListener('load', () => { setTimeout(async () => {
     Object.keys(templatesData).forEach((key) => {
       loadDocState(cloneData(templatesData[key])); autoBindLinks();
       const want = { nodes: devSig(), cables: cableSig(), findings: fkeys(), nets: netSig(), grps: grpSig(), eff: effSig() };
-      const sheets = { P: csvText(csvProvidersSheet()), S: csvText(csvSubnetsSheet()), G: csvText(csvGroupsSheet()), W: csvText(csvWifiSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
+      const sheets = { P: csvText(csvProvidersSheet()), S: csvText(csvSubnetsSheet()), G: csvText(csvGroupsSheet()), W: csvText(csvWifiSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()), T: csvText(csvPortsSheet()) };
+      const ports = state.nodes.some((n) => n.portAttrs) ? 'T' : '';
       // With Wi-Fi, the subnets and Wi-Fi sheets first whichever the order
       // (a Wi-Fi network names its subnet, a radio or a cable its network),
       // and only groups.csv last.
       const wifiOrder = { SGDIC: 'SWGDIC', DICSG: 'SWDICG' };
       const hasWifi = (state.wifi || []).length > 0;
       Object.keys(full).forEach((key0) => {
-        const order = ((state.providers || []).length ? 'P' : '') + (hasWifi ? wifiOrder[key0] : key0);
+        // ports.csv after the cables (as above), before a last groups.csv.
+        const base = hasWifi ? wifiOrder[key0] : key0;
+        const order = ((state.providers || []).length ? 'P' : '') + (ports ? base.replace('C', 'C' + ports) : base);
         blank();
         // With the review's "make the groups the sheet names" ticked, as a
         // person importing devices.csv on its own would.
@@ -492,8 +499,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 11d: the final review ----
     open();
     const subnets = csvSubnetsSheet();
-    ok('subnets.csv: every network field under its csv name', subnets.headers.join() === 'network_id,cidr,name,vlan,purpose,gateway,dns,dhcp,draw_zone'
-       && subnets.rows.length === 1 && subnets.rows[0].join() === 'n10,10.0.0.0/24,Office,,,10.0.0.1,,false,', subnets.rows.map((r) => r.join()).join(' | '));
+    ok('subnets.csv: every network field under its csv name', subnets.headers.join() === 'network_id,cidr,name,vlan,purpose,gateway,dns,dhcp,dhcp_first,dhcp_last,draw_zone'
+       && subnets.rows.length === 1 && subnets.rows[0].join() === 'n10,10.0.0.0/24,Office,,,10.0.0.1,,false,,,', subnets.rows.map((r) => r.join()).join(' | '));
     plan = planOf(csvText(subnets));
     ok('imported over the map it changes nothing', plan.kind === 'subnets' && !plan.ops.length && statuses(plan) === 'same', plan.kind + ' ' + statuses(plan));
     let sub = sheetOf('cidr,name,gateway,vlan\n10.0.5.0/24,Voice,10.0.5.1,20');

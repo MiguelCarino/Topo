@@ -1483,6 +1483,7 @@ function renderFaceplate(node, container) {
     head.appendChild(count);
     wrap.appendChild(head);
     wrap.appendChild(refusal);
+    wrap.appendChild(renderPoeBudget(node));
     wrap.appendChild(renderPortScheme(node));
 
     const grid = document.createElement('div');
@@ -1540,7 +1541,7 @@ function portChipTitle(node, portId) {
     const a = portAttrOf(node, portId);
     const link = linkOnIface(node.id, portId);
     const neighbour = link ? getNode(link.source === node.id ? link.target : link.source) : null;
-    const head = [ifaceLabel(node, portId), a.label, a.vlan !== null ? `VLAN ${a.vlan}` : ''].filter(Boolean).join(' · ');
+    const head = portFactsText(node, portId, [ifaceLabel(node, portId), a.label]);
     const title = neighbour ? t('Port {port} → {name}', { port: head, name: neighbour.name || neighbour.id }) : t('Port {port}: free', { port: head });
     const total = portCountOf(node);
     return Number(portId.slice(1)) > total ? `${title}\n${t('Past the {total}-port faceplate', { total })}` : title;
@@ -1560,10 +1561,30 @@ function refreshPortMarks(node) {
     });
     const sum = wrap.querySelector('#portAttrBox > summary');
     if (sum) sum.textContent = portAttrsSummary(node);
+    // A port given or losing PoE changes what the budget is asked for.
+    const load = wrap.querySelector('#poeLoadLine');
+    if (load) load.textContent = poeLoadText(poeLoad(node));
 }
+// "Port labels, VLANs and PoE (12 · 2 trunks · 8 PoE)": the ports with
+// anything written about them, then how many are trunks (a tagged list) and
+// how many give PoE, each only when there are any.
 function portAttrsSummary(node) {
-    const noted = faceplatePortIds(node).filter((id) => hasPortAttrs(node, id)).length;
-    return noted ? `${t('Port labels and VLANs')} (${noted})` : t('Port labels and VLANs');
+    const ids = faceplatePortIds(node);
+    const noted = ids.filter((id) => hasPortAttrs(node, id)).length;
+    if (!noted) return t('Port labels, VLANs and PoE');
+    const trunks = ids.filter((id) => portAttrOf(node, id).tagged !== null).length;
+    const poe = ids.filter((id) => portAttrOf(node, id).poe !== null).length;
+    const parts = [String(noted), trunks ? t(trunks === 1 ? '{n} trunk' : '{n} trunks', { n: trunks }) : '', poe ? `${poe} PoE` : ''].filter(Boolean);
+    return `${t('Port labels, VLANs and PoE')} (${parts.join(' · ')})`;
+}
+// One port's facts as one line: what comes first (its name, its label),
+// then its VLANs and its PoE: "Gi1/0/5 · Desk 5 · VLAN 10" for an access
+// port, "… · Untagged 1 · Tagged 10,20 · PoE+ 30 W" once it is a trunk.
+// The trade's words (VLAN, Tagged, Untagged, PoE) stay English, as the Full
+// editor's vocabulary does.
+function portFactsText(node, portId, lead = []) {
+    const a = portAttrOf(node, portId);
+    return lead.concat(portVlanFacts(a.vlan, a.tagged), [a.poe !== null ? poeText(a.poe) : '']).filter(Boolean).join(' · ');
 }
 
 // ---- Port names, labels and access VLANs (node.portScheme, node.portAttrs) ----
@@ -1659,10 +1680,52 @@ function renderPortScheme(node) {
     return row;
 }
 
-// Every faceplate port, one line each: its name, a label and an access VLAN.
-// Folded by default (a 48-port switch is 48 lines); open stays open while
-// the panel is redrawn, for as long as the page is.
+// A text field that writes only what it can read: a value it cannot read is
+// marked and not written, and puts back what the record held when the field
+// was entered (typed digit by digit, "5000" passes through 5, 50 and 500, so
+// its last valid prefix, a VLAN nobody meant, would otherwise stay in the
+// document, the report and the link). Leaving a marked field shows what is
+// kept; leaving a good one shows it the one way the file writes it.
+//   now()      what the record holds (undefined for nothing)
+//   read(text) { value } | { error: true } for a non-blank text
+//   write(v)   writes it (undefined clears)
+//   show(v)    the field's text for a held value
+//   after()    what to redraw once it is written
+function heldField(input, { now, read, write, show = (v) => (v === undefined ? '' : String(v)), after = () => {} }) {
+    let held = now();
+    input.addEventListener('focus', () => { held = now(); });
+    input.addEventListener('input', () => {
+        const v = input.value.trim();
+        const r = v ? read(v) : { value: undefined };
+        const bad = !!r.error;
+        input.classList.toggle('bad', bad);
+        if (bad) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+        const want = bad ? held : r.value;
+        if (now() === want) return;
+        write(want);
+        after();
+        saveTyping(); renderTyped();
+    });
+    input.addEventListener('blur', () => {
+        const bad = input.classList.contains('bad');
+        input.classList.remove('bad');
+        input.removeAttribute('aria-invalid');
+        const text = show(now());
+        if (bad || input.value.trim() !== text) input.value = text;
+    });
+}
+const vlanRead = (text) => { const n = asVlan(text); return n === undefined ? { error: true } : { value: n }; };
+const vlanListRead = (text) => { const v = asVlanList(text); return v === undefined ? { error: true } : { value: v }; };
+
+// Every faceplate port, one line each: its name, a label and its untagged
+// VLAN, and a ⋯ that opens a second line with its tagged VLANs and its PoE.
+// That line is open by itself on a port that has either, so a 48-port list
+// stays short. Folded by default (a 48-port switch is 48 lines); open stays
+// open while the panel is redrawn, for as long as the page is. Above the
+// lines, Set on ports writes one fact on a run of ports as one undo step.
 let _portAttrsOpen = false;
+const _portMoreOpen = new Set();   // `${nodeId}|${portId}`: a ⋯ opened by hand, for the page's life
+const POE_PICKS = [['', '—'], ['af', '802.3af'], ['at', '802.3at (PoE+)'], ['bt3', '802.3bt Type 3'], ['bt4', '802.3bt Type 4'], ['w', 'Watts…']];
 function renderPortAttrs(node) {
     const box = document.createElement('details');
     box.className = 'port-attrs';
@@ -1673,6 +1736,7 @@ function renderPortAttrs(node) {
     const sum = document.createElement('summary');
     sum.textContent = portAttrsSummary(node);
     box.appendChild(sum);
+    if (ids.length) box.appendChild(renderPortSetRow(node));
     const list = document.createElement('div');
     list.className = 'port-attr-list';
     list.id = 'portAttrList';
@@ -1696,48 +1760,284 @@ function renderPortAttrs(node) {
             refreshPortMarks(node);
             saveTyping(); renderTyped();
         });
+        // The untagged VLAN: an access port's, a trunk's native one. 1-4094
+        // or nothing; anything else is marked and not written (heldField).
         const vlan = document.createElement('input');
         vlan.type = 'text'; vlan.inputMode = 'numeric'; vlan.className = 'if-in port-attr-vlan';
         vlan.value = a.vlan === null ? '' : String(a.vlan);
-        vlan.placeholder = 'VLAN';
-        vlan.setAttribute('aria-label', `VLAN · ${ifaceLabel(node, id)}`);
-        // 1-4094 or nothing. Anything else is marked and not written, as a
-        // half-typed address is: the field keeps it, the document does not.
-        // Typed digit by digit, "5000" passes through 5, 50 and 500, so a
-        // refused value also puts back what the port held when the field was
-        // entered; otherwise its last valid prefix (500, a VLAN nobody meant)
-        // would stay in the document, the report and the link. Leaving a
-        // refused field shows that value again.
-        let held = a.vlan === null ? undefined : a.vlan;
-        const vlanNow = () => { const v = portAttrOf(node, id).vlan; return v === null ? undefined : v; };
-        vlan.addEventListener('focus', () => { held = vlanNow(); });
-        vlan.addEventListener('input', () => {
-            const v = vlan.value.trim();
-            const n = v ? asVlan(v) : undefined;
-            const bad = !!v && n === undefined;
-            vlan.classList.toggle('bad', bad);
-            const want = bad ? held : n;
-            if (vlanNow() === want) return;
-            setPortAttr(node, id, 'vlan', want);
-            refreshPortMarks(node);
-            saveTyping(); renderTyped();
+        vlan.placeholder = t('Untagged');
+        vlan.title = t('Untagged VLAN');
+        vlan.setAttribute('aria-label', `${t('Untagged VLAN')} · ${ifaceLabel(node, id)}`);
+        heldField(vlan, {
+            now: () => { const v = portAttrOf(node, id).vlan; return v === null ? undefined : v; },
+            read: vlanRead,
+            write: (v) => setPortAttr(node, id, 'vlan', v),
+            after: () => refreshPortMarks(node)
         });
-        vlan.addEventListener('blur', () => {
-            if (!vlan.classList.contains('bad')) return;
-            const now = vlanNow();
-            vlan.value = now === undefined ? '' : String(now);
-            vlan.classList.remove('bad');
-        });
+        const key = `${node.id}|${id}`;
+        const more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'port-attr-more-btn';
+        more.textContent = '⋯';
+        more.title = t('Tagged VLANs and PoE');
+        more.setAttribute('aria-label', `${t('Tagged VLANs and PoE')} · ${ifaceLabel(node, id)}`);
         const link = linkOnIface(node.id, id);
         const peer = link ? getNode(link.source === node.id ? link.target : link.source) : null;
         const where = document.createElement('span');
         where.className = 'port-attr-peer';
         where.textContent = peer ? `→ ${peer.name || peer.id}` : '';
-        line.appendChild(name); line.appendChild(label); line.appendChild(vlan); line.appendChild(where);
+        const extra = renderPortMore(node, id);
+        const open = a.tagged !== null || a.poe !== null || _portMoreOpen.has(key);
+        extra.hidden = !open;
+        more.setAttribute('aria-expanded', String(open));
+        more.classList.toggle('on', open);
+        more.onclick = () => {
+            const show = extra.hidden;
+            extra.hidden = !show;
+            if (show) _portMoreOpen.add(key); else _portMoreOpen.delete(key);
+            more.setAttribute('aria-expanded', String(show));
+            more.classList.toggle('on', show);
+            if (show) { const first = extra.querySelector('input'); if (first) first.focus(); }
+        };
+        line.appendChild(name); line.appendChild(label); line.appendChild(vlan); line.appendChild(more); line.appendChild(where);
+        line.appendChild(extra);
         list.appendChild(line);
     });
     box.appendChild(list);
     return box;
+}
+
+// The port's second line: Tagged (a list, "10,20,30-39" or "all") and PoE
+// (a standard, or Watts… for a port that is none of them).
+function renderPortMore(node, id) {
+    const a = portAttrOf(node, id);
+    const row = document.createElement('div');
+    row.className = 'port-attr-more';
+    const tagged = document.createElement('input');
+    tagged.type = 'text'; tagged.className = 'if-in port-attr-tagged';
+    tagged.value = a.tagged === null ? '' : a.tagged;
+    tagged.placeholder = t('Tagged, e.g. 10,20,30-39');
+    tagged.title = t('Tagged VLANs: a list such as 10,20,30-39, or all');
+    tagged.setAttribute('aria-label', `${t('Tagged VLANs')} · ${ifaceLabel(node, id)}`);
+    heldField(tagged, {
+        now: () => { const v = portAttrOf(node, id).tagged; return v === null ? undefined : v; },
+        read: vlanListRead,
+        write: (v) => setPortAttr(node, id, 'tagged', v),
+        after: () => refreshPortMarks(node)
+    });
+    const poe = document.createElement('select');
+    poe.className = 'if-select port-attr-poe';
+    poe.setAttribute('aria-label', `PoE · ${ifaceLabel(node, id)}`);
+    POE_PICKS.forEach(([value, text]) => {
+        const opt = document.createElement('option');
+        opt.value = value; opt.textContent = value === 'w' ? t('Watts…') : text;
+        poe.appendChild(opt);
+    });
+    const watts = document.createElement('input');
+    watts.type = 'text'; watts.inputMode = 'decimal'; watts.className = 'if-in port-attr-watts';
+    watts.placeholder = 'W';
+    watts.title = t('Watts at the switch, 0.5 to 100');
+    watts.setAttribute('aria-label', `${t('PoE watts')} · ${ifaceLabel(node, id)}`);
+    const pick = (v) => {
+        const custom = typeof v === 'number';
+        poe.value = v === null || v === undefined ? '' : custom ? 'w' : v;
+        watts.hidden = !custom;
+        if (custom) watts.value = wattsText(v);
+    };
+    pick(a.poe);
+    poe.addEventListener('change', () => {
+        if (poe.value === 'w') {
+            // Nothing is written until a number of watts is typed.
+            watts.hidden = false; watts.value = ''; watts.focus();
+            return;
+        }
+        watts.hidden = true;
+        setPortAttr(node, id, 'poe', poe.value || undefined);
+        refreshPortMarks(node);
+        save(); renderTyped();
+    });
+    // What the port held when the field was entered, a standard included: a
+    // refused or blank entry puts that back (clearing is the '—' pick's), and
+    // leaving the field sets the pick to what the port now holds.
+    const poeNow = () => { const v = portAttrOf(node, id).poe; return v === null ? undefined : v; };
+    let poeHeld = poeNow();
+    watts.addEventListener('focus', () => { poeHeld = poeNow(); });
+    heldField(watts, {
+        now: poeNow,
+        read: (text) => { const v = wattsFromText(text, 0.5, 100, 1); return v === null ? { error: true } : { value: v }; },
+        write: (v) => setPortAttr(node, id, 'poe', v === undefined ? poeHeld : v),
+        show: (v) => (typeof v === 'number' ? wattsText(v) : ''),
+        after: () => refreshPortMarks(node)
+    });
+    watts.addEventListener('blur', () => pick(poeNow()));
+    row.appendChild(tagged); row.appendChild(poe); row.appendChild(watts);
+    return row;
+}
+
+// "Set on ports [1-24] [Untagged | Tagged | PoE] [value] Apply": one fact on
+// a run of ports, one undo step. The ports are the numbers the box prints
+// (its scheme's: "0-3" on a ge-0/0/ box counted from 0) or its names
+// ("1-24", "1,3,5-8", "Gi1/0/5"); a bare number and a range's ends are read
+// the same way (portIdByText). A port the box does not have (its faceplate,
+// or one past it a cable or a label already holds: faceplatePortIds, the
+// rule csvPlanPorts uses) refuses the whole run, and a blank value clears
+// that fact on them.
+function portRunIds(node, text) {
+    const have = new Set(faceplatePortIds(node));
+    const out = [];
+    const no = (port) => ({ error: t('{name} has no port {port}.', { name: node.name || node.id, port }) });
+    for (const part of String(text || '').replace(/\s*-\s*/g, '-').split(/[\s,;]+/).filter(Boolean)) {
+        const r = /^(\d{1,4})-(\d{1,4})$/.exec(part);
+        if (r) {
+            const a = Number(r[1]), b = Number(r[2]);
+            if (b < a) return { error: t('Type the ports as 1-24, or 1,3,5.') };
+            for (let n = a; n <= b; n++) {
+                const id = portIdByText(node, String(n));
+                if (!id || !have.has(id)) return no(String(n));
+                out.push(id);
+            }
+            continue;
+        }
+        const id = portIdByText(node, part);
+        if (!id || !have.has(id)) return no(part);
+        out.push(id);
+    }
+    return out.length ? { ids: [...new Set(out)] } : { error: t('Type the ports as 1-24, or 1,3,5.') };
+}
+const PORT_SET_KEYS = [['vlan', 'Untagged'], ['tagged', 'Tagged'], ['poe', 'PoE']];
+// One fact's value as Set on ports reads it: { value } (undefined clears)
+// or { error }.
+function portSetValue(key, text) {
+    const v = String(text == null ? '' : text).trim();
+    if (!v) return { value: undefined };
+    if (key === 'vlan') return vlanRead(v);
+    if (key === 'tagged') return vlanListRead(v);
+    const p = portPoeFromText(v);
+    return p === null ? { error: true } : { value: p };
+}
+// Writes it on a copy of the box first, so a refusal changes nothing.
+// -> { n } (ports changed) | { error }.
+function applyPortSet(node, runText, key, valueText) {
+    const run = portRunIds(node, runText);
+    if (run.error) return { error: run.error };
+    const v = portSetValue(key, valueText);
+    const label = t((PORT_SET_KEYS.find((k) => k[0] === key) || [])[1] || key);
+    if (v.error) return { error: t('{value} is not a valid {field}.', { value: String(valueText).trim(), field: label }) };
+    let n = 0;
+    run.ids.forEach((id) => {
+        const before = portAttrOf(node, id)[key];
+        setPortAttr(node, id, key, v.value);
+        if (portAttrOf(node, id)[key] !== before) n++;
+    });
+    return { n };
+}
+function renderPortSetRow(node) {
+    const row = document.createElement('div');
+    row.className = 'port-set';
+    const cap = document.createElement('span');
+    cap.className = 'prop-lbl';
+    cap.textContent = t('Set on ports');
+    const run = document.createElement('input');
+    run.type = 'text'; run.className = 'if-in port-set-run';
+    // As the box numbers its ports: 1-24, or 0-23 on a scheme from 0.
+    const first = node.portScheme && Number.isInteger(node.portScheme.start) ? node.portScheme.start : 1;
+    const span = portCountOf(node) || faceplatePortIds(node).length;
+    run.placeholder = span > 1 ? `${first}-${first + span - 1}` : String(first);
+    run.setAttribute('aria-label', t('Ports, e.g. 1-24'));
+    const what = document.createElement('select');
+    what.className = 'if-select port-set-key';
+    what.setAttribute('aria-label', t('Which fact'));
+    PORT_SET_KEYS.forEach(([value, text]) => {
+        const opt = document.createElement('option');
+        opt.value = value; opt.textContent = t(text);
+        what.appendChild(opt);
+    });
+    const value = document.createElement('input');
+    value.type = 'text'; value.className = 'if-in port-set-value';
+    const hint = () => { value.placeholder = what.value === 'vlan' ? '10' : what.value === 'tagged' ? '10,20' : 'PoE+'; };
+    hint();
+    what.addEventListener('change', hint);
+    value.setAttribute('aria-label', t('Value (blank clears it)'));
+    const go = document.createElement('button');
+    go.type = 'button'; go.className = 'link-btn port-set-go';
+    go.textContent = t('Apply');
+    const note = document.createElement('div');
+    note.className = 'port-set-note';
+    note.setAttribute('role', 'status');
+    const apply = () => {
+        if (typeof readOnlyRefuses === 'function' && readOnlyRefuses()) return;
+        // On a copy first: a refused run leaves the box as it was.
+        const copy = JSON.parse(JSON.stringify({ portAttrs: node.portAttrs, portScheme: node.portScheme, portCount: node.portCount,
+            type: node.type, id: node.id, name: node.name, interfaces: node.interfaces }));
+        const trial = applyPortSet(copy, run.value, what.value, value.value);
+        if (trial.error) { note.textContent = trial.error; note.classList.add('bad'); return; }
+        if (!trial.n) { note.textContent = t('Nothing to change: those ports already say so.'); note.classList.remove('bad'); return; }
+        applyPortSet(node, run.value, what.value, value.value);
+        save();
+        renderSidebarData(node);
+        renderNodeDiagnostics(node, drawnDiag(renderCanvasOnly()));
+        const live = document.querySelector('#portAttrBox .port-set-note');
+        if (live) { live.textContent = t(trial.n === 1 ? 'Set on {n} port.' : 'Set on {n} ports.', { n: trial.n }); live.classList.remove('bad'); }
+    };
+    go.onclick = apply;
+    [run, value].forEach((el) => el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); apply(); } }));
+    const fields = document.createElement('div');
+    fields.className = 'port-set-fields';
+    fields.append(run, what, value, go);
+    row.append(cap, fields, note);
+    return row;
+}
+
+// A switch's or an AP's PoE budget, under its port count, with the live
+// line of what its PoE ports are asked for (poeLoad, js/model.js).
+function renderPoeBudget(node) {
+    const row = document.createElement('div');
+    row.className = 'poe-budget';
+    const cap = document.createElement('label');
+    cap.className = 'prop-lbl';
+    cap.htmlFor = 'poeBudgetInput';
+    cap.textContent = t('PoE budget (W)');
+    const input = document.createElement('input');
+    input.type = 'text'; input.id = 'poeBudgetInput'; input.inputMode = 'decimal';
+    input.className = 'if-in poe-budget-in';
+    input.autocomplete = 'off';
+    input.placeholder = '—';
+    const shownBudget = () => (asPoeBudget(node.poeBudget) === undefined ? '' : wattsText(asPoeBudget(node.poeBudget)));
+    input.value = shownBudget();
+    const line = document.createElement('span');
+    line.className = 'poe-load';
+    line.id = 'poeLoadLine';
+    line.textContent = poeLoadText(poeLoad(node));
+    heldField(input, {
+        now: () => asPoeBudget(node.poeBudget),
+        read: (text) => { const v = poeBudgetFromText(text); return v === null ? { error: true } : { value: v }; },
+        write: (v) => { if (v === undefined) delete node.poeBudget; else node.poeBudget = v; },
+        show: (v) => (v === undefined ? '' : wattsText(v)),
+        after: () => { line.textContent = poeLoadText(poeLoad(node)); }
+    });
+    row.append(cap, input, line);
+    return row;
+}
+
+// The device's PoE draw (index.html #poeDrawRow): on anything that can be
+// powered by its cable (canDrawPoe), not on a cloud, a VM or a container.
+function renderPoeDraw(node) {
+    const row = document.getElementById('poeDrawRow');
+    const input = document.getElementById('propPoeDraw');
+    if (!row || !input) return;
+    const on = !!node && canDrawPoe(node.type);
+    row.classList.toggle('hidden', !on);
+    input.classList.remove('bad');
+    input.value = on && asPoeDraw(node.poeDraw) !== undefined ? wattsText(asPoeDraw(node.poeDraw)) : '';
+    if (!on) return;
+    if (input.dataset.wired) return;
+    input.dataset.wired = '1';
+    heldField(input, {
+        now: () => { const n = state.selectedType === 'node' ? getNode(state.selectedId) : null; return n ? asPoeDraw(n.poeDraw) : undefined; },
+        read: (text) => { const v = poeDrawFromText(text); return v === null ? { error: true } : { value: v }; },
+        write: (v) => { const n = state.selectedType === 'node' ? getNode(state.selectedId) : null; if (!n) return; if (v === undefined) delete n.poeDraw; else n.poeDraw = v; },
+        show: (v) => (v === undefined ? '' : wattsText(v))
+    });
 }
 
 // A free port's chip: the list opens on that port's label.
@@ -1809,7 +2109,7 @@ function renderSidebarData(node) {
             // The address field is named after its interface, and so is the
             // MAC line's under it, so a rename renames both: one attribute
             // each, no redraw.
-            let macLine = null;
+            let macLine = null, vlanLine = null;
             nameInp.addEventListener('input', (e) => {
                 node.interfaces[i].name = e.target.value;
                 ipInp.setAttribute('aria-label', `${t('Address')} · ${e.target.value || t('Interface')}`);
@@ -1862,8 +2162,10 @@ function renderSidebarData(node) {
                 const parsedData = parseValidCIDR(e.target.value);
                 if (e.target.value.trim() !== '' && !parsedData) ipInp.classList.add('bad');
                 else ipInp.classList.remove('bad');
-                // A new address can mean a new network to inherit from.
+                // A new address can mean a new network to inherit from, and
+                // a new subnet VLAN for the greyed one under it.
                 refreshInheritance(node);
+                if (vlanLine && vlanLine.refreshAuto) vlanLine.refreshAuto();
 
                 saveTyping();   // one undo step per address, taken when the field is left
                 renderTyped();
@@ -1911,6 +2213,15 @@ function renderSidebarData(node) {
             // it regardless — hiding a value that exists is how a drawing starts
             // lying about itself.
             if (node.macOpen || hasMac(iface)) ifCont.appendChild(macLine = renderMacLine(node, iface));
+            // Its VLANs, on a wired one only: opened with the MAC line, and
+            // shown by itself when it records any.
+            // Not on a faceplate port a name or an address put in this list:
+            // its VLANs are the port's (portAttrs, the port list above), the
+            // one place portVlans reads them from.
+            if (!ifaceIsWireless(iface) && !(hasPortGrid(node) && PORT_ID_RE.test(iface.id))
+                && (node.macOpen || asVlan(iface.vlan) !== undefined || asVlanList(iface.tagged) !== undefined)) {
+                ifCont.appendChild(vlanLine = renderIfaceVlanLine(node, iface));
+            }
 
             // What the radio is (iface.radio, js/wifi.js): folded to one line
             // under it, since most of the time the line is all anyone needs.
@@ -1925,6 +2236,13 @@ function renderSidebarData(node) {
             }
         });
     }
+    // Where it is plugged in (js/locate.js), redrawn with the NICs it reads.
+    if (typeof renderLocate === 'function') renderLocate(node);
+    // What it held before (js/trail.js), against the values it holds now.
+    if (typeof renderHistoryFields === 'function') renderHistoryFields(node);
+    // The Vendor field's MAC hint (js/assets.js): a NIC cleared, deleted,
+    // added or unbonded changes what the MACs say.
+    if (typeof renderVendorHint === 'function') renderVendorHint(node);
 }
 
 // The bond's mode, on its own line beneath it. Active-backup and LACP differ in
@@ -1937,6 +2255,61 @@ function renderSidebarData(node) {
 // table says: the universal/local bit is the one that matters on a network map,
 // because a locally-administered address is randomised and any inventory keyed
 // on it is fiction. The vendor is a nice-to-have on top of that.
+// A wired interface's VLANs, on the line under it: its untagged VLAN, greyed
+// with its subnet's ("Auto · 10 Staff", as the Wi-Fi selects show what is
+// worked out) until one is typed over it, and the VLANs it carries tagged
+// (a router on a stick, a hypervisor's uplink). A bond's members read the
+// bond's, so the line is the bond's.
+function ifaceVlanAuto(iface) {
+    const p = parseValidCIDR(typeof iface.ip === 'string' ? iface.ip.trim() : '');
+    const net = p ? networkOfIp(p.ip) : null;
+    const v = net ? asVlan(net.vlan) : undefined;
+    if (v === undefined) return null;
+    // An SVI on a trunk (its subnet's VLAN in its own tagged list) has no
+    // native VLAN from its subnet, as portVlans reads it.
+    const tagged = asVlanList(iface.tagged);
+    if (tagged && vlanListHas(parseVlanList(tagged), v)) return null;
+    return { vlan: v, name: asText(net.name).trim() };
+}
+function renderIfaceVlanLine(node, iface) {
+    const row = document.createElement('div');
+    row.className = 'if-row if-sub if-vlan';
+    const tick = document.createElement('span');
+    tick.className = 'if-tick'; tick.textContent = '↳';
+    const label = document.createElement('span');
+    label.className = 'if-tick'; label.textContent = 'vlan';
+    const untagged = document.createElement('input');
+    untagged.type = 'text'; untagged.inputMode = 'numeric'; untagged.className = 'if-in if-vlan-in';
+    untagged.value = asVlan(iface.vlan) === undefined ? '' : String(asVlan(iface.vlan));
+    // Redone when the address above it is typed (the row's IP field).
+    row.refreshAuto = () => {
+        const auto = ifaceVlanAuto(iface);
+        untagged.placeholder = auto ? `${t('Auto')} · ${auto.vlan}${auto.name ? ' ' + auto.name : ''}` : t('Untagged');
+    };
+    row.refreshAuto();
+    untagged.title = t('Untagged VLAN: blank is its subnet\'s');
+    untagged.setAttribute('aria-label', `${t('Untagged VLAN')} · ${iface.name || t('Interface')}`);
+    heldField(untagged, {
+        now: () => asVlan(iface.vlan),
+        read: vlanRead,
+        write: (v) => { if (v === undefined) delete iface.vlan; else iface.vlan = v; }
+    });
+    const tagged = document.createElement('input');
+    tagged.type = 'text'; tagged.className = 'if-in if-ip if-tagged-in';
+    tagged.value = asVlanList(iface.tagged) || '';
+    tagged.placeholder = t('Tagged, e.g. 10,20');
+    tagged.title = t('Tagged VLANs: a list such as 10,20,30-39, or all');
+    tagged.setAttribute('aria-label', `${t('Tagged VLANs')} · ${iface.name || t('Interface')}`);
+    heldField(tagged, {
+        now: () => asVlanList(iface.tagged),
+        read: vlanListRead,
+        // The greyed untagged VLAN goes when the subnet's VLAN is tagged here.
+        write: (v) => { if (v === undefined) delete iface.tagged; else iface.tagged = v; row.refreshAuto(); }
+    });
+    row.append(tick, label, untagged, tagged);
+    return row;
+}
+
 function renderMacLine(node, iface) {
     const row = document.createElement('div');
     row.className = 'if-mac';
@@ -2023,6 +2396,7 @@ function renderMacLine(node, iface) {
         paint();
         saveTyping();
         renderNodeDiagnostics(node);
+        if (typeof renderVendorHint === 'function') renderVendorHint(node);   // the Vendor field's MAC hint (js/assets.js)
     });
     // Leaving the field is when a half-typed address becomes a stored one, so
     // that is where it gets tidied into one canonical form.
@@ -2176,6 +2550,9 @@ function renderLinkPorts(link) {
     if (!src || !tgt) { panel.classList.add('hidden'); return; }
 
     body.innerHTML = '';
+    // Both ends' VLANs, read-only, once either end records any: a mismatch
+    // is seen where it is. Nothing is said on a cable whose ends say nothing.
+    const vlansShown = [src, tgt].some((n) => link[ifaceKeyFor(link, n.id)] && portVlans(n, link[ifaceKeyFor(link, n.id)]).known);
     [[src, tgt], [tgt, src]].forEach(([node, other]) => {
         const key = ifaceKeyFor(link, node.id);
         const row = document.createElement('div');
@@ -2218,7 +2595,7 @@ function renderLinkPorts(link) {
                 sub.textContent = attr.label;
                 chip.appendChild(sub);
             }
-            const facts = [attr.label, attr.vlan !== null ? `VLAN ${attr.vlan}` : ''].filter(Boolean).join(' · ');
+            const facts = hasPortGrid(node) ? portFactsText(node, iface.id, [attr.label]) : '';
 
             if (takenBy) {
                 const neighbour = getNode(takenBy.source === node.id ? takenBy.target : takenBy.source);
@@ -2250,10 +2627,23 @@ function renderLinkPorts(link) {
         }
 
         row.appendChild(chips);
+        if (vlansShown) row.appendChild(linkEndVlanLine(node, current));
         body.appendChild(row);
     });
 
     panel.classList.remove('hidden');
+}
+
+// One end of a cable's VLANs in a line: "VLAN 10", "Untagged 1 · Tagged
+// 10,20", or that it records none and so carries every VLAN.
+function linkEndVlanLine(node, ifaceId) {
+    const line = document.createElement('div');
+    line.className = 'port-end-vlan';
+    const e = ifaceId ? portVlans(node, ifaceId) : { known: false };
+    if (!e.known) { line.classList.add('muted'); line.textContent = t('No VLAN recorded: it carries every VLAN.'); return line; }
+    const tagged = e.tagged === 'all' ? 'all' : e.tagged ? vlanListText(e.tagged) : null;
+    line.textContent = portVlanFacts(e.untagged, tagged).join(' · ');
+    return line;
 }
 
 function clearPropertyInputs() {
@@ -2265,6 +2655,7 @@ function clearPropertyInputs() {
     document.getElementById('propNotes').value = '';
     renderAssetFields(null);   // js/assets.js
     renderCableFields(null);
+    renderPoeDraw(null);
     document.getElementById('ifaceListContainer').innerHTML = '';
     document.getElementById('jumpGwBtn').classList.add('hidden');
     refreshNetcfgLink(null);
@@ -2479,6 +2870,9 @@ function renderSelection() {
     // Mixed: what applies to a device does not apply to a cable, so a set of
     // both offers only Delete and the way to make it one kind.
     document.getElementById('selOnlyRow').classList.toggle('hidden', !(nodes && links));
+    // The Locate print sheet (js/locate.js) needs devices in the set.
+    const printLocateBtn = document.getElementById('printLocateBtn');
+    if (printLocateBtn) printLocateBtn.classList.toggle('hidden', !nodes);
     // Devices only or cables only, in the full editor: change all of them at once (js/bulk.js).
     if (typeof renderBulkPanel === 'function') renderBulkPanel();
     refreshSelectedNodeDiagnostics();   // which says to select one device
@@ -2552,7 +2946,13 @@ function select(id, type) {
     const netProps = document.getElementById('nodeNetworkProps'), generalProps = document.getElementById('nodeGeneralProps'), linkProps = document.getElementById('linkProps');
     const nameInput = document.getElementById('propName'), jumpGwBtn = document.getElementById('jumpGwBtn');
 
-    if (!id) { clearPropertyInputs(); pPane.classList.add('hidden'); nPane.classList.remove('hidden'); renderCanvasOnly(); return; }
+    if (!id) {
+        clearPropertyInputs(); pPane.classList.add('hidden'); nPane.classList.remove('hidden');
+        // The Locate section and the reduced views' sentence (js/locate.js) say nothing of no device.
+        if (typeof renderLocate === 'function') renderLocate(null);
+        if (typeof renderHistoryFields === 'function') renderHistoryFields(null);
+        renderCanvasOnly(); return;
+    }
     nPane.classList.add('hidden'); pPane.classList.remove('hidden');
     // A device's tag and QR, or a cable's label (js/assets.js); a note has none.
     document.getElementById('printLabelBtn').classList.toggle('hidden', type !== 'node' && type !== 'link');
@@ -2583,6 +2983,7 @@ function select(id, type) {
             propNat.checked = !!node.nat;
             propNat.onchange = (e) => { node.nat = e.target.checked; save(); renderNodeDiagnostics(node, drawnDiag(renderCanvasOnly())); };
         } else { natRow.classList.add('hidden'); }
+        renderPoeDraw(node);   // PoE draw (W), on anything a cable can power
         refreshNetcfgLink(node); // "Open in Netplan ↗", host types only
         renderSiteRef(node);
         if (effectiveGw(node)) {

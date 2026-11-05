@@ -100,7 +100,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('Preview opens the dialog', dialogOpen() && CarinoUI.modal.isOpen(el('bulkDialog')));
     ok('titled with the action', el('bulkTitle').textContent === 'Set fields');
     ok('counted per device', /3\s*To change/.test(el('bulkCounts').textContent) && /0\s*Unchanged/.test(el('bulkCounts').textContent), el('bulkCounts').textContent);
-    ok('every change is listed with its field', el('bulkPreview').querySelectorAll('tr.paste-change').length === 3 && /Model \/ firmware/.test(el('bulkPreview').textContent));
+    ok('every change is listed with its field', el('bulkPreview').querySelectorAll('tr.paste-change').length === 3 && /Firmware \/ OS/.test(el('bulkPreview').textContent));
     ok('an OS changes no finding', /The findings stay the same/.test(el('bulkDelta').textContent), el('bulkDelta').textContent);
     ok('nothing is written before Apply', nodeByName('Phone 1').os === 'FW 1.0' && _undoStack.length === undoBefore);
     let saves = 0;
@@ -300,7 +300,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     setLocale('es'); applyLocale();
     ok('the sentences are translated', el('bulkPanel').querySelector('.bulk-title').textContent === 'Cambiarlos todos' && el('bulkF-gw').placeholder === 'mixto',
        `${el('bulkPanel').querySelector('.bulk-title').textContent} | ${el('bulkF-gw').placeholder}`);
-    ok('the field labels stay English', /Model \/ firmware/.test(el('bulkFields').textContent) && /Gateway/.test(el('bulkFields').textContent));
+    ok('the field labels stay English', /Firmware \/ OS/.test(el('bulkFields').textContent) && /Fabricante/.test(el('bulkFields').textContent) && /Gateway/.test(el('bulkFields').textContent));
     setLocale('en'); applyLocale();
     ok('and back', el('bulkPanel').querySelector('.bulk-title').textContent === 'Change all of them');
 

@@ -42,7 +42,7 @@ function setDialogResponder(fn) {
 }
 
 // What dismissing answers, per kind: never the answer that does something.
-const ASK_DISMISSED = { tell: undefined, confirm: false, prompt: null, choice: null };
+const ASK_DISMISSED = { tell: undefined, confirm: false, prompt: null, choice: null, ticks: null };
 
 function ask(req) {
     if (_askResponder) {
@@ -119,6 +119,19 @@ function askChoice(message, opts = {}) {
         .then((v) => (choices.some((c) => c.id === v) ? v : null));
 }
 
+// A review: rows to tick under the message, each on unless it says
+// otherwise, and the answer applies only what is ticked (Split model and
+// firmware, js/assets.js). opts.rows is [{ id, label, detail?, checked? }];
+// opts.after is a line under the list (what is left out, and why). The yes
+// is disabled while nothing is ticked. -> the ticked ids in row order, or
+// null when dismissed. A test's responder answers with an array of ids.
+function askTicks(message, opts = {}) {
+    const rows = (opts.rows || []).filter((r) => r && r.id)
+        .map((r) => ({ id: String(r.id), label: String(r.label || ''), detail: r.detail ? String(r.detail) : '', checked: r.checked !== false }));
+    return ask({ kind: 'ticks', message, title: opts.title || '', ok: opts.ok, rows, after: opts.after ? String(opts.after) : '' })
+        .then((v) => (Array.isArray(v) ? rows.map((r) => r.id).filter((id) => v.includes(id)) : null));
+}
+
 function showAsk(req) {
     return new Promise((resolve) => {
         const scrim = document.getElementById('topoAsk');
@@ -173,6 +186,35 @@ function showAsk(req) {
         // a date input, the same as none picked, and would accept for good
         // what was meant to wait. It answers '!' instead, which no caller
         // reads as a day, so it is refused rather than taken as "no date".
+        // The rows to tick, for askTicks: text nodes, never markup, since a
+        // row names a device and its typed text.
+        const ticksEl = document.getElementById('topoAskTicks');
+        const afterEl = document.getElementById('topoAskAfter');
+        const ticking = req.kind === 'ticks' && !!ticksEl;
+        if (ticksEl) { ticksEl.hidden = !ticking; ticksEl.textContent = ''; }
+        if (afterEl) { afterEl.hidden = !(ticking && req.after); afterEl.textContent = ticking ? req.after : ''; }
+        if (ticking) {
+            req.rows.forEach((r) => {
+                const li = document.createElement('li');
+                const lab = document.createElement('label');
+                lab.className = 'ask-tick';
+                const box = document.createElement('input');
+                box.type = 'checkbox'; box.value = r.id; box.checked = r.checked;
+                const text = document.createElement('span');
+                const name = document.createElement('span');
+                name.className = 'ask-tick-name'; name.textContent = r.label;
+                text.appendChild(name);
+                if (r.detail) {
+                    const d = document.createElement('span');
+                    d.className = 'ask-tick-detail'; d.textContent = r.detail;
+                    text.appendChild(d);
+                }
+                lab.append(box, text);
+                li.appendChild(lab);
+                ticksEl.appendChild(li);
+            });
+        }
+        const tickedIds = () => [...ticksEl.querySelectorAll('input[type=checkbox]')].filter((b) => b.checked).map((b) => b.value);
         const dayTyped = () => (date.validity && date.validity.badInput ? '!' : date.value);
         const answer = () => (picking ? { value: input.value, pick: pick.value } : dating ? { value: input.value, date: dayTyped() } : input.value);
 
@@ -184,6 +226,7 @@ function showAsk(req) {
             else scrim.hidden = true;
             input.onkeydown = null;
             if (pick) pick.onchange = null;
+            if (ticksEl) ticksEl.onchange = null;
             resolve(value);
         };
         const button = (label, value, primary, danger) => {
@@ -208,7 +251,12 @@ function showAsk(req) {
             req.choices.forEach((c) => { const b = button(c.label, c.id, !!c.primary); if (c.primary) main = b; });
         } else {
             button(req.cancel || t('Cancel'), ASK_DISMISSED[req.kind], false);
-            main = button(req.ok || t('Continue'), req.kind === 'prompt' ? answer : true, true, req.danger);
+            main = button(req.ok || t('Continue'), req.kind === 'prompt' ? answer : ticking ? tickedIds : true, true, req.danger);
+        }
+        if (ticking && main) {
+            const sync = () => { main.disabled = !tickedIds().length; };
+            ticksEl.onchange = sync;
+            sync();
         }
         if (req.kind === 'prompt') {
             input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(answer()); } };
@@ -226,4 +274,4 @@ function showAsk(req) {
 }
 
 // Published for the suites, which reach the app as bare globals anyway.
-window.TopoDialog = { ask, tell, askConfirm, askPrompt, askPromptPick, askPromptDate, askChoice, setDialogResponder };
+window.TopoDialog = { ask, tell, askConfirm, askPrompt, askPromptPick, askPromptDate, askChoice, askTicks, setDialogResponder };

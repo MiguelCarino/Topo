@@ -588,9 +588,10 @@ function libraryDelete(id) {
     if (!lib[id]) return false;
     delete lib[id];
     const ok = persistLibrary(lib);
-    // Its baseline goes with it (js/changes.js): an old copy of a network
-    // somebody deleted has no business staying in the browser.
-    if (ok) dropSnapshot(id);
+    // Its baseline and its address history go with it (js/changes.js,
+    // js/trail.js): an old copy of a network somebody deleted has no
+    // business staying in the browser.
+    if (ok) { dropSnapshot(id); if (typeof dropTrail === 'function') dropTrail(id); }
     return ok;
 }
 
@@ -679,7 +680,7 @@ function binderLinkFile() {
 // the live document's index.
 function canonicalDoc(doc) {
     return withoutLookupPass(() => {
-        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report };
+        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, searches: state.searches, annotations: state.annotations, report: state.report };
         _borrowedState++;
         try {
             loadDocState(doc);
@@ -687,7 +688,7 @@ function canonicalDoc(doc) {
         } finally {
             _borrowedState--;
             state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
-            state.columns = held.columns; state.tableView = held.tableView;
+            state.columns = held.columns; state.tableView = held.tableView; state.searches = held.searches;
             state.annotations = held.annotations; state.report = held.report;
         }
     });
@@ -986,7 +987,7 @@ function binderStatus() { const s = backupStatus(); return s ? s.text : null; }
 // borrowed arrays. The state goes back first, then the pass.
 function withDoc(doc, fn) {
     return withoutLookupPass(() => {
-        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report };
+        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, searches: state.searches, annotations: state.annotations, report: state.report };
         _borrowedState++;
         try {
             // The same reader replaceDocument() uses, so a stored v1 card is
@@ -1002,7 +1003,7 @@ function withDoc(doc, fn) {
         } finally {
             _borrowedState--;
             state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
-            state.columns = held.columns; state.tableView = held.tableView;
+            state.columns = held.columns; state.tableView = held.tableView; state.searches = held.searches;
             state.annotations = held.annotations; state.report = held.report;
         }
     });
@@ -1439,16 +1440,38 @@ async function rebindBinderFile() {
 // A binder arriving from a file. Merging, not replacing — see importBinderSites.
 // Returns whether the file was a binder at all, so the single-build path can
 // take over when it was not.
+//
+// A site whose card here is newer, and that differs from it, is an older
+// back-up of that network: once the merge is done, one question offers to
+// read all of them into their cards' address history (js/trail.js). Asked
+// after, never in the way of the merge, and the cards stay as they are.
 function applyImportedBinder(parsed) {
     const binder = binderFromImported(parsed);
     if (!binder) return false;
+    const older = binderOlderSites(binder.sites);
     const result = importBinderSites(binder.sites);
     if (!result) { showToast(t('Could not save — browser storage is unavailable (private mode or full).'), 'err'); return true; }
     if (landingIsOpen()) renderLanding();
     renderUserTemplates();
     showToast(t('Binder loaded: {added} added, {updated} updated, {kept} already up to date.', result)
         + (binder.dropped ? ' ' + t('{n} entry in the file could not be read and was skipped.', { n: binder.dropped }) : ''), 'ok');
+    if (older.length && typeof offerOlderSitesToTrail === 'function') offerOlderSitesToTrail(older);
     return true;
+}
+// The binder's sites that are an older copy of a network card here (not a
+// template or block): the card is newer, and they differ. -> [{ id, doc, updated }].
+function binderOlderSites(sites) {
+    const out = [];
+    (sites || []).forEach((site) => {
+        const id = typeof site.id === 'string' ? site.id : '';
+        const mine = id ? libraryEntry(id) : null;
+        if (!mine || mine.template || !Number.isFinite(site.updated) || site.updated <= 0) return;
+        if (site.updated >= (mine.updated || 0)) return;
+        if (typeof trailCanReadIn === 'function' && !trailCanReadIn(site.doc, site.updated)) return;
+        if (!docChangeCount(mine.doc, site.doc)) return;
+        out.push({ id, doc: site.doc, updated: site.updated });
+    });
+    return out;
 }
 
 function renderGuestSection() {
@@ -1539,6 +1562,11 @@ function landingCard(entry, opts = {}) {
         if (!id) { showToast(t('Could not save — browser storage is unavailable (private mode or full).'), 'err'); return; }
         renderLanding();
         showToast(t('Added "{name}" to your networks.', { name: libraryEntry(id).name }), 'ok');
+    });
+    // The address history kept for this card in this browser (js/trail.js):
+    // offered only once there is some, and nothing on the card's face.
+    if (typeof hasTrail === 'function' && hasTrail(entry.id)) tool('⌫', t('Clear history'), async () => {
+        if (await clearCardHistory(entry)) renderLanding();
     });
     tool('✕', t('Delete'), async () => {
         if (!(await askConfirm(t('Delete saved network "{name}"? This cannot be undone.', { name: entry.name }), { ok: t('Delete'), danger: true }))) return;
@@ -1670,7 +1698,12 @@ function releaseDocument() {
 // visitor can always take it as a copy instead.
 //
 // incoming = { doc, updated }. -> 'same' (nothing differs: just open the card),
-// 'update', 'copy', 'mine', or null (cancelled).
+// 'update', 'copy', 'mine', 'history' or null (cancelled). opts.history offers,
+// when yours is newer, a third answer: read the older copy into the card's
+// address history (js/trail.js, feature 5 stage 4) and leave the card and
+// the canvas alone. Offered only for a copy that can go in (a time to put it
+// at, a version this build reads, recording on) of a network card: never a
+// template's or a block's, as the binder's question (trailReadInCard).
 async function askAboutKnownCopy(incoming, entry, opts = {}) {
     const changes = docChangeCount(entry.doc, incoming.doc);
     if (!changes) return 'same';
@@ -1683,16 +1716,20 @@ async function askAboutKnownCopy(incoming, entry, opts = {}) {
                 label: t(changes === 1 ? 'Update "{name}" ({n} change)' : 'Update "{name}" ({n} changes)', { name, n: changes }) }]
         });
     }
+    const history = opts.history && typeof trailCanReadIn === 'function' && trailCanReadIn(incoming.doc, incoming.updated)
+        && !entry.template && !entry.block
+        ? [{ id: 'history', label: t('Add to its history') }] : [];
     return askChoice(t('You already have "{name}" in this browser, and yours is newer than this copy.', { name }), {
         title: opts.title || '',
-        choices: [copy, { id: 'mine', label: t('Open mine'), primary: true }]
+        choices: [copy, ...history, { id: 'mine', label: t('Open mine'), primary: true }]
     });
 }
 
 // How many devices, cables and notes differ between two documents, matched by
-// id, plus one for a changed report header, one for the accepted findings and
-// one for the pins: the "(n changes)" on Update. A copy that differed only by
-// a pin was "the same", and the pin was not taken. Both
+// id, plus one for a changed report header, one for the accepted findings,
+// one for the pins and one for the saved searches: the "(n changes)" on
+// Update. A copy that differed only by a pin was "the same", and the pin was
+// not taken. Both
 // sides go through the serializer first, so a key order or a default filled
 // in on load is not counted as somebody's change.
 function docChangeCount(a, b) {
@@ -1708,6 +1745,7 @@ function docChangeCount(a, b) {
     if (JSON.stringify(ca.report || null) !== JSON.stringify(cb.report || null)) n++;
     if (JSON.stringify(ca.accepted || null) !== JSON.stringify(cb.accepted || null)) n++;   // the accepted findings, as one
     if (JSON.stringify(ca.pinned || null) !== JSON.stringify(cb.pinned || null)) n++;   // the pins, as one
+    if (JSON.stringify(ca.searches || null) !== JSON.stringify(cb.searches || null)) n++;   // the saved searches, as one
     return n;
 }
 
@@ -1765,6 +1803,9 @@ function noteDocChanged(json) {
     if (json === _lastDocJson) return;
     _lastDocJson = json;
     state.docUpdated = Math.max(Date.now(), (state.docUpdated || 0) + 1);
+    // The History section reads "now" from the network on screen, so an edit
+    // typed into the panel (a name, an address, a group) shows there at once.
+    if (typeof refreshHistoryPanelSafe === 'function') refreshHistoryPanelSafe();   // js/trail.js
     if (!isKept()) return;
     const now = Date.now();
     if (!_autosaveDueSince) {

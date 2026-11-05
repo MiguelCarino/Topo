@@ -581,7 +581,7 @@ function rvFitGuests() {
 //   finding  ringed in the error colour: a cable an open finding names (a
 //            loop, two subnets on one cable, a label on two cables), two
 //            cables on the one port, or a port past the faceplate's count;
-//   VLAN     an access VLAN tints the port's cell.
+//   VLAN     an untagged or a tagged VLAN tints the port's cell.
 // The ports are as big as the box has room for under its name. A 1U box at
 // 1x has none (its name fills it), so its ports are a hairline along its foot
 // (rvPortsFit, rk-pthin): their state seen, not read. The selected device's
@@ -657,7 +657,7 @@ function rvPortsHtml(n, perRow = RV_PORTS_ROW, units = 0) {
         const st = rvPortState(p, bad);
         // A bond's bar runs under its members, broken where a row ends.
         const bond = p.bond ? ['rk-pb', !same(ports[k - 1], p) || k % cols === 0 ? 'rk-pb-s' : '', !same(p, ports[k + 1]) || (k + 1) % cols === 0 ? 'rk-pb-e' : ''] : [];
-        const cls = ['rk-port', st.cabled ? 'rk-pcab' : '', st.problem ? 'rk-pbad' : '', p.vlan !== null ? 'rk-pvlan' : '', ...bond].filter(Boolean).join(' ');
+        const cls = ['rk-port', st.cabled ? 'rk-pcab' : '', st.problem ? 'rk-pbad' : '', p.vlan !== null || p.tagged ? 'rk-pvlan' : '', ...bond].filter(Boolean).join(' ');
         return `<span class="${cls}" data-port="${escapeHtml(p.id)}"${st.colour ? ` style="--pcol:${escapeHtml(st.colour)}"` : ''}></span>`;
     }).join('');
     // title="": the box's own tooltip is not shown over its ports, which
@@ -672,7 +672,9 @@ function rvPortInfo(node, portId) {
     const st = rvPortState(p, _rv.badLinks || rvBadLinks());
     const head = `${rvName(node)} · ${p.name}${p.label ? ` · ${p.label}` : ''}`;
     const lines = [];
-    if (p.vlan !== null) lines.push(`VLAN ${p.vlan}`);
+    const vlans = portVlanFacts(p.vlan, p.tagged);
+    if (vlans.length) lines.push(vlans.join(' · '));
+    if (p.poe !== null && p.poe !== undefined) lines.push(poeText(p.poe));
     if (p.bond) lines.push(t('In {bond}', { bond: p.bond.name }));
     if (!p.links.length) lines.push(t('Free: no cable on it.'));
     p.links.forEach((l) => {

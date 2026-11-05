@@ -98,15 +98,13 @@ const sentenceCase = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 // Pure: no DOM, no formatting. The tests assert against this rather than against
 // the rendered HTML, so a layout change cannot quietly break the content.
 
-// Faceplate usage, counted the way evaluatePorts() counts it — sockets only, so
-// an AP's wireless clients are not reported as cables in a port.
+// Faceplate usage: portCapacity()'s count (js/model.js), the one the node
+// panel (evaluatePorts) and the port map print too. Numbered sockets only, so
+// an AP's wireless clients are not reported as cables in a port, and a bond
+// counts as used.
 function portUsage(node) {
-    if (!hasPortGrid(node)) return null;
-    const total = portCountOf(node);
-    const used = new Set(linksAtNode(node.id)
-        .map((l) => ifaceIdOn(l, node.id))
-        .filter((id) => /^p\d+$/.test(id))).size;
-    return { used, total };
+    const cap = portCapacity(node);
+    return cap ? { used: cap.used, total: cap.total } : null;
 }
 
 function reportInterface(node, iface) {
@@ -167,7 +165,9 @@ function reportDevices() {
         // Age and upkeep (js/model.js), as of the report's date: the day
         // reportModel() counts the checks to (onChecksDay), so the inventory
         // and the findings say one age. Outside a report it is today.
-        upkeep: reportUpkeepOf(node, checksDay())
+        upkeep: reportUpkeepOf(node, checksDay()),
+        // What it draws by PoE (document v16), for its inventory line, or null.
+        poeDraw: canDrawPoe(node.type) && asPoeDraw(node.poeDraw) !== undefined ? asPoeDraw(node.poeDraw) : null
     }));
 }
 // The day a report counts to: its own date when that is one, so a report
@@ -363,6 +363,12 @@ function reportFieldsOf(node) {
     return out;
 }
 
+// A report column's text for one device row: its field's value, except the
+// Model column, which reads "vendor model" (the vendor has no column of its
+// own; document v16).
+const REPORT_CELL = { model: (d) => [d.vendor, d.model].filter((v) => !isBlank(v)).map((v) => v.trim()).join(' ') };
+const reportCellText = (d, f) => (REPORT_CELL[f.report.key] ? REPORT_CELL[f.report.key](d) : d[f.report.key]);
+
 function reportConnections() {
     return state.links.map((link) => {
         const src = getNode(link.source), tgt = getNode(link.target);
@@ -457,7 +463,8 @@ function reportSubnets() {
         if (!p || byNet.has(net.cidr)) return;
         byNet.set(net.cidr, { id: net.id, network: net.cidr, kind: p.kind, isPrivate: p.isPrivate, declared: true,
             name: asText(net.name).trim(), vlan: Number.isInteger(net.vlan) ? net.vlan : null, purpose: asText(net.purpose).trim(),
-            gateway: asText(net.gateway).trim(), dns: asText(net.dns).trim(), dhcp: !!net.dhcp, devices: [], nodeIds: [] });
+            gateway: asText(net.gateway).trim(), dns: asText(net.dns).trim(), dhcp: !!net.dhcp,
+            dhcpFirst: asText(net.dhcpFirst).trim(), dhcpLast: asText(net.dhcpLast).trim(), devices: [], nodeIds: [] });
     });
     state.nodes.forEach((node) => {
         getValidIps(node).forEach((parsed) => {
@@ -465,7 +472,7 @@ function reportSubnets() {
             const key = net ? net.cidr : parsed.networkStr;
             if (!byNet.has(key)) {
                 byNet.set(key, { id: null, network: key, kind: parsed.kind, isPrivate: parsed.isPrivate, declared: false,
-                    name: '', vlan: null, purpose: '', gateway: '', dns: '', dhcp: false, devices: [], nodeIds: [] });
+                    name: '', vlan: null, purpose: '', gateway: '', dns: '', dhcp: false, dhcpFirst: '', dhcpLast: '', devices: [], nodeIds: [] });
             }
             const entry = byNet.get(key);
             const name = node.name || node.id;
@@ -475,7 +482,86 @@ function reportSubnets() {
             if (!entry.nodeIds.includes(node.id)) entry.nodeIds.push(node.id);
         });
     });
+    // How much of it is used and free (subnetCapacity, js/model.js), the
+    // numbers the Capacity section and the table's Subnets tab print: size
+    // and free are null past 2^24 addresses (an IPv6 /64), bits says how many
+    // host bits it has then. near: the address-capacity note's test
+    // (addressCapacityNote), so the table marks what the Findings tab names.
+    // pool: the DHCP pool's split (subnetCapacity), null with none recorded;
+    // fixed: the part outside a valid one, the whole subnet otherwise.
+    byNet.forEach((entry) => {
+        const net = entry.id ? state.networks.find((n) => n.id === entry.id) : null;
+        const of = net || entry.network;
+        const cap = subnetCapacity(of);
+        const p = parseValidCIDR(entry.network);
+        const note = addressCapacityNote(of, cap);
+        Object.assign(entry, { size: cap ? cap.size : null, used: cap ? cap.used : 0, free: cap ? cap.free : null,
+            bits: p ? hostBits(p) : 0, near: !!note, full: !!(note && note.fixed.free === 0),
+            pool: cap ? cap.pool : null, fixed: cap ? cap.fixed : { size: null, used: 0, free: null } });
+    });
     return [...byNet.values()].sort((a, b) => a.network.localeCompare(b.network));
+}
+
+// VLANs (docs/BACKLOG.md feature 4): one row per VLAN the register names,
+// a declared subnet's, a port's untagged one or one listed tagged, in number
+// order, or null when no port and no wired interface records a tagged VLAN
+// (an access-only network's VLANs are already under Addressing and Switch
+// ports). Each row:
+//   vlan      the number
+//   subnets   [{ name, cidr, gateway }] the declared subnets on it
+//   access    how many ports have it untagged with no tagged list
+//   trunks    [{ device, ports: [names] }] the ports and wired interfaces
+//             that carry it tagged (a list holding it, or "all"), by device
+//             in name order
+// What is written only: nothing is walked or checked here.
+function reportVlans() {
+    const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+    const ends = [];
+    state.nodes.forEach((node) => {
+        const name = node.name || node.id;
+        if (hasPortGrid(node)) {
+            Object.keys(node.portAttrs || {}).forEach((id) => {
+                if (!/^p\d+$/.test(id)) return;
+                const a = portAttrOf(node, id);
+                const list = a.tagged ? parseVlanList(a.tagged) : null;
+                if (a.vlan !== null || list) ends.push({ device: name, port: ifaceLabel(node, id), n: Number(id.slice(1)), untagged: a.vlan, list, port_: true });
+            });
+        }
+        // As portVlans reads them: not a faceplate port written into the
+        // list (its VLANs are portAttrs, above), not a bond member (it reads
+        // its bond's).
+        (node.interfaces || []).forEach((i, k) => {
+            if (ifaceIsWireless(i) || isBondMember(node, i.id) || (hasPortGrid(node) && PORT_ID_RE.test(i.id || ''))) return;
+            const list = asVlanList(i.tagged) ? parseVlanList(i.tagged) : null;
+            if (list) ends.push({ device: name, port: i.name || i.id, n: 10000 + k, untagged: null, list, port_: false });
+        });
+    });
+    if (!ends.some((e) => e.list)) return null;
+    const nums = new Set();
+    state.networks.forEach((net) => { if (asVlan(net.vlan) !== undefined) nums.add(asVlan(net.vlan)); });
+    ends.forEach((e) => {
+        if (e.untagged !== null) nums.add(e.untagged);
+        if (e.list && !e.list.all) e.list.forEach((v) => nums.add(v));
+    });
+    const group = (list) => {
+        const trunks = [];
+        list.sort((a, b) => byName(a.device, b.device) || a.n - b.n).forEach((e) => {
+            const last = trunks[trunks.length - 1];
+            if (last && last.device === e.device) last.ports.push(e.port); else trunks.push({ device: e.device, ports: [e.port] });
+        });
+        return trunks;
+    };
+    const rows = [...nums].sort((a, b) => a - b).map((v) => {
+        const subnets = state.networks.filter((net) => asVlan(net.vlan) === v && parseValidCIDR(net.cidr))
+            .map((net) => ({ name: asText(net.name).trim(), cidr: net.cidr, gateway: asText(net.gateway).trim() }));
+        const access = ends.filter((e) => e.port_ && e.untagged === v && !e.list).length;
+        return { vlan: v, subnets, access, trunks: group(ends.filter((e) => vlanListHas(e.list, v))) };
+    });
+    // Trunks that carry every VLAN in a file that names none: one row for
+    // them, so the section still says they are there.
+    const all = ends.filter((e) => e.list && e.list.all);
+    if (!rows.length && all.length) rows.push({ vlan: 'all', subnets: [], access: 0, trunks: group(all) });
+    return rows;
 }
 
 // Every faceplate port of every switch and access point, cabled or free, in
@@ -495,7 +581,7 @@ function reportPorts() {
             const peer = peerId ? getNode(peerId) : null;
             const peerIface = peer ? ifaceIdOn(link, peerId) : null;
             out.push({ nodeId: node.id, portId: id, number: n, device: node.name || node.id, port: ifaceLabel(node, id),
-                label: a.label, vlan: a.vlan, over: n > total,
+                label: a.label, vlan: a.vlan, tagged: a.tagged, poe: a.poe, over: n > total,
                 peerId: peer ? peer.id : null, peer: peer ? peer.name || peer.id : '', peerIface: peer ? ifaceLabel(peer, peerIface) : '',
                 linkId: link && peer ? link.id : null, cable: link ? cableOf(link, 'label').trim() : '' });
         });
@@ -621,7 +707,7 @@ function reportPortMaps() {
             rows.push({ port: m ? Number(m[1]) : null, label: ifaceLabel(node, mine), linkId: link.id, peerId: peer.id,
                 peer: peer.name || peer.id, peerIface: ifaceLabel(peer, peerIface), ip: asText(ifaceOn(peer, peerIface)?.ip),
                 cable: cableOf(link, 'label').trim(), medium: mediumName(effectiveMedium(link)),
-                portLabel: a.label, vlan: a.vlan, free: false });
+                portLabel: a.label, vlan: a.vlan, tagged: a.tagged, poe: a.poe, free: false });
         });
         // Free ports with something written about them.
         const cabled = new Set(rows.filter((r) => r.port !== null).map((r) => r.port));
@@ -630,25 +716,273 @@ function reportPortMaps() {
             if (!m || cabled.has(Number(m[1])) || !hasPortAttrs(node, id)) return;
             const a = portAttrOf(node, id);
             rows.push({ port: Number(m[1]), label: ifaceLabel(node, id), linkId: null, peerId: null, peer: '', peerIface: '', ip: '',
-                cable: '', medium: '', portLabel: a.label, vlan: a.vlan, free: true });
+                cable: '', medium: '', portLabel: a.label, vlan: a.vlan, tagged: a.tagged, poe: a.poe, free: true });
         });
         rows.sort((a, b) => ((a.port === null) - (b.port === null)) || (a.port !== null ? a.port - b.port : 0)
             || byName(a.label, b.label) || byName(a.peer, b.peer));
-        const total = portCountOf(node);
-        const taken = new Set(rows.filter((r) => r.port !== null && !r.free).map((r) => r.port));
+        // Used and total are portCapacity()'s, so the heading agrees with the
+        // inventory and the node panel (a bond is used, a radio's clients are
+        // not ports); the free ranges are its free ports less the ones that
+        // already have a row of their own (a labelled free jack).
+        const cap = portCapacity(node);
+        const total = cap.total;
         const listed = new Set(rows.filter((r) => r.port !== null).map((r) => r.port));
-        const free = [];
-        for (let i = 1; i <= total; i++) {
-            if (listed.has(i)) continue;
-            const last = free[free.length - 1];
-            if (last && last[1] === i - 1) last[1] = i; else free.push([i, i]);
-        }
-        const name = (n) => portNameOf(node, n);
-        return { id: node.id, name: node.name || node.id, typeName: typeName(node.type), total, used: taken.size, rows,
+        const freeNums = cap.freeIds.map((id) => Number(id.slice(1))).filter((i) => i <= total && !listed.has(i));
+        // full: the port-capacity note's test (portCapacityNote), so the map
+        // marks the switch the Findings tab and the Capacity section name.
+        const note = portCapacityNote(node);
+        return { id: node.id, name: node.name || node.id, typeName: typeName(node.type), total, used: cap.used, rows,
+            explicit: cap.explicit, retired: isRetired(node), freeCount: cap.free, nearlyFull: !!note, full: !!(note && note.full),
             hasLabels: rows.some((r) => r.portLabel), hasVlans: rows.some((r) => r.vlan !== null),
-            free: free.map(([a, b]) => (a === b ? name(a) : `${name(a)}–${name(b)}`)).join(', ') };
-    }).filter((m) => m.rows.length)
+            // Tagged and PoE columns only on a switch whose rows have them, as
+            // Label and VLAN; poe: what its PoE ports draw against its budget
+            // (poeLoad, js/model.js), for the heading, or null.
+            hasTagged: rows.some((r) => r.tagged !== null && r.tagged !== undefined), hasPoe: rows.some((r) => r.poe !== null && r.poe !== undefined),
+            poe: poeLoad(node),
+            free: portRangeText(node, freeNums) };
+    // Every switch and AP, cabled or not: a switch with nothing plugged in yet
+    // is the room the site has to grow (Decisions taken, docs/BACKLOG.md).
+    // Not a bare one-port faceplate with nothing on it (a default AP's
+    // uplink), which says nothing a reader needs, and not a retired box with
+    // nothing on it, which is off the network and no room to grow (the note
+    // and Room to grow leave it out too).
+    }).filter((m) => m.rows.length || (m.total >= 2 && !m.retired))
         .sort((a, b) => byName(a.name, b.name));
+}
+
+// Capacity (docs/BACKLOG.md feature 2): what is close to running out of room,
+// worked out from the register only. The ports side:
+//   ports  each switch or AP the port-capacity note names (portCapacityNote,
+//          js/model.js), with its free ports as the port map writes them, in
+//          name order: the Capacity section's Ports table. The note itself
+//          is info, which the report's findings leave out, so this is where
+//          a reader sees it. Every switch's own ports are the port map's.
+//   room   for the Simple summary's Room to grow line: the free ports over
+//          every in-service or planned switch and AP whose port count was
+//          set, of PORT_CAPACITY_MIN ports or more (an implicit count grows
+//          with every cable, so its free ports are not known), and how many
+//          such boxes there are (aps: how many of them are access points,
+//          so the line names what the site has); null when there is none.
+// The documented state, like everything else here: no date enters it.
+function reportCapacity(subnets = reportSubnets()) {
+    const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
+    const ports = [];
+    let free = 0, devices = 0, aps = 0;
+    state.nodes.forEach((node) => {
+        if (!hasPortGrid(node) || isRetired(node)) return;
+        const cap = portCapacity(node);
+        if (cap.explicit && cap.total >= PORT_CAPACITY_MIN) { devices++; free += cap.free; if (node.type === 'ap') aps++; }
+        const note = portCapacityNote(node);
+        if (!note) return;
+        ports.push({ id: node.id, name: node.name || node.id, typeName: typeName(node.type), total: note.total, used: note.used,
+            free: note.free, full: note.full, freePorts: portRangeText(node, note.freeIds.map((id) => Number(id.slice(1)))) });
+    });
+    // The addresses side, from the Addressing table's rows (reportSubnets):
+    //   subnets   every subnet it lists, declared or implied, with its size,
+    //             use and free count, and whether the address-capacity note
+    //             names it (near, full): the Capacity section's Addresses
+    //             table;
+    //   addresses for Room to grow: the free addresses over every subnet the
+    //             note could name (countable IPv4 of ADDRESS_CAPACITY_MIN
+    //             addresses or more), how many such subnets, and the nearly
+    //             full ones by name; null when there is none. An implied
+    //             subnet only retired devices hold is left out: they are off
+    //             the network, so it is no room to grow (the port half leaves
+    //             retired boxes out the same way). A free address is added
+    //             once: a subnet inside another counted one (a /24 declared
+    //             inside a /16) is already in the outer one's free count,
+    //             which subnetCapacity works out over the whole range.
+    const rows = subnets.map((s) => ({ network: s.network, name: s.name, declared: s.declared, kind: s.kind,
+        size: s.size, used: s.used, free: s.free, bits: s.bits, near: s.near, full: s.full, pool: s.pool, fixed: s.fixed }));
+    const counted = rows.filter((r) => r.kind === 'ipv4' && r.size !== null && r.size >= ADDRESS_CAPACITY_MIN
+        && (r.declared || r.used > 0));
+    const spans = counted.map((r) => usableRange(parseValidCIDR(r.network)));
+    const inside = (k) => spans.some((o, j) => j !== k && o.first <= spans[k].first && spans[k].last <= o.last
+        && (o.first !== spans[k].first || o.last !== spans[k].last || j < k));
+    const addresses = counted.length ? { free: counted.reduce((n, r, k) => (inside(k) ? n : n + r.free), 0), networks: counted.length,
+        tight: counted.filter((r) => r.near).map((r) => (r.pool && r.pool.valid
+            ? { name: r.name || r.network, free: r.fixed.free, size: r.fixed.size, full: r.full, fixed: true }
+            : { name: r.name || r.network, free: r.free, size: r.size, full: r.full })) } : null;
+    // The PoE side: every switch or AP in service or planned that records a
+    // budget, what its PoE ports are asked for and what is left (poeLoad,
+    // js/model.js). A figure only: going over is stage 2b's check.
+    const poe = state.nodes.filter((n) => hasPortGrid(n) && !isRetired(n)).map((n) => ({ n, load: poeLoad(n) }))
+        .filter((x) => x.load && x.load.budget !== null)
+        .map(({ n, load }) => ({ id: n.id, name: n.name || n.id, typeName: typeName(n.type), budget: load.budget, used: load.used,
+            left: Math.round((load.budget - load.used) * 100) / 100, devices: load.devices.length }));
+    return { ports: ports.sort(byName), room: devices ? { free, devices, aps } : null, subnets: rows, addresses, poe: poe.sort(byName) };
+}
+
+// ---- Inventory by vendor, model and firmware (docs/BACKLOG.md feature 3, stage 5) ----
+// What the register holds, counted three ways: the report's Inventory
+// section and the Table's Inventory tab both read this, so they cannot
+// disagree. Typed values only: a vendor the MAC suggests is not saved, so it
+// is not counted (macVendorSuggestion, js/assets.js).
+//   any       some device has a vendor, a model or a firmware / OS: the
+//             section prints and the tab is offered only then;
+//   vendors   one row per vendor (compared without case, runs of space as
+//             one, shown in the most common spelling);
+//   models    one row per model, keyed as the firmware finding keys it
+//             (firmwareFindings, js/diagnostics.js): a vendor set and
+//             different is another model, a blank vendor joins the model's
+//             one vendor or stays apart when the model is under two; with
+//             the firmware versions of its devices in service, each with its
+//             count, most first; mismatch: 'open' while a firmware finding
+//             names one of its devices and is not accepted, 'accepted' once
+//             it is, else '';
+//   firmware  one row per firmware / OS (the finding's comparison key, so
+//             "v17.9.4" and "17.9.4" are one row).
+// Every row: value ('' for the one Not recorded row, last), count (devices
+// in service or planned), retired (retired devices, counted apart), nodeIds
+// and names in the map's order. Ordered by count, then by value.
+// findings: the diagnosis to read the firmware finding from (the report
+// passes its own, counted to its date).
+function reportInventory(findings) {
+    const nodes = state.nodes;
+    const any = nodes.some((n) => !isBlank(n.vendor) || !isBlank(n.model) || !isBlank(n.os));
+    if (!any) return { any: false, vendors: [], models: [], firmware: [] };
+    const low = (s) => fwSpace(s).toLowerCase();
+    const bucket = (map, key) => { if (!map.has(key)) map.set(key, { key, nodes: [], spell: [], extra: [] }); return map.get(key); };
+    const vendors = new Map(), models = new Map(), firmware = new Map();
+    // The vendors each model is recorded under, so a blank vendor can join:
+    // counted over the devices the firmware finding groups (in service, with
+    // a model and a firmware), so a blank vendor joins or stays apart here
+    // exactly as it does there, whatever a retired device or one with no
+    // firmware is recorded under.
+    const modelVendors = new Map();
+    nodes.forEach((n) => {
+        const m = low(n.model), v = low(n.vendor);
+        if (!m || !v || isRetired(n) || !fwSpace(n.os) || !firmwareKey(n.os)) return;
+        if (!modelVendors.has(m)) modelVendors.set(m, new Set());
+        modelVendors.get(m).add(v);
+    });
+    nodes.forEach((n) => {
+        const vendor = fwSpace(n.vendor), model = fwSpace(n.model), fw = fwSpace(n.os);
+        const vb = bucket(vendors, vendor.toLowerCase()); vb.nodes.push(n); vb.spell.push(vendor);
+        const fb = bucket(firmware, fw ? firmwareKey(n.os) : ''); fb.nodes.push(n); fb.spell.push(fw);
+        let mk = '';
+        if (model) {
+            const known = modelVendors.get(model.toLowerCase());
+            const v = vendor.toLowerCase() || (known && known.size === 1 ? [...known][0] : '');
+            // A pair, not a joined string: "A|B" + "C" and "A" + "B|C" are two models.
+            mk = JSON.stringify([v, model.toLowerCase()]);
+        }
+        const mb = bucket(models, mk); mb.nodes.push(n); mb.spell.push(model); mb.extra.push(vendor);
+    });
+    const fwFindings = (findings || topologyFindings()).filter((f) => f.key === 'firmware');
+    const order = (a, b) => (!a.value) - (!b.value) || b.count - a.count || b.retired - a.retired
+        || a.value.localeCompare(b.value, undefined, { numeric: true, sensitivity: 'base' });
+    const row = (b) => {
+        const live = b.nodes.filter((n) => !isRetired(n));
+        return { key: b.key, value: b.key ? commonSpelling(b.spell) : '', count: live.length, retired: b.nodes.length - live.length,
+            nodeIds: b.nodes.map((n) => n.id), names: b.nodes.map((n) => n.name || n.id) };
+    };
+    const modelRows = [...models.values()].map((b) => {
+        const r = row(b);
+        if (!b.key) return Object.assign(r, { vendor: '', model: '', firmware: [], mismatch: '' });
+        r.model = r.value;
+        r.vendor = commonSpelling(b.extra);
+        r.value = (r.vendor ? r.vendor + ' ' : '') + r.model;
+        const versions = new Map();
+        b.nodes.forEach((n) => {
+            const fw = fwSpace(n.os);
+            if (isRetired(n) || !fw) return;
+            const k = firmwareKey(n.os);
+            if (!versions.has(k)) versions.set(k, []);
+            versions.get(k).push(fw);
+        });
+        r.firmware = [...versions.values()].map((s) => ({ value: commonSpelling(s), count: s.length }))
+            .sort((x, y) => y.count - x.count || x.value.localeCompare(y.value, undefined, { numeric: true }));
+        const ids = new Set(r.nodeIds);
+        const hits = fwFindings.filter((f) => (f.nodeIds || []).some((id) => ids.has(id)));
+        r.mismatch = hits.some((f) => !f.accepted) ? 'open' : hits.length ? 'accepted' : '';
+        return r;
+    });
+    return { any: true, vendors: [...vendors.values()].map(row).sort(order), models: modelRows.sort(order),
+        firmware: [...firmware.values()].map(row).sort(order) };
+}
+// A model's firmware versions as one line: "17.9.4 × 2; 17.6.1 × 1".
+const inventoryVersionsText = (list) => (list || []).map((v) => `${v.value} × ${v.count}`).join('; ');
+
+// ---- Saved searches, printed (docs/BACKLOG.md feature 6, stage 3) ----
+// The cells the Devices table draws for the screen that would print wrong:
+// every address rather than two and '+N', a type and a tick in words, the
+// whole note. Everything else is the table's own show(row).text, so the
+// report and the table cannot disagree; age and next service count to
+// checksDay(), the report's date inside reportModel (js/table.js).
+const REPORT_SEARCH_CELLS = {
+    type: (row) => t(row.data.typeName),
+    ifaces: (row) => {
+        const ips = row.data.interfaces.map((i) => i.ip).filter(Boolean);
+        return ips.length ? ips.join(', ') : (row.data.ports ? `${row.data.ports.used}/${row.data.ports.total}` : '');
+    },
+    nat: (row) => { const n = getNode(row.ref.nodeId); return n && isRoutingDevice(n.type) ? t(row.data.nat ? 'Yes' : 'No') : '—'; },
+    notes: (row) => String(row.data.notes || '').trim(),
+    // The record's own vendor only: the MAC's suggestion the table greys
+    // (tvVendorCell) is never printed (docs/BACKLOG.md feature 3, stage 3).
+    vendor: (row) => { const n = getNode(row.ref.nodeId); return n && !isBlank(n.vendor) ? n.vendor.trim() : ''; }
+};
+function reportSearchCell(col, row) {
+    if (REPORT_SEARCH_CELLS[col.key]) return REPORT_SEARCH_CELLS[col.key](row);
+    if (col.custom) {
+        const def = customColumnById(col.custom);
+        if (def && def.kind === 'yesno') return t(customValueOf(getNode(row.ref.nodeId), def.id) ? 'Yes' : 'No');
+    }
+    const text = String(col.show(row).text || '');
+    return text === '✓' ? t('Yes') : text;
+}
+// The column a search sorts by, as the sheet prints it: one whose cell the
+// report words differently from the screen (a type, NAT, a yes/no column, a
+// whole note) sorts on the printed text, so the rows follow the words the
+// reader sees, in the report's language, and Yes/No turn over when
+// descending. A dash is a blank, last either way. Addresses keep the table's
+// numeric order (the first address leads in both).
+function reportSearchSortColumn(col) {
+    if (!col) return null;
+    const yesno = col.custom && (customColumnById(col.custom) || {}).kind === 'yesno';
+    if (col.key === 'ifaces' || (!REPORT_SEARCH_CELLS[col.key] && !yesno)) return col;
+    return Object.assign({}, col, { sort: 'text', sortKey: null, show: (row) => { const text = reportSearchCell(col, row); return { text: text === '—' ? '' : text }; } });
+}
+// The saved searches the technical sheet prints, in document order. ids: the
+// ones asked for (the report dialog's ticks, parts.searches); null or absent
+// means every search marked to print (a binder's site, a report from code).
+// Worked out here, inside reportModel's lookup pass and report date, so a
+// binder's sheet is its own site's and has:finding counts to the report's
+// date as the Findings section does (open findings only). devices: the
+// model's rows (reportDevices). Each one is
+//   { id, name, query, total, local?, error?, columns: [{ label, mono }],
+//     rows: [{ name, guest, cells: [text] }] }
+// local: the browser-local words (was:, has:history), never matched here: a
+// report is the same whoever prints it. error: the words not understood.
+// Either way no rows. O(searches × devices), at most SEARCH_MAX searches.
+function reportSearches(ids, devices = reportDevices()) {
+    const pick = Array.isArray(ids) ? new Set(ids) : null;
+    const chosen = (state.searches || []).filter((s) => (pick ? pick.has(s.id) : !!s.print));
+    if (!chosen.length) return [];
+    const all = devices.map((d) => ({ rec: 'node', ref: { nodeId: d.id }, data: d }));
+    const tableKeys = tvDevicesArranged().filter((c) => c.key !== TV_FIXED_COL).map((c) => c.key);
+    return chosen.map((s) => {
+        const base = { id: s.id, name: s.name, query: s.query, total: devices.length, columns: [], rows: [] };
+        const local = queryLocalTerms(s.query);
+        if (local.length) return Object.assign(base, { local: local.join(' ') });
+        const parsed = parseQuery(s.query);
+        if (parsed.errors.length) return Object.assign(base, { error: parsed.errors.join(' ') });
+        const cols = (s.columns || tableKeys).filter((k) => k !== TV_FIXED_COL).map(tvDeviceColumn)
+            .filter((c) => c && (!c.when || c.when()));
+        base.columns = cols.map((c) => ({ label: c.custom ? c.label : t(c.label), mono: !!c.mono }));
+        let rows = parsed.terms.length ? all.filter((r) => queryMatch(parsed, 'node', getNode(r.ref.nodeId))) : [];
+        const sortCol = reportSearchSortColumn(s.sort && (s.sort === TV_FIXED_COL ? TV_COLS.devices.find((c) => c.key === TV_FIXED_COL) : tvDeviceColumn(s.sort)));
+        if (sortCol) {
+            const dir = s.desc ? -1 : 1;
+            rows = rows.map((r, seq) => ({ r, seq })).sort((a, b) => (compareRows(sortCol, a.r, b.r, dir) * dir) || (a.seq - b.seq)).map((x) => x.r);
+        } else {
+            // As listed: a guest under its host, as the inventory has it.
+            const byId = new Map(rows.map((r) => [r.data.id, r]));
+            rows = hostOrdered(rows.map((r) => r.data)).map((d) => Object.assign({}, byId.get(d.id), { guest: d.guest || 0 }));
+        }
+        base.rows = rows.map((r) => ({ name: r.data.name, guest: r.guest || 0, cells: cols.map((c) => reportSearchCell(c, r)) }));
+        return base;
+    });
 }
 
 // Past this many devices the diagram no longer reads at the width of a page
@@ -802,8 +1136,10 @@ function diagramSheets(layout, image, caption, id, defined = false) {
 // Every date-relative check (ages, services due, schedules) counts to the
 // report's date (onChecksDay, js/model.js), and so do the counts and the
 // verdict built from them. meta: the dialog's header, else state.report.
-function reportModel(meta) { return onChecksDay(reportAsOf(meta || state.report), () => withLookupPass(reportModelNow)); }
-function reportModelNow() {
+// searchIds: the saved searches to print (reportParts' searches); absent,
+// every one marked to print (reportSearches).
+function reportModel(meta, searchIds) { return onChecksDay(reportAsOf(meta || state.report), () => withLookupPass(() => reportModelNow(searchIds))); }
+function reportModelNow(searchIds) {
     // Severity order, then the order the checks ran in. topologyFindings() walks
     // nodes before links, so ties keep the reading order of the Findings tab
     // rather than whatever the sort happens to do with equal keys.
@@ -820,6 +1156,12 @@ function reportModelNow() {
     const tally = findingCounts(all);
 
     const devices = reportDevices();
+    // The socket each end device is plugged into (locateSocketText,
+    // js/model.js), for the Simple summary's Where cell: only on a list the
+    // summary prints, and only where the register holds one, so a network
+    // with none reads byte for byte as before. reportDevices maps state.nodes
+    // in order.
+    if (devices.length <= SUMMARY_LIST_MAX) devices.forEach((d, i) => { const s = locateSocketText(state.nodes[i]); if (s) d.socket = s; });
     const connections = reportConnections();
     const subnets = reportSubnets();
     const groups = reportGroups();
@@ -847,6 +1189,15 @@ function reportModelNow() {
         connections,
         subnets,
         portMaps: reportPortMaps(),
+        // One row per VLAN, printed only once a trunk is recorded (reportVlans).
+        vlans: reportVlans(),
+        capacity: reportCapacity(subnets),
+        // By vendor, model and firmware (reportInventory), with the firmware
+        // finding as this report counts it.
+        inventory: reportInventory(all),
+        // The saved searches the technical sheet prints (doc.searches), each
+        // matched here so a binder's sheet is its own site's.
+        searches: reportSearches(searchIds, devices),
         wifi: reportWifiSection(),
         providers: reportProviders(),
         counts: {
@@ -1121,6 +1472,8 @@ function reportStyles() {
        carries its name and its own fields; the lines after it only the
        interface, without the rule between them, so a device reads as one block. */
     .inv td { padding: 3px 6px; }
+    /* The Inventory section's three tables: the counts stay narrow. */
+    .invsum th.n, .invsum td.n { width: 64px; }
     .inv tr.cont td { border-top: 0; }
     .inv tr.dev td { border-top: 1px solid #e2e8f0; }
     .inv tr.guest > td:first-child { padding-left: calc(6px + var(--guest, 1) * 14px); }
@@ -1339,22 +1692,31 @@ function racksSection(racks) {
     }).join('');
 }
 
+// A switch with nothing cabled to it yet has its heading and its free ports,
+// no table (a bond with no cable on it still takes its ports, and it says
+// so). One the port-capacity note names (portCapacityNote) is marked in its
+// heading, as the Capacity section lists it. A switch whose port count was
+// never set says so after its total, which is then a guess (the node panel's
+// 'Port count not set, so the total is a guess.'), and has no Free line: its
+// free ports are not known.
 function portMapsSection(maps) {
     return maps.map((m) => `
-        <h3>${escapeHtml(m.name)} <span class="muted">· ${escapeHtml(t(m.typeName))} · ${escapeHtml(t(m.total === 1 ? '{used} of {total} port used' : '{used} of {total} ports used', { used: m.used, total: m.total }))}</span></h3>
-        <table class="ports">
-        <thead><tr><th>${t('Port')}</th>${m.hasLabels ? `<th>${t('Label')}</th>` : ''}${m.hasVlans ? '<th>VLAN</th>' : ''}<th>${t('Device')}</th><th>${t('Interface')}</th><th>${t('Address')}</th><th>${t('Cable')}</th></tr></thead>
+        <h3>${escapeHtml(m.name)} <span class="muted">· ${escapeHtml(t(m.typeName))} · ${escapeHtml(t(m.total === 1 ? '{used} of {total} port used' : '{used} of {total} ports used', { used: m.used, total: m.total }))}${m.explicit ? '' : ` · ${escapeHtml(t('port count not set'))}`}${m.poe && m.poe.budget !== null ? ` · ${escapeHtml(t('PoE: {used} of {budget} W budget', { used: wattsText(m.poe.used), budget: wattsText(m.poe.budget) }))}` : ''}</span>${m.nearlyFull ? ` <span class="sev warn">${escapeHtml(t(m.full ? 'No free port' : 'Almost full'))}</span>` : ''}</h3>
+        ${!m.rows.length ? `<p class="muted">${escapeHtml(t(m.used ? 'No cable is plugged in yet. Its bond ports count as in use.' : 'Nothing is plugged in yet.'))}</p>` : `<table class="ports">
+        <thead><tr><th>${t('Port')}</th>${m.hasLabels ? `<th>${t('Label')}</th>` : ''}${m.hasVlans ? `<th>${m.hasTagged ? escapeHtml(t('Untagged')) : 'VLAN'}</th>` : ''}${m.hasTagged ? `<th>${escapeHtml(t('Tagged'))}</th>` : ''}${m.hasPoe ? '<th>PoE</th>' : ''}<th>${t('Device')}</th><th>${t('Interface')}</th><th>${t('Address')}</th><th>${t('Cable')}</th></tr></thead>
         <tbody>${m.rows.map((r) => `<tr${r.free ? ' class="free-port"' : ''}>
             <td class="mono"><b>${escapeHtml(r.label)}</b></td>
             ${m.hasLabels ? `<td>${escapeHtml(r.portLabel)}</td>` : ''}
             ${m.hasVlans ? `<td class="mono">${r.vlan === null ? '' : r.vlan}</td>` : ''}
+            ${m.hasTagged ? `<td class="mono">${r.tagged === null || r.tagged === undefined ? '' : escapeHtml(r.tagged)}</td>` : ''}
+            ${m.hasPoe ? `<td class="mono">${r.poe === null || r.poe === undefined ? '' : escapeHtml(poeText(r.poe))}</td>` : ''}
             ${r.free ? `<td class="muted" colspan="4">${escapeHtml(t('Free'))}</td>` : `
             <td><b>${escapeHtml(r.peer)}</b></td>
             <td class="mono muted">${escapeHtml(r.peerIface)}</td>
             <td class="mono">${escapeHtml(r.ip) || '<span class="muted">—</span>'}</td>
             <td>${r.cable ? `<span class="mono">${escapeHtml(r.cable)}</span> · ` : ''}<span class="muted">${escapeHtml(t(r.medium))}</span></td>`}
-        </tr>`).join('')}</tbody></table>
-        ${m.free ? `<p class="free muted">${escapeHtml(t('Free: {ports}', { ports: m.free }))}</p>` : ''}`).join('');
+        </tr>`).join('')}</tbody></table>`}
+        ${m.free && m.explicit ? `<p class="free muted">${escapeHtml(t('Free: {ports}', { ports: m.free }))}</p>` : ''}`).join('');
 }
 
 // An interface's own line: its name and what kind of port it is, then its
@@ -1398,7 +1760,8 @@ function hostOrdered(list) {
 }
 
 function devicesSection(devices, groups) {
-    // Gateway, DNS, Model / firmware: the schema rows that carry a report column.
+    // Gateway, DNS, Model, Firmware / OS: the schema rows that carry a report
+    // column (reportCellText joins the vendor into Model).
     const cols = reportColumns();
     const empty = '<span class="muted">—</span>';
     const known = new Set((groups || []).map((g) => g.id));
@@ -1406,6 +1769,7 @@ function devicesSection(devices, groups) {
     const deviceRows = (d) => {
         const extra = [
             d.ports ? `${escapeHtml(t('Ports'))}: ${d.ports.used}/${d.ports.total}` : '',
+            d.poeDraw !== null && d.poeDraw !== undefined ? escapeHtml(`PoE ${wattsText(d.poeDraw)} W`) : '',
             d.nat ? escapeHtml(t('NAT')) : '',
             d.allowedPorts ? `${escapeHtml(t('Allowed'))}: ${escapeHtml(d.allowedPorts)}` : ''
         ].filter(Boolean).join(' · ');
@@ -1438,7 +1802,7 @@ function devicesSection(devices, groups) {
             <td>${d.guest ? '<span class="muted">↳ </span>' : ''}<b>${escapeHtml(d.name)}</b>${status}${runs}${asset ? `<br><span class="muted">${escapeHtml(asset)}</span>` : ''}${upkeep ? `<br><span class="muted">${escapeHtml(upkeep)}</span>` : ''}${mine ? `<br><span class="muted">${escapeHtml(mine)}</span>` : ''}${d.notes ? `<br><span class="muted">${escapeHtml(d.notes)}</span>` : ''}</td>
             <td>${escapeHtml(t(d.typeName))}${extra ? `<br><span class="muted">${extra}</span>` : ''}</td>
             ${own}
-            ${cols.map((f) => `<td${f.report.mono ? ' class="mono"' : ''}>${escapeHtml(d[f.report.key]) || empty}</td>`).join('\n            ')}
+            ${cols.map((f) => `<td${f.report.mono ? ' class="mono"' : ''}>${escapeHtml(reportCellText(d, f)) || empty}</td>`).join('\n            ')}
         </tr>`;
         }).join('');
     };
@@ -1532,7 +1896,7 @@ function subnetsSection(subnets) {
         const service = [
             s.gateway ? `${escapeHtml(t('Gateway'))} <span class="mono">${escapeHtml(s.gateway)}</span>` : '',
             s.dns ? `${escapeHtml(t('DNS'))} <span class="mono">${escapeHtml(s.dns)}</span>` : '',
-            s.dhcp ? escapeHtml(t('DHCP')) : ''
+            s.dhcp ? `${escapeHtml(t('DHCP'))}${s.dhcpFirst || s.dhcpLast ? ` <span class="mono">${escapeHtml(t('pool {range}', { range: `${s.dhcpFirst || '?'}–${s.dhcpLast || '?'}` }))}</span>` : ''}` : ''
         ].filter(Boolean);
         return `<tr>
         <td><span class="mono"><b>${escapeHtml(s.network)}</b></span>${about.filter(Boolean).map((x) => `<br>${x}`).join('')}</td>
@@ -1544,6 +1908,207 @@ function subnetsSection(subnets) {
     return `<table>
         <thead><tr><th>${t('Network')}</th><th>${t('Kind')}</th><th>${t('Devices')}</th><th>${t('Members')}</th></tr></thead>
         <tbody>${rows}</tbody></table>`;
+}
+
+// The VLANs section (reportVlans): its number, its subnet (name, CIDR) and
+// gateway, its access ports and the trunks that carry it, by device and
+// port. '' when there is nothing to print.
+function vlansSection(rows) {
+    if (!rows || !rows.length) return '';
+    const muted = (text) => `<span class="muted">${escapeHtml(text)}</span>`;
+    const body = rows.map((r) => `<tr>
+        <td class="mono"><b>${r.vlan === 'all' ? escapeHtml(t('All VLANs')) : r.vlan}</b></td>
+        <td>${r.subnets.length ? r.subnets.map((x) => `<span class="mono">${escapeHtml(x.cidr)}</span>${x.name ? ` ${escapeHtml(x.name)}` : ''}`).join('<br>') : muted('—')}</td>
+        <td class="mono">${r.subnets.some((x) => x.gateway) ? r.subnets.filter((x) => x.gateway).map((x) => escapeHtml(x.gateway)).join('<br>') : muted('—')}</td>
+        <td>${r.access || muted('—')}</td>
+        <td>${r.trunks.length ? r.trunks.map((x) => `<b>${escapeHtml(x.device)}</b> <span class="mono">${escapeHtml(x.ports.join(', '))}</span>`).join('<br>') : muted('—')}</td>
+    </tr>`).join('');
+    return `<p class="muted">${escapeHtml(t('Each VLAN the register names: its subnet, how many ports have it untagged, and the trunks that carry it tagged. What is written only; nothing here is checked yet.'))}</p>
+    <table class="vlans">
+        <thead><tr><th>VLAN</th><th>${t('Subnet')}</th><th>${t('Gateway')}</th><th>${escapeHtml(t('Access ports'))}</th><th>${escapeHtml(t('Carried tagged on'))}</th></tr></thead>
+        <tbody>${body}</tbody></table>`;
+}
+
+// The Inventory section (reportInventory): three compact tables, By vendor,
+// By model (with each model's firmware versions, a mismatch marked as its
+// firmware finding is) and By firmware / OS. Retired devices are counted in
+// a muted column of their own. Text only: nothing in it reaches outside the
+// page. '' when no device has a vendor, a model or a firmware.
+const hasInventory = (inv) => !!inv && !!inv.any;
+function inventorySection(inv) {
+    if (!hasInventory(inv)) return '';
+    const muted = (text) => `<span class="muted">${escapeHtml(text)}</span>`;
+    const value = (r, text) => (r.value ? escapeHtml(text === undefined ? r.value : text) || muted('—') : muted(t('Not recorded')));
+    const counts = (r) => `<td class="n">${r.count}</td><td class="n">${r.retired ? muted(String(r.retired)) : muted('—')}</td>`;
+    const head = (cells) => `<thead><tr>${cells.map((c) => `<th${c.n ? ' class="n"' : ''}>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>`;
+    const N = (label) => ({ label, n: true }), L = (label) => ({ label });
+    const versions = (r) => {
+        if (!r.firmware.length) return muted('—');
+        const text = escapeHtml(inventoryVersionsText(r.firmware));
+        if (r.mismatch === 'open') return `<span class="sev warn">${text}</span>`;
+        if (r.mismatch === 'accepted') return `${text} ${muted('· ' + t('Accepted'))}`;
+        return text;
+    };
+    const vendorRows = inv.vendors.map((r) => `<tr><td>${value(r)}</td>${counts(r)}</tr>`).join('');
+    const modelRows = inv.models.map((r) => `<tr><td>${r.value ? (escapeHtml(r.vendor) || muted('—')) : muted('—')}</td><td>${value(r, r.model)}</td>${counts(r)}<td class="mono">${r.value ? versions(r) : muted('—')}</td></tr>`).join('');
+    const fwRows = inv.firmware.map((r) => `<tr><td class="mono">${value(r)}</td>${counts(r)}</tr>`).join('');
+    return `<p class="muted">${escapeHtml(t('Devices counts the ones in service or planned; retired ones are counted apart.'))}</p>
+    <h3>${escapeHtml(t('By vendor'))}</h3>
+    <table class="invsum">${head([L(t('Vendor')), N(t('Devices')), N(t('Retired'))])}<tbody>${vendorRows}</tbody></table>
+    <h3>${escapeHtml(t('By model'))}</h3>
+    <table class="invsum">${head([L(t('Vendor')), L(t('Model')), N(t('Devices')), N(t('Retired')), L(t('Firmware / OS'))])}<tbody>${modelRows}</tbody></table>
+    <h3>${escapeHtml(t('By firmware / OS'))}</h3>
+    <table class="invsum">${head([L(t('Firmware / OS')), N(t('Devices')), N(t('Retired'))])}<tbody>${fwRows}</tbody></table>`;
+}
+
+// The Capacity section (reportCapacity): '' when there is nothing in it, so
+// the sheet leaves the heading out too.
+const hasCapacity = (cap) => !!cap && ((cap.ports || []).length > 0 || (cap.subnets || []).length > 0 || (cap.poe || []).length > 0);
+// sec: the sections ticked (reportSections); a table not ticked is left
+// out, and with none left the section is '' and its heading goes too.
+function capacitySection(cap, sec = reportSections()) {
+    if (!hasCapacity(cap)) return '';
+    return (sec.capAddresses ? capacityAddresses(cap.subnets || []) : '')
+        + (sec.capPorts ? capacityPorts(cap.ports || [], sec.ports) : '')
+        + (sec.capPoe ? capacityPoe(cap.poe || []) : '');
+}
+// The PoE table: each switch or AP with a budget, the draw of the devices
+// on its PoE ports and what is left; a figure under nothing is marked.
+function capacityPoe(rows) {
+    if (!rows.length) return '';
+    const body = rows.map((r) => `<tr>
+        <td><b>${escapeHtml(r.name)}</b> <span class="muted">${escapeHtml(t(r.typeName))}</span></td>
+        <td class="mono">${escapeHtml(wattsText(r.budget))}</td>
+        <td class="mono">${escapeHtml(wattsText(r.used))}</td>
+        <td class="mono">${r.left < 0 ? `<span class="sev warn">${escapeHtml(wattsText(r.left))}</span>` : escapeHtml(wattsText(r.left))}</td>
+        <td>${r.devices}</td>
+    </tr>`).join('');
+    return `<h3>PoE</h3>
+    <p class="muted">${escapeHtml(t('Each switch with a PoE budget: what the devices on its PoE ports draw, as recorded, and what is left.'))}</p>
+    <table class="capacity poe">
+        <thead><tr><th>${t('Device')}</th><th>${escapeHtml(t('Budget (W)'))}</th><th>${escapeHtml(t('Drawn (W)'))}</th><th>${escapeHtml(t('Left (W)'))}</th><th>${t('Devices')}</th></tr></thead>
+        <tbody>${body}</tbody></table>`;
+}
+// The Addresses table: every subnet the Addressing table lists, its size, how
+// many addresses are in use (its devices, and its own gateway and DNS, drawn
+// or not) and how many are free, which is what Add devices can still hand
+// out. An implied subnet is muted, as in Addressing; an IPv6 one says
+// 2^bits and its use only; one the address-capacity note names has its free
+// count marked, without counting it anywhere.
+// A subnet that records a DHCP pool adds three columns for every row: the
+// pool as written, how many of its addresses are recorded here (never the
+// leases, which Topo cannot see) and the fixed addresses free outside it,
+// marked when the note names it. A pool that does not count says so.
+function capacityAddresses(subnets) {
+    if (!subnets.length) return '';
+    const muted = (text) => `<span class="muted">${escapeHtml(text)}</span>`;
+    const pooled = (s) => !!(s.pool && s.pool.valid);
+    const pools = subnets.some((s) => s.pool);
+    const poolCells = (s) => {
+        if (!s.pool) return `<td>${muted('—')}</td><td>${muted('—')}</td><td>${muted('—')}</td>`;
+        const range = `<span class="mono">${escapeHtml(`${s.pool.first || '?'}–${s.pool.last || '?'}`)}</span>`;
+        if (!s.pool.valid) return `<td>${range}<br>${muted(t('not counted'))}</td><td>${muted('—')}</td><td>${muted('—')}</td>`;
+        const fixed = s.fixed.free === null ? muted('—') : s.near ? `<span class="sev warn">${s.fixed.free}</span>` : s.fixed.free;
+        return `<td>${range}</td><td>${s.pool.used} / ${s.pool.size === null ? '—' : s.pool.size}</td><td>${fixed}</td>`;
+    };
+    const rows = subnets.map((s) => `<tr>
+        <td><span class="mono"><b>${escapeHtml(s.network)}</b></span>${s.declared ? (s.name ? ` ${escapeHtml(s.name)}` : '') : `<br>${muted(t('Not declared: implied by the addresses'))}`}</td>
+        <td class="mono">${s.size === null ? `2^${s.bits}` : s.size}</td>
+        <td>${s.used}</td>
+        <td>${s.size === null ? muted('—') : s.near && !pooled(s) ? `<span class="sev warn">${s.free}</span>` : s.free}</td>
+        ${pools ? poolCells(s) : ''}
+    </tr>`).join('');
+    return `<h3>${escapeHtml(t('Addresses'))}</h3>
+    <p class="muted">${escapeHtml(t('In use counts the devices on each subnet and its own gateway and DNS servers, drawn or not. Free is what can still be handed out.'))}</p>
+    ${pools ? `<p class="muted">${escapeHtml(t('In pool counts the addresses inside the DHCP pool that are recorded here, not the leases the server has handed out. Fixed free is what is left outside the pool.'))}</p>` : ''}
+    <table class="capacity addresses">
+        <thead><tr><th>${t('Subnet')}</th><th>${t('Size')}</th><th>${t('In use')}</th><th>${t('Free')}</th>${pools ? `<th>${t('DHCP pool')}</th><th>${t('In pool')}</th><th>${t('Fixed free')}</th>` : ''}</tr></thead>
+        <tbody>${rows}</tbody></table>`;
+}
+// mapped: the Switch ports section prints too (sec.ports), so the intro can
+// point at it; without it the pointer is left off.
+function capacityPorts(ports, mapped = true) {
+    if (!ports.length) return '';
+    const rows = ports.map((r) => `<tr>
+        <td><b>${escapeHtml(r.name)}</b> <span class="muted">${escapeHtml(t(r.typeName))}</span></td>
+        <td>${r.total}</td>
+        <td>${r.used}</td>
+        <td><span class="sev warn">${r.free}</span>${r.freePorts ? ` <span class="mono">${escapeHtml(r.freePorts)}</span>` : ''}</td>
+    </tr>`).join('');
+    return `<h3>${escapeHtml(t('Ports'))}</h3>
+    <p class="muted">${escapeHtml(t(mapped ? 'Switches and access points with few or no free ports left. Every port of every switch is under Switch ports.' : 'Switches and access points with few or no free ports left.'))}</p>
+    <table class="capacity">
+        <thead><tr><th>${t('Device')}</th><th>${t('Ports')}</th><th>${t('In use')}</th><th>${t('Free ports')}</th></tr></thead>
+        <tbody>${rows}</tbody></table>`;
+}
+
+// The Address history section (js/trail.js trailReportHistory): one table,
+// a device per run of rows (its name on the first), each value that changed
+// since the previous report with the value now first, then the past ones
+// newest first with the dates each was seen and how it was recorded. A
+// removed device says when it went. Print-safe: text only, no link out.
+function addressHistorySection(h) {
+    const muted = (text) => `<span class="muted">${escapeHtml(text)}</span>`;
+    const lead = `<p class="muted">${escapeHtml(h.since !== null
+        ? t('Recorded in this browser at each back-up and report since the report of {date}: the addresses, MACs, switch ports, groups and names that changed, with the dates each was seen.', { date: localDateOf(h.since) })
+        : t('Recorded in this browser at each back-up and report since {date}: the addresses, MACs, switch ports, groups and names that changed, with the dates each was seen.', { date: localDateOf(h.first) }))}</p>`;
+    if (!h.devices.length) return `${lead}<p>${escapeHtml(t('Nothing has changed since then.'))}</p>`;
+    const kinds = { backup: 'back-up', report: 'report', file: 'file' };
+    const range = (s) => (s.first === s.last ? localDateOf(s.first) : t('{from} → {to}', { from: localDateOf(s.first), to: localDateOf(s.last) }));
+    const val = (f, text) => (f === 'ip' || f === 'mac' ? `<span class="mono">${escapeHtml(text)}</span>` : escapeHtml(text));
+    const rows = [];
+    h.devices.forEach((d) => {
+        let first = true;
+        const who = () => {
+            if (!first) return '';
+            first = false;
+            const note = d.gone !== null ? t('removed on {date}', { date: localDateOf(d.gone) })
+                : d.goneAfter ? t('removed after {date}', { date: localDateOf(d.goneAfter) }) : '';
+            return `<b>${escapeHtml(d.name)}</b>${note ? `<br>${muted(note)}` : ''}`;
+        };
+        d.blocks.forEach((b) => {
+            const lines = [];
+            if (b.now) lines.push([val(b.f, b.now), muted(b.since !== null ? t('since {date}', { date: localDateOf(b.since) }) : t('now'))]);
+            b.past.forEach((s) => lines.push([val(b.f, s.txt || s.val), `${escapeHtml(range(s))} ${muted(t(kinds[s.kind] || s.kind))}`]));
+            lines.forEach(([v, when], i) => rows.push(`<tr class="${first ? 'dev' : 'cont'}">
+        <td>${who()}</td>
+        <td>${i === 0 ? escapeHtml(b.label) : ''}</td>
+        <td>${v}</td>
+        <td>${when}</td>
+    </tr>`));
+        });
+    });
+    // The inventory's row rules (.inv tr.dev / tr.cont), so a device reads
+    // as one block and the stylesheet every report prints stays as it was.
+    return `${lead}<table class="inv addrhist">
+        <thead><tr><th>${escapeHtml(t('Device'))}</th><th>${escapeHtml(t('Field'))}</th><th>${escapeHtml(t('Value'))}</th><th>${escapeHtml(t('Seen'))}</th></tr></thead>
+        <tbody>${rows.join('')}</tbody></table>`;
+}
+
+// The Saved searches section (reportSearches): one block per search, its
+// name, the search as typed in mono (prefixes are syntax, never translated),
+// how many devices it matched, then a table of them with Device first. A
+// search that is not understood, or that reads what one browser remembers,
+// says so in a muted line and prints no table.
+function searchesSection(list) {
+    const muted = (html) => `<p class="muted">${html}</p>`;
+    const marker = '\u0001q\u0001';
+    return list.map((s) => {
+        const said = escapeHtml(t('Search: {query}', { query: marker })).replace(marker, () => `<span class="mono">${escapeHtml(s.query)}</span>`);
+        const head = `<h3>${escapeHtml(s.name)}</h3>`;
+        if (s.local) return `${head}${muted(`${said}<br>${escapeHtml(t('Not printed: {terms} reads what this browser remembers, so it would match differently on another computer.', { terms: s.local }))}`)}`;
+        if (s.error) return `${head}${muted(`${said}<br>${escapeHtml(t('Not understood, so nothing matches: {terms}', { terms: s.error }))}`)}`;
+        const line = muted(`${said} · ${escapeHtml(t('Devices: {n} of {total}', { n: s.rows.length, total: s.total }))}`);
+        if (!s.rows.length) return `${head}${line}${muted(escapeHtml(t('No devices match.')))}`;
+        const empty = '<span class="muted">—</span>';
+        const rows = s.rows.map((r) => `<tr class="dev${r.guest ? ` guest" style="--guest:${Math.min(r.guest, HOST_DEPTH_MAX)}` : ''}">
+            <td>${r.guest ? '<span class="muted">↳ </span>' : ''}<b>${escapeHtml(r.name)}</b></td>${r.cells.map((text, i) => `<td${s.columns[i].mono ? ' class="mono"' : ''}>${text && text !== '—' ? escapeHtml(text) : empty}</td>`).join('')}
+        </tr>`).join('');
+        return `${head}${line}
+    <table class="inv saved-search">
+        <thead><tr><th>${escapeHtml(t('Device'))}</th>${s.columns.map((c) => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>
+        <tbody>${rows}</tbody></table>`;
+    }).join('\n');
 }
 
 // The estate's table of contents. In-document anchors only — no scheme, no
@@ -1668,6 +2233,7 @@ const PLAIN_FINDINGS = {
     loop: ['The cables form a loop', 'Unless the switches are set up for it, a loop can flood the network and bring it down.'],
     'cable-label': ['Two cables carry the same label', 'Whoever traces a cable later may unplug the wrong one.'],
     'asset-tag': ['Two devices carry the same asset tag', 'The inventory cannot tell them apart.'],
+    firmware: ['Devices of the same model run different software versions', 'They can behave differently, and the older ones may miss security fixes.'],
     group: ['The list of places (buildings, rooms, racks) has an error', 'Some devices do not show where they really are.'],
     rack: ['A device does not fit where the rack drawing puts it', 'The rack drawing does not match what fits in the rack.'],
     host: ['Something runs on a device that is marked as retired', 'If that device is switched off, what runs on it stops too.'],
@@ -1680,6 +2246,17 @@ const PLAIN_FINDINGS = {
     age: ['A device is older than it is expected to last', 'It is more likely to fail; plan and budget its replacement.'],
     service: ['A device is overdue for its service', 'Equipment that is not looked after fails sooner, often without warning.'],
     'service-due': ['A device is due for its service soon', 'Booking it now keeps it from becoming overdue.'],
+    'port-capacity': ['A switch is almost out of free ports', 'The next device may have nowhere to plug in: plan a bigger switch or another one.'],
+    'address-capacity': ['A network is almost out of free addresses', 'The next device may get no address: plan a bigger network, or move some devices to another one.'],
+    'dhcp-pool': ['The automatic address range clashes with a fixed address', 'Devices may be handed an address already in use, and lose their connection.'],
+    // PoE (feature 4 stage 2b): plain words, so neither "PoE" nor "VLAN".
+    'vlan-path': ['Part of the network cannot reach its way out', 'The devices on it cannot reach the internet or the other networks, because a link between the switches does not carry it.'],
+    'vlan-subnet': ['A switch port is set up for a network that has no addresses recorded', 'A device plugged into it may get no address, or the record is out of date.'],
+    'vlan-mismatch': ['A device is plugged into a port set up for another network', 'The two ends of the cable do not agree on which network it carries, so traffic is lost on it.'],
+    'poe-none': ['A device that takes its power from the network cable is on a port that gives none', 'It cannot switch on where it is plugged in.'],
+    'poe-class': ['A device that takes its power from the network cable needs more than its port gives', 'It may not switch on, or may restart when it works hardest.'],
+    'poe-budget': ['A switch is asked for more power than it can give', 'Some devices will switch off or restart.'],
+    'poe-near': ['A switch is almost out of power for the devices it feeds', 'The next device powered by its cable may not switch on: plan a bigger switch or another one.'],
     interfaces: ['A device has no valid address recorded', 'It cannot be reached the way it is documented.'],
     multihoming: ['A device is connected twice to the same network', 'Its connection can become unstable.'],
     bond: ['Network ports joined together on a device are set up wrongly', 'The backup or extra speed they should give does not work.'],
@@ -1730,6 +2307,56 @@ const SUMMARY_LIST_MAX = 60;
 const SUMMARY_WHERE_MAX = 6;
 const SUMMARY_CHANGES_MAX = 8;
 
+// The summary's Room to grow paragraph, from model.capacity: the switches'
+// half, then the subnets'; '' when neither is known (no switch's port count
+// set, no subnet that can run out). The names are cut as the Where lines are
+// (SUMMARY_WHERE_MAX), each half on its own.
+function summaryRoomPorts(cap) {
+    const room = cap && cap.room;
+    if (!room) return '';
+    const n = room.free, aps = room.aps || 0;
+    // Named for what the boxes are: switches, access points, or both.
+    const words = !aps ? (room.devices === 1 ? ['The switch has {n} free port.', 'The switch has {n} free ports.']
+        : ['The switches have {n} free port.', 'The switches have {n} free ports.'])
+        : aps === room.devices ? (room.devices === 1 ? ['The access point has {n} free port.', 'The access point has {n} free ports.']
+            : ['The access points have {n} free port.', 'The access points have {n} free ports.'])
+            : ['The switches and access points have {n} free port.', 'The switches and access points have {n} free ports.'];
+    const total = t(words[n === 1 ? 0 : 1], { n });
+    const tight = (cap.ports || []).map((r) => (r.full ? t('{name} is full: all {total} ports are in use.', { name: r.name, total: r.total })
+        : t(r.free === 1 ? '{name} is almost full: {free} free port of {total}.' : '{name} is almost full: {free} free ports of {total}.',
+            { name: r.name, free: r.free, total: r.total })));
+    const named = tight.slice(0, SUMMARY_WHERE_MAX).concat(tight.length > SUMMARY_WHERE_MAX
+        ? [t('…and {n} more.', { n: tight.length - SUMMARY_WHERE_MAX })] : []).join(' ');
+    return [total, named].filter(Boolean).join(' ');
+}
+// The addresses half: the free addresses over the subnets that can run out
+// (reportCapacity's addresses), then the ones almost or quite out of them by
+// name, cut as the switches are. A subnet is a network in these words, as
+// the Simple view calls it.
+function summaryRoomAddresses(cap) {
+    const a = cap && cap.addresses;
+    if (!a) return '';
+    const n = a.free;
+    const total = t(a.networks === 1 ? (n === 1 ? 'The network has {n} free address.' : 'The network has {n} free addresses.')
+        : (n === 1 ? 'The networks have {n} free address.' : 'The networks have {n} free addresses.'), { n });
+    const tight = a.tight.map((r) => (r.fixed ? (r.full ? t('The network {name} has no fixed address left outside the automatic range.', { name: r.name })
+        : t(r.free === 1 ? 'The network {name} has {free} fixed address left outside the automatic range, of {size}.' : 'The network {name} has {free} fixed addresses left outside the automatic range, of {size}.',
+            { name: r.name, free: r.free, size: r.size }))
+        : r.full ? t('The network {name} is full: all {size} addresses are in use.', { name: r.name, size: r.size })
+        : t(r.free === 1 ? 'The network {name} is almost full: {free} free address of {size}.' : 'The network {name} is almost full: {free} free addresses of {size}.',
+            { name: r.name, free: r.free, size: r.size })));
+    const named = tight.slice(0, SUMMARY_WHERE_MAX).concat(tight.length > SUMMARY_WHERE_MAX
+        ? [t('…and {n} more.', { n: tight.length - SUMMARY_WHERE_MAX })] : []).join(' ');
+    return [total, named].filter(Boolean).join(' ');
+}
+function summaryRoom(cap) {
+    const text = [summaryRoomPorts(cap), summaryRoomAddresses(cap)].filter(Boolean).join(' ');
+    if (!text) return '';
+    return `
+    <h3>${escapeHtml(t('Room to grow'))}</h3>
+    <p class="room">${escapeHtml(text)}</p>`;
+}
+
 // opts as reportSheet's: a binder labels the sheet by site and anchors it.
 function summarySheet(model, opts = {}) {
     const meta = model.meta || {};
@@ -1775,13 +2402,21 @@ function summarySheet(model, opts = {}) {
     const kindStats = [...kinds.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .map(([k, n]) => `<div class="stat"><b>${n}</b><span>${escapeHtml(k)}</span></div>`).join('');
     const own = model.customColumns || [];
-    const placeOf = (d) => d.place || d.location || '';
+    // Where it is, then the socket it is plugged into when known: a device
+    // with a socket but no place still gets the Where column.
+    const placeOf = (d) => [d.place || d.location || '', d.socket || ''].filter(Boolean).join(' · ');
     const anyPlace = devices.some(placeOf);
     const cell = (d, name) => { const x = (d.custom || []).find((c) => c.name === name); return x ? escapeHtml(x.text) : ''; };
     const list = devices.length && devices.length <= SUMMARY_LIST_MAX ? `<table class="summary-list">
         <thead><tr><th>${escapeHtml(t('Device'))}</th><th>${escapeHtml(t('Kind'))}</th>${anyPlace ? `<th>${escapeHtml(t('Where'))}</th>` : ''}${own.map((n) => `<th>${escapeHtml(n)}</th>`).join('')}</tr></thead>
         <tbody>${devices.map((d) => `<tr><td><b>${escapeHtml(d.name)}</b>${d.status === 'retired' ? ` <span class="muted">(${escapeHtml(statusName('retired'))})</span>` : ''}</td><td>${escapeHtml(t(d.typeName))}</td>${anyPlace ? `<td>${escapeHtml(placeOf(d))}</td>` : ''}${own.map((n) => `<td>${cell(d, n)}</td>`).join('')}</tr>`).join('')}</tbody>
     </table>` : (devices.length ? `<p class="muted">${escapeHtml(t('The full list of devices is in the technical report.'))}</p>` : '');
+
+    // Room to grow (reportCapacity): the free ports the switches have, then
+    // the ones that are almost out of them, by name, as many as the Where
+    // lines. Only when a port count was set somewhere; otherwise nothing is
+    // known and the line is left out.
+    const room = summaryRoom(model.capacity);
 
     // What changed since the last visit, in a few lines.
     const ch = model.changes;
@@ -1807,7 +2442,7 @@ function summarySheet(model, opts = {}) {
 
     <h2>${escapeHtml(t('What you have'))}</h2>
     <div class="stats">${kindStats || `<div class="stat"><b>0</b><span>${escapeHtml(t('Devices'))}</span></div>`}</div>
-    ${list}${map ? `
+    ${list}${room}${map ? `
     <p class="muted">${escapeHtml(t('The map of the network is on the next page.'))}</p>` : ''}
     ${changes}
     ${who}
@@ -1849,14 +2484,17 @@ function reportSheet(model, image, opts = {}) {
         .filter(({ key, multiline }) => !multiline && meta[key])
         .map(({ key, label }) => `<div><dt>${escapeHtml(t(label))}</dt><dd>${escapeHtml(meta[key])}</dd></div>`)
         .join('');
+    // The sections ticked (reportParts.sections); every one at its default
+    // when the caller names none. The summary stats above them always print.
+    const sec = opts.sections || reportSections();
     const accepted = model.accepted || [];
-    const portMaps = model.portMaps || [];
+    const portMaps = sec.ports ? model.portMaps || [] : [];
     // Inline, a landscape page of its own, or tiles (reportDiagramLayout).
     // With the large map asked for (opts.largeMap, the dialog's Large map)
     // the diagram is also tiled large at the end: an overview with each
     // sheet's square marked, then the sheets. A diagram already in tiles is
     // tiled large in their place rather than twice.
-    const layout = reportDiagramLayout(image, counts.devices);
+    const layout = sec.diagram ? reportDiagramLayout(image, counts.devices) : null;
     const large = opts.largeMap ? reportDiagramLayout(image, counts.devices, { large: true, cols: opts.largeCols, rows: opts.largeRows, skip: opts.largeSkip }) : null;
     const caption = meta.site ? `${t('Topology')} — ${meta.site}` : t('Topology');
     const figure = layout && layout.kind === 'inline' ? `<div class="figure">
@@ -1866,6 +2504,7 @@ function reportSheet(model, image, opts = {}) {
     const away = layout && layout.kind === 'sheet' ? t('The diagram is on a landscape page of its own at the end of this report.') : '';
     const largeNote = large ? t('A large map is at the end: an overview with each sheet marked, then {n} landscape sheets.', { n: large.tiles.length }) : '';
     const diagramId = opts.diagramId || 'topo-dg';
+    const capacity = capacitySection(model.capacity, sec);
 
     return `<div class="sheet"${opts.anchorId ? ` id="${escapeHtml(opts.anchorId)}"` : ''}>
     <div class="rule"></div>
@@ -1883,43 +2522,59 @@ function reportSheet(model, image, opts = {}) {
         ${stat(accepted.length, 'Accepted')}` : ''}
     </div>
 
-    <h2>${escapeHtml(t('Findings'))}</h2>
-    ${findingsSection(model.findings, { accepted: accepted.length > 0 })}
-${(model.visit || []).length ? `
+${sec.findings ? `    <h2>${escapeHtml(t('Findings'))}</h2>
+    ${findingsSection(model.findings, { accepted: accepted.length > 0 })}` : ''}
+${sec.findings && (model.visit || []).length ? `
     <h2>${escapeHtml(t('To check on the next visit'))}</h2>
     ${visitSection(model.visit)}
-` : ''}${accepted.length ? `
+` : ''}${sec.findings && accepted.length ? `
     <h2>${escapeHtml(t('Known / accepted'))}</h2>
     ${acceptedSection(accepted)}
-` : ''}${(model.providers || []).length ? `
+` : ''}${sec.providers && (model.providers || []).length ? `
     <h2>${escapeHtml(t('Providers'))}</h2>
     ${providersSection(model.providers)}
 ` : ''}
-    ${image ? `<h2>${escapeHtml(t('Topology'))}</h2>
+    ${image && sec.diagram ? `<h2>${escapeHtml(t('Topology'))}</h2>
     ${away ? `<p class="muted">${escapeHtml(away)}</p>` : figure}${largeNote ? `
-    <p class="muted">${escapeHtml(largeNote)}</p>` : ''}` : ''}
+    <p class="muted">${escapeHtml(largeNote)}</p>` : ''}` : (largeNote ? `<h2>${escapeHtml(t('Topology'))}</h2>
+    <p class="muted">${escapeHtml(largeNote)}</p>` : '')}
 
-    <h2>${escapeHtml(t('Device inventory'))}</h2>
-    ${devicesSection(model.devices, model.groups)}
-${(model.racks || []).length ? `
+${sec.devices ? `    <h2>${escapeHtml(t('Device inventory'))}</h2>
+    ${devicesSection(model.devices, model.groups)}` : ''}
+${sec.inventory && hasInventory(model.inventory) ? `
+    <h2>${escapeHtml(t('Inventory'))}</h2>
+    ${inventorySection(model.inventory)}
+` : ''}${sec.racks && (model.racks || []).length ? `
     <h2>${escapeHtml(t('Racks'))}</h2>
     ${racksSection(model.racks)}
 ` : ''}${portMaps.length ? `
     <h2>${escapeHtml(t('Switch ports'))}</h2>
     ${portMapsSection(portMaps)}
 ` : ''}
-    <h2>${escapeHtml(t('Connections'))}</h2>
-    ${connectionsSection(model.connections)}
-${model.wifi ? `
+${sec.cables ? `    <h2>${escapeHtml(t('Connections'))}</h2>
+    ${connectionsSection(model.connections)}` : ''}
+${sec.wifi && model.wifi ? `
     <h2>Wi-Fi</h2>
     ${wifiSection(model.wifi)}
 ` : ''}
-    <h2>${escapeHtml(t('Addressing'))}</h2>
-    ${subnetsSection(model.subnets)}
-
-${model.changes ? `
+${sec.addressing ? `    <h2>${escapeHtml(t('Addressing'))}</h2>
+    ${subnetsSection(model.subnets)}` : ''}
+${sec.vlans && (model.vlans || []).length ? `
+    <h2>VLANs</h2>
+    ${vlansSection(model.vlans)}
+` : ''}
+${capacity ? `
+    <h2>${escapeHtml(t('Capacity'))}</h2>
+    ${capacity}
+` : ''}${sec.searches && (model.searches || []).length ? `
+    <h2>${escapeHtml(t('Saved searches'))}</h2>
+    ${searchesSection(model.searches)}
+` : ''}${sec.changes && model.changes ? `
     <h2>${escapeHtml(t(model.changes.kind === 'report' ? 'Changes since the last report' : 'Changes since the last back-up'))}</h2>
     ${changesSection(model.changes)}
+` : ''}${sec.history && model.history ? `
+    <h2>${escapeHtml(t('Address history'))}</h2>
+    ${addressHistorySection(model.history)}
 ` : ''}
     <h2>${escapeHtml(t('Scope and method'))}</h2>
     ${methodSection(meta)}
@@ -1933,13 +2588,69 @@ ${model.changes ? `
 // What a report holds: the summary for the client, the technical sheet, or
 // both (the summary first). The dialog ticks both by default; a caller that
 // says nothing gets the technical sheet alone, as before the summary existed.
+// The technical sheet's sections, in print order: a tick each in the
+// report dialog, and reportParts.sections. `on` is what prints when nothing
+// says otherwise, which is the sheet as it always printed, except the
+// Capacity section's Ports table (the nearly full switches only, which the
+// Switch ports maps already list), off unless ticked. The summary stats at
+// the top and Scope and method at the end always print. 'findings' carries
+// To check on the next visit and Known / accepted with it. 'history' is
+// the Address history section (feature 5 stage 5, the owner's call on
+// 2026-11-05): off unless ticked, and only for a kept network with a trail.
+const REPORT_SECTIONS = [
+    { key: 'findings', label: 'Findings', on: true },
+    { key: 'providers', label: 'Providers', on: true },
+    { key: 'diagram', label: 'Topology', on: true },
+    { key: 'devices', label: 'Device inventory', on: true },
+    { key: 'inventory', label: 'Inventory', on: true },
+    { key: 'racks', label: 'Racks', on: true },
+    { key: 'ports', label: 'Switch ports', on: true },
+    { key: 'cables', label: 'Connections', on: true },
+    { key: 'wifi', label: 'Wi-Fi', on: true },
+    { key: 'addressing', label: 'Addressing', on: true },
+    { key: 'vlans', label: 'VLANs', on: true },
+    { key: 'capAddresses', label: 'Capacity: addresses', on: true },
+    { key: 'capPorts', label: 'Capacity: ports table', on: false },
+    { key: 'capPoe', label: 'Capacity: PoE budgets', on: true },
+    { key: 'searches', label: 'Saved searches', on: true },
+    { key: 'changes', label: 'Changes since the last back-up or report', on: true },
+    { key: 'history', label: 'Address history', on: false },
+];
+// A sections map read for one report: every key of REPORT_SECTIONS, a
+// boolean given for it winning, anything else (unknown keys, non-booleans,
+// no map at all) leaving the default.
+const reportSections = (given) => {
+    const out = {};
+    const src = given && typeof given === 'object' ? given : {};
+    REPORT_SECTIONS.forEach(({ key, on }) => {
+        out[key] = Object.prototype.hasOwnProperty.call(src, key) && typeof src[key] === 'boolean' ? src[key] : on;
+    });
+    return out;
+};
+
 const reportParts = (parts) => {
     const p = { summary: !!(parts && parts.summary), technical: !parts || parts.technical !== false, largeMap: !!(parts && parts.largeMap),
         largeCols: gridCount(parts && parts.largeCols), largeRows: gridCount(parts && parts.largeRows),
-        largeSkip: [...gridSkip(parts && parts.largeSkip)].sort() };
+        largeSkip: [...gridSkip(parts && parts.largeSkip)].sort(),
+        // The saved searches ticked for this report (ids), or null: every
+        // one marked to print. Never written back to the searches.
+        searches: parts && Array.isArray(parts.searches) ? parts.searches.filter((id) => typeof id === 'string') : null,
+        // The technical sheet's sections (REPORT_SECTIONS), every key there.
+        sections: reportSections(parts && parts.sections) };
     if (!p.summary && !p.technical) p.technical = true;
     return p;
 };
+// Whether handing this report over moves a kept network's report baseline
+// (onKept): only when the report shows what changed, which the summary
+// always does and the technical sheet does while Changes is ticked.
+// Otherwise the next report would count from a copy that never listed them.
+const reportShowsChanges = (p) => p.summary || (p.technical && p.sections.changes);
+// A report that printed the Address history but not Changes still notes a
+// 'report' point in the trail (recordPoint alone), so the next one's history
+// counts from it, while the Changes baseline stays where it was.
+const reportShowsHistoryOnly = (p) => !reportShowsChanges(p) && p.technical && p.sections.history;
+const reportKept = (p, list) => (reportShowsChanges(p) ? () => list.forEach((e) => takeSnapshot(e.id, 'report', e.doc))
+    : reportShowsHistoryOnly(p) && typeof recordPoint === 'function' ? () => list.forEach((e) => recordPoint(e.id, 'report', e.doc)) : null);
 const reportTitleWord = (p) => t(p.technical ? 'Network documentation report' : 'Network summary');
 
 // The single-site report: one document of the parts asked for.
@@ -1947,11 +2658,13 @@ function reportHtml(model, image, parts) {
     const p = reportParts(parts);
     const title = model.meta.site ? `${model.meta.site} — ${reportTitleWord(p)}` : reportTitleWord(p);
     return reportDocument(title, (p.summary ? summarySheet(model, { image }) : '')
-        + (p.technical ? reportSheet(model, image, { largeMap: p.largeMap, largeCols: p.largeCols, largeRows: p.largeRows, largeSkip: p.largeSkip, diagramDefined: p.summary && !!image }) : ''));
+        + (p.technical ? reportSheet(model, image, { sections: p.sections, largeMap: p.largeMap, largeCols: p.largeCols, largeRows: p.largeRows, largeSkip: p.largeSkip, diagramDefined: p.summary && !!image }) : ''));
 }
 
 // The cover: what the whole engagement adds up to, before any one building.
-function binderCoverSheet(binder) {
+// sec (reportParts.sections): the estate findings, addressing and topology
+// follow the Findings, Addressing and Topology ticks, as each site's do.
+function binderCoverSheet(binder, sec = reportSections()) {
     const { meta, counts } = binder;
     const metaRows = REPORT_FIELDS
         .filter(({ key, multiline }) => !multiline && key !== 'site' && meta[key])
@@ -1976,17 +2689,17 @@ function binderCoverSheet(binder) {
     <h2>${escapeHtml(t('Sites'))}</h2>
     ${siteIndexSection(binder.sites)}
 
-    <h2>${escapeHtml(t('Findings across the estate'))}</h2>
+${sec.findings ? `    <h2>${escapeHtml(t('Findings across the estate'))}</h2>
     ${findingsSection(binder.findings, { site: true })}
 
-    <h2>${escapeHtml(t('Estate addressing'))}</h2>
+` : ''}${sec.addressing ? `    <h2>${escapeHtml(t('Estate addressing'))}</h2>
     ${estateSubnetsSection(binder.subnets)}
 
-    <h2>${escapeHtml(t('Estate topology'))}</h2>
+` : ''}${sec.diagram ? `    <h2>${escapeHtml(t('Estate topology'))}</h2>
     ${estateGraphSvg(binder.graph)}
     ${siteLinksSection(binder.graph)}
 
-    <h2>${escapeHtml(t('Scope and method'))}</h2>
+` : ''}    <h2>${escapeHtml(t('Scope and method'))}</h2>
     ${methodSection(meta)}
 
     <footer>
@@ -2050,9 +2763,9 @@ function binderHtml(binder, images = {}, parts) {
         const image = images[s.id] || null, diagramId = `topo-dg-${s.anchor}`;
         const summary = p.summary ? summarySheet(Object.assign({}, s.model, { meta: Object.assign({}, binder.meta, { site: '' }, pickSet(sheetMeta)) }),
             { title: s.name, subtitle: t('Network summary'), anchorId: s.anchor, image, diagramId }) : '';
-        return summary + (p.technical ? reportSheet(sheetModel, image, { title: s.name, subtitle: '', anchorId: p.summary ? '' : s.anchor, diagramId, largeMap: p.largeMap, largeCols: p.largeCols, largeRows: p.largeRows, largeSkip: p.largeSkip, diagramDefined: p.summary && !!image }) : '');
+        return summary + (p.technical ? reportSheet(sheetModel, image, { title: s.name, subtitle: '', anchorId: p.summary ? '' : s.anchor, diagramId, sections: p.sections, largeMap: p.largeMap, largeCols: p.largeCols, largeRows: p.largeRows, largeSkip: p.largeSkip, diagramDefined: p.summary && !!image }) : '');
     }).join('');
-    return reportDocument(title, (p.technical ? binderCoverSheet(binder) : '') + sheets);
+    return reportDocument(title, (p.technical ? binderCoverSheet(binder, p.sections) : '') + sheets);
 }
 // The fields of a header that say something.
 const pickSet = (meta) => { const out = {}; Object.keys(meta || {}).forEach((k) => { if (meta[k]) out[k] = meta[k]; }); return out; };
@@ -2116,11 +2829,15 @@ async function buildSiteReport(meta, parts, cache = null) {
     const p = reportParts(parts);
     // The dialog's date, not only the stored one: a read-only document never
     // stores what was typed, and the model would count to another day.
-    const model = reportModel(meta);
+    // The saved searches only where the technical sheet prints them.
+    const model = reportModel(meta, p.technical ? p.searches : []);
     if (meta) model.meta = siteReportMeta(meta);
     const keptId = isKept() ? state.libraryId : null;
     const doc = keptId ? serializeDoc() : null;
     if (keptId) model.changes = reportChanges(keptId, doc);
+    // The Address history, only when ticked: what this browser's trail
+    // holds for the card (js/trail.js), never the Simple summary's.
+    if (keptId && p.technical && p.sections.history) model.history = trailReportHistory(keptId, doc);
     let image = null;
     {
         const day = reportAsOf(meta || state.report);
@@ -2130,7 +2847,7 @@ async function buildSiteReport(meta, parts, cache = null) {
     // The baseline moves when the report is handed over (downloaded or
     // printed), not when it is only looked at.
     return { html: reportHtml(model, image, p), meta: model.meta, kind: p.technical ? 'report' : 'summary',
-        onKept: keptId ? () => takeSnapshot(keptId, 'report', doc) : null };
+        onKept: keptId ? reportKept(p, [{ id: keptId, doc }]) : null };
 }
 async function generateSiteReport(meta, parts) {
     const b = await buildSiteReport(meta, parts);
@@ -2172,7 +2889,7 @@ function captureReportDiagram(day, base = 4) {
 
 async function withDocRendered(doc, fn) {
     const held = {
-        nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, annotations: state.annotations, report: state.report,
+        nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, searches: state.searches, annotations: state.annotations, report: state.report,
         camera: { x: state.camera.x, y: state.camera.y, zoom: state.camera.zoom },
         selection: state.selection,   // the whole set: a getter pair would lose a set of several
     };
@@ -2184,7 +2901,7 @@ async function withDocRendered(doc, fn) {
         return await fn();
     } finally {
         state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
-        state.columns = held.columns; state.tableView = held.tableView;
+        state.columns = held.columns; state.tableView = held.tableView; state.searches = held.searches;
         state.annotations = held.annotations; state.report = held.report;
         state.camera = held.camera;
         state.selection = held.selection;
@@ -2226,10 +2943,12 @@ async function buildBinderReport(estateMeta, opts = {}, cache = null) {
     // estate report is then every card's new one, as a site report is.
     binder.sites.forEach((s) => { if (s.model) s.model.changes = reportChanges(s.id, s.doc); });
     const p = reportParts(opts.parts);
+    // Ticked, each site's sheet reads its own card's trail.
+    if (p.technical && p.sections.history) binder.sites.forEach((s) => { if (s.model) s.model.history = trailReportHistory(s.id, s.doc); });
     const images = opts.images === false ? {}
         : await cachedImage(cache, 'binder', () => captureBinderImages(binder.sites, opts.onProgress, opts.capture));
     return { html: binderHtml(binder, images, p), meta: { site: binder.meta.site || 'estate', date: binder.meta.date, ref: binder.meta.ref },
-        kind: p.technical ? 'report' : 'summary', onKept: () => entries.forEach((e) => takeSnapshot(e.id, 'report', e.doc)) };
+        kind: p.technical ? 'report' : 'summary', onKept: reportKept(p, entries) };
 }
 
 async function generateBinderReport(estateMeta, opts = {}) {
@@ -2326,6 +3045,10 @@ function renderReportDialog() {
         if (cb && binder) cb.checked = entries.length <= 8;
     }
     renderReportFields(binder ? Object.assign({ site: '' }, binderHeaderDefaults(binderSiteModels(entries))) : null);
+    // The search ticks' notes are worded too (This browser only, Not understood),
+    // and so are the section ticks.
+    renderReportSections(true);
+    renderReportSearches(true);
 }
 
 function openReportDialog(mode) {
@@ -2345,6 +3068,8 @@ function openReportDialog(mode) {
     _largeSkip.clear();
     syncLargeSheets();
     document.getElementById('reportLargeMapRow')?.classList.toggle('hidden', !document.getElementById('reportTechnical')?.checked);
+    renderReportSections();
+    renderReportSearches();
     renderReportDialog();
     dropReportPreview();
     dialog.classList.remove('hidden');
@@ -2365,7 +3090,102 @@ function readReportParts() {
     const large = document.getElementById('reportLargeMap');
     const val = (id) => { const el = document.getElementById(id); return el ? Number(el.value) : REPORT_DIAGRAM_GRID_DEFAULT; };
     return reportParts({ summary: on('reportSummary'), technical: on('reportTechnical'), largeMap: !!(large && large.checked),
-        largeCols: val('reportLargeCols'), largeRows: val('reportLargeRows'), largeSkip: largeSkipInGrid(val('reportLargeCols'), val('reportLargeRows')) });
+        largeCols: val('reportLargeCols'), largeRows: val('reportLargeRows'), largeSkip: largeSkipInGrid(val('reportLargeCols'), val('reportLargeRows')),
+        searches: readReportSearches(), sections: readReportSections() });
+}
+// ---- The technical sheet's sections to print (an owner request, 2026-11-04) ----
+// A tick per REPORT_SECTIONS entry (none for one marked reserved), each
+// starting from its default every time the dialog opens: nothing is
+// remembered between openings, in this browser or the document, so a
+// report nobody unticks is the usual one. Site and binder alike. The row
+// shows while the technical sheet is ticked (syncReportSections).
+// keep: redrawn in place (a language switch), the ticks as they were left.
+function renderReportSections(keep) {
+    const list = document.getElementById('reportSectionsList');
+    if (!list) return;
+    const held = new Map(keep ? [...list.querySelectorAll('[data-section]')].map((cb) => [cb.dataset.section, cb.checked]) : []);
+    list.replaceChildren(...REPORT_SECTIONS.filter((x) => !x.reserved).map(({ key, label, on }) => {
+        const row = document.createElement('label');
+        row.className = 'dlg-section';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.dataset.section = key;
+        cb.checked = held.has(key) ? held.get(key) : on;
+        const text = document.createElement('span');
+        text.textContent = t(label);
+        const dim = key === 'capPorts' ? 'The nearly full switches only; Switch ports lists every port.'
+            : key === 'history' ? 'What each device held at earlier back-ups and reports, from this browser. Networks kept here only.' : '';
+        if (dim) {
+            const why = document.createElement('span');
+            why.className = 'dlg-dim';
+            why.textContent = t(dim);
+            text.append(why);
+        }
+        row.append(cb, text);
+        return row;
+    }));
+    syncReportSections();
+}
+function syncReportSections() {
+    document.getElementById('reportSectionsRow')?.classList.toggle('hidden', !document.getElementById('reportTechnical')?.checked);
+    syncReportSearches();
+}
+// The ticks as a sections map, or undefined when the dialog draws none:
+// the defaults then hold.
+function readReportSections() {
+    const boxes = [...document.querySelectorAll('#reportSectionsList [data-section]')];
+    if (!boxes.length) return undefined;
+    const out = {};
+    boxes.forEach((cb) => { out[cb.dataset.section] = cb.checked; });
+    return out;
+}
+// ---- The saved searches to print (docs/BACKLOG.md feature 6, stage 3) ----
+// A tick per saved search, in document order, each starting from its print
+// mark every time the dialog opens; one that reads what this browser
+// remembers (was:, has:history) says it will not be printed. A site report
+// only: a binder prints each site's marked ones. The row shows while the
+// technical sheet is ticked (syncReportSearches).
+// keep: redrawn in place (a language switch, renderReportDialog), so a tick
+// the visitor changed stays as they left it; only opening starts afresh.
+function renderReportSearches(keep) {
+    const list = document.getElementById('reportSearchesList');
+    if (!list) return;
+    const searches = _reportMode === 'site' ? (state.searches || []) : [];
+    const held = new Map(keep ? [...list.querySelectorAll('[data-search]')].map((cb) => [cb.dataset.search, cb.checked]) : []);
+    list.replaceChildren(...searches.map((s) => {
+        const row = document.createElement('label');
+        row.className = 'dlg-search';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.dataset.search = s.id;
+        cb.checked = held.has(s.id) ? held.get(s.id) : !!s.print;
+        const text = document.createElement('span');
+        const name = document.createElement('span');
+        name.textContent = s.name;
+        const query = document.createElement('span');
+        query.className = 'dlg-dim mono';
+        query.textContent = s.query;
+        text.append(name, document.createElement('br'), query);
+        const local = queryLocalTerms(s.query);
+        const why = local.length ? t('This browser only') : parseQuery(s.query).errors.length ? t('Not understood') : '';
+        if (why) { const note = document.createElement('span'); note.className = 'dlg-dim'; note.textContent = ' · ' + why; text.append(note); }
+        row.append(cb, text);
+        return row;
+    }));
+    syncReportSearches();
+}
+function syncReportSearches() {
+    const row = document.getElementById('reportSearchesRow');
+    if (!row) return;
+    const any = !!document.querySelector('#reportSearchesList [data-search]');
+    const section = document.querySelector('#reportSectionsList [data-section="searches"]');
+    row.classList.toggle('hidden', !any || !document.getElementById('reportTechnical')?.checked || (!!section && !section.checked));
+}
+// The ticked ids, or undefined when the dialog lists none (a binder, or a
+// network with no saved searches): the default then holds.
+function readReportSearches() {
+    const boxes = [...document.querySelectorAll('#reportSearchesList [data-search]')];
+    return boxes.length ? boxes.filter((cb) => cb.checked).map((cb) => cb.dataset.search) : undefined;
 }
 // At least one stays ticked: unticking the last one ticks the other.
 (function wireReportParts() {
@@ -2375,8 +3195,10 @@ function readReportParts() {
         if (!e.target.checked && !other.checked) other.checked = true;
         const images = document.getElementById('reportImagesRow');
         if (images) images.classList.toggle('hidden', _reportMode !== 'binder');
-        // The large map is a diagram's, so the technical sheet's.
+        // The large map is a diagram's, so the technical sheet's, and so
+        // are the saved searches.
         document.getElementById('reportLargeMapRow')?.classList.toggle('hidden', !tech.checked);
+        syncReportSections();
     };
     s.addEventListener('change', keep(tech));
     tech.addEventListener('change', keep(s));
@@ -2624,6 +3446,7 @@ function wirePreviewCells(doc) {
 (function wireReportPreview() {
     const fields = document.getElementById('reportFields');
     if (fields) fields.addEventListener('input', () => scheduleReportPreview());
+    document.getElementById('reportSectionsList')?.addEventListener('change', syncReportSearches);
     ['reportLargeMap', 'reportTechnical', 'reportLargeCols', 'reportLargeRows'].forEach((id) => document.getElementById(id)?.addEventListener('change', syncLargeSheets));
     // A change to the large map's grid shows the preview at its overview.
     ['reportLargeMap', 'reportLargeCols', 'reportLargeRows'].forEach((id) => document.getElementById(id)?.addEventListener('change', () => { _reportPv.focusLarge = true; }));
@@ -2631,7 +3454,7 @@ function wirePreviewCells(doc) {
         const b = e.target.closest('.dlg-cell');
         if (b) toggleLargeSheet(b.dataset.cell);
     });
-    ['reportSummary', 'reportTechnical', 'reportLargeMap', 'reportLargeCols', 'reportLargeRows', 'reportImages'].forEach((id) => {
+    ['reportSummary', 'reportTechnical', 'reportLargeMap', 'reportLargeCols', 'reportLargeRows', 'reportImages', 'reportSearchesList', 'reportSectionsList'].forEach((id) => {
         document.getElementById(id)?.addEventListener('change', () => scheduleReportPreview(50));
     });
 })();

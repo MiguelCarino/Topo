@@ -69,7 +69,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok(`the document is stamped v${DOC_VERSION} (v6 brought the ports)`, doc.v === DOC_VERSION && DOC_VERSION >= 6);
     ok('a v5 document is opened by the chain', migrateDoc({ v: 5, nodes: [], links: [] }).doc.v === DOC_VERSION
        && MIGRATIONS.some((m) => m.from === 5 && m.to === 6));
-    const swOut = doc.nodes.find((n) => n.id === 'sw');
+    const swOut = JSON.parse(JSON.stringify(doc.nodes.find((n) => n.id === 'sw')));
     ok('both are written, in schema order before the interfaces', JSON.stringify(Object.keys(swOut).slice(Object.keys(swOut).indexOf('portCount'), Object.keys(swOut).indexOf('portCount') + 4))
        === '["portCount","portScheme","portAttrs","interfaces"]', Object.keys(swOut).join(','));
     ok('a device that never said anything carries neither', !('portScheme' in JSON.parse(JSON.stringify(doc)).nodes.find((n) => n.id === 'rt'))
@@ -294,9 +294,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('and the PC\'s switch port by the scheme', dev.rows.find((r) => r[0] === 'pc1')[dev.headers.indexOf('port')] === 'Gi1/0/3');
     const portsCsv = csvOf('ports');
     const ps = sheetOf(portsCsv);
-    ok('ports.csv: every faceplate port, its name, label and VLAN', ps.rows.length === 8 && ps.headers.join(',') === 'device_id,device,port,port_label,port_vlan,connected_device,connected_port'
-       && ps.rows[2].join('|') === 'sw|SW-1|Gi1/0/3|Reception desk|30|PC-1|eth0', ps.rows[2].join('|'));
-    ok('its columns map themselves, the connected ones left alone', csvAutoMap(ps).join(',') === 'id,name,cab:port,pt:label,pt:vlan,,', csvAutoMap(ps).join(','));
+    ok('ports.csv: every faceplate port, its name, label and VLAN', ps.rows.length === 8 && ps.headers.join(',') === 'device_id,device,port,port_label,port_vlan,port_tagged,port_poe,connected_device,connected_port'
+       && ps.rows[2].join('|') === 'sw|SW-1|Gi1/0/3|Reception desk|30|||PC-1|eth0', ps.rows[2].join('|'));
+    ok('its columns map themselves, the connected ones left alone', csvAutoMap(ps).join(',') === 'id,name,cab:port,pt:label,pt:vlan,pt:tagged,pt:poe,,', csvAutoMap(ps).join(','));
     ok('every sheet imported straight back changes nothing',
        ['devices', 'interfaces', 'cables', 'ports'].every((k) => { const p = planOf(csvOf(k)); return !p.errors.length && p.counts.change === 0 && p.counts.add === 0 && p.counts.conflict === 0; }));
     let p = planOf('device,port,port_label,port_vlan\nSW-1,Gi1/0/6,Jack 6,60\nSW-1,7,,70\nSW-1,3,,\nSW-1,Gi1/0/2,Upstairs,4095\nPC-1,1,x,\nSW-1,Te9,,\nSW-1,Gi1/0/99,Far jack,\nSW-1,Gi2/0/5,Wrong member,\nNobody,1,x,\nSW-1,8,A,\nSW-1,8,B,');
@@ -375,14 +375,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
     save();
     const ch = docChanges(base, serializeDoc());
     const swCh = ch.devices.changed.find((c) => c.id === 'sw');
-    ok('the changes since a back-up name the port facts', !!swCh && swCh.fields.includes('Port labels and VLANs'), JSON.stringify(ch.devices.changed));
+    ok('the changes since a back-up name the port facts', !!swCh && swCh.fields.includes('Port labels, VLANs and PoE'), JSON.stringify(ch.devices.changed));
 
     // ---- 8: the words ----
     open();
     setLocale('es'); applyLocale();
     select('sw', 'node');
     ok('the sentences are Spanish', document.querySelector('.port-scheme .prop-lbl').textContent === 'Nombres de los puertos'
-       && /Etiquetas y VLAN de los puertos/.test(el('portAttrBox').querySelector('summary').textContent)
+       && /Etiquetas, VLAN y PoE de los puertos/.test(el('portAttrBox').querySelector('summary').textContent)
        && /Puerto Gi1\/0\/6: libre/.test(document.querySelectorAll('#ifaceListContainer .faceplate .chip-row .port-chip')[5].title));
     ok('the report too', /<th>Etiqueta<\/th><th>VLAN<\/th>/.test(portMapsSection(reportModel().portMaps)));
     ok('the faceplate\'s own heading stays English', /Physical Ports/.test(document.querySelector('#ifaceListContainer .faceplate .prop-lbl').textContent));

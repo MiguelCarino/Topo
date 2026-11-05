@@ -23,7 +23,9 @@
 //                has an i1), so the interface id alone names nothing. With
 //                the device's type, and a row with blank interface cells for
 //                a device with none (a switch that is all faceplate), so the
-//                sheet names every device on the map. A wireless one's radio
+//                sheet names every device on the map. A wired one's own
+//                untagged VLAN and tagged VLANs (untagged_vlan, tagged_vlans;
+//                blank on a wireless one). A wireless one's radio
 //                follows (RADIO_CSV_PARTS, js/model.js): standard, bands,
 //                and per band ch_2g/ch_5g/ch_6g, width_*, power_* and
 //                ssids_* (the SSIDs it broadcasts there, by name; "none"
@@ -35,8 +37,10 @@
 //                length, colour, via).
 //   ports        one row per faceplate port of every switch and access
 //                point: the device, the port as the box names it
-//                (node.portScheme: "Gi1/0/12"), its label and access VLAN
-//                (node.portAttrs), and what is plugged into it, for reading.
+//                (node.portScheme: "Gi1/0/12"), its label, its untagged
+//                VLAN, its tagged VLANs ("10,20,30-39" or "all") and its PoE
+//                (af/at/bt3/bt4 or watts; node.portAttrs), and what is
+//                plugged into it, for reading.
 //                The patch list a technician walks the rack with.
 //   subnets      one row per declared network (doc.networks, the Subnets
 //                tab): its CIDR, name, VLAN, purpose, gateway, DNS, DHCP and
@@ -263,8 +267,9 @@ const csvPortsFace = (node) => (isVirtualType(node.type) ? '' : node.portsFace ?
 const csvNodeFields = () => NODE_FIELDS.filter((f) => f.csv && f.key !== 'interfaces');
 const csvIfaceField = (key) => IFACE_FIELDS.find((f) => f.key === key);
 
-// Where a device is patched: its first cable onto a switch or an AP, the
-// same choice the bulk panel's "by switch port" order makes (patchPoint).
+// Where a device is patched (uplinkOf, js/model.js): its cable onto the
+// lowest-named switch or AP, then the lowest port there, the same choice the
+// bulk panel's "by switch port" order makes (patchPoint, js/bulk.js).
 // own is the device's end of that cable (an interface id), so a sheet can say
 // which of its NICs the cable is on: a router's LAN cable is on eth1, and a
 // row that left that to the binder put it on whatever NIC was free (the WAN).
@@ -277,17 +282,8 @@ const csvIfaceField = (key) => IFACE_FIELDS.find((f) => f.key === key);
 // round-trips (tests/suites/rackschedule.js). A radio's association has no
 // port at the AP by nature and stays an uplink.
 function csvUplink(node, forSheet = false) {
-    let best = null;
-    linksAtNode(node.id).forEach((l) => {
-        const peerId = l.source === node.id ? l.target : l.source;
-        const peer = getNode(peerId);
-        if (!hasPortGrid(peer)) return;
-        if (forSheet && !ifaceIdOn(l, peerId) && effectiveMedium(l, getNode(l.source), getNode(l.target)) !== 'wireless') return;
-        const m = /^p(\d+)$/.exec(ifaceIdOn(l, peerId) || '');
-        const at = { peer, link: l, port: m ? Number(m[1]) : Infinity };
-        if (!best || naturalCompare(peer.name, best.peer.name) < 0 || (peer.name === best.peer.name && at.port < best.port)) best = at;
-    });
-    return best ? { peer: best.peer, port: ifaceLabel(best.peer, ifaceIdOn(best.link, best.peer.id)), own: ifaceIdOn(best.link, node.id) || null } : null;
+    const up = uplinkOf(node, { skipNoPort: forSheet });
+    return up ? { peer: up.peer, port: up.label, own: up.own } : null;
 }
 
 function csvDevicesSheet() {
@@ -309,7 +305,10 @@ function csvDevicesSheet() {
         // keeps its scheme in memory, but the file and the sealed link leave
         // it out (the schema's write), and a sheet that kept it would not
         // read back ("Only a switch or an access point has numbered ports").
-        const cells = fields.map((f) => ((f.key === 'nat' && !isRoutingDevice(node.type)) || (f.key === 'portScheme' && !hasPortGrid(node)) ? ''
+        // PoE likewise: a budget only on a switch or an AP, a draw on
+        // anything but a cloud, a VM or a container (the schema's write).
+        const cells = fields.map((f) => ((f.key === 'nat' && !isRoutingDevice(node.type)) || (f.key === 'portScheme' && !hasPortGrid(node))
+            || (f.key === 'poeBudget' && !hasPortGrid(node)) || (f.key === 'poeDraw' && !canDrawPoe(node.type)) ? ''
             : f.key === 'rackDepth' ? csvRackDepth(node) : f.key === 'portsFace' ? csvPortsFace(node) : csvValue(f, node[f.key])));
         return cells.concat([nic ? nic.id : '', nic ? nic.name || '' : '', nic ? nic.ip || '' : '', nic && !isBlank(nic.mac) ? fmtColonSafe(nic.mac) : '',
             up ? up.peer.name || up.peer.id : '', up ? up.port : '', up && up.own ? ifaceLabel(node, up.own) : ''], custom.map((c) => customText(c, customValueOf(node, c.id))));
@@ -326,7 +325,7 @@ function csvDevicesSheet() {
 // SSIDs it broadcasts, blank where the radio says nothing (and on a wired
 // interface, which has none).
 function csvInterfacesSheet() {
-    const keys = ['id', 'name', 'ip', 'mac', 'wireless', 'bond'];
+    const keys = ['id', 'name', 'ip', 'mac', 'wireless', 'bond', 'vlan', 'tagged'];
     const headers = ['device_id', 'device', 'type'].concat(keys.map((k) => csvIfaceField(k).csv), RADIO_CSV_PARTS.map((p) => p.csv));
     const rows = [];
     state.nodes.forEach((node) => {
@@ -337,6 +336,8 @@ function csvInterfacesSheet() {
             const radio = ifaceIsWireless(iface) ? radioOf(iface) : null;
             rows.push(head.concat(keys.map((k) => {
                 if (k === 'mac') return isBlank(iface.mac) ? '' : fmtColonSafe(iface.mac);
+                // A wired interface's VLANs only, as the file writes them.
+                if (k === 'vlan' || k === 'tagged') { const f = csvIfaceField(k); const w = f.write(iface[k], iface); return w === undefined ? '' : String(w); }
                 return csvValue(csvIfaceField(k), iface[k]);
             }), RADIO_CSV_PARTS.map((p) => csvRadioCell(radioPartValue(radio, p.part), p))));
         });
@@ -415,10 +416,11 @@ function csvPortsSheet() {
             const peerId = link ? (link.source === node.id ? link.target : link.source) : null;
             const peer = peerId ? getNode(peerId) : null;
             rows.push([node.id, node.name || '', ifaceLabel(node, id), a.label, a.vlan === null ? '' : String(a.vlan),
+                a.tagged === null ? '' : a.tagged, a.poe === null ? '' : String(a.poe),
                 peer ? peer.name || peer.id : '', peer ? ifaceLabel(peer, ifaceIdOn(link, peerId)) : '']);
         });
     });
-    return { name: 'ports', headers: ['device_id', 'device', 'port', 'port_label', 'port_vlan', 'connected_device', 'connected_port'], rows };
+    return { name: 'ports', headers: ['device_id', 'device', 'port', 'port_label', 'port_vlan', 'port_tagged', 'port_poe', 'connected_device', 'connected_port'], rows };
 }
 
 // The declared networks, in the Subnets tab's order (numeric, IPv4 first):
@@ -462,6 +464,59 @@ function csvProvidersSheet() {
         rows: (state.providers || []).map((p) => PROVIDER_FIELDS.map((f) => csvValue(f, p[f.key]))) };
 }
 
+// ---- Saved searches (doc.searches, SEARCH_FIELDS in js/model.js) ----
+// A saved search's column, as a cell of searches.csv names it, and back.
+// Topo's own columns go by their key; a custom one by its name, unless the
+// name holds the separator (';') or would read back as another column (a
+// file's custom column named 'serial'), when it goes by its key, x:<id>.
+// Read back, a token is, in this order: one of Topo's keys as written, a
+// custom column's key, a custom column's name in any case, one of Topo's
+// keys in any case, or a Devices table heading in English or the page's
+// language. allow: keys taken as they are even though this build draws no
+// such column (the ones the search being updated already keeps), so a sheet
+// exported and imported back changes nothing. -> the key, or null.
+function csvSearchColumnKey(token, allow) {
+    const v = String(token == null ? '' : token).trim();
+    if (!v) return null;
+    const cols = state.columns || [];
+    const own = TV_COLS.devices.find((c) => c.key === v);
+    if (own) return own.key;
+    if (/^x:/.test(v) && cols.some((c) => `x:${c.id}` === v)) return v;
+    const low = v.toLowerCase();
+    const custom = cols.find((c) => String(c.name).toLowerCase() === low);
+    if (custom) return `x:${custom.id}`;
+    const byKey = TV_COLS.devices.find((c) => c.key.toLowerCase() === low);
+    if (byKey) return byKey.key;
+    const byLabel = TV_COLS.devices.find((c) => c.label && (c.label.toLowerCase() === low || tvLabel(c).toLowerCase() === low));
+    if (byLabel) return byLabel.key;
+    return allow && allow.has(v) ? v : null;
+}
+function csvSearchToken(key) {
+    const m = /^x:(.+)$/.exec(String(key || ''));
+    const def = m && (state.columns || []).find((c) => c.id === m[1]);
+    if (def && !String(def.name).includes(';') && csvSearchColumnKey(def.name) === key) return def.name;
+    return key;
+}
+// A column key as the review shows it: its heading, or the key itself.
+function csvSearchColumnLabel(key) {
+    const col = typeof tvDeviceColumn === 'function' ? tvDeviceColumn(key) : null;
+    if (!col) return String(key);
+    return col.custom ? ((customColumnById(col.custom) || {}).name || key) : tvLabel(col);
+}
+// One row per saved search, in the document's order: the columns as tokens
+// joined by '; ' (blank: as the Devices table shows them), the sort as a
+// token (blank: as listed), descending only beside a sort, and yes/no.
+function csvSearchesSheet() {
+    return { name: 'searches', headers: SEARCH_FIELDS.map((f) => f.csv),
+        rows: (state.searches || []).map((s) => SEARCH_FIELDS.map((f) => {
+            if (f.key === 'columns') return (s.columns || []).map(csvSearchToken).join('; ');
+            if (f.key === 'sort') return s.sort ? csvSearchToken(s.sort) : '';
+            if (f.key === 'desc') return s.sort ? (s.desc ? 'yes' : 'no') : '';
+            if (f.key === 'print') return s.print ? 'yes' : 'no';
+            return csvValue(f, s[f.key]);
+        })) };
+}
+
 // shown: whether the export lists the sheet at all. The Wi-Fi sheet only
 // once there is Wi-Fi to put in it, so a wired site's list stays as it was.
 const CSV_SHEETS = [
@@ -474,6 +529,8 @@ const CSV_SHEETS = [
     { key: 'groups', label: 'Groups', plain: true, build: csvGroupsSheet },
     // Only once there is a provider, as the Wi-Fi sheet.
     { key: 'providers', label: 'Providers', plain: true, build: csvProvidersSheet, shown: () => (state.providers || []).length > 0 },
+    // Only once there is a saved search, likewise.
+    { key: 'searches', label: 'Saved searches', plain: true, build: csvSearchesSheet, shown: () => (state.searches || []).length > 0 },
     { key: 'findings', label: 'Findings', plain: true, build: csvFindingsSheet }
 ];
 const csvSheetLabel = (s) => (s.plain ? t(s.label) : s.label);
@@ -522,7 +579,14 @@ const CSV_ALIASES = {
     type: ['kind', 'role', 'device type', 'tipo', 'тип', '種類'],
     gw: ['gw', 'default gateway', 'puerta de enlace'],
     dns: ['dns server', 'dns servers', 'nameserver', 'resolver'],
-    os: ['firmware', 'os firmware', 'model', 'modelo', 'operating system'],
+    // Vendor and model (document v16). "Model" and "modelo" were the old
+    // field's; a column so headed is the model now.
+    vendor: ['manufacturer', 'make', 'brand', 'maker', 'mfr', 'fabricante', 'marca', 'производитель', 'メーカー', '製造元'],
+    model: ['model', 'modelo', 'model name', 'model number', 'product', 'модель', 'モデル', '型番', '機種'],
+    // "Model / firmware" is the old label (csvNorm: "model firmware"), so a
+    // sheet written by an older build still lands here.
+    os: ['firmware', 'os firmware', 'model firmware', 'firmware version', 'fw', 'os version', 'software version', 'operating system',
+        'sistema operativo', 'прошивка', 'ファームウェア'],
     ports: ['ports', 'allowed ports', 'open ports', 'services'],
     notes: ['note', 'comment', 'comments', 'description', 'notas', 'observaciones', 'заметки', 'メモ'],
     portCount: ['port count', 'ports count'],
@@ -531,7 +595,17 @@ const CSV_ALIASES = {
     // Not a bare "vlan" or "jack": an inventory with a VLAN column (the
     // device's network) would turn into a sheet of ports and be refused.
     'pt:label': ['port label', 'port description', 'etiqueta del puerto'],
-    'pt:vlan': ['port vlan', 'access vlan', 'port access vlan'],
+    'pt:vlan': ['port vlan', 'access vlan', 'port access vlan', 'port untagged vlan', 'port native vlan'],
+    // Its tagged VLANs and its PoE (document v16). Not a bare "poe" either:
+    // an asset inventory's PoE column (or devices.csv's poe_draw) is a
+    // device's, and would make the sheet one of ports.
+    'pt:tagged': ['port tagged', 'port tagged vlans', 'port trunk vlans', 'port allowed vlans'],
+    'pt:poe': ['port poe', 'poe class', 'port power'],
+    // A switch's PoE budget and a device's draw (devices.csv, document v16).
+    poeBudget: ['poe budget', 'poe budget w', 'poe power budget'],
+    // Only headings that say PoE: an inventory's "Power draw" is the mains
+    // supply's, and would refuse a 450 W server or mark a PC PoE-powered.
+    poeDraw: ['poe draw', 'poe draw w'],
     // The Asset group (js/assets.js).
     serial: ['serial', 'serial no', 'serial number', 's n', 'sn', 'número de serie', 'numero de serie', 'número de série', 'серийный номер', 'シリアル番号'],
     assetTag: ['asset', 'asset id', 'asset tag', 'asset number', 'tag', 'inventory number', 'etiqueta', 'patrimonio', 'patrimônio', 'инвентарный номер', '資産番号'],
@@ -578,6 +652,14 @@ const CSV_ALIASES = {
     'if:name': ['iface', 'nic', 'interface name'],
     'if:ip': ['ip address', 'ipv4', 'ipv4 address', 'address', 'ip cidr', 'ip_address', 'dirección ip', 'endereço ip', 'ip адрес', 'ipアドレス'],
     'if:mac': ['mac address', 'hw address', 'hwaddr', 'hardware address', 'physical address', 'dirección mac', 'endereço mac'],
+    // A wired interface's own VLANs (interfaces.csv, document v16). Not a
+    // bare "vlan": an inventory's VLAN column is the device's network, which
+    // its address already says, and is left unmapped as before.
+    'if:vlan': ['untagged vlan', 'native vlan', 'interface vlan', 'nic vlan'],
+    // On a sheet that names ports and nothing of an interface's, these are
+    // the port's (csvPortShapedVlans): a switch's "Native VLAN" / "Tagged
+    // VLANs" export is a sheet of ports.
+    'if:tagged': ['tagged vlans', 'trunk vlans', 'allowed vlans', 'interface tagged vlans'],
     'cab:switch': ['switch', 'switch name', 'uplink', 'connected to', 'patched to'],
     'cab:port': ['port', 'switch port', 'switchport', 'switch_port'],
     'cab:local': ['local port', 'local interface', 'own port', 'device port'],
@@ -593,6 +675,8 @@ const CSV_ALIASES = {
     'net:vlan': ['vlan id'],
     'net:gateway': ['gw', 'default gateway', 'router', 'puerta de enlace'],
     'net:dns': ['dns server', 'dns servers', 'nameserver', 'resolver'],
+    'net:dhcpFirst': ['dhcp start', 'dhcp from', 'dhcp pool start', 'dhcp range start', 'pool start', 'pool first'],
+    'net:dhcpLast': ['dhcp end', 'dhcp to', 'dhcp pool end', 'dhcp range end', 'pool end', 'pool last'],
     'net:drawZone': ['zone', 'draw zone'],
     // A radio's (interfaces.csv). Not a bare "channel": an inventory's
     // Channel column is as often a sales channel as a radio's.
@@ -717,6 +801,15 @@ const CSV_PARSERS = {
     'pv:service': (text) => { const k = providerServiceKey(text); return k ? { value: k } : { error: true }; },
     'pv:email': (text) => (providerEmailOk(text) ? { value: String(text).trim() } : { error: true }),
     'pv:notes': (text) => ({ value: String(text) }),
+    // A saved search's cells (searches.csv): the query as typed, and the
+    // columns and sort as tokens, both read by csvPlanSearches, which knows
+    // the search the row is about.
+    'sq:name': (text) => { const v = searchName(text); return v ? { value: v } : { error: true }; },
+    'sq:query': (text) => ({ value: String(text).trim() }),
+    'sq:columns': (text) => ({ value: String(text) }),
+    'sq:sort': (text) => ({ value: String(text).trim() }),
+    'sq:desc': (text) => tvBoolParse(text),
+    'sq:print': (text) => tvBoolParse(text),
     name: (text) => (String(text).trim() ? { value: String(text).trim() } : { error: true }),
     nat: (text) => tvBoolParse(text),
     // Kept as typed, line breaks and all, as the table's Notes cell does.
@@ -738,6 +831,12 @@ const CSV_PARSERS = {
     },
     'pt:label': (text) => { const v = String(text).trim(); return fieldOk.tag(v) ? { value: v } : { error: true }; },
     'pt:vlan': (text) => { const n = asVlan(String(text).trim()); return n === undefined ? { error: true } : { value: n }; },
+    // "10,20,30-39" or "all", held as its canonical text (vlanListText).
+    'pt:tagged': (text) => { const v = asVlanList(String(text)); return v === undefined ? { error: true } : { value: v }; },
+    // af / at / bt3 / bt4, the standard or the trade's name, or watts.
+    'pt:poe': (text) => fromTextResult(portPoeFromText, text),
+    poeBudget: (text) => csvFromText('poeBudget', text),
+    poeDraw: (text) => csvFromText('poeDraw', text),
     // planned / active / retired, by key or by its name in the page's
     // language; a word that is none of them is refused, not blanked.
     status: (text) => { const r = tvStatusParse(text); return r.value === undefined ? { error: true } : r; },
@@ -810,6 +909,8 @@ const CSV_PARSERS = {
     'if:wireless': (text) => tvBoolParse(text),
     // "802.3ad n1 n2": a mode Topo knows, then at least one member.
     'if:bond': (text) => fromTextResult(csvIfaceField('bond').fromText, text),
+    'if:vlan': (text) => { const n = asVlan(String(text).trim()); return n === undefined ? { error: true } : { value: n }; },
+    'if:tagged': (text) => { const v = asVlanList(String(text)); return v === undefined ? { error: true } : { value: v }; },
     'lk:medium': (text) => tvMediumParse(text),
     // The two the link's property panel offers; blank is the default.
     'lk:attachment': (text) => { const v = csvLower(text); return v === 'bridged' || v === 'passthrough' ? { value: v } : { error: true }; },
@@ -818,6 +919,11 @@ const CSV_PARSERS = {
     'net:id': (text) => ({ value: String(text).trim() }),
     'net:vlan': (text) => { const n = asVlan(String(text).trim()); return n === undefined ? { error: true } : { value: n }; },
     'net:dhcp': (text) => tvBoolParse(text),
+    // The DHCP pool's ends (document v16): an address, kept as written
+    // (trimmed), as the gateway is. Whether it lies in the subnet is the
+    // 'dhcp-pool' finding's to say, after the import, as for a gateway.
+    'net:dhcpFirst': (text) => { const v = String(text).trim(); return fieldOk.ip(v) ? { value: v } : { error: true }; },
+    'net:dhcpLast': (text) => { const v = String(text).trim(); return fieldOk.ip(v) ? { value: v } : { error: true }; },
     'net:drawZone': (text) => tvBoolParse(text),
     // An association: its SSID by name or id (a network the map has), its
     // band (2.4, "5 GHz", 6g) and its signal in dBm.
@@ -874,7 +980,9 @@ function csvWifiFind(text) {
 
 // Labels that are not a heading for their field: port count's label is
 // "Ports", and a sheet's "Ports" column is the services list far more often.
-const CSV_NOT_NAMES = { portCount: ['ports'] };
+// An interface's VLAN is labelled "VLAN", and a bare VLAN heading is an
+// inventory's network column (CSV_ALIASES['if:vlan']).
+const CSV_NOT_NAMES = { portCount: ['ports'], 'if:vlan': ['vlan'] };
 
 // Built once the schema exists (it is a classic script loaded before this one).
 function csvBuildTargets() {
@@ -886,9 +994,9 @@ function csvBuildTargets() {
         names: new Set([field && field.csv, field && field.label, label, ...(CSV_ALIASES[key] || [])].filter(Boolean).map(csvNorm)
             .filter((n) => !(CSV_NOT_NAMES[key] || []).includes(n)))
     });
-    const PLAIN = new Set(['name', 'type', 'notes', 'serial', 'assetTag', 'location', 'status', 'inService', 'serviced', 'serviceEvery', 'lifeYears', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'portsFace', 'host', 'provider']);
+    const PLAIN = new Set(['name', 'type', 'notes', 'vendor', 'model', 'serial', 'assetTag', 'location', 'status', 'inService', 'serviced', 'serviceEvery', 'lifeYears', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'portsFace', 'host', 'provider']);
     csvNodeFields().forEach((f) => add(f.key, 'device', f, null, PLAIN.has(f.key)));
-    ['id', 'name', 'ip', 'mac', 'wireless', 'bond'].forEach((k) => add(`if:${k}`, 'iface', csvIfaceField(k)));
+    ['id', 'name', 'ip', 'mac', 'wireless', 'bond', 'vlan', 'tagged'].forEach((k) => add(`if:${k}`, 'iface', csvIfaceField(k)));
     // A radio's parts (iface.radio, js/model.js "Wi-Fi").
     RADIO_CSV_PARTS.forEach((p) => add(`if:radio.${p.part}`, 'iface', p));
     add('cab:switch', 'cabling', null, 'Switch');
@@ -908,6 +1016,8 @@ function csvBuildTargets() {
     // A port's own facts, kept in node.portAttrs (js/model.js).
     add('pt:label', 'port', null, 'Port label', true);
     add('pt:vlan', 'port', null, 'Access VLAN');
+    add('pt:tagged', 'port', null, 'Port tagged VLANs');
+    add('pt:poe', 'port', null, 'Port PoE');
     // A subnet's own fields (NETWORK_FIELDS, js/model.js): subnets.csv.
     NETWORK_FIELDS.forEach((f) => add(`net:${f.key}`, 'network', f, null, f.key === 'name' || f.key === 'purpose'));
     // A group's own fields (GROUP_FIELDS, js/model.js): groups.csv. Plain
@@ -916,6 +1026,9 @@ function csvBuildTargets() {
     // A provider's own fields (PROVIDER_FIELDS, js/model.js): providers.csv.
     // Plain words, translated, but for the id.
     PROVIDER_FIELDS.forEach((f) => add(`pv:${f.key}`, 'pvdef', f, f.key === 'id' ? 'Provider ID' : null, f.key !== 'id'));
+    // A saved search's own fields (SEARCH_FIELDS, js/model.js): searches.csv.
+    // Plain words, translated, but for the id.
+    SEARCH_FIELDS.forEach((f) => add(`sq:${f.key}`, 'sqdef', f, f.key === 'id' ? 'Search ID' : null, f.key !== 'id'));
     return out;
 }
 let _csvTargets = null;
@@ -994,7 +1107,7 @@ const csvTargetLabel = (tg) => (tg.plain ? t(tg.label) : tg.label);
 // A sheet of groups likewise, and there only a group's fields are guessed:
 // its "name", "kind" and "parent" are the group's, not a device's.
 // family: 'network' (true, as it was), 'grpdef', or none for a device sheet.
-const CSV_OWN_FAMILIES = ['network', 'grpdef', 'wifidef', 'pvdef'];
+const CSV_OWN_FAMILIES = ['network', 'grpdef', 'wifidef', 'pvdef', 'sqdef'];
 function csvGuessByHeading(heading, family) {
     const h = csvNorm(heading);
     if (!h) return '';
@@ -1024,7 +1137,17 @@ const csvIsWifiSheet = (sheet) => !!sheet.hasHeadings && !csvIsSubnetSheet(sheet
 const CSV_PROVIDER_HEADINGS = new Set(['provider id']);
 const csvIsProviderSheet = (sheet) => !!sheet.hasHeadings && !csvIsSubnetSheet(sheet) && !csvIsGroupSheet(sheet)
     && sheet.headers.some((h) => CSV_PROVIDER_HEADINGS.has(csvNorm(h)));
-const csvSheetFamily = (sheet) => (csvIsSubnetSheet(sheet) ? 'network' : csvIsGroupSheet(sheet) ? 'grpdef' : csvIsProviderSheet(sheet) ? 'pvdef' : csvIsWifiSheet(sheet) ? 'wifidef' : null);
+// A sheet of saved searches by its search_id column (searches.csv).
+const CSV_SEARCH_HEADINGS = new Set(['search id']);
+// Or, with no search_id column (a hand-written sheet of new searches): a
+// query column beside a name and nothing but searches.csv's own headings, so
+// a device sheet's Query column never makes it one.
+const CSV_SEARCH_OWN = new Set(['search id', 'name', 'query', 'columns', 'sort', 'descending', 'in report']);
+const csvIsSearchSheet = (sheet) => !!sheet.hasHeadings && !csvIsSubnetSheet(sheet) && !csvIsGroupSheet(sheet)
+    && (sheet.headers.some((h) => CSV_SEARCH_HEADINGS.has(csvNorm(h)))
+        || (sheet.headers.some((h) => csvNorm(h) === 'query') && sheet.headers.some((h) => csvNorm(h) === 'name')
+            && sheet.headers.every((h) => CSV_SEARCH_OWN.has(csvNorm(h)))));
+const csvSheetFamily = (sheet) => (csvIsSubnetSheet(sheet) ? 'network' : csvIsGroupSheet(sheet) ? 'grpdef' : csvIsSearchSheet(sheet) ? 'sqdef' : csvIsProviderSheet(sheet) ? 'pvdef' : csvIsWifiSheet(sheet) ? 'wifidef' : null);
 // With no heading row: what a column's values look like (most of them).
 function csvGuessByValues(values) {
     const vals = values.map((v) => String(v).trim()).filter(Boolean);
@@ -1040,7 +1163,7 @@ function csvGuessByValues(values) {
 // say "Printer" is still data).
 function csvHasHeadingRow(rows) {
     const first = rows[0] || [];
-    if (!first.some((c) => csvGuessByHeading(c) || CSV_SUBNET_HEADINGS.has(csvNorm(c)) || CSV_GROUP_HEADINGS.has(csvNorm(c)) || CSV_WIFI_HEADINGS.has(csvNorm(c)) || CSV_PROVIDER_HEADINGS.has(csvNorm(c)))) return false;
+    if (!first.some((c) => csvGuessByHeading(c) || CSV_SUBNET_HEADINGS.has(csvNorm(c)) || CSV_GROUP_HEADINGS.has(csvNorm(c)) || CSV_WIFI_HEADINGS.has(csvNorm(c)) || CSV_PROVIDER_HEADINGS.has(csvNorm(c)) || CSV_SEARCH_HEADINGS.has(csvNorm(c)))) return false;
     return !first.some((c) => parseValidCIDR(String(c).trim()) || parseIpText(String(c).trim()) || normMac(c).length === 12 && /[:\-.]/.test(c));
 }
 
@@ -1049,17 +1172,44 @@ function csvHasHeadingRow(rows) {
 function csvAutoMap(sheet) {
     const used = new Set();
     const family = csvSheetFamily(sheet);
-    const keys = sheet.headers.map((h, i) => {
-        const key = sheet.hasHeadings ? csvGuessByHeading(h, family) : csvGuessByValues(sheet.rows.map((r) => r[i] || ''));
+    const guesses = sheet.headers.map((h, i) => (sheet.hasHeadings ? csvGuessByHeading(h, family) : csvGuessByValues(sheet.rows.map((r) => r[i] || ''))));
+    // A network's own column named as one of Topo's fields' csv headings
+    // ("Vendor", made in v15 before Topo had a vendor field) sits beside that
+    // field in Topo's own devices.csv, field first. When two headings of the
+    // sheet name the same column of the network's, the first that is a
+    // field's csv heading is that field, so the sheet reads back whole.
+    if (sheet.hasHeadings && !family) {
+        const fieldByCsv = (h) => csvTargets().find((tg) => tg.group === 'device' && tg.csv && csvNorm(tg.csv) === csvNorm(h));
+        guesses.forEach((key, i) => {
+            if (!/^x:/.test(key || '') || guesses.filter((k) => k === key).length < 2) return;
+            const f = fieldByCsv(sheet.headers[i]);
+            if (f && !guesses.includes(f.key)) guesses[i] = f.key;
+        });
+    }
+    const keys = csvPortShapedVlans(guesses.map((key) => {
         if (!key || used.has(key)) return '';
         used.add(key);
         return key;
-    });
+    }));
     // An association's SSID, band and signal are a cable sheet's only beside
     // a cable's own columns: an inventory with an SSID or a Band column (which
     // network a laptop is on) is still a sheet of devices, not a mixed one.
     const cableOwn = keys.some((k) => k && !/^lk:wifi\./.test(k) && csvTarget(k).group === 'cable');
     return cableOwn ? keys : keys.map((k) => (/^lk:wifi\./.test(k) ? '' : k));
+}
+
+// "Tagged VLANs", "Trunk VLANs", "Allowed VLANs" and "Native VLAN" name an
+// interface's VLANs on a sheet of devices, but a port's on a sheet that names
+// a port (and no switch) and nothing else of an interface's or a cable's: a
+// switch's port list ("device, port, Native VLAN, Tagged VLANs"), or a
+// ports.csv with a plain "Tagged VLANs" column beside port_vlan. interfaces.csv
+// always has interface_id, so it keeps its own.
+const CSV_IF_TO_PORT = { 'if:vlan': 'pt:vlan', 'if:tagged': 'pt:tagged' };
+function csvPortShapedVlans(keys) {
+    if (!keys.includes('cab:port') || !keys.some((k) => CSV_IF_TO_PORT[k])) return keys;
+    const fits = keys.every((k) => !k || CSV_IF_TO_PORT[k] || CSV_PORT_SHEET_KEYS.has(k) || csvTarget(k).group === 'port');
+    if (!fits) return keys;
+    return keys.map((k) => (CSV_IF_TO_PORT[k] && !keys.includes(CSV_IF_TO_PORT[k]) ? CSV_IF_TO_PORT[k] : k));
 }
 
 // { headers, rows, hasHeadings } from parsed rows.
@@ -1093,6 +1243,10 @@ function csvSheetKind(mapping) {
     // 'providers' likewise, when a column is a provider's own field.
     if (keys.some((k) => csvTarget(k).group === 'pvdef')) {
         return keys.every((k) => csvTarget(k).group === 'pvdef') ? 'providers' : 'mixed-providers';
+    }
+    // 'searches' likewise, when a column is a saved search's own field.
+    if (keys.some((k) => csvTarget(k).group === 'sqdef')) {
+        return keys.every((k) => csvTarget(k).group === 'sqdef') ? 'searches' : 'mixed-searches';
     }
     if (keys.some((k) => csvTarget(k).group === 'port')) {
         return keys.every((k) => csvTarget(k).group === 'port' || CSV_PORT_SHEET_KEYS.has(k)) ? 'ports' : 'mixed-ports';
@@ -1266,6 +1420,7 @@ function csvPlanMapped(sheet, mapping, opts = {}) {
     if (kind === 'mixed-groups') return Object.assign(empty, { errors: [t(CSV_MIXED_GROUPS)] });
     if (kind === 'mixed-wifi') return Object.assign(empty, { errors: [t(CSV_MIXED_WIFI)] });
     if (kind === 'mixed-providers') return Object.assign(empty, { errors: [t(CSV_MIXED_PROVIDERS)] });
+    if (kind === 'mixed-searches') return Object.assign(empty, { errors: [t(CSV_MIXED_SEARCHES)] });
     if (!mapping.some(Boolean)) return Object.assign(empty, { errors: [t('Pick what at least one column is.')] });
     // A depth column whose heading asks "half depth?" answers the opposite
     // question to rackDepth's parser, which reads a yes as full depth: its
@@ -1301,6 +1456,7 @@ function csvPlanMapped(sheet, mapping, opts = {}) {
     if (kind === 'groups') return csvPlanGroups(rows, empty);
     if (kind === 'wifi') return csvPlanWifi(rows, empty);
     if (kind === 'providers') return csvPlanProviders(rows, empty);
+    if (kind === 'searches') return csvPlanSearches(rows, empty);
     return kind === 'cables' ? csvPlanCables(rows, empty) : csvPlanDevices(rows, empty);
 }
 // A heading that asks "half depth?" (or "shallow?"), in English or the
@@ -1315,24 +1471,25 @@ const csvHalfAnswer = (raw) => {
     const v = csvLower(raw);
     return YES_RE.test(v) ? 'half' : NO_RE.test(v) ? 'full' : raw;
 };
-const CSV_MIXED_PORTS = 'A sheet of ports maps the device, the port and its label or VLAN. Leave the other columns unmapped.';
+const CSV_MIXED_PORTS = 'A sheet of ports maps the device, the port and its label, VLANs or PoE. Leave the other columns unmapped.';
 const CSV_MIXED_SUBNETS = 'A sheet of subnets maps only what a subnet has: its CIDR, name, VLAN, gateway and so on. Leave the other columns unmapped.';
 const CSV_MIXED_GROUPS = 'A sheet of groups maps only what a group has: its id, name, kind, parent and height. Leave the other columns unmapped.';
 const CSV_MIXED_PROVIDERS = 'A sheet of providers maps only what a provider has: its name, service, contact, phone, email, account, support hours and notes. Leave the other columns unmapped.';
-const CSV_MIXED_WIFI = 'A sheet of Wi-Fi networks maps only what a Wi-Fi network has: its SSID, security, bands, subnet and whether it is hidden. Leave the other columns unmapped.';
+const CSV_MIXED_SEARCHES = 'A sheet of saved searches maps only what a saved search has: its name, search, columns, sort, whether it is descending and whether the site report prints it. Leave the other columns unmapped.';
+const CSV_MIXED_WIFI ='A sheet of Wi-Fi networks maps only what a Wi-Fi network has: its SSID, security, bands, subnet and whether it is hidden. Leave the other columns unmapped.';
 
 // Counted per thing, not per row: the three interfaces.csv rows of one new
 // device are one device added.
 function csvFinish(plan, results) {
     plan.rows = results.sort((a, b) => a.index - b.index);
     const seen = { add: new Set(), change: new Set(), same: new Set(), conflict: new Set() };
-    plan.rows.forEach((r) => { seen[r.status].add(r.status === 'conflict' ? `row:${r.index}` : (r.newGroup || r.nodeId || r.linkId || (r.netId && `net:${r.netId}`) || (r.grpId && `grp:${r.grpId}`) || (r.wifiId && `wf:${r.wifiId}`) || (r.pvId && `pv:${r.pvId}`) || `row:${r.index}`)); });
+    plan.rows.forEach((r) => { seen[r.status].add(r.status === 'conflict' ? `row:${r.index}` : (r.newGroup || r.nodeId || r.linkId || (r.netId && `net:${r.netId}`) || (r.grpId && `grp:${r.grpId}`) || (r.wifiId && `wf:${r.wifiId}`) || (r.pvId && `pv:${r.pvId}`) || (r.sqId && `sq:${r.sqId}`) || `row:${r.index}`)); });
     Object.keys(seen).forEach((k) => { plan.counts[k] = seen[k].size; });
     return plan;
 }
 
 // ---- Devices ----
-const CSV_IFACE_KEYS = ['if:id', 'if:name', 'if:ip', 'if:mac', 'if:wireless', 'if:bond'].concat(RADIO_CSV_PARTS.map((p) => 'if:radio.' + p.part));
+const CSV_IFACE_KEYS = ['if:id', 'if:name', 'if:ip', 'if:mac', 'if:wireless', 'if:bond', 'if:vlan', 'if:tagged'].concat(RADIO_CSV_PARTS.map((p) => 'if:radio.' + p.part));
 // An interface's value of a column: its own field, or a part of its radio
 // (field 'radio.ch_5g').
 const csvIfaceValue = (iface, field) => (!iface ? undefined
@@ -1392,7 +1549,7 @@ function csvPlanDevices(rows, plan) {
     // two srv1 and a cable to srv1 then "named more than one device". The
     // rows meet as a device on the map found by its name does, each NIC its
     // own interface. Unless they say they are two boxes: another serial,
-    // asset tag, type, model, location or group (what two NICs of one box
+    // asset tag, type, vendor, model, firmware, location or group (what two NICs of one box
     // never disagree on) keeps a row its own device, and the review says so.
     // Names seen on the wire (plan.observed) never join rows: DHCP clients
     // repeat theirs. Nor does a row whose MAC is locally administered, for
@@ -1400,7 +1557,7 @@ function csvPlanDevices(rows, plan) {
     // randomised Wi-Fi address is no sign of a second NIC on one box.
     const byNameRows = new Map();   // lower name -> the rows joined under it
     const differs = (rows, v, key) => !isBlank(v[key]) && rows.some((o) => !isBlank(o.values[key]) && csvLower(o.values[key]) !== csvLower(v[key]));
-    const apartKeys = ['assetTag', 'serial', 'type', 'os', 'location', 'group'];
+    const apartKeys = ['assetTag', 'serial', 'type', 'vendor', 'model', 'os', 'location', 'group'];
     const randomMac = (v) => macIsLocal(v['if:mac']);
     const nameCount = new Map();
     parsed.forEach((r) => {
@@ -1678,6 +1835,9 @@ function csvPlanDeviceRow(r, anchor, ctx) {
         const type = draftSets.type || said.type || record.type;
         if (key === 'nat' && !isRoutingDevice(type)) { out.notes.push(t('Only a routing device does NAT.')); continue; }
         if (key === 'portScheme' && !hasPortGrid({ type })) { if (value) out.notes.push(t('Only a switch or an access point has numbered ports.')); continue; }
+        // PoE as the schema writes it (document v16): said, not stored.
+        if (key === 'poeBudget' && !hasPortGrid({ type })) { out.notes.push(t('Only a switch or an access point has a PoE budget.')); continue; }
+        if (key === 'poeDraw' && !canDrawPoe(type)) { out.notes.push(t('A cloud, a VM or a container draws no PoE.')); continue; }
         // The face the device's type already has is not stored (asPortsFace):
         // a sheet this page wrote says every rack device's face, and reading
         // it back must not list each one as a change.
@@ -1766,6 +1926,18 @@ function csvPlanDeviceRow(r, anchor, ctx) {
             }
             if (field === 'name' && iface && iface.name === value) continue;
             if (field === 'name' && !iface) continue;   // it names the interface being made
+            // A VLAN is a wired interface's (IFACE_FIELDS): on a wireless
+            // one, as this row leaves it, the cell is passed over, and the
+            // row says so (as a PoE budget on a PC does).
+            if (field === 'vlan' || field === 'tagged') {
+                const wl = Object.prototype.hasOwnProperty.call(ifaceDraft.set, 'wireless') ? ifaceDraft.set.wireless
+                    : iface ? iface.wireless : (held && held.set && Object.prototype.hasOwnProperty.call(held.set, 'wireless') ? held.set.wireless : undefined);
+                if (ifaceIsWireless({ wireless: wl, name: iface ? iface.name : ifaceDraft.name })) {
+                    const note = t('Only a wired interface has a VLAN of its own.');
+                    if (!out.notes.includes(note)) out.notes.push(note);
+                    continue;
+                }
+            }
             const before = csvIfaceValue(iface, field);
             // A new device's interface was filled in by an earlier row of
             // the same device: saying otherwise now is the same conflict.
@@ -2442,7 +2614,7 @@ function csvPlanPorts(rows, plan) {
         const key = `${node.id}\u0000${port.id}`;
         const before = said.get(key) || {};
         const set = {};
-        for (const [k, field] of [['pt:label', 'label'], ['pt:vlan', 'vlan']]) {
+        for (const [k, field] of [['pt:label', 'label'], ['pt:vlan', 'vlan'], ['pt:tagged', 'tagged'], ['pt:poe', 'poe']]) {
             if (!Object.prototype.hasOwnProperty.call(values, k)) continue;
             const v = values[k];
             if (Object.prototype.hasOwnProperty.call(before, field) && String(before[field]) !== String(v)) {
@@ -2805,12 +2977,16 @@ function csvPlanProviders(rows, plan) {
         if (!p) {
             if (!values.name) { conflict(t('A new provider needs a name.')); return; }
             if (claimed.has(`new:${values.name.toLowerCase()}`)) { conflict(t('Another row is this provider.')); return; }
+            // An id an earlier row's new provider already took is that one:
+            // nothing is written until the plan is, so providerById cannot see it.
+            if (values.id && claimed.has(`id:${values.id}`)) { conflict(t('Another row is this provider.')); return; }
             if (room <= 0) { conflict(t('A network holds at most {n} providers.', { n: PROVIDER_MAX })); return; }
             room--;
             claimed.add(`new:${values.name.toLowerCase()}`);
             const fieldsIn = {};
             fields.forEach((k) => { fieldsIn[k] = values[k]; });
             const rec = makeProvider(Object.assign({ id: values.id && !providerById(values.id) ? values.id : undefined }, fieldsIn));
+            claimed.add(`id:${rec.id}`);
             plan.ops.push({ pv: { create: rec } });
             fields.forEach((k) => out.changes.push({ field: label(k), before: '', after: show(k, values[k]) }));
             Object.assign(out, { status: 'add', pvId: rec.id, name: providerLabel(rec) });
@@ -2833,6 +3009,168 @@ function csvPlanProviders(rows, plan) {
         }
         results.push(out);
     });
+    return csvFinish(plan, results);
+}
+
+// One row per saved search (searches.csv). Found by its id, then by its name
+// (any case; names are unique, so at most one). A row matching nothing is a
+// new search, under the sheet's id when no search here has it, and needs a
+// name and a search. A search Topo does not understand, or one that reads
+// what this browser alone remembers (was:, has:history), is refused on its
+// row, as Save refuses it; a row that leaves an existing search's text as it
+// is keeps it, whatever it says, so a sheet exported and imported back
+// changes nothing. The columns and the sort are tokens (csvSearchColumnKey);
+// one naming no column is a conflict that names it. Blank cells leave a field
+// as it is, as everywhere here. At most SEARCH_MAX. A name is found as the
+// rows above leave the names (one a row renames away is free), and is checked
+// against what the whole sheet leaves them, so two searches can swap names:
+// a row whose name another search still has at the end is a conflict.
+function csvPlanSearches(rows, plan) {
+    const results = [];
+    const claimed = new Set();
+    const opOf = new Map();         // result -> the op it pushed
+    const label = (key) => csvTargetLabel(csvTarget(`sq:${key}`));
+    const show = (key, v) => {
+        if (v === undefined || v === null) return '';
+        if (key === 'columns') return v.map(csvSearchColumnLabel).join(', ');
+        if (key === 'sort') return csvSearchColumnLabel(v);
+        if (key === 'desc' || key === 'print') return v ? t('Yes') : t('No');
+        return String(v);
+    };
+    const keys = SEARCH_FIELDS.map((f) => f.key).filter((k) => k !== 'id');
+    const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+    // Who holds each name, as the rows above leave them.
+    const names = new Map((state.searches || []).map((s) => [s.name.toLowerCase(), s.id]));
+    let room = SEARCH_MAX - (state.searches || []).length;
+    rows.forEach(({ index, vals }) => {
+        if (!Object.keys(vals).length) return;
+        const out = { index, name: '', status: 'same', changes: [], notes: [], why: '' };
+        const conflict = (why) => { results.push(Object.assign(out, { status: 'conflict', why })); };
+        const values = {}, errors = [];
+        Object.keys(vals).forEach((key) => {
+            const tg = csvTarget(key);
+            const res = tg.parse(vals[key]);
+            if (res.error) errors.push(t('{value} is not a valid {field}.', { value: String(vals[key]).trim() || '—', field: csvTargetLabel(tg) }));
+            else values[key.slice(3)] = res.value;
+        });
+        if (values.id !== undefined) values.id = asGroupRef(values.id);
+        out.name = values.name || values.id || '';
+        if (errors.length) { conflict(errors.join(' ')); return; }
+        let s = values.id ? searchById(values.id) : null;
+        if (!s && values.name) {
+            // As the rows above leave the names: one renamed away is free, and
+            // one a new row above took is that row's (not in state yet).
+            s = searchById(names.get(values.name.toLowerCase())) || null;
+        }
+        if (s) {
+            if (claimed.has(s.id)) { conflict(t('Another row is this saved search.')); return; }
+        } else {
+            if (!values.name || !values.query) { conflict(t('A new saved search needs a name and a search.')); return; }
+            if (claimed.has(`new:${values.name.toLowerCase()}`)) { conflict(t('Another row is this saved search.')); return; }
+            // An id an earlier row's new search already took is that one:
+            // nothing is written until the plan is, so searchById cannot see it.
+            if (values.id && claimed.has(`id:${values.id}`)) { conflict(t('Another row is this saved search.')); return; }
+        }
+        // The search's text: checked only when it is new or changes.
+        if (values.query !== undefined && !(s && s.query === values.query)) {
+            const q = values.query;
+            if (q.length > SEARCH_QUERY_MAX) { conflict(t('A saved search can be at most {n} characters long.', { n: SEARCH_QUERY_MAX })); return; }
+            const local = queryLocalTerms(q);
+            if (local.length) { conflict(t('{terms} reads what this browser remembers, so a saved search cannot use it: it would match differently on another computer.', { terms: local.join(' ') })); return; }
+            const parsed = parseQuery(q);
+            if (parsed.errors.length) { conflict(t('{query} is not understood: {terms}', { query: q, terms: parsed.errors.join(' ') })); return; }
+            if (!parsed.terms.length) { conflict(t('A saved search needs a search.')); return; }
+        }
+        // The columns and the sort, as keys. A key the search keeps already
+        // reads as itself, drawn by this build or not.
+        const allow = new Set(s ? (s.columns || []).concat(s.sort ? [s.sort] : []) : []);
+        const unknown = [];
+        if (values.columns !== undefined) {
+            const tokens = values.columns.split(';').map((x) => x.trim()).filter(Boolean);
+            const cols = [];
+            tokens.forEach((tok) => { const k = csvSearchColumnKey(tok, allow); if (!k) unknown.push(tok); else if (k !== TV_FIXED_COL && !cols.includes(k)) cols.push(k); });
+            if (cols.length > SEARCH_COLUMNS_MAX) { conflict(t('A saved search can print at most {n} columns.', { n: SEARCH_COLUMNS_MAX })); return; }
+            if (cols.length) values.columns = cols; else if (!unknown.length) delete values.columns;
+        }
+        if (values.sort !== undefined) {
+            const k = csvSearchColumnKey(values.sort, allow);
+            if (!k) unknown.push(values.sort); else values.sort = k;
+        }
+        if (unknown.length) { conflict(unknown.map((name) => t('No column is called {name}.', { name })).join(' ')); return; }
+        // The name is checked once every row is read (below), against what
+        // the whole sheet leaves.
+        const given = keys.filter((k) => values[k] !== undefined);
+        if (!s) {
+            if (room <= 0) { conflict(t('A network can keep at most {n} saved searches.', { n: SEARCH_MAX })); return; }
+            room--;
+            claimed.add(`new:${values.name.toLowerCase()}`);
+            const fieldsIn = {};
+            given.forEach((k) => { fieldsIn[k] = values[k]; });
+            if (values.id && !searchById(values.id)) fieldsIn.id = values.id;
+            const rec = makeSearch(fieldsIn);
+            claimed.add(`id:${rec.id}`);
+            if (!names.has(rec.name.toLowerCase())) names.set(rec.name.toLowerCase(), rec.id);
+            const op = { sq: { create: rec } };
+            plan.ops.push(op);
+            opOf.set(out, op);
+            keys.forEach((k) => { if (rec[k] !== undefined) out.changes.push({ field: label(k), before: '', after: show(k, rec[k]) }); });
+            Object.assign(out, { status: 'add', sqId: rec.id, name: rec.name });
+            results.push(out);
+            return;
+        }
+        claimed.add(s.id);
+        out.sqId = s.id;
+        out.name = s.name;
+        // What the search would be, read through its fields (a descending
+        // with no sort is none), against what it is.
+        const next = readFields(SEARCH_FIELDS, Object.assign({}, s, ...given.map((k) => ({ [k]: values[k] }))));
+        const set = {};
+        keys.forEach((k) => {
+            if (same(s[k], next[k])) return;
+            set[k] = next[k] === undefined ? null : next[k];
+            out.changes.push({ field: label(k), before: show(k, s[k]), after: show(k, next[k]) });
+        });
+        if (Object.keys(set).length) {
+            out.status = 'change';
+            if (set.name) {
+                if (names.get(s.name.toLowerCase()) === s.id) names.delete(s.name.toLowerCase());
+                if (!names.has(set.name.toLowerCase())) names.set(set.name.toLowerCase(), s.id);
+            }
+            const op = { sq: { id: s.id, set } };
+            plan.ops.push(op);
+            opOf.set(out, op);
+        }
+        results.push(out);
+    });
+    // The names, as the whole sheet leaves them: a row that gives a search a
+    // name another one still has is a conflict, and its op goes. Taking a row
+    // back can leave its search's old name where another row put it, so
+    // again until none clashes. A search the sheet leaves its name keeps it;
+    // of two rows giving one name, the earlier keeps it.
+    for (;;) {
+        const giver = new Map();    // search id -> the row that names it
+        opOf.forEach((op, r) => {
+            const name = op.sq.create ? op.sq.create.name : op.sq.set.name;
+            if (name) giver.set(op.sq.create ? op.sq.create.id : op.sq.id, { r, name });
+        });
+        const holders = new Map();  // lower name -> [{ id, r }]
+        const hold = (id, name, r) => { const k = name.toLowerCase(); if (!holders.has(k)) holders.set(k, []); holders.get(k).push({ id, r }); };
+        (state.searches || []).forEach((x) => { if (!giver.has(x.id)) hold(x.id, x.name, null); });
+        giver.forEach(({ r, name }, id) => hold(id, name, r));
+        const losers = [];
+        holders.forEach((list) => {
+            if (list.length < 2) return;
+            const rows = list.filter((h) => h.r).sort((a, b) => a.r.index - b.r.index);
+            losers.push(...(list.some((h) => !h.r) ? rows : rows.slice(1)).map((h) => h.r));
+        });
+        if (!losers.length) break;
+        losers.forEach((r) => {
+            const at = plan.ops.indexOf(opOf.get(r));
+            if (at > -1) plan.ops.splice(at, 1);
+            opOf.delete(r);
+            Object.assign(r, { status: 'conflict', why: t('A saved search with this name already exists.'), changes: [] });
+        });
+    }
     return csvFinish(plan, results);
 }
 
@@ -2863,13 +3201,18 @@ function csvWrite(plan, doc) {
     // document's indexes. The binds open their own over doc. Not a pass
     // itself: it writes.
     return withoutLookupPass(() => {
-        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers };
+        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, searches: state.searches };
         if (!Array.isArray(doc.networks)) doc.networks = [];
         if (!Array.isArray(doc.groups)) doc.groups = [];
         if (!Array.isArray(doc.wifi)) doc.wifi = [];
         state.nodes = doc.nodes; state.links = doc.links; state.networks = doc.networks; state.groups = doc.groups; state.wifi = doc.wifi;
         if (!Array.isArray(doc.providers)) doc.providers = held.providers || [];
         state.providers = doc.providers;
+        // The saved searches likewise (searches.csv writes them), and a
+        // scratch copy that brought none borrows a copy of the live list,
+        // never the list itself.
+        if (!Array.isArray(doc.searches)) doc.searches = cloneData(held.searches || []);
+        state.searches = doc.searches;
         const touched = new Set(), newLinks = new Set();
         try {
             // Groups before anything names them, each read back through
@@ -2924,6 +3267,15 @@ function csvWrite(plan, doc) {
                 const at = doc.providers.findIndex((p) => p.id === op.pv.id);
                 if (at > -1) doc.providers[at] = read(Object.assign({}, doc.providers[at], op.pv.set));
             });
+            // The saved searches likewise, through SEARCH_FIELDS. A field the
+            // row clears is null in the set, which the fields read as none.
+            plan.ops.forEach((op) => {
+                if (!op.sq) return;
+                const read = (rec) => readFields(SEARCH_FIELDS, writeFields(SEARCH_FIELDS, rec));
+                if (op.sq.create) { doc.searches.push(read(cloneData(op.sq.create))); return; }
+                const at = doc.searches.findIndex((x) => x.id === op.sq.id);
+                if (at > -1) doc.searches[at] = read(Object.assign({}, doc.searches[at], op.sq.set));
+            });
             // The columns the sheet makes, before any device holds a value for one.
             plan.ops.forEach((op) => {
                 if (op.column && !(doc.columns || []).some((c) => c.id === op.column.id)) doc.columns = normalizeCustomColumns((doc.columns || []).concat(op.column));
@@ -2938,7 +3290,7 @@ function csvWrite(plan, doc) {
             doc.nodes.forEach((n) => { if (!nodeById.has(n.id)) nodeById.set(n.id, n); });
             doc.links.forEach((l) => { if (!linkById.has(l.id)) linkById.set(l.id, l); });
             plan.ops.forEach((op) => {
-                if (op.create || op.link || op.net || op.grp || op.wifi || op.pv || op.column) return;
+                if (op.create || op.link || op.net || op.grp || op.wifi || op.pv || op.sq || op.column) return;
                 if (op.linkId) {
                     const link = linkById.get(op.linkId);
                     if (link) Object.assign(link, op.set);
@@ -3000,7 +3352,7 @@ function csvWrite(plan, doc) {
             const setLinks = new Set(plan.ops.filter((op) => op.linkId).map((op) => op.linkId));
             doc.links.forEach((l, i) => { if (newLinks.has(l.id) || setLinks.has(l.id)) doc.links[i] = normalizeLoadedLink(serializeLink(l)); });
         } finally {
-            state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers;
+            state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.searches = held.searches;
         }
     });
 }
@@ -3008,7 +3360,7 @@ function csvWrite(plan, doc) {
 // The findings the plan would leave, against the ones there now.
 function csvFindingsDelta(plan) {
     if (!plan.ops.length || plan.errors.length) return [];
-    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers });
+    const scratch = cloneData({ nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, searches: state.searches });
     csvWrite(plan, scratch);
     return findingsDelta(topologyFindings(), diagnoseDoc(scratch).findings);
 }
@@ -3026,6 +3378,11 @@ function applyCsvPlan(plan) {
         renderCanvasOnly();
     });
     renderGroupsPanel();   // a sheet may have made groups, or filled them
+    // A sheet of saved searches: the ☆ and the ▾ Saved menu say so now.
+    if (plan.ops.some((op) => op.sq) && typeof updateQueryBar === 'function') {
+        updateQueryBar();
+        if (typeof renderSavedMenu === 'function') renderSavedMenu();
+    }
     const ids = plan.newIds.concat(plan.touchedIds).filter((id) => getNode(id));
     if (ids.length) {
         selectEntries(ids.map((id) => ({ type: 'node', id })));
@@ -3509,12 +3866,13 @@ function renderCsvImport() {
         : kind === 'mixed-groups' ? t(CSV_MIXED_GROUPS)
         : kind === 'mixed-wifi' ? t(CSV_MIXED_WIFI)
         : kind === 'mixed-providers' ? t(CSV_MIXED_PROVIDERS)
+        : kind === 'mixed-searches' ? t(CSV_MIXED_SEARCHES)
             : sheet.observed && kind === 'devices' ? seenLine()
-                : t(kind === 'cables' ? 'Rows of cables: {n}' : kind === 'ports' ? 'Rows of ports: {n}' : kind === 'subnets' ? 'Rows of subnets: {n}' : kind === 'groups' ? 'Rows of groups: {n}' : kind === 'wifi' ? 'Rows of Wi-Fi networks: {n}' : kind === 'providers' ? 'Rows of providers: {n}' : 'Rows of devices: {n}', { n: sheet.rows.length });
+                : t(kind === 'cables' ? 'Rows of cables: {n}' : kind === 'ports' ? 'Rows of ports: {n}' : kind === 'subnets' ? 'Rows of subnets: {n}' : kind === 'groups' ? 'Rows of groups: {n}' : kind === 'wifi' ? 'Rows of Wi-Fi networks: {n}' : kind === 'providers' ? 'Rows of providers: {n}' : kind === 'searches' ? 'Rows of saved searches: {n}' : 'Rows of devices: {n}', { n: sheet.rows.length });
     csvEl('csvKind').classList.toggle('csv-kind-bad', /^mixed/.test(kind));
     // 'Ports' stays English here, like 'Interface': the full editor's
     // technical vocabulary (see the header).
-    const groups = [['device', t('Device')], ['iface', 'Interface'], ['cabling', t('Cabling')], ['cable', t('Cables')], ['port', 'Ports'], ['network', 'Subnets'], ['wifidef', 'Wi-Fi'], ['grpdef', t('Groups')], ['pvdef', t('Providers')]];
+    const groups = [['device', t('Device')], ['iface', 'Interface'], ['cabling', t('Cabling')], ['cable', t('Cables')], ['port', 'Ports'], ['network', 'Subnets'], ['wifidef', 'Wi-Fi'], ['grpdef', t('Groups')], ['pvdef', t('Providers')], ['sqdef', t('Saved searches')]];
     const opt = (tg, sel) => `<option value="${escapeHtml(tg.key)}"${tg.key === sel ? ' selected' : ''}>${escapeHtml(csvTargetLabel(tg))}${tg.csv && csvNorm(tg.csv) !== csvNorm(csvTargetLabel(tg)) ? ` · ${escapeHtml(tg.csv)}` : ''}</option>`;
     // The network's own columns, and a new one named by the heading: a
     // column of the client's sheet that Topo has no field for comes in as a

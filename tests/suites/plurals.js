@@ -76,8 +76,13 @@ window.addEventListener('load', () => { setTimeout(async () => {
     replaceDocument(portsDoc(), { origin: 'file' });
     const srvPorts = evaluatePorts(getNode('srv')).text;
     ok('one bound link: "1 link, on its own interface."', srvPorts === '1 link, on its own interface.', srvPorts);
-    ok('a default AP with one cable: "1 of 1 port in use."', evaluatePorts(getNode('ap')).text === '1 of 1 port in use.', evaluatePorts(getNode('ap')).text);
-    ok('a switch keeps "1 of 8 ports in use."', evaluatePorts(getNode('sw')).text === '1 of 8 ports in use.', evaluatePorts(getNode('sw')).text);
+    // Then what is left (portCapacity): an AP with no count set says so, a
+    // switch with one gives its free ports.
+    ok('a default AP with one cable: "1 of 1 port in use."', evaluatePorts(getNode('ap')).text === '1 of 1 port in use. Port count not set, so the total is a guess.', evaluatePorts(getNode('ap')).text);
+    ok('a switch keeps "1 of 8 ports in use."', evaluatePorts(getNode('sw')).text === '1 of 8 ports in use. 7 ports free.', evaluatePorts(getNode('sw')).text);
+    getNode('sw').portCount = 2;
+    ok('one free port: "1 port free."', evaluatePorts(getNode('sw')).text === '1 of 2 ports in use. 1 port free.', evaluatePorts(getNode('sw')).text);
+    getNode('sw').portCount = 8;
     const html = reportHtml(reportModel(), null);
     ok('the report\'s port map: "1 of 1 port used"', html.includes('1 of 1 port used') && html.includes('1 of 8 ports used'),
        (html.match(/AP-1 <span[^\n]*/) || [])[0]);

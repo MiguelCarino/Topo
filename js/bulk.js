@@ -9,6 +9,9 @@
 //               disagree on says "mixed"; a field left blank, or as it was, is
 //               not touched; Clear empties it on all of them (a gateway or DNS
 //               override cleared is inherited from the network again).
+//               Under the fields, "Fill vendor from MAC" previews the vendor
+//               each MAC suggests onto the devices with none
+//               (bulkPlanVendorFromMac), naming the ones that get nothing.
 //   Rename      one control for both ways of renaming: a pattern (CAM-{n:02},
 //               counted in the order chosen: by name, by switch port or by
 //               position on the map), or, with Find filled, find and replace
@@ -62,7 +65,7 @@
 // one undo step, one save, one redraw.
 //
 // The full editor's, like the table: technical vocabulary (Gateway, DNS,
-// Model / firmware, IP / CIDR, NAT…) stays English, as the comment in
+// Firmware / OS, IP / CIDR, NAT…) stays English, as the comment in
 // applyProfile (js/app.js) explains; plain words and sentences are translated
 // (MESSAGES, js/i18n.js). A reduced view never shows it (data-adv).
 //
@@ -130,6 +133,8 @@ const BULK_FIELD_OPTS = {
     // The Asset group (js/assets.js): plain words, so translated. A status is
     // a pick of three, and has no Clear: unset and active read the same.
     location: { plain: true },
+    vendor: { plain: true },
+    model: { plain: true },
     status: { editor: 'status', plain: true, get: (node) => node.status || '' },
     // Age and upkeep (js/model.js): a set bought, or serviced, together.
     // Read by the field's fromText, so "03/2019" is set as 2019-03.
@@ -140,7 +145,14 @@ const BULK_FIELD_OPTS = {
     // Who is responsible for them (js/model.js "Providers"): a pick of the
     // network's providers. Its own, as stored: one that only inherits one
     // from its group reads as none, and a blank pick asks for nothing.
-    provider: { editor: 'provider', plain: true, get: (node) => node.provider || '' }
+    provider: { editor: 'provider', plain: true, get: (node) => node.provider || '' },
+    // PoE (document v16): a budget only on a switch or an AP, a draw on
+    // anything a cable can power. Read by the field's fromText ("12,5",
+    // "class 4"); a device it cannot be held on is skipped, saying why.
+    poeBudget: { plain: true, can: (node) => hasPortGrid(node), skipWhy: 'Only a switch or an access point has a PoE budget.',
+        get: (node) => (asPoeBudget(node.poeBudget) === undefined ? '' : asPoeBudget(node.poeBudget)) },
+    poeDraw: { plain: true, can: (node) => canDrawPoe(node.type), skipWhy: 'A cloud, a VM or a container draws no PoE.',
+        get: (node) => (asPoeDraw(node.poeDraw) === undefined ? '' : asPoeDraw(node.poeDraw)) }
 };
 // A cable's medium is a pick of the five the canvas draws. It is compared as
 // drawn (effectiveMedium), as the table's Medium column does: a cable never
@@ -279,7 +291,7 @@ function bulkPlanSet(ids, edits, kind = 'node') {
             const op = { nodeId: node.id, set: {}, drop: [] };
             wanted.forEach(({ bf, value }) => {
                 const row = { nodeId: node.id, name: node.name, field: bulkFieldLabel(bf), before: bulkShowOn(bf, node, bulkGet(bf, node)), after: bulkShowOn(bf, node, value) };
-                if (!bulkCan(bf, node)) rows.push(Object.assign(row, { status: 'skip', after: '', why: t('Only a routing device does NAT.') }));
+                if (!bulkCan(bf, node)) rows.push(Object.assign(row, { status: 'skip', after: '', why: t(bf.skipWhy || 'Only a routing device does NAT.') }));
                 else if (bulkGet(bf, node) === value) rows.push(Object.assign(row, { status: 'same' }));
                 else {
                     rows.push(Object.assign(row, { status: 'change' }));
@@ -315,21 +327,17 @@ function bulkPlanSetLinks(links, wanted, rows, ops) {
 }
 
 // ---- Rename ----
-const naturalCompare = (a, b) => String(a || '').localeCompare(String(b || ''), undefined, { numeric: true, sensitivity: 'base' });
-// Where a device is patched: the switch (or AP) its first cable onto a
-// faceplate lands on, and the port number there. Devices on no port sort
-// after every patched one, by name.
+// naturalCompare lives in js/model.js beside uplinkOf.
+// Where a device is patched: the switch (or AP) it is cabled into, the
+// lowest-named one then the lowest port (uplinkOf, js/model.js, the same
+// choice as the devices sheet's switch/port columns), as that peer's name
+// (else its id) and the port number there. Devices on no port sort after
+// every patched one, by name.
 function patchPoint(node) {
-    let best = null;
-    linksAtNode(node.id).forEach((l) => {
-        const peerId = l.source === node.id ? l.target : l.source;
-        const peer = getNode(peerId);
-        if (!hasPortGrid(peer)) return;
-        const m = /^p(\d+)$/.exec(ifaceIdOn(l, peerId) || '');
-        const at = { peer: peer.name || peer.id, port: m ? Number(m[1]) : Infinity };
-        if (!best || naturalCompare(at.peer, best.peer) < 0 || (at.peer === best.peer && at.port < best.port)) best = at;
-    });
-    return best;
+    const up = uplinkOf(node, { nameOrId: true });
+    if (!up) return null;
+    const m = /^p(\d+)$/.exec(up.portId || '');
+    return { peer: up.peer.name || up.peer.id, port: m ? Number(m[1]) : Infinity };
 }
 // Rows of the map, top to bottom, then left to right. Half a node's height
 // apart counts as one row, so a line of devices dragged by hand, a few pixels
@@ -433,12 +441,27 @@ function bulkPlanMove(ids, netId) {
     const taken = takenAddresses(net);
     const { first, last } = usableRange(p);
     let cursor = first, tries = 0;
-    const nextFree = () => {
+    const lowestFree = () => {
         for (; cursor <= last && tries < 65536; cursor++, tries++) {
             const ip = bigToIp(cursor, p.kind).toString();
             if (!taken.has(ip)) { taken.add(ip); cursor++; return ip; }
         }
         return null;
+    };
+    // A subnet with a DHCP pool that counts: the devices that keep a fixed
+    // address step round it (poolDealer, keepsFixedAddress, js/model.js), and
+    // the preview says who was kept out or found no room outside. Without
+    // one, the bottom of the subnet as ever.
+    const dealer = poolDealer(net.cidr, { net });
+    const kept = [], pooled = [];
+    const nextFree = (node) => {
+        if (!dealer) return lowestFree();
+        const got = dealer.next(keepsFixedAddress(node.type));
+        if (!got) return null;
+        const name = node.name || node.id;
+        if (got.kept) kept.push({ name, ip: got.ip });
+        if (got.pooled) pooled.push({ name, ip: got.ip });
+        return got.ip;
     };
     const label = networkLabel(net);
     const ipField = 'IP / CIDR';
@@ -457,10 +480,13 @@ function bulkPlanMove(ids, netId) {
             rows.push(Object.assign(base, { status: 'skip', before: addrs.join(', '), after: '', why }));
             return;
         }
-        const ip = nextFree();
+        const ip = nextFree(node);
         if (!ip) { rows.push(Object.assign(base, { status: 'bad', before: iface.ip || '', after: '', why: t('No free address left in {network}.', { network: label }) })); return; }
         const cidr = `${ip}/${p.prefix}`;
         rows.push(Object.assign(base, { status: 'change', before: iface.ip || '', after: cidr }));
+        const dealt = kept.concat(pooled).find((x) => x.ip === ip);
+        if (dealt) base.why = kept.includes(dealt) ? t('Kept out of the DHCP pool {pool}.', { pool: poolRangeText(dealer.pool) })
+            : t('No address is left outside the DHCP pool {pool}.', { pool: poolRangeText(dealer.pool) });
         const op = { nodeId: node.id, set: {}, iface: { id: iface.id, ip: cidr } };
         // The device's own gateway is an override; one outside the new network
         // cannot be its gateway there, so it goes and the network's applies.
@@ -480,7 +506,12 @@ function bulkPlanMove(ids, netId) {
         }
         ops.push(op);
     });
-    return bulkFinish('move', rows, ops, { network: net });
+    if (!dealer) return bulkFinish('move', rows, ops, { network: net });
+    const range = poolRangeText(dealer.pool);
+    const said = poolNotes([range], kept.map((x) => ({ name: x.name, ip: x.ip })), pooled.map((x) => ({ name: x.name, ip: x.ip })));
+    // Kept out is how it should be: said plainly (info). Taking a pool
+    // address for want of room outside is the warning (notes).
+    return bulkFinish('move', rows, ops, { network: net, pool: range, info: said.kept, notes: said.pooled });
 }
 
 // ---- Re-cable onto another switch ----
@@ -526,11 +557,15 @@ function bulkPlanRecable(ids, req) {
     // The free ports, handed out in order. A switch nobody has given a size
     // grows as it is plugged into (DEFAULT_PORT_COUNT, js/model.js); one with
     // a faceplate does not, and past its last port nothing is free.
+    // Used means what portCapacity() says (portUsedTest, js/model.js): any
+    // link on the port, a bond or a bond's member, so this never plans a cable
+    // onto a port the panel, the inventory and Add devices call used.
+    const portUsed = portUsedTest(target);
     const nextPort = () => {
         for (; cursor <= 9999; cursor++) {
             if (explicit && cursor > total) return null;
             const id = `p${cursor}`;
-            if (ifaceIsOccupied(target.id, id) || isBond(explicitIface(target, id))) continue;
+            if (portUsed(id)) continue;
             cursor++;
             return id;
         }
@@ -733,6 +768,26 @@ function bulkPlanWifi(ids, req) {
 }
 
 // ---- Delete ----
+// Fill vendor from MAC (inventory stage 3): each device of the set with no
+// vendor takes the one its MACs suggest (macVendorRead, js/assets.js). A
+// vendor already there is never touched, and a device whose MACs name no
+// maker is listed with the reason, so the preview says who got nothing.
+function bulkPlanVendorFromMac(ids) {
+    const rows = [], ops = [];
+    const field = t('Vendor');
+    bulkSet(ids).forEach((node) => {
+        const row = { nodeId: node.id, name: node.name, field, before: isBlank(node.vendor) ? '' : node.vendor.trim(), after: '' };
+        if (!isBlank(node.vendor)) { rows.push(Object.assign(row, { status: 'skip', why: t('Already has a vendor: kept.') })); return; }
+        const r = macVendorRead(node);
+        if (!r.vendor) { rows.push(Object.assign(row, { status: 'skip', why: macVendorWhy(r.why) })); return; }
+        rows.push(Object.assign(row, { status: 'change', after: r.vendor }));
+        ops.push({ nodeId: node.id, set: { vendor: r.vendor }, drop: [] });
+    });
+    return bulkFinish('vendormac', rows, ops, { kind: 'node' });
+}
+// Offered while some device of the set has no vendor.
+const bulkVendorMacOffered = (nodes) => nodes.some((n) => isBlank(n.vendor));
+
 function bulkPlanDelete(ids) {
     const nodes = bulkSet(ids);
     const gone = new Set(nodes.map((n) => n.id));
@@ -765,7 +820,11 @@ function bulkWrite(plan, doc) {
         const node = doc.nodes.find((n) => n.id === op.nodeId);
         if (!node) return;
         Object.keys(op.set || {}).forEach((k) => {
-            if (!/^x:/.test(k)) { node[k] = op.set[k]; return; }
+            if (!/^x:/.test(k)) {
+                // A cleared PoE figure is no key, as the side panel leaves it.
+                if ((k === 'poeBudget' || k === 'poeDraw') && op.set[k] === '') delete node[k]; else node[k] = op.set[k];
+                return;
+            }
             // A custom column's value, written as the column holds it (the
             // plan carries it as shown); No and blank are no value kept.
             const def = customColumnById(k.slice(2));
@@ -815,6 +874,7 @@ function bulkPlan(req) {
     if (req.action === 'group') return bulkPlanGroup(req.ids, req.group);
     if (req.action === 'host') return bulkPlanHost(req.ids, req.host);
     if (req.action === 'wifi') return bulkPlanWifi(req.ids, req.wifi);
+    if (req.action === 'vendormac') return bulkPlanVendorFromMac(req.ids);
     return bulkPlanDelete(req.ids);
 }
 
@@ -879,6 +939,7 @@ function renderBulkPanel(force) {
     });
     ['set', 'rename', 'move', 'recable', 'group', 'host', 'wifi'].forEach((k) => bulkEl(`bulkPane-${k}`).classList.toggle('hidden', k !== tab));
     renderBulkFields(recs, draft, force, kind);
+    bulkEl('bulkVendorMac').classList.toggle('hidden', kind !== 'node' || !bulkVendorMacOffered(recs));
     // Rename and Move keep what was typed; only the network list is rebuilt.
     bulkEl('bulkFind').value = draft.rename.find;
     bulkEl('bulkPattern').value = draft.rename.pattern;
@@ -1116,6 +1177,7 @@ function bulkRequest(action = bulkTab()) {
     if (action === 'group') return { action, ids, group: draft.group.target };
     if (action === 'host') return { action, ids, host: draft.host.target };
     if (action === 'wifi') return { action, ids, wifi: Object.assign({}, draft.wifi) };
+    if (action === 'vendormac') return { action, ids };
     return { action: 'delete', ids };
 }
 // Preview is offered once the form asks for something.
@@ -1128,6 +1190,7 @@ function bulkAsksSomething(req) {
     if (req.action === 'group') return !!req.group;
     if (req.action === 'host') return !!req.host;
     if (req.action === 'wifi') return !!(req.wifi.ssid || req.wifi.band);
+    if (req.action === 'vendormac') return bulkVendorMacOffered(bulkSet(req.ids));
     return req.ids.length > 0;
 }
 function updateBulkGo() {
@@ -1136,7 +1199,7 @@ function updateBulkGo() {
 }
 
 // ---- The preview ----
-const BULK_TITLES = { set: 'Set fields', rename: 'Rename', move: 'Move', recable: 'Re-cable', group: 'Move to group', host: 'Move to host', wifi: 'Set Wi-Fi', delete: 'Delete' };
+const BULK_TITLES = { set: 'Set fields', rename: 'Rename', move: 'Move', recable: 'Re-cable', group: 'Move to group', host: 'Move to host', wifi: 'Set Wi-Fi', vendormac: 'Fill vendor from MAC', delete: 'Delete' };
 function openBulkPreview(action = bulkTab()) {
     if (!bulkApplies() || readOnlyRefuses()) return;
     const req = bulkRequest(bulkKind() === 'link' ? 'set' : action);
@@ -1166,11 +1229,13 @@ function renderBulkPreview(plan) {
     const blurb = {
         set: plan.kind === 'link' ? t('The same value on every cable.') : t('The same value on every device that can take it.'),
         rename: t('Numbered in the order shown.'),
-        move: t('Each one takes the next free address there, and its gateway and DNS come from the subnet.'),
+        move: t('Each one takes the next free address there, and its gateway and DNS come from the subnet.')
+            + (plan.pool ? ' ' + t('Devices that keep a fixed address (printers, servers, cameras, network gear) take the next free one outside the DHCP pool {pool}.', { pool: plan.pool }) : ''),
         recable: t('Each cable moves to the next free port there, in the order shown. The cable keeps its label, length and colour, and each device keeps its address.'),
         group: plan.none ? t('They stay on the map, in no group.') : t('Each one moves into the group; its addressing and cables stay as they are.'),
         host: plan.none ? t('They run on nothing in the register, and stay where they are.') : t('Each one runs on it and is where it is; its addressing, cables and place on the map stay as they are.'),
         wifi: t('Each device on Wi-Fi joins it; its address and its access point stay as they are.'),
+        vendormac: t('Each device with no vendor takes the maker its MAC address names. The built-in list knows about 35 makers, so printers, cameras and phones often get none. A vendor already there is kept.'),
         delete: t('Every cable on these devices goes with them.')
     }[action];
     bulkEl('bulkBlurb').textContent = blurb;
@@ -1179,7 +1244,8 @@ function renderBulkPreview(plan) {
         : [[t('To change'), c.change], [t('Unchanged'), c.same], [t('Not valid'), c.bad], [t('Left as they are'), c.skip]];
     bulkEl('bulkCounts').innerHTML = bits.map(([label, n]) => `<span class="paste-count${n ? '' : ' zero'}"><b class="mono">${n}</b> ${escapeHtml(label)}</span>`).join('');
     const msgs = plan.errors.map((m) => `<div class="alert err">${escapeHtml(m)}</div>`)
-        .concat(plan.notes.map((m) => `<div class="alert warn">${escapeHtml(m)}</div>`));
+        .concat(plan.notes.map((m) => `<div class="alert warn">${escapeHtml(m)}</div>`))
+        .concat((plan.info || []).map((m) => `<div class="alert info">${escapeHtml(m)}</div>`));
     bulkEl('bulkMsgs').innerHTML = msgs.join('');
     bulkEl('bulkMsgs').classList.toggle('hidden', !msgs.length);
     const mark = { change: action === 'delete' ? '✕' : '→', same: '=', bad: '✕', skip: '—' };
@@ -1187,7 +1253,7 @@ function renderBulkPreview(plan) {
             <td>${escapeHtml(r.name)}${r.field ? `<span class="bulk-what">${escapeHtml(r.field)}</span>` : ''}</td>
             <td class="mono">${escapeHtml(r.before)}</td>
             <td class="paste-mark" title="${escapeHtml(r.why || '')}">${mark[r.status]}</td>
-            <td class="mono">${escapeHtml(r.status === 'skip' || r.status === 'bad' ? (r.why || '') : r.after)}</td>
+            <td class="mono">${escapeHtml(r.status === 'skip' || r.status === 'bad' ? (r.why || '') : r.after)}${r.status === 'change' && r.why ? `<span class="bulk-what">${escapeHtml(r.why)}</span>` : ''}</td>
         </tr>`).join('');
     bulkEl('bulkPreviewWrap').classList.toggle('hidden', !plan.rows.length);
     const apply = bulkEl('bulkApplyBtn');
@@ -1264,5 +1330,6 @@ function deleteSelectionAsked() {
         openBulkPreview();
     });
     bulkEl('bulkPreviewBtn').addEventListener('click', () => openBulkPreview());
+    bulkEl('bulkVendorMacBtn').addEventListener('click', () => openBulkPreview('vendormac'));
     bulkEl('bulkApplyBtn').addEventListener('click', applyBulkDialog);
 })();

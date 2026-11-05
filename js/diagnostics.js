@@ -277,13 +277,17 @@ function evaluatePorts(node) {
     // the hardware the count describes. An explicit count is never grown to
     // make room (see DEFAULT_PORT_COUNT in js/model.js), so this is where the
     // extra cable is reported instead of absorbed.
-    if (hasPortGrid(node)) {
-        const total = portCountOf(node);
-        const usedIds = new Set(adjacent.map((l) => ifaceIdOn(l, node.id)).filter((id) => /^p\d+$/.test(id)));
+    // The faceplate's count is portCapacity()'s (js/model.js), the one the
+    // inventory and the port map print: a link on a numbered port holds it, a
+    // bond is used, a radio's clients are not ports.
+    const cap = portCapacity(node);
+    if (cap) {
+        const total = cap.total;
         // More cables than ports. Fewer, but one of them past the faceplate
         // (a count lowered by an older build) is a cable to rebind, and the
         // orphan check says exactly that.
-        if (usedIds.size > total) {
+        // Cables only: a bond is used but is not a cable (cap.cables).
+        if (cap.cables > total) {
             // One key per device rather than a {type} slot: the slot printed
             // the raw type ("switch") into every locale's sentence, and the
             // finding now reaches the reduced profiles, where it must read
@@ -291,22 +295,29 @@ function evaluatePorts(node) {
             const key = node.type === 'ap'
                 ? '{used} cables on a {total}-port access point. Raise the port count or add a switch.'
                 : '{used} cables on a {total}-port switch. Raise the port count or add a switch.';
-            return { level: 'bad', text: t(key, { used: usedIds.size, total }) };
+            return { level: 'bad', text: t(key, { used: cap.cables, total }) };
         }
     }
 
+    // A cable past an explicit faceplate is one to rebind too, even when its
+    // pN was materialized as an interface of its own (getInterfaces lists it
+    // after the faceplate): the count says the port is not there, and the
+    // in-use line below would otherwise count it against a free port.
     const known = new Set(getInterfaces(node).map((i) => i.id));
-    const orphaned = adjacent.filter((l) => !known.has(ifaceIdOn(l, node.id)));
+    const pastFaceplate = (id) => {
+        const m = cap && cap.explicit ? /^p(\d+)$/.exec(id || '') : null;
+        return !!m && Number(m[1]) > cap.total;
+    };
+    const orphaned = adjacent.filter((l) => !known.has(ifaceIdOn(l, node.id)) || pastFaceplate(ifaceIdOn(l, node.id)));
     if (orphaned.length) {
         return { level: 'bad', text: t(orphaned.length === 1 ? '{n} link lands on an interface this node no longer has. Rebind it or raise the port count.'
             : '{n} links land on interfaces this node no longer has. Rebind them or raise the port count.', { n: orphaned.length }) };
     }
 
-    if (hasPortGrid(node)) {
+    if (cap) {
         // Count sockets only. An AP's radio is not part of the faceplate, and its
         // clients must not read as cables in a port.
-        const total = portCountOf(node);
-        const used = new Set(adjacent.map((l) => ifaceIdOn(l, node.id)).filter((id) => /^p\d+$/.test(id))).size;
+        const { total, used } = cap;
         const clients = adjacent.filter((l) => ifaceIsWireless(ifaceOn(node, ifaceIdOn(l, node.id)))).length;
         // A one-port faceplate (a default AP's uplink) says "port", whatever
         // its clients number.
@@ -317,7 +328,12 @@ function evaluatePorts(node) {
             : (!clients ? '{used} of {total} ports in use.'
                 : clients === 1 ? '{used} of {total} ports in use, {n} wireless client.'
                     : '{used} of {total} ports in use, {n} wireless clients.');
-        return { level: 'good', text: t(key, { used, total, n: clients }) };
+        // Then what is left: the free count when the faceplate's size was set,
+        // or that it was not, which is why no capacity note can appear (an
+        // implicit count grows with every cable, js/model.js).
+        const room = !cap.explicit ? t('Port count not set, so the total is a guess.')
+            : t(cap.free === 1 ? '{n} port free.' : '{n} ports free.', { n: cap.free });
+        return { level: 'good', text: `${t(key, { used, total, n: clients })} ${room}` };
     }
 
     return { level: 'good', text: t(adjacent.length === 1 ? '{n} link, on its own interface.' : '{n} links on distinct interfaces.', { n: adjacent.length }) };
@@ -829,8 +845,15 @@ function isGatewayOf(client, possibleGateway) {
     } catch (e) { return false; }
 }
 
-// Enhanced L2 Traverse (Supports Dumb Switches & VM Passthrough)
-function reachL2Domain(originId) {
+// The L2 domain around a node: every switch and AP it is cabled to, managed
+// or not (isL2Forwarder: a management address makes the box a host on that
+// subnet as well, it still forwards), and VM passthrough links. Every member
+// is reachable; the walk hands on from the non-forwarding neighbours.
+// vlan (the Trace's VLAN tick, docs/BACKLOG.md feature 4 stage 3): a number
+// keeps the domain to the links whose both ends let that VLAN through
+// (endPassesVlan: an end with nothing recorded lets every VLAN through, so a
+// file with no VLAN facts walks as before); left out or null, every link.
+function reachL2Domain(originId, vlan, ends) {
     const nodes = new Set([originId]), links = new Set(), l2Queue = [originId], l2Processed = new Set();
     while (l2Queue.length) {
         const currentId = l2Queue.shift();
@@ -842,8 +865,13 @@ function reachL2Domain(originId) {
             // A retired switch is still drawn, but forwards nothing.
             if (!nextNode || isRetired(nextNode)) continue;
 
-            // Traverse if it's a dumb switch, OR if it's a passthrough link (treats the host like a dumb switch for this path)
-            if (isDumbDevice(nextNode) || link.attachment === 'passthrough') {
+            // A VPN tunnel is a routed overlay (reachWalk's VPN block), never
+            // L2 adjacency, even when it ends on a managed switch.
+            if (link.medium === 'vpn') continue;
+            if (!linkPassesVlan(link, currentId, nextId, vlan, ends)) continue;
+
+            // Traverse a switch/AP, OR a passthrough link (treats the host like a switch for this path)
+            if (isL2Forwarder(nextNode) || link.attachment === 'passthrough') {
                 if (!nodes.has(nextId)) {
                     nodes.add(nextId); links.add(link.id); l2Queue.push(nextId);
                 }
@@ -865,8 +893,145 @@ function hostRoutesFor(guest, host, link) {
     return link.attachment === 'bridged' || !link.attachment;
 }
 
-function reachAccumulator(seedIds) {
-    return { reachableNodes: new Set(seedIds), reachableLinks: new Set(), processedMode: {}, natCache: {} };
+// vlanAware: the Trace's VLAN tick (calculateReachability opts.vlan). The
+// findings' walks (reachContext) never set it, so the gateway and DNS checks
+// stay VLAN-blind and a VLAN break is told once, by vlan-path.
+function reachAccumulator(seedIds, vlanAware) {
+    return { reachableNodes: new Set(seedIds), reachableLinks: new Set(), processedMode: {}, natCache: {},
+        vlanAware: !!vlanAware, l2Cache: vlanAware ? new Map() : null, ends: vlanAware ? new Map() : null };
+}
+
+// ---- The VLAN-aware Trace (docs/BACKLOG.md feature 4, stage 3) ----
+// REACH_UNTAGGED: what a routing device walks a subnet with no VLAN on (an
+// undeclared WAN or LAN). Its frames go untagged, so they cross an end that
+// records nothing, an access port, or a trunk with a native VLAN, but not a
+// trunk that lists only tagged VLANs: the undeclared subnet never opens the
+// whole fabric (every VLAN behind every trunk), as a VLAN-blind walk would.
+const REACH_UNTAGGED = 'untagged';
+function untaggedPasses(e) {
+    return !e.known || e.tagged === null || e.untagged !== null;
+}
+// Whether a link lets VLAN v through at both its ends. v null or undefined:
+// every link (the VLAN-blind walk). ends: a Map the walk keeps of what
+// portVlans read for each end, so each end is read once per walk.
+function linkPassesVlan(link, aId, bId, v, ends) {
+    if (v === null || v === undefined) return true;
+    const end = (id) => {
+        const iface = ifaceIdOn(link, id);
+        if (!ends) return portVlans(getNode(id), iface);
+        const k = id + '\u0000' + iface;
+        let e = ends.get(k);
+        if (!e) { e = portVlans(getNode(id), iface); ends.set(k, e); }
+        return e;
+    };
+    const pass = v === REACH_UNTAGGED ? untaggedPasses : (e) => vlansPass(e, v);
+    return pass(end(aId)) && pass(end(bId));
+}
+// The VLAN of the declared subnet a networkStr ('10.0.10.0/24') is: the
+// most specific declared network holding all of it. null for none, for a
+// network with no VLAN, and for the walk's sentinels ('__vpn__', '__cloud__').
+// While a VLAN-aware walk runs, each answer is kept (reachNetVlans), the
+// document not changing under it.
+let reachNetVlans = null;
+function vlanOfNet(networkStr) {
+    if (!networkStr || networkStr.startsWith('__')) return null;
+    if (reachNetVlans) {
+        if (!reachNetVlans.has(networkStr)) reachNetVlans.set(networkStr, vlanOfNetNow(networkStr));
+        return reachNetVlans.get(networkStr);
+    }
+    return vlanOfNetNow(networkStr);
+}
+function vlanOfNetNow(networkStr) {
+    const p = parseValidCIDR(networkStr);
+    const net = p ? networkOfIp(p.ip) : null;
+    const q = net ? parseValidCIDR(net.cidr) : null;
+    if (!q || q.kind !== p.kind || q.prefix > p.prefix) return null;
+    const v = asVlan(net.vlan);
+    return v === undefined ? null : v;
+}
+// The VLANs a walk starts on from a device: per cable, as vlan-path reads a
+// host's VLAN (vlanPathFindings): the untagged VLAN of the switch port it is
+// cabled into, else its NIC's (its own or its subnet's); on Wi-Fi to an
+// access point, the SSID's subnet's VLAN. A cable that says nothing adds
+// null (that cable is walked VLAN-blind). A managed switch or AP (a host on
+// its management subnet) starts on its addressed interfaces' VLANs. A
+// device with no cable falls back to its NICs'. Never empty: [null] at least.
+function traceStartVlans(node) {
+    const out = [];
+    const add = (v) => { const k = v === undefined ? null : v; if (!out.includes(k)) out.push(k); };
+    if (isL2Forwarder(node)) {
+        (node.interfaces || []).forEach((i) => { if (parseValidCIDR(i.ip)) add(portVlans(node, i.id).untagged); });
+        return out.length ? out : [null];
+    }
+    linksAtNode(node.id).forEach((l) => {
+        if (l.source === l.target || effectiveMedium(l) === 'vpn') return;
+        const farId = l.source === node.id ? l.target : l.source;
+        const far = getNode(farId);
+        if (!far || isRetired(far)) return;
+        const own = ifaceIdOn(l, node.id);
+        if (effectiveMedium(l) === 'wireless') {
+            const e = wifiLinkEnds(l);
+            if (e && e.client && e.client.node.id === node.id && isL2Forwarder(e.ap.node)) {
+                const w = wifiById(linkWifiSsid(l));
+                const net = w && w.network ? networkById(w.network) : null;
+                add(net ? asVlan(net.vlan) : null);
+                return;
+            }
+            add(portVlans(node, own).untagged);
+            return;
+        }
+        if (isExclusiveLink(l) && hasPortGrid(far)) {
+            const port = portVlans(far, ifaceIdOn(l, farId));
+            if (port.untagged !== null) { add(port.untagged); return; }
+        }
+        add(portVlans(node, own).untagged);
+    });
+    if (!out.length) (node.interfaces || []).forEach((i) => { const u = portVlans(node, i.id).untagged; if (u !== null) add(u); });
+    return out.length ? out : [null];
+}
+// The VLANs one queue entry walks. A router (or any routing device) walks
+// each of its subnets on that subnet's VLAN, so a router reached on VLAN 10
+// still routes into VLAN 20, and a start router walks each interface with
+// its own VLANs. Anything else walks one: at the start (viaNet null) its
+// own (traceStartVlans), after a hop the VLAN of the declared subnet it
+// hopped into, so the walk is a function of (id, viaNet) as reachContext's
+// tails are keyed; after a VPN tunnel or the cloud, VLAN-blind. A routing
+// device's subnet with no VLAN is walked REACH_UNTAGGED, not blind.
+function reachVlansOf(node, viaNet) {
+    if (isRoutingDevice(node.type)) {
+        const out = [];
+        getValidIps(node).forEach((p) => { const n = vlanOfNet(p.networkStr), v = n === null ? REACH_UNTAGGED : n; if (!out.includes(v)) out.push(v); });
+        return out.length ? out : [null];
+    }
+    if (viaNet === null || viaNet === undefined) return traceStartVlans(node);
+    return [vlanOfNet(viaNet)];
+}
+// The subnet a walker reaches a device on through the VLANs it found it
+// on: a shared subnet whose VLAN is among them, or that has no VLAN, or any
+// shared subnet when it was found VLAN-blind (null among them); else null.
+// A router (perSubnet) is held to each subnet's own VLAN: a subnet with a
+// VLAN only through that VLAN's domain, one with none through its untagged
+// one (REACH_UNTAGGED),
+// so its undeclared uplink subnet does not open every VLAN. So a router
+// reaches each subnet on that subnet's VLAN, and a PC on Staff (VLAN 10)
+// plugged into a VLAN 20 port finds its gateway's VLAN 20 interface but not
+// the address on Staff it would talk to.
+function vlanSubnetOn(a, b, vlans, perSubnet) {
+    if (b.type === 'cloud' || a.type === 'cloud') return '__cloud__'; // the Internet cloud has no VLAN
+    const ipsA = getValidIps(a), ipsB = getValidIps(b);
+    for (const ia of ipsA) for (const ib of ipsB) {
+        if (ia.kind !== ib.kind || ia.networkStr !== ib.networkStr) continue;
+        const v = vlanOfNet(ia.networkStr);
+        if (perSubnet ? vlans.has(v === null ? REACH_UNTAGGED : v) : (vlans.has(null) || v === null || vlans.has(v))) return ia.networkStr;
+    }
+    return null;
+}
+// One L2 domain per (node, VLAN) in a walk: a node is expanded at most
+// twice (blocked, then full), and a router once per VLAN of its subnets.
+function reachL2DomainCached(acc, id, v) {
+    const k = id + '\u0000' + v;
+    if (!acc.l2Cache.has(k)) acc.l2Cache.set(k, reachL2Domain(id, v, acc.ends));
+    return acc.l2Cache.get(k);
 }
 
 // Queue entries carry viaNet: the subnet we arrived on (or a sentinel), so NAT
@@ -897,16 +1062,53 @@ function reachWalk(queue, acc, handedOn) {
         if (processedMode[currentId] === 'blocked' && mode !== 'full') continue;
         processedMode[currentId] = mode;
 
-        const l2 = reachL2Domain(currentId);
-        l2.nodes.forEach((id) => reachableNodes.add(id)); l2.links.forEach((id) => reachableLinks.add(id));
+        // With the VLAN tick, the domains of the VLANs this entry walks, and
+        // each candidate device with the VLANs (and the link) it was found on.
+        const vlans = acc.vlanAware ? reachVlansOf(currentNode, viaNet) : null;
+        let l2;
+        if (!vlans) l2 = reachL2Domain(currentId);
+        else if (vlans.length === 1) l2 = reachL2DomainCached(acc, currentId, vlans[0]);
+        else {
+            l2 = { nodes: new Set(), links: new Set() };
+            vlans.forEach((v) => { const d = reachL2DomainCached(acc, currentId, v); d.nodes.forEach((n) => l2.nodes.add(n)); d.links.forEach((n) => l2.links.add(n)); });
+        }
+        // Frames cross every switch/AP in the fabric, so its links light; but
+        // a switch/AP with a management address is a host only on that
+        // subnet. It is reached the way a candidate device is: sharing a
+        // subnet with the walker (VLAN-aware: a subnet of a VLAN whose domain
+        // holds it, vlanSubnetOn), and not hidden behind NAT.
+        const walkerRoutes = isRoutingDevice(currentNode.type);
+        l2.nodes.forEach((id) => {
+            const member = id === currentId ? null : getNode(id);
+            if (member && isL2Forwarder(member) && !isDumbDevice(member)) {
+                const shared = vlans
+                    ? vlanSubnetOn(currentNode, member, new Set(vlans.filter((v) => reachL2DomainCached(acc, currentId, v).nodes.has(id))), walkerRoutes)
+                    : sharedSubnetOf(currentNode, member);
+                if (!shared || (blockInside && ni.inside.has(shared))) return;
+            }
+            reachableNodes.add(id);
+        });
+        l2.links.forEach((id) => reachableLinks.add(id));
 
         const candidateDevices = new Set(), candidateLinks = new Map();
-        l2.nodes.forEach((l2id) => {
-            linksAtNode(l2id).forEach((link) => {
-                const neighborId = link.source === l2id ? link.target : link.source, neighbor = getNode(neighborId);
-                if (!neighbor || isDumbDevice(neighbor) || isRetired(neighbor)) return;
-                if (link.medium === 'vpn') return; // overlay tunnels handled below, not as physical adjacency
-                candidateDevices.add(neighborId); candidateLinks.set(neighborId, link);
+        // VLAN-aware: per VLAN, a device is a candidate only through a link
+        // that lets that VLAN through at both ends; candidateVlans holds the
+        // link per VLAN it was found on.
+        const candidateVlans = vlans ? new Map() : null;
+        (vlans || [undefined]).forEach((v) => {
+            const dom = vlans ? reachL2DomainCached(acc, currentId, v) : l2;
+            dom.nodes.forEach((l2id) => {
+                linksAtNode(l2id).forEach((link) => {
+                    const neighborId = link.source === l2id ? link.target : link.source, neighbor = getNode(neighborId);
+                    if (!neighbor || isL2Forwarder(neighbor) || isRetired(neighbor)) return;
+                    if (link.medium === 'vpn') return; // overlay tunnels handled below, not as physical adjacency
+                    if (vlans && !linkPassesVlan(link, l2id, neighborId, v, acc.ends)) return;
+                    candidateDevices.add(neighborId); candidateLinks.set(neighborId, link);
+                    if (vlans) {
+                        if (!candidateVlans.has(neighborId)) candidateVlans.set(neighborId, new Map());
+                        candidateVlans.get(neighborId).set(v, link);
+                    }
+                });
             });
         });
 
@@ -914,12 +1116,21 @@ function reachWalk(queue, acc, handedOn) {
             if (deviceId === currentId) return;
             const device = getNode(deviceId);
             if (!device) return;
-            const shared = sharedSubnetOf(currentNode, device);
+            let shared = sharedSubnetOf(currentNode, device);
             if (!shared) return;
+            let link = candidateLinks.get(deviceId);
+            // VLAN-aware: a device is reached only on a subnet the VLAN it
+            // was found on is (vlanSubnetOn), through that VLAN's link.
+            if (vlans) {
+                const found = candidateVlans.get(deviceId);
+                shared = vlanSubnetOn(currentNode, device, new Set(found.keys()), walkerRoutes);
+                if (!shared) return;
+                const n = shared === '__cloud__' ? null : vlanOfNet(shared), v = n === null && walkerRoutes ? REACH_UNTAGGED : n;
+                link = found.get(v) || (found.has(null) ? found.get(null) : link);
+            }
             if (blockInside && ni.inside.has(shared)) return; // NAT hides this inside subnet from the WAN side
 
             reachableNodes.add(deviceId);
-            const link = candidateLinks.get(deviceId);
             if (link) reachableLinks.add(link.id);
 
             // The gateway test parses addresses, so it is only asked when its
@@ -949,11 +1160,32 @@ function reachWalk(queue, acc, handedOn) {
 // opts.port: the service port to filter by. Left out, it is the trace's own
 // (activeTracePort(), from state.settings); the checks always pass '' so a
 // typed trace port never changes a diagnostic.
+// opts.vlan: walk one VLAN at a time (the Trace's VLAN tick). Left out, it
+// is the trace's own (state.settings.traceVlan, on unless set false) only
+// when the port is left out too: a call that names its port is a check's
+// (calculateBaseReachability, reachContext) and stays VLAN-blind unless it
+// asks. -> { reachableNodes, reachableLinks, vlans }: vlans, with the tick,
+// the VLAN numbers the start walks on (the status line's "· VLAN 10").
+const traceVlanOn = () => state.settings.traceVlan !== false;
 function calculateReachability(startNodeId, opts = {}) {
     const start = getNode(startNodeId);
-    if (!start) return { reachableNodes: new Set(), reachableLinks: new Set() };
+    if (!start) return { reachableNodes: new Set(), reachableLinks: new Set(), vlans: [] };
 
-    const acc = reachAccumulator([startNodeId]);
+    const vlanAware = opts.vlan !== undefined ? !!opts.vlan : (opts.port === undefined && traceVlanOn());
+    const heldNetVlans = reachNetVlans;
+    if (vlanAware && !heldNetVlans) reachNetVlans = new Map();
+    try {
+        return reachabilityWalk(start, startNodeId, opts, vlanAware);
+    } finally {
+        reachNetVlans = heldNetVlans;
+    }
+}
+function reachabilityWalk(start, startNodeId, opts, vlanAware) {
+    const acc = reachAccumulator([startNodeId], vlanAware);
+    // The VLANs the start walks on (numbers only: blind or untagged legs name
+    // none); a retired start walks nothing, so it names none.
+    const vlans = vlanAware && !isDumbDevice(start) && !isRetired(start)
+        ? reachVlansOf(start, null).filter((v) => typeof v === 'number').sort((a, b) => a - b) : [];
     const { reachableNodes, reachableLinks } = acc;
     const queue = [{ id: startNodeId, viaNet: null }];
     const targetPort = opts.port !== undefined ? String(opts.port).trim() : activeTracePort();
@@ -964,7 +1196,7 @@ function calculateReachability(startNodeId, opts = {}) {
         l2.nodes.forEach((l2id) => {
             linksAtNode(l2id).forEach((link) => {
                 const neighborId = link.source === l2id ? link.target : link.source, neighbor = getNode(neighborId);
-                if (!neighbor || isDumbDevice(neighbor) || isRetired(neighbor)) return;
+                if (!neighbor || isL2Forwarder(neighbor) || isRetired(neighbor)) return;
                 reachableNodes.add(neighborId); reachableLinks.add(link.id); queue.push({ id: neighborId, viaNet: null });
             });
         });
@@ -979,7 +1211,7 @@ function calculateReachability(startNodeId, opts = {}) {
 
         reachableNodes.forEach(id => {
             const node = getNode(id);
-            if (isRoutingDevice(node.type) || isDumbDevice(node) || id === startNodeId || acceptsPort(node, targetPort)) {
+            if (isRoutingDevice(node.type) || isL2Forwarder(node) || id === startNodeId || acceptsPort(node, targetPort)) {
                 filteredNodes.add(id);
             }
         });
@@ -991,10 +1223,10 @@ function calculateReachability(startNodeId, opts = {}) {
                 filteredLinks.add(linkId);
             }
         });
-        return { reachableNodes: filteredNodes, reachableLinks: filteredLinks };
+        return { reachableNodes: filteredNodes, reachableLinks: filteredLinks, vlans };
     }
 
-    return { reachableNodes, reachableLinks };
+    return { reachableNodes, reachableLinks, vlans };
 }
 
 // Written through t() on every draw, not by applyStaticI18n(): the text is
@@ -1009,7 +1241,12 @@ function updateTraceStatus(reach) {
         if (reach) {
             reach.reachableNodes.forEach(id => { if(!isDumbDevice(getNode(id)) && id !== state.selectedId) count++; });
         }
-        el.textContent = t(count === 1 ? '→ {n} device' : '→ {n} devices', { n: count }); el.className = 'cs-trace-status active';
+        // With the VLAN tick, the VLANs the start walks on: "→ 5 devices · VLAN 10".
+        const vlans = reach && reach.vlans && reach.vlans.length ? vlanListText(new Set(reach.vlans)) : '';
+        el.textContent = vlans
+            ? t(count === 1 ? '→ {n} device · VLAN {vlan}' : '→ {n} devices · VLAN {vlan}', { n: count, vlan: vlans })
+            : t(count === 1 ? '→ {n} device' : '→ {n} devices', { n: count });
+        el.className = 'cs-trace-status active';
     }
 
 // ============================================================================
@@ -1075,7 +1312,7 @@ const runNodeCheck = (c, node, ctx) => (isRetired(node)
 // The Wi-Fi networks likewise: a scratch copy's links name the document's.
 function diagnoseDoc(doc) {
     if (!doc) return withLookupPass(runDiagnosis);
-    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted };
+    const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, searches: state.searches };
     try {
         state.nodes = Array.isArray(doc.nodes) ? doc.nodes : [];
         state.links = Array.isArray(doc.links) ? doc.links : [];
@@ -1084,9 +1321,12 @@ function diagnoseDoc(doc) {
         if (Array.isArray(doc.wifi)) state.wifi = doc.wifi;
         if (Array.isArray(doc.providers)) state.providers = doc.providers;
         if (Array.isArray(doc.accepted)) state.accepted = doc.accepted;
+        // No check reads the saved searches; lent and handed back all the
+        // same, so nothing run here ever sees another document's.
+        if (Array.isArray(doc.searches)) state.searches = doc.searches;
         return withLookupPass(runDiagnosis);
     } finally {
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.accepted = held.accepted;
+        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.accepted = held.accepted; state.searches = held.searches;
     }
 }
 
@@ -1098,9 +1338,13 @@ function runDiagnosis() {
         { line: f.line || (f.subject ? `${f.subject}: ${f.detail}` : f.detail) }));
 
     const accepted = acceptedList();
+    // The devices whose gateway check says good: vlan-path explains a VLAN
+    // break behind a reachable gateway, never repeats an IP one.
+    const gatewayGood = new Set();
     state.nodes.forEach((node) => {
         const results = {};
         NODE_CHECKS.forEach((c) => { results[c.key] = runNodeCheck(c, node, ctx); });
+        if (results.gateway && results.gateway.level === 'good') gatewayGood.add(node.id);
         const issues = interfaceIssues(node, results);
         // The badge counts what is still open: an issue someone accepted with
         // a reason is listed as accepted, not flagged on the map. The node
@@ -1125,8 +1369,12 @@ function runDiagnosis() {
     ipConflictFindings().forEach(add);
     macConflictFindings(ctx).forEach(add);
     cablingFindings().forEach(add);
+    vlanFindings(ctx, gatewayGood).forEach(add);
     loopFindings().forEach(add);
     labelFindings().forEach(add);
+    firmwareFindings().forEach(add);
+    capacityFindings().forEach(add);
+    poeFindings().forEach(add);
     upkeepFindings().forEach(add);
     placeFindings().forEach(add);
     hostFindings().forEach(add);
@@ -1294,7 +1542,9 @@ function dropFindingNotes(kind, drop, refresh) {
 const FINDING_CHECK_NAMES = { 'ip-conflict': 'IP Conflict', 'mac-conflict': 'MAC Conflict', cabling: 'Cabling', loop: 'L2 loop',
     'cable-label': 'Cable label', 'asset-tag': 'Asset tag', group: 'Groups', rack: 'Rack', 'rack-tag': 'Cable tags', host: 'Runs on', age: 'Age', service: 'Service', 'service-due': 'Service due',
     'wifi-band': 'Wi-Fi band', 'wifi-ssid': 'SSID', 'wifi-subnet': 'Wi-Fi subnet', 'wifi-overlap': 'Channel overlap', 'wifi-plan': 'Channel plan',
-    'wifi-security': 'Wi-Fi security', 'wifi-signal': 'Signal', provider: 'Provider' };
+    'wifi-security': 'Wi-Fi security', 'wifi-signal': 'Signal', provider: 'Provider', 'port-capacity': 'Port capacity', 'address-capacity': 'Address capacity', 'dhcp-pool': 'DHCP pool', firmware: 'Firmware',
+    'poe-none': 'PoE power', 'poe-class': 'PoE power', 'poe-budget': 'PoE budget', 'poe-near': 'PoE budget',
+    'vlan-path': 'VLAN path', 'vlan-subnet': 'VLAN subnet', 'vlan-mismatch': 'VLAN mismatch' };
 const findingCheckName = (key) => t(FINDING_CHECK_NAMES[key] || (NODE_CHECKS_BY_KEY[key] && NODE_CHECKS_BY_KEY[key].label) || key);
 
 // One undo step: the findings of one line of the tab (the same finding on
@@ -1575,7 +1825,10 @@ function loopFindings() {
     state.links.forEach((link) => {
         const src = getNode(link.source), tgt = getNode(link.target);
         if (!src || !tgt || effectiveMedium(link) === 'vpn') return;
-        if (!isDumbDevice(src) || !isDumbDevice(tgt)) return; // only forwarding devices close a loop
+        // Only forwarding devices close a loop, and only unaddressed ones count:
+        // a managed switch (one with an address) is where STP runs, so a ring
+        // through one is taken as redundancy, not a storm (BACKLOG step 6).
+        if (!isDumbDevice(src) || !isDumbDevice(tgt)) return;
         if (isRetired(src) || isRetired(tgt)) return;          // nor does one that is off the network
         const rootA = find(src.id), rootB = find(tgt.id);
         if (rootA === rootB) {
@@ -1618,6 +1871,481 @@ function labelFindings() {
         out.push({ key: 'asset-tag', level: 'warn', check: t('Asset tag'), subject: names, detail,
             line: `${t('Asset tag')}: ${detail}`, nodeIds: g.items.map((n) => n.id) });
     });
+    return out;
+}
+
+// ---- Firmware (docs/BACKLOG.md feature 3, stage 4) ----
+// Devices of one model that run different firmware: they can behave
+// differently, and the older ones may miss fixes. Advisory, like a shared
+// asset tag. Only devices in service or planned (not retired) with both a
+// model and a firmware recorded count, so the reduced profiles' seeded
+// firmware ("Windows 11", "Firmware") and older files whose combined text was
+// never split (it is all in os, no model) cannot raise it.
+//
+// The model: its vendor (when set) and model, compared without case and with
+// runs of space as one. Two vendors set and different are two models; a
+// blank vendor joins the model's one vendor, or, when the model is recorded
+// under two or more vendors, makes its own group (it cannot say which it
+// is). The firmware: compared without case or spaces and without a leading
+// v, version or fw before a digit ("v17.9.4" is "17.9.4"). Both are shown
+// in their most common spelling. Topo cannot know which version is newer, so
+// the detail names each with its devices and claims nothing about either.
+//
+// Scoped to the model (vendor|model only when the model is under two or more
+// vendors): accepting it covers those devices on that model, and
+// one more device of the model reopens it (what was accepted was those
+// devices). A key longer than an accepted entry keeps (ACCEPT_SCOPE_MAX) is
+// cut and given a hash of the whole, so two long models cannot meet.
+const fwSpace = (s) => asText(s).trim().replace(/\s+/g, ' ');
+const firmwareKey = (s) => fwSpace(s).toLowerCase().replace(/\s+/g, '').replace(/^(?:version|fw|v)(?=\d)/, '');
+function firmwareScope(key) {
+    if (key.length <= ACCEPT_SCOPE_MAX) return key;
+    let h = 0x811c9dc5;
+    for (let i = 0; i < key.length; i += 1) { h ^= key.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return key.slice(0, ACCEPT_SCOPE_MAX - 9) + '#' + (h >>> 0).toString(16).padStart(8, '0');
+}
+// The spelling most of them use; the first one met on a tie.
+function commonSpelling(values) {
+    const by = new Map();
+    values.forEach((v) => { if (v) by.set(v, (by.get(v) || 0) + 1); });
+    let best = '', most = 0;
+    by.forEach((n, v) => { if (n > most) { best = v; most = n; } });
+    return best;
+}
+function firmwareFindings() {
+    const out = [];
+    const byModel = new Map();
+    state.nodes.forEach((n) => {
+        if (isRetired(n)) return;
+        const model = fwSpace(n.model), fw = fwSpace(n.os);
+        const fwKey = firmwareKey(n.os);
+        if (!model || !fw || !fwKey) return;
+        const key = model.toLowerCase();
+        if (!byModel.has(key)) byModel.set(key, []);
+        byModel.get(key).push({ node: n, model, fw, fwKey, vendor: fwSpace(n.vendor), vendorKey: fwSpace(n.vendor).toLowerCase() });
+    });
+    byModel.forEach((rows, modelKey) => {
+        const vendors = [...new Set(rows.map((r) => r.vendorKey).filter(Boolean))];
+        const groups = new Map();
+        rows.forEach((r) => {
+            const v = r.vendorKey || (vendors.length === 1 ? vendors[0] : '');
+            if (!groups.has(v)) groups.set(v, []);
+            groups.get(v).push(r);
+        });
+        groups.forEach((group, vendorKey) => {
+            const versions = new Map();
+            group.forEach((r) => {
+                if (!versions.has(r.fwKey)) versions.set(r.fwKey, []);
+                versions.get(r.fwKey).push(r);
+            });
+            if (versions.size < 2) return;
+            const vendor = commonSpelling(group.map((r) => r.vendor));
+            const name = (vendor ? vendor + ' ' : '') + commonSpelling(group.map((r) => r.model));
+            const list = [...versions.values()].sort((a, b) => b.length - a.length)
+                .map((rs) => t('{version} on {names}', { version: commonSpelling(rs.map((r) => r.fw)), names: rs.map((r) => r.node.name || r.node.id).join(', ') }))
+                .join('; ');
+            const detail = t('{model} runs {k} different firmware versions: {list}.', { model: name, k: versions.size, list });
+            // The vendor is in the scope only when the model is under two or
+            // more vendors (it is then what tells the groups apart), so
+            // filling in or clearing the one vendor of a model leaves an
+            // accepted finding accepted.
+            out.push({ key: 'firmware', level: 'warn', check: t('Firmware'), subject: name, detail,
+                line: `${t('Firmware')}: ${detail}`, nodeIds: group.map((r) => r.node.id),
+                scope: firmwareScope(vendors.length > 1 ? `${vendorKey}|${modelKey}` : modelKey) });
+        });
+    });
+    return out;
+}
+
+// ---- Capacity (docs/BACKLOG.md feature 2) ----
+// port-capacity: a switch or an AP that is nearly out of free ports, or out
+// of them (portCapacityNote, js/model.js: in service or planned, its port
+// count set, at least PORT_CAPACITY_MIN ports, at most max(1, total / 10)
+// free, and not past its faceplate, which evaluatePorts already calls
+// critical). Info, like an untagged rack cable: a full closet is planning,
+// not a fault, so it is listed but never counted (isCountedFinding). Scoped
+// to the port count, so accepting it ("the closet only ever has 8 phones")
+// reopens once the count changes. A note, so it adds nothing to a file that
+// sets no port count.
+function capacityFindings() {
+    const out = [];
+    state.nodes.forEach((node) => {
+        const cap = portCapacityNote(node);
+        if (!cap) return;
+        const name = node.name || node.id;
+        const ports = portRangeText(node, cap.freeIds.map((id) => Number(id.slice(1))));
+        const detail = cap.full
+            ? t('{name} has no free port: {used} of {total} in use. Raise the port count if it is bigger, or plan another switch.', { name, used: cap.used, total: cap.total })
+            : t(cap.free === 1 ? '{name} has {free} free port of {total}: {ports}.' : '{name} has {free} free ports of {total}: {ports}.',
+                { name, free: cap.free, total: cap.total, ports });
+        out.push({ key: 'port-capacity', level: 'info', check: t('Port capacity'), subject: name, detail, nodeIds: [node.id], scope: `ports:${cap.total}` });
+    });
+    // poe-near (docs/BACKLOG.md feature 4 stage 2b): a switch or an AP in
+    // service or planned whose PoE ports are asked for 90% to 100% of its
+    // budget (poeLoad, js/model.js). Over it is poe-budget, critical
+    // (poeFindings); this is the note before it, info like the port note, so
+    // listed and never counted. Its devices are the box and the ones it
+    // powers, so accepting it reopens when another powered device joins; and
+    // scoped to the budget, so a budget changed later raises it again.
+    state.nodes.forEach((node) => {
+        if (isRetired(node)) return;
+        const load = poeLoad(node);
+        if (!load || load.budget === null || !load.devices.length) return;
+        if (load.used > load.budget || load.used < load.budget * POE_NEAR_SHARE) return;
+        const name = node.name || node.id;
+        const pct = Math.round(load.used / load.budget * 100);
+        out.push({ key: 'poe-near', level: 'info', check: t('PoE budget'), subject: name,
+            detail: t('{name} draws {used} W of its {budget} W PoE budget ({pct}%).', { name, used: wattsText(load.used), budget: wattsText(load.budget), pct }),
+            nodeIds: [node.id, ...load.devices], scope: `budget:${load.budget}` });
+    });
+    // address-capacity: a subnet nearly out of free addresses, or out of
+    // them (addressCapacityNote, js/model.js: countable IPv4, at least
+    // ADDRESS_CAPACITY_MIN usable addresses, at most max(2, ceil(size / 10))
+    // free). Every subnet the Addressing table lists: the declared ones, then
+    // any a device's address implies that nobody declared. Info, like the
+    // port note. Its devices are the in-service holders of its addresses, so
+    // accepting it reopens when another one joins; scoped to the network (its
+    // id, or the CIDR of an implied one), so accepting it on one subnet does
+    // not cover another.
+    capacitySubnetList().forEach(({ cidr, net }) => {
+        const cap = addressCapacityNote(net || cidr);
+        if (!cap) return;
+        const part = cap.fixed;
+        const name = net && !isBlank(net.name) ? net.name.trim() : cidr;
+        // With a valid DHCP pool it is the fixed addresses outside it.
+        const pooled = !!(cap.pool && cap.pool.valid);
+        const detail = pooled
+            ? (part.free === 0
+                ? t('{cidr} has no free address outside the DHCP pool: all {size} fixed addresses are in use. Shrink the pool, plan a bigger subnet, or move some devices to another one.', { cidr, size: part.size })
+                : t(part.free === 1 ? '{cidr} has {free} free address outside the DHCP pool, of {size}.' : '{cidr} has {free} free addresses outside the DHCP pool, of {size}.', { cidr, free: part.free, size: part.size }))
+            : part.free === 0
+            ? t('{cidr} has no free address: all {size} are in use. Plan a bigger subnet, or move some devices to another one.', { cidr, size: part.size })
+            : t(part.free === 1 ? '{cidr} has {free} free address of {size}.' : '{cidr} has {free} free addresses of {size}.', { cidr, free: part.free, size: part.size });
+        out.push({ key: 'address-capacity', level: 'info', check: t('Address capacity'), subject: name, detail,
+            nodeIds: subnetHolders(cidr).map((n) => n.id), scope: net ? net.id : cidr });
+    });
+    // dhcp-pool: a declared network with DHCP on whose pool (dhcpPoolOf,
+    // js/model.js; document v16) does not count, because an end is missing
+    // or not an address, it is the wrong family, outside the subnet, takes in
+    // its network or broadcast address or ends before it starts; or a sound
+    // pool with the network's own gateway or a DNS server inside it, the
+    // classic way a server hands out the router's address. Warn (advisory,
+    // counted). It names the devices holding those addresses when they are
+    // drawn, else the subnet's members, and is scoped to the network and the
+    // kind of problem (`n1:clash`, `n1:reversed`), so accepting it
+    // ("excluded on the server") covers this subnet and this problem only: a
+    // pool that later turns reversed or outside opens again. A
+    // pool with DHCP off is kept and not counted: the card says so, nothing
+    // here.
+    state.networks.forEach((net) => {
+        const def = dhcpPoolOf(net);
+        if (!def || def.problem === 'off') return;
+        const texts = poolProblemTexts(net, def);
+        if (!texts.length) return;
+        const clashes = def.valid ? poolClashes(net, def) : [];
+        const holders = clashes.length
+            ? state.nodes.filter((n) => !isRetired(n) && getValidIps(n).some((a) => clashes.some((c) => c.ip === a.ip.toString())))
+            : [];
+        const named = holders.length ? holders : networkMembers(net).map((m) => m.node).filter((n) => !isRetired(n));
+        const name = !isBlank(net.name) ? net.name.trim() : net.cidr;
+        out.push({ key: 'dhcp-pool', level: 'warn', check: t('DHCP pool'), subject: name, detail: texts.join(' '),
+            nodeIds: [...new Set(named.map((n) => n.id))], scope: (net.id + ':' + (def.problem || 'clash')).slice(0, ACCEPT_SCOPE_MAX) });
+    });
+    return out;
+}
+// ---- PoE (docs/BACKLOG.md feature 4 stage 2b) ----
+// What is judged is only what is recorded: a device is powered by its cable
+// when it has a PoE draw (node.poeDraw), and a switch or an AP is
+// PoE-documented when it records a budget or any PoE port (poeLoad is not
+// null). A device cabled to anything else (a router's NIC, a switch that
+// says nothing about PoE, an injector nobody drew) is never judged, and
+// Accept is for the injector that is there. Only cables (isExclusiveLink),
+// only a faceplate port (pN) on the far side; retired devices on either end
+// are left out.
+//   poe-none (critical): a powered device none of whose cables lands on a
+//     port that records PoE, cabled to a PoE-documented box's port that
+//     records none. One finding per such cable (the device, the box, the
+//     cable), so the port is named where it is.
+//   poe-class (advisory): a powered device on a PoE port, but its draw is
+//     more than the best such port gives at the device (a standard's pd,
+//     POE_CLASSES; a custom port's watts as typed, which are watts at the
+//     switch: Topo cannot know what its cable loses, so it does not guess).
+//     It may not start, or restart under load. One per device, naming that
+//     port. POE_CLASS_SLACK covers the class table's rounding: class 0 and
+//     class 3 are held as 13 W (POE_CLASS_DRAW) and an 802.3af port gives
+//     12.95 W, and those devices are what such a port is for.
+//   poe-budget (critical): what a box's PoE ports are asked for (poeLoad) is
+//     more than its budget. The box and the devices it powers, scoped to
+//     the budget. 90% to 100% is the info note poe-near (capacityFindings).
+const POE_NEAR_SHARE = 0.9;
+const POE_CLASS_SLACK = 0.05;
+function poeFindings() {
+    const out = [];
+    const documented = new Map();
+    const isDocumented = (node) => {
+        if (!documented.has(node.id)) documented.set(node.id, !!poeLoad(node));
+        return documented.get(node.id);
+    };
+    const portName = (box, pid) => `${box.name || box.id} · ${portNameOf(box, Number(pid.slice(1)))}`;
+    state.nodes.forEach((node) => {
+        if (isRetired(node)) return;
+        const draw = asPoeDraw(node.poeDraw);
+        if (draw === undefined || !canDrawPoe(node.type)) return;
+        const bare = [], powered = [];
+        linksAtNode(node.id).forEach((l) => {
+            if (!isExclusiveLink(l)) return;
+            const farId = l.source === node.id ? l.target : l.source;
+            if (farId === node.id) return;
+            const far = getNode(farId);
+            if (!far || isRetired(far) || !hasPortGrid(far)) return;
+            const pid = ifaceIdOn(l, farId);
+            if (!PORT_ID_RE.test(pid || '') || !isDocumented(far)) return;
+            const poe = portAttrOf(far, pid).poe;
+            if (poe === null) bare.push({ l, far, pid });
+            else powered.push({ l, far, pid, poe, gives: typeof poe === 'string' ? POE_CLASSES[poe].pd : poe });
+        });
+        const name = node.name || node.id;
+        if (!powered.length) {
+            bare.forEach(({ l, far, pid }) => {
+                out.push({ key: 'poe-none', level: 'bad', check: t('PoE power'), subject: name,
+                    detail: t('{name} draws {draw} W over its cable, but {port} gives no PoE.', { name, draw: wattsText(draw), port: portName(far, pid) }),
+                    nodeIds: [node.id, far.id], linkIds: [l.id] });
+            });
+            return;
+        }
+        const best = powered.reduce((a, b) => (b.gives > a.gives ? b : a));
+        if (draw <= best.gives + POE_CLASS_SLACK) return;
+        const port = portName(best.far, best.pid);
+        const detail = typeof best.poe === 'string'
+            ? t('{name} asks {draw} W; {port} is {poe}, {pd} W at the device.', { name, draw: wattsText(draw), port, poe: POE_CLASSES[best.poe].name, pd: wattsText(best.gives) })
+            : t('{name} asks {draw} W; {port} gives {pd} W.', { name, draw: wattsText(draw), port, pd: wattsText(best.gives) });
+        out.push({ key: 'poe-class', level: 'warn', check: t('PoE power'), subject: name, detail,
+            nodeIds: [node.id, best.far.id], linkIds: [best.l.id] });
+    });
+    state.nodes.forEach((node) => {
+        if (isRetired(node) || !hasPortGrid(node)) return;
+        const load = poeLoad(node);
+        if (!load || load.budget === null || load.used <= load.budget) return;
+        const name = node.name || node.id;
+        const n = load.devices.length;
+        out.push({ key: 'poe-budget', level: 'bad', check: t('PoE budget'), subject: name,
+            detail: t(n === 1 ? '{name}: {used} W drawn of a {budget} W budget ({n} device).' : '{name}: {used} W drawn of a {budget} W budget ({n} devices).',
+                { name, used: wattsText(load.used), budget: wattsText(load.budget), n }),
+            nodeIds: [node.id, ...load.devices], scope: `budget:${load.budget}` });
+    });
+    return out;
+}
+// ---- VLAN checks (docs/BACKLOG.md feature 4, stage 2a) ----
+// Three findings read the VLAN facts (portVlans/endCarries/vlanPath,
+// js/model.js). A port or NIC that records nothing carries every VLAN, so a
+// file that never said anything about VLANs raises none of them, and a
+// retired device takes part in none.
+//   vlan-path (critical, scoped to the VLAN): a device whose gateway check
+//     is good (reachable, VLAN-blind) but whose VLAN does not get to its
+//     gateway over the switches: the first cable on the way that does not
+//     carry it is named. The device's VLAN is the untagged VLAN of the
+//     switch port it is cabled into, else its NIC's (its own or its
+//     subnet's); a Wi-Fi client's is its SSID's subnet's VLAN, walked from
+//     its access point. Devices stopped at the same cable for the same VLAN
+//     and gateway are one finding.
+//   vlan-subnet (advisory, scoped to the VLAN): an access port's untagged
+//     VLAN that no declared subnet has, once per VLAN, naming the switches
+//     and ports. Tagged VLANs (a transit VLAN) and a trunk's native VLAN are
+//     left alone.
+//   vlan-mismatch (per cable): the two ends' untagged VLANs, both known,
+//     differ (critical: a switch port and a device's NIC, or two ports); else
+//     one end tags a VLAN the other does not carry tagged, or sends untagged
+//     (advisory, listing them). Radio links, VPN tunnels and a VM's bridged
+//     or passthrough link are not cables and are skipped.
+const VLAN_NAMES_SHOWN = 3;
+const VLAN_PORTS_SHOWN = 6;
+function vlanNameList(names, max) {
+    return names.length > max ? t('{names} and {n} more', { names: names.slice(0, max).join(', '), n: names.length - max }) : names.join(', ');
+}
+const vlanEndText = (node, ifaceId) => `${node.name || node.id} · ${ifaceLabel(node, ifaceId)}`;
+function vlanFindings(ctx, gatewayGood) {
+    return vlanPathFindings(ctx, gatewayGood || new Set()).concat(vlanSubnetFindings(), vlanMismatchFindings());
+}
+function vlanPathFindings(ctx, gatewayGood) {
+    const walks = new Map();
+    const walk = (fromId, v, gwId) => {
+        const k = `${fromId}\u0000${v}\u0000${gwId}`;
+        if (!walks.has(k)) walks.set(k, vlanPath(fromId, v, gwId));
+        return walks.get(k);
+    };
+    const groups = new Map();
+    state.nodes.forEach((host) => {
+        if (!gatewayGood.has(host.id) || isRetired(host) || isL2Forwarder(host) || isRoutingDevice(host.type)) return;
+        const gw = effectiveGw(host);
+        const gwNode = gw ? ctx.nodeByIp(gw) : null;
+        if (!gwNode || gwNode.id === host.id) return;
+        const gwIp = parseIpText(gw);
+        if (!gwIp) return;
+        // The interfaces on the gateway's subnet, and the cables on them (a
+        // bond's are its members').
+        const onLink = (host.interfaces || []).filter((i) => {
+            const p = parseValidCIDR(typeof i.ip === 'string' ? i.ip.trim() : '');
+            return p && p.kind === gwIp.kind() && gwIp.match(p.cidrObj);
+        });
+        if (!onLink.length) return;
+        const ids = new Set();
+        onLink.forEach((i) => { ids.add(i.id); ((i.bond && i.bond.members) || []).forEach((m) => ids.add(m)); });
+        let fine = false, stop = null;
+        linksAtNode(host.id).forEach((l) => {
+            if (fine) return;
+            const own = ifaceIdOn(l, host.id);
+            if (!ids.has(own)) return;
+            const farId = l.source === host.id ? l.target : l.source;
+            const far = getNode(farId);
+            if (!far || farId === host.id || isRetired(far)) return;
+            let v = null, fromId = null, first = null;
+            const medium = effectiveMedium(l);
+            if (medium === 'wireless') {
+                const e = wifiLinkEnds(l);
+                if (!e || !e.client || e.client.node.id !== host.id || !isL2Forwarder(e.ap.node)) return;
+                const w = wifiById(linkWifiSsid(l));
+                const net = w && w.network ? networkById(w.network) : null;
+                v = net ? asVlan(net.vlan) : undefined;
+                if (v === undefined) return;
+                fromId = farId;
+            } else {
+                if (!isExclusiveLink(l) || !hasPortGrid(far)) return;
+                const pid = ifaceIdOn(l, farId);
+                const port = portVlans(far, pid);
+                v = port.untagged !== null ? port.untagged : portVlans(host, own).untagged;
+                if (v === null) return;
+                if (!endCarries(far, pid, v)) first = { ok: false, link: l, near: host.id, far: farId };
+                fromId = farId;
+            }
+            const r = first || walk(fromId, v, gwNode.id);
+            if (!r) return;
+            if (r.ok) { fine = true; return; }
+            if (!stop) stop = Object.assign({ v }, r);
+        });
+        if (fine || !stop) return;
+        const k = `${stop.v}\u0000${gwNode.id}\u0000${stop.link.id}`;
+        if (!groups.has(k)) groups.set(k, { v: stop.v, gw: gwNode, stop, hosts: [] });
+        groups.get(k).hosts.push(host);
+    });
+    const out = [];
+    groups.forEach((g) => {
+        const l = g.stop.link;
+        const near = getNode(g.stop.near), far = getNode(g.stop.far);
+        const cable = `${vlanEndText(near, ifaceIdOn(l, near.id))} ↔ ${vlanEndText(far, ifaceIdOn(l, far.id))}`;
+        const names = g.hosts.map((h) => h.name || h.id).sort(naturalCompare);
+        const detail = t('VLAN {vlan} does not reach its gateway {gateway}: {cable} does not carry it. On it: {hosts}.',
+            { vlan: g.v, gateway: g.gw.name || g.gw.id, cable, hosts: vlanNameList(names, VLAN_NAMES_SHOWN) });
+        const nodeIds = [...new Set([...g.hosts.map((h) => h.id), g.gw.id, near.id])];
+        out.push({ key: 'vlan-path', level: 'bad', check: t('VLAN path'), subject: near.name || near.id, detail, line: detail,
+            nodeIds, linkIds: [l.id], scope: `vlan:${g.v}` });
+    });
+    return out;
+}
+function vlanSubnetFindings() {
+    const declared = new Set(state.networks.map((n) => asVlan(n.vlan)).filter((v) => v !== undefined));
+    const byVlan = new Map();
+    state.nodes.forEach((node) => {
+        if (isRetired(node) || !hasPortGrid(node) || !node.portAttrs) return;
+        Object.keys(node.portAttrs).forEach((pid) => {
+            if (!PORT_ID_RE.test(pid)) return;
+            const e = portVlans(node, pid);
+            if (e.untagged === null || e.tagged !== null || declared.has(e.untagged)) return;
+            if (!byVlan.has(e.untagged)) byVlan.set(e.untagged, []);
+            byVlan.get(e.untagged).push({ node, pid });
+        });
+    });
+    const out = [];
+    [...byVlan.keys()].sort((a, b) => a - b).forEach((v) => {
+        const ports = byVlan.get(v);
+        const boxes = [...new Set(ports.map((p) => p.node))];
+        const names = ports.map((p) => vlanEndText(p.node, p.pid));
+        const detail = t(ports.length === 1 ? 'VLAN {vlan} is untagged on {ports}, but no subnet has it.' : 'VLAN {vlan} is untagged on {ports}, but no subnet has it ({n} ports).',
+            { vlan: v, ports: vlanNameList(names, VLAN_PORTS_SHOWN), n: ports.length });
+        out.push({ key: 'vlan-subnet', level: 'warn', check: t('VLAN subnet'), subject: boxes.map((b) => b.name || b.id).join(', '), detail, line: detail,
+            nodeIds: boxes.map((b) => b.id), scope: `vlan:${v}` });
+    });
+    return out;
+}
+function vlanMismatchFindings() {
+    const out = [];
+    const tagsOf = (e) => (e.tagged === 'all' ? 'all' : e.tagged instanceof Set ? e.tagged : null);
+    // Whether end e carries v tagged: in its list, and not its native one.
+    const carriesTagged = (e, v) => { const tg = tagsOf(e); return !!tg && e.untagged !== v && (tg === 'all' || tg.has(v)); };
+    state.links.forEach((link) => {
+        if (link.source === link.target || !isExclusiveLink(link) || link.attachment === 'passthrough') return;
+        const src = getNode(link.source), tgt = getNode(link.target);
+        if (!src || !tgt || isRetired(src) || isRetired(tgt)) return;
+        const si = ifaceIdOn(link, src.id), ti = ifaceIdOn(link, tgt.id);
+        const a = portVlans(src, si), b = portVlans(tgt, ti);
+        if (!a.known || !b.known) return;
+        const aPort = hasPortGrid(src) && PORT_ID_RE.test(si || ''), bPort = hasPortGrid(tgt) && PORT_ID_RE.test(ti || '');
+        // An end whose only VLAN is its address's subnet's (nothing typed on
+        // it) is a fact about the NIC, not the cable: vlanPath walks through
+        // it, and here it never takes part in the tagged comparison (c), nor
+        // in (a) when the port tags that VLAN (an AP or a router managed on a
+        // tagged VLAN, with nothing typed on its uplink).
+        const bare = (e) => e.derived && e.tagged === null;
+        const subject = `${src.name || src.id} ↔ ${tgt.name || tgt.id}`;
+        const push = (level, detail) => out.push({ key: 'vlan-mismatch', level, check: t('VLAN mismatch'), subject, detail, line: detail,
+            nodeIds: [src.id, tgt.id], linkIds: [link.id] });
+        if (a.untagged !== null && b.untagged !== null && a.untagged !== b.untagged && (aPort || bPort)) {
+            if (aPort && bPort) {
+                push('bad', t('{a} and {b} are cabled together with different untagged VLANs ({va} and {vb}).',
+                    { a: vlanEndText(src, si), b: vlanEndText(tgt, ti), va: a.untagged, vb: b.untagged }));
+                return;
+            }
+            // A switch port and a device's NIC: the device by its network.
+            const [dev, di, dv, sw, swi, sv] = aPort ? [tgt, ti, b, src, si, a] : [src, si, a, tgt, ti, b];
+            if (bare(dv) && carriesTagged(sv, dv.untagged)) return;
+            const nic = ifaceOn(dev, di);
+            const p = nic ? parseValidCIDR(typeof nic.ip === 'string' ? nic.ip.trim() : '') : null;
+            const net = p ? networkOfIp(p.ip) : null;
+            const onNet = net && asVlan(net.vlan) === dv.untagged;
+            push('bad', onNet
+                ? t('{device} is on {network} (VLAN {vd}) but plugged into {port}, which is VLAN {vp}.', { device: dev.name || dev.id, network: networkLabel(net), vd: dv.untagged, port: vlanEndText(sw, swi), vp: sv.untagged })
+                : t('{device} is on VLAN {vd} but plugged into {port}, which is VLAN {vp}.', { device: dev.name || dev.id, vd: dv.untagged, port: vlanEndText(sw, swi), vp: sv.untagged }));
+            return;
+        }
+        // Tagged at one end only, or tagged at one end and untagged at the
+        // other. An "all" list names nothing by itself: only the other end's
+        // list and native VLAN are compared against it.
+        if (bare(a) || bare(b)) return;
+        const one = new Set(), mixed = new Set();
+        const compare = (x, y) => {
+            const tg = tagsOf(x);
+            if (tg instanceof Set) tg.forEach((v) => {
+                if (v === x.untagged || carriesTagged(y, v)) return;
+                if (y.untagged === v) mixed.add(v); else one.add(v);
+            });
+            else if (tg === 'all' && y.untagged !== null && y.untagged !== x.untagged && !carriesTagged(y, y.untagged)) mixed.add(y.untagged);
+        };
+        compare(a, b); compare(b, a);
+        mixed.forEach((v) => one.delete(v));
+        if (!one.size && !mixed.size) return;
+        const list = (s) => vlanListText(s).replace(/,/g, ', ');
+        const parts = [];
+        if (one.size) parts.push(t(one.size === 1 ? 'VLAN {vlans} is tagged at one end only.' : 'VLANs {vlans} are tagged at one end only.', { vlans: list(one) }));
+        if (mixed.size) parts.push(t(mixed.size === 1 ? 'VLAN {vlans} is tagged at one end and untagged at the other.' : 'VLANs {vlans} are tagged at one end and untagged at the other.', { vlans: list(mixed) }));
+        push('warn', t('{a} and {b} disagree on what the cable carries: {what}', { a: vlanEndText(src, si), b: vlanEndText(tgt, ti), what: parts.join(' ') }));
+    });
+    return out;
+}
+
+// The subnets the Addressing table lists, in the same way (reportSubnets,
+// js/report.js): each declared network once by its CIDR, then the subnet of
+// any address no declared network holds.
+function capacitySubnetList() {
+    const out = [], seen = new Set();
+    state.networks.forEach((net) => {
+        if (!parseValidCIDR(net.cidr) || seen.has(net.cidr)) return;
+        seen.add(net.cidr);
+        out.push({ cidr: net.cidr, net });
+    });
+    state.nodes.forEach((node) => getValidIps(node).forEach((parsed) => {
+        if (networkOfIp(parsed.ip) || seen.has(parsed.networkStr)) return;
+        seen.add(parsed.networkStr);
+        out.push({ cidr: parsed.networkStr, net: null });
+    }));
     return out;
 }
 

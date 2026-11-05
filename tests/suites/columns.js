@@ -94,8 +94,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 3: the table ----
     setView('table'); showTableTab('devices');
     const keys = () => tvCols('devices').map((c) => c.key);
-    ok('the saved order is the table\'s: Name first, then the order named, the rest after; a hidden column is not drawn',
-       keys()[0] === 'name' && keys()[1] === 'x:c2' && keys()[2] === 'os' && !keys().includes('dns') && keys().includes('x:c1') && keys().includes('x:c3'), keys().join(','));
+    ok('the saved order is the table\'s: Name first, then the order named, the rest after (Vendor and Model, which a v15 order cannot name, beside Firmware / OS); a hidden column is not drawn',
+       keys()[0] === 'name' && keys()[1] === 'x:c2' && keys()[2] === 'vendor' && keys()[3] === 'model' && keys()[4] === 'os' && !keys().includes('dns') && keys().includes('x:c1') && keys().includes('x:c3'), keys().join(','));
     ok('the header shows the user\'s name for it, as typed', [...el('tvGrid').querySelectorAll('thead th')].some((th) => th.textContent.trim().startsWith('Warranty until')));
     ok('a value shows; a yes is a tick', (() => { const tr = el('tvGrid').querySelector('tr[data-row="n:pc1"]'); return tr.querySelector('td[data-col="x:c1"]').textContent === 'Ana' && tr.querySelector('td[data-col="x:c3"]').textContent === '✓'; })());
     ok('the Columns button is on the Devices tab only', !el('tvColsBtn').classList.contains('hidden')

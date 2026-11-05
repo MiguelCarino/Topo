@@ -238,7 +238,7 @@ window.addEventListener('load', () => { setTimeout(() => {
   };
   const grpKeys = new Map();
   ['js/groups.js', 'js/groupmap.js', 'js/rackview.js', 'js/ui.js', 'js/add.js', 'js/diagnostics.js', 'js/app.js',
-   'js/report.js', 'js/csv.js', 'js/library.js', 'js/share.js', 'js/table.js', 'js/providers.js'].forEach((file) => {
+   'js/report.js', 'js/csv.js', 'js/library.js', 'js/share.js', 'js/table.js', 'js/providers.js', 'js/locate.js', 'js/searches.js'].forEach((file) => {
     const req = new XMLHttpRequest(); req.open('GET', file, false); req.send();
     firstArgKeys(req.responseText).forEach((k) => grpKeys.set(k.replace(/\\n/g, '\n').replace(/\\(['"\\])/g, '$1'), file));
   });

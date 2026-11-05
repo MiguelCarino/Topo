@@ -16,6 +16,11 @@
 //   5. the diagram is drawn for the report's day as well (a folded group's
 //      card counts its findings), the map for today again afterwards, and a
 //      binder's site diagram for that site's date.
+//   6-8. the Capacity section, saved searches and the firmware finding
+//      against the report's date (the firmware finding reads no date);
+//   9. the Inventory section counts the same in a report dated in the past,
+//      today and a binder site dated in the past, and its firmware mismatch
+//      follows the report's date (a schedule lapsed since: accepted then).
 window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
@@ -161,6 +166,93 @@ window.addEventListener('load', () => { setTimeout(async () => {
     try { await captureBinderImages([{ id: 's1', name: 'S', model: {}, doc: binderDoc }]); }
     finally { window.captureCanvasImage = heldCapture; }
     ok('a binder\'s site diagram is drawn for that site\'s date', binderDay === R, String(binderDay));
+
+    // ---- 6: the Capacity section is the documented state, whatever the date ----
+    // The lab's switch with seven of its eight ports cabled: nearly full on
+    // any day, so a report dated R and one dated today print the same
+    // section and the same Room to grow line, and the note is in neither
+    // one's counts (an info note), whatever ages and services count to.
+    const full = lab();
+    for (let p = 3; p <= 7; p++) {
+      full.nodes.push({ id: `x${p}`, type: 'pc', name: `PC ${p}`, x: 0, y: 200, interfaces: [{ id: 'i1', name: 'eth0' }] });
+      full.links.push({ id: `lx${p}`, source: 'sw', target: `x${p}`, sourceIface: `p${p}`, targetIface: 'i1' });
+    }
+    replaceDocument(full, { origin: 'file' });
+    const capToday = reportModel({ date: '' }), capR = reportModel({ date: R });
+    ok('the fixture: the switch is nearly full', capToday.capacity.ports.length === 1 && capToday.capacity.ports[0].free === 1, show(capToday.capacity));
+    ok('a report dated R has the same Capacity section as today\'s', show(capR.capacity) === show(capToday.capacity)
+       && capacitySection(capR.capacity) === capacitySection(capToday.capacity));
+    const room = (m) => (summarySheet(m).match(/<p class="room">[^<]*/) || [])[0];
+    ok('and the same Room to grow line', !!room(capR) && room(capR) === room(capToday), room(capR));
+    ok('while its findings still count to R', !swFinding(capR.findings, 'age') && !!swFinding(capToday.findings, 'age'));
+    ok('the note is in neither report\'s findings', ![capR, capToday].some((m) => m.findings.concat(m.accepted).some((f) => f.key === 'port-capacity')));
+    state.report = Object.assign({}, state.report, { date: R });
+    const capDoc = serializeDoc();
+    state.report = Object.assign({}, state.report, { date: '' });
+    const capSite = binderSiteModels([{ id: 's1', name: 'S', updated: 1, doc: capDoc }])[0];
+    ok('a binder\'s site dated R prints the same section too', !!capSite.model && show(capSite.model.capacity) === show(capToday.capacity),
+       show(capSite.model && capSite.model.capacity));
+
+    // ---- 7: a saved search counts to the report's date ----
+    // has:finding is the report's findings (open ones, as of its date), and
+    // the Age and Next service columns count to that date too, not today:
+    // the table's cells read checksDay() (js/table.js).
+    const dated = lab();
+    dated.nodes.push({ id: 'due', type: 'pc', name: 'Due PC', x: 0, y: 300, serviceEvery: 12, serviced: day(-200), interfaces: [] });
+    dated.searches = [
+      { id: 'sq_f', name: 'With findings', query: 'has:finding -type:pc', columns: ['age', 'nextService'], print: true },
+      { id: 'sq_d', name: 'Due', query: 'name:"Due PC" has:finding', print: true }
+    ];
+    replaceDocument(dated, { origin: 'file' });
+    const sqToday = reportModel({ date: '' }), sqR = reportModel({ date: R }), sqAhead = reportModel({ date: day(400) });
+    const rowsOf = (m, id) => (m.searches.find((s) => s.id === id) || { rows: [] }).rows;
+    ok('today has:finding finds the old switch', show(rowsOf(sqToday, 'sq_f').map((r) => r.name)) === show(['Core']), show(rowsOf(sqToday, 'sq_f')));
+    ok('a report dated R does not: it was not old then', rowsOf(sqR, 'sq_f').length === 0, show(rowsOf(sqR, 'sq_f')));
+    ok('the Age column counts to the report\'s date', rowsOf(sqAhead, 'sq_f')[0] && rowsOf(sqAhead, 'sq_f')[0].cells[0] === ageText(deviceAge(getNode('sw'), day(400)))
+       && rowsOf(sqToday, 'sq_f')[0].cells[0] === ageText(deviceAge(getNode('sw'))) && rowsOf(sqAhead, 'sq_f')[0].cells[0] !== rowsOf(sqToday, 'sq_f')[0].cells[0],
+       show([rowsOf(sqAhead, 'sq_f')[0], rowsOf(sqToday, 'sq_f')[0]]));
+    ok('a service not yet due is no finding today', rowsOf(sqToday, 'sq_d').length === 0);
+    ok('a year ahead it is overdue, and has:finding finds it as the Findings section does',
+       show(rowsOf(sqAhead, 'sq_d').map((r) => r.name)) === show(['Due PC']) && sqAhead.findings.some((f) => (f.nodeIds || []).includes('due')),
+       show(rowsOf(sqAhead, 'sq_d')));
+    ok('and the table still counts to today afterwards', TV_COLS.devices.find((c) => c.key === 'age').show({ rec: 'node', ref: { nodeId: 'sw' }, data: {} }).text === ageText(deviceAge(getNode('sw'))));
+
+    // ---- 8: the firmware finding is the documented state, whatever the date ----
+    // It reads no date, so a report dated R (a diagnosis memoised for R, not
+    // today's) and a binder's site dated R hold the same finding as today's,
+    // while the Age finding still counts to R.
+    const fwDoc = lab();
+    fwDoc.nodes.push(
+      { id: 'f1', type: 'switch', name: 'Edge 1', x: 0, y: 400, vendor: 'Cisco', model: 'C9200L', os: '17.9.4', interfaces: [] },
+      { id: 'f2', type: 'switch', name: 'Edge 2', x: 80, y: 400, vendor: 'Cisco', model: 'C9200L', os: '17.6.1', interfaces: [] });
+    replaceDocument(fwDoc, { origin: 'file' });
+    const fwOf = (m) => m.findings.filter((f) => f.key === 'firmware').map((f) => f.detail);
+    const fwToday = reportModel({ date: '' }), fwR = reportModel({ date: R });
+    ok('the fixture raises the firmware finding today', fwOf(fwToday).length === 1, show(fwOf(fwToday)));
+    ok('a report dated R holds the same firmware finding', show(fwOf(fwR)) === show(fwOf(fwToday)), show(fwOf(fwR)));
+    ok('while its Age finding still counts to R', !swFinding(fwR.findings, 'age') && !!swFinding(fwToday.findings, 'age'));
+    state.report = Object.assign({}, state.report, { date: R });
+    const fwSaved = serializeDoc();
+    state.report = Object.assign({}, state.report, { date: '' });
+    const fwSite = binderSiteModels([{ id: 's1', name: 'S', updated: 1, doc: fwSaved }])[0];
+    ok('a binder\'s site dated R holds it too', !!fwSite.model && show(fwOf(fwSite.model)) === show(fwOf(fwToday)), show(fwSite.model && fwOf(fwSite.model)));
+
+    // ---- 9: the Inventory section counts the register, and marks the
+    // firmware finding as the report's date has it ----
+    const invOf = (m) => show({ v: m.inventory.vendors.map((r) => [r.value, r.count]), m: m.inventory.models.map((r) => [r.value, r.count, r.firmware]),
+      f: m.inventory.firmware.map((r) => [r.value, r.count]) });
+    ok('a report dated R counts the same inventory as today', fwToday.inventory.any && invOf(fwR) === invOf(fwToday), invOf(fwR));
+    ok('and so does the binder\'s site dated R', invOf(fwSite.model) === invOf(fwToday), invOf(fwSite.model));
+    ok('the mismatch is open today and at R', fwToday.inventory.models[0].mismatch === 'open' && fwR.inventory.models[0].mismatch === 'open');
+    // Accepted until a day that has passed by today but had not by R.
+    acceptFindings(topologyFindings().filter((f) => f.key === 'firmware'), 'Upgrade booked', day(10));
+    state.accepted[state.accepted.length - 1].until = day(-200);
+    const lapsedToday = reportModel({ date: '' }), lapsedR = reportModel({ date: R });
+    ok('a schedule lapsed since: open today, accepted in a report dated R',
+       lapsedToday.inventory.models[0].mismatch === 'open' && lapsedR.inventory.models[0].mismatch === 'accepted',
+       show([lapsedToday.inventory.models[0].mismatch, lapsedR.inventory.models[0].mismatch]));
+    ok('the dated sheet says it, today\'s marks it', inventorySection(lapsedR.inventory).includes('· Accepted')
+       && inventorySection(lapsedToday.inventory).includes('<span class="sev warn">'));
   } catch (e) {
     ok('suite ran without throwing', false, e && e.stack);
   } finally {

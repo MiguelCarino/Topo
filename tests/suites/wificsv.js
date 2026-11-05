@@ -63,7 +63,7 @@ window.addEventListener('load', () => { setTimeout(() => {
 
     // ---- 2: interfaces.csv ----
     const ifs = csvInterfacesSheet();
-    ok('interfaces.csv carries the radio after the interface', ifs.headers.slice(9).join(',') === RADIO_CSV_PARTS.map((p) => p.csv).join(',')
+    ok('interfaces.csv carries the radio after the interface', ifs.headers.slice(11).join(',') === RADIO_CSV_PARTS.map((p) => p.csv).join(',')
        && ['standard', 'bands', 'ch_2g', 'ch_5g', 'ch_6g', 'width_2g', 'width_5g', 'width_6g', 'power_2g', 'ssids_6g'].every((h) => ifs.headers.includes(h)), ifs.headers.join(','));
     const r1 = row({ headers: ifs.headers, rows: ifs.rows.filter((r) => r[0] === 'ap1') }, 'ap1');
     ok('an AP\'s radio, band by band', r1.standard === 'axe' && r1.bands === '2.4 5 6' && r1.ch_2g === '6' && r1.ch_5g === '36' && r1.ch_6g === '37'

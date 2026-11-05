@@ -6,9 +6,10 @@
 //
 //   Asset group   the device's fields in the side panel, folded into one
 //                 collapsible group (its open state remembered here) and hidden
-//                 in the reduced views (data-adv). Model / firmware is the old
+//                 in the reduced views (data-adv). Firmware / OS is the old
 //                 OS field, relabelled; it stays English with the rest of the
-//                 technical labels, while the plain words are translated.
+//                 technical labels, while the plain words (Vendor, Model,
+//                 Serial number…) are translated.
 //   Status        planned / active / retired. A retired device is kept for the
 //                 record and dimmed on the map, and the reachability walk
 //                 neither reaches it nor goes through it (js/diagnostics.js).
@@ -136,9 +137,298 @@ function renderSecretLint(el, hits, onShow) {
     }
 }
 
+// What a QR label prints as the model: "vendor model" when either is
+// recorded, else the firmware / OS text, which is where the model was written
+// before it had a field of its own (document v16).
+function assetLabelModel(n) {
+    const made = [asText(n.vendor).trim(), asText(n.model).trim()].filter(Boolean).join(' ');
+    return made || asText(n.os).trim();
+}
+
+// ---- Split model and firmware (docs/BACKLOG.md inventory stage 2) ----
+// Before document v16 a device's model and its firmware shared one field, so
+// an older file's os can hold "C9200L-24P / IOS-XE 17.9.4" or "HP LaserJet
+// M404dn". The upgrade leaves that text where it was (the v7 precedent: a
+// pure step cannot tell a model from firmware for certain, and every stored
+// baseline would show it as a change); this offers the split instead, as a
+// review the user ticks, applied as one undo step. Nothing is ever split by
+// itself, and nothing typed is lost: vendor + model + os always hold the
+// original words, less the one separator between model and firmware.
+//
+// Firmware or OS words: the first word of a text that names a system.
+const FW_WORDS = new Set(['ios', 'ios-xe', 'nx-os', 'junos', 'routeros', 'switchos', 'fortios', 'arubaos', 'edgeos', 'unifi',
+    'openwrt', 'pfsense', 'opnsense', 'dsm', 'qts', 'esxi', 'windows', 'ubuntu', 'debian', 'rhel', 'macos', 'android',
+    'linux', 'freertos', 'firmware', 'fw']);
+// Vendor words: the makers js/oui.js names (in their usual short form, its
+// NIC-chip and virtual entries aside) and the ones a register commonly holds.
+// Matched case aside as the first word(s) of the text, and moved as typed.
+const VENDOR_WORDS = ['Apple', 'Samsung', 'Intel', 'Dell', 'HP', 'HPE', 'Cisco', 'TP-Link', 'Huawei', 'Xiaomi', 'Google', 'Amazon',
+    'Microsoft', 'Raspberry Pi', 'Netgear', 'ASUS', 'Lenovo', 'LG', 'Sony', 'MSI', 'Gigabyte', 'Acer', 'NVIDIA', 'Ubiquiti',
+    'MikroTik', 'D-Link', 'Nintendo', 'Aruba', 'Juniper', 'Fortinet', 'Synology', 'QNAP', 'Hikvision', 'Dahua', 'Axis', 'Brother',
+    'Canon', 'Epson', 'Lexmark', 'Xerox', 'Siemens', 'Philips', 'GE', 'Supermicro', 'APC', 'Eaton', 'Yealink', 'Polycom', 'Grandstream']
+    .sort((a, b) => b.length - a.length);
+// Between model and firmware: spaced, so "IOS-XE", "Gi1/0" and "1.2,3" never split.
+const SPLIT_SEPARATORS = [' / ', ' · ', ' | ', ' ; ', ', '];
+const VERSION_ALONE = /^v?\d+(?:\.\d+)+$/i;
+const HAS_VERSION = /\bv?\d+(?:\.\d+)+\b/i;
+let _fwSeeds = null;   // the type seeds' os ("Windows 11", "pfSense", "Firmware"), lowercased
+const fwSeeds = () => _fwSeeds || (_fwSeeds = new Set(Object.values(initialDataDefaults).map((d) => asText(d && d.os).trim().toLowerCase()).filter(Boolean)));
+
+// A leading vendor word, as typed, and the rest. -> { vendor, rest } or null.
+function leadingVendor(text) {
+    const s = text.trim(), low = s.toLowerCase();
+    for (const w of VENDOR_WORDS) {
+        const n = w.length;
+        if (!low.startsWith(w.toLowerCase()) || !(s.length === n || /\s/.test(s[n]))) continue;
+        const rest = s.slice(n).trim();
+        // "HP / LaserJet": the maker is not followed by its model, so a
+        // proposed model never starts with a separator.
+        return /^[\/·|;,]/.test(rest) ? null : { vendor: s.slice(0, n), rest };
+    }
+    return null;
+}
+// What may follow a system's name in firmware text: a version or build
+// ("17.9.4", "v7", "2019", "22.04") or an edition word ("Server", "LTS").
+const FW_EDITION_WORDS = new Set(['server', 'pro', 'home', 'enterprise', 'lts', 'xe', 'os', 'standard', 'essentials',
+    'datacenter', 'education', 'build', 'release', 'stable', 'version', 'ver', 'rev']);
+const FW_TAIL_TOKEN = /^(?:v|ver\.?|r)?\d[\w.()-]*$/i;
+const fwToken = (w) => w.replace(/^[(\[]+|[)\],:;]+$/g, '').toLowerCase();
+// The whole text is firmware or OS: a version alone, a type seed, or a
+// system's name (after a vendor: "Synology DSM 7.2") followed only by
+// versions and edition words. A product line named like a system ("UniFi
+// Switch 24 PoE") is not firmware: only its first word is.
+function looksFirmware(text) {
+    const s = text.trim();
+    if (!s) return false;
+    if (VERSION_ALONE.test(s) || fwSeeds().has(s.toLowerCase())) return true;
+    const v = leadingVendor(s);
+    const words = (v ? v.rest : s).split(/\s+/).map(fwToken).filter(Boolean);
+    if (!words.length || !FW_WORDS.has(words[0])) return false;
+    return words.slice(1).every((w) => FW_WORDS.has(w) || FW_EDITION_WORDS.has(w) || FW_TAIL_TOKEN.test(w));
+}
+// Any firmware in a text with no separator: a version token, a system's
+// word anywhere ("Cisco C9200L IOS-XE"), or a type seed at its end ("Dell
+// OptiPlex 7090 Windows 11").
+function hasFirmwarePart(text) {
+    if (HAS_VERSION.test(text)) return true;
+    const words = text.trim().split(/\s+/).map(fwToken).filter(Boolean);
+    if (words.some((w) => FW_WORDS.has(w))) return true;
+    for (let i = 0; i < words.length; i++) if (fwSeeds().has(words.slice(i).join(' '))) return true;
+    return false;
+}
+const firmwareLike = (text) => looksFirmware(text) || HAS_VERSION.test(text);
+// The text cut at its one separator, or null for none or several.
+function splitOnce(text) {
+    let at = null, count = 0;
+    SPLIT_SEPARATORS.forEach((sep) => {
+        let i = text.indexOf(sep);
+        while (i >= 0) { count++; at = { i, n: sep.length }; i = text.indexOf(sep, i + sep.length); }
+    });
+    return count === 1 ? [text.slice(0, at.i).trim(), text.slice(at.i + at.n).trim()] : null;
+}
+
+// Pure: what the split would do to each device whose os holds text and whose
+// vendor and model are blank.
+//   kept: the text is firmware or OS already ("RouterOS 7.14", "Windows 11");
+//   rows: { nodeId, kind: 'split', vendor, model, os } where one separator
+//         has a model on its left and firmware on its right, or
+//         { nodeId, kind: 'model', vendor, model, os: '' } where the text is a
+//         known maker's model with no firmware and no separator in it
+//         ("HP LaserJet M404dn");
+//         a leading maker's word goes to vendor in both ('' when none);
+//   left: anything else, left as it is ("my old box").
+// -> { rows, kept: [nodeId], left: [nodeId] }
+function planModelSplit(nodes = state.nodes) {
+    const rows = [], kept = [], left = [];
+    (nodes || []).forEach((n) => {
+        if (!n || isBlank(n.os) || !isBlank(n.model) || !isBlank(n.vendor)) return;
+        const s = n.os.trim();
+        if (looksFirmware(s)) { kept.push(n.id); return; }
+        const parts = splitOnce(s);
+        if (parts) {
+            const [l, r] = parts;
+            if (l && r && firmwareLike(r) && !firmwareLike(l)) {
+                const v = leadingVendor(l);
+                rows.push({ nodeId: n.id, kind: 'split', vendor: v ? v.vendor : '', model: v ? v.rest : l, os: r });
+                return;
+            }
+        }
+        // Model-only: a maker's model with no firmware in it and no separator
+        // at all. Text after a separator ("HP LaserJet M404dn, Floor 2") is a
+        // note Topo cannot place, so one, two or more separators that did not
+        // split are all left as they are.
+        if (!SPLIT_SEPARATORS.some((sep) => s.includes(sep)) && !hasFirmwarePart(s)) {
+            const v = leadingVendor(s);
+            if (v && v.rest) { rows.push({ nodeId: n.id, kind: 'model', vendor: v.vendor, model: v.rest, os: '' }); return; }
+        }
+        left.push(n.id);
+    });
+    return { rows, kept, left };
+}
+const modelSplitRowFor = (nodeId) => planModelSplit().rows.find((r) => r.nodeId === nodeId) || null;
+const sameSplitRow = (a, b) => !!a && !!b && a.nodeId === b.nodeId && a.vendor === b.vendor && a.model === b.model && a.os === b.os;
+
+// What a row proposes, in words: "Vendor: Cisco · Model: C9200L · Firmware / OS: 17.9".
+function modelSplitDetail(row) {
+    return [row.vendor ? t('Vendor') + ': ' + row.vendor : '', row.model ? t('Model') + ': ' + row.model : '',
+        t('Firmware / OS') + ': ' + (row.os || '—')].filter(Boolean).join(' · ');
+}
+
+// Writes the rows given, each only if the device still plans exactly that
+// row (the question was open; a stale plan is never what is written), in one
+// undo step. -> the rows written.
+function applyModelSplit(rows) {
+    if (readOnlyRefuses()) return [];
+    const now = planModelSplit().rows;
+    const go = (rows || []).filter((r) => now.some((x) => sameSplitRow(x, r)));
+    if (!go.length) return [];
+    batch(() => {
+        go.forEach((r) => {
+            const n = getNode(r.nodeId);
+            if (!n) return;
+            if (r.vendor) n.vendor = r.vendor; else delete n.vendor;
+            if (r.model) n.model = r.model; else delete n.model;
+            n.os = r.os;   // still written when empty, as os always was
+        });
+        save(); renderCanvasOnly();
+    });
+    const sel = selectedNodeForEdit();
+    if (sel) { assetEl('propOs').value = sel.os || ''; renderAssetFields(sel); }   // the panel shows what was written
+    if (typeof tableShown === 'function' && tableShown()) renderTableView(true);
+    return go;
+}
+
+const MODEL_SPLIT_LEFT_MAX = 10;
+// The review: one tick per device that would change (all ticked), the ones
+// left as they are named under it. Applies what stays ticked in one step.
+// -> the rows written, or null when dismissed or there was nothing to split.
+async function reviewModelSplit() {
+    if (readOnlyRefuses()) return null;
+    const plan = planModelSplit();
+    if (!plan.rows.length) return null;
+    const nameOf = (id) => { const n = getNode(id); return n ? (asText(n.name).trim() || id) : id; };
+    const leftNames = plan.left.slice(0, MODEL_SPLIT_LEFT_MAX).map(nameOf);
+    if (plan.left.length > MODEL_SPLIT_LEFT_MAX) leftNames.push(t('…and {n} more.', { n: plan.left.length - MODEL_SPLIT_LEFT_MAX }));
+    const after = [plan.left.length ? t('Left as it is') + ': ' + leftNames.join(', ') : '',
+        t('Nothing typed is lost: the words only move between the fields. One Undo takes all of it back.')].filter(Boolean).join('\n');
+    const n = plan.rows.length;
+    const ids = await askTicks(n === 1 ? t('Split model and firmware for one device?') : t('Split model and firmware for {n} devices?', { n }), {
+        title: t('Split model and firmware'), ok: t('Apply split'), after,
+        rows: plan.rows.map((r) => ({ id: r.nodeId, label: nameOf(r.nodeId), detail: '“' + getNode(r.nodeId).os.trim() + '” → ' + modelSplitDetail(r) }))
+    });
+    if (!ids || !ids.length) return null;
+    const done = applyModelSplit(plan.rows.filter((r) => ids.includes(r.nodeId)));
+    if (!done.length) showToast(t('Nothing was split: those devices changed while the question was open.'));
+    else showToast(done.length === 1 ? t('Model and firmware split on one device.') : t('Model and firmware split on {n} devices.', { n: done.length }), 'ok');
+    return done;
+}
+
+// The device editor's one-line offer. os: the field's text when it is ahead
+// of the node (the keystroke's own listener, js/app.js, runs after this one).
+function renderModelSplitNote(node, os) {
+    const note = document.getElementById('modelSplitNote');
+    if (!note) return;
+    const probe = node && os !== undefined ? { ...node, os } : node;
+    const row = probe && !state.readOnly ? (planModelSplit([probe]).rows[0] || null) : null;
+    note.classList.toggle('hidden', !row);
+    document.getElementById('modelSplitBtn').title = row ? modelSplitDetail(row) : '';
+}
+
+// ---- Vendor from the MAC (docs/BACKLOG.md inventory stage 3) ----
+// A device's interfaces' MACs name who made the network card (js/oui.js,
+// the curated table shared with hardware.carino.systems, about 35 makers:
+// computers, phones and network gear, few printers or cameras). That is
+// often who made the box, so a blank Vendor is offered it, as a hint in the
+// field and in the table, and only ever written when the user presses Use
+// (or Change all's "Fill vendor from MAC", which previews first). Stored
+// nowhere: it is read from the MACs each time.
+//
+// Not offered from a randomised (locally administered) or group address,
+// from a NIC-chip maker (the chip is not the box: an Intel NIC sits in a
+// Dell), from a virtual machine's prefix, or when the MACs left disagree.
+const OUI_CHIP_ONLY = new Set(['Intel Corporate', 'Realtek', 'Espressif (ESP8266/32)']);
+const OUI_VENDOR_DISPLAY = { 'ASUSTek': 'ASUS', 'MSI (Micro-Star)': 'MSI' };
+// One prefix block is both companies: servers and network gear are HPE's.
+const HPE_TYPES = new Set(['server', 'switch', 'l3switch', 'ap', 'firewall']);
+function ouiVendorShown(name, node) {
+    if (name === 'HP / HPE') return node && HPE_TYPES.has(node.type) ? 'HPE' : 'HP';
+    return OUI_VENDOR_DISPLAY[name] || name;
+}
+// Pure. -> { vendor, from: [interface names] }, or { why } with why one of
+// 'none' (no MAC recorded), 'random' (randomised or group addresses only),
+// 'chip', 'virtual', 'unknown' (a maker the table does not hold) or
+// 'disagree' (the usable MACs name different makers). It does not look at
+// node.vendor: the callers offer it only while that is blank.
+function macVendorRead(node) {
+    const ifaces = ((node && node.interfaces) || []).filter((i) => hasMac(i));
+    if (!ifaces.length) return { why: 'none' };
+    const seen = new Set(), found = new Map();
+    ifaces.forEach((i) => {
+        const v = (window.CarinoOUI ? CarinoOUI.decodeMac(i.mac) : { vendor: {} }).vendor || {};
+        // A virtual prefix first: QEMU/KVM (52:54:00) and Docker (02:42) set
+        // the local bit, and they are a VM's, not randomised.
+        if (v.kind === 'oui' && /\(virtual\)$/.test(v.vendor || '')) { seen.add('virtual'); return; }
+        if (macIsGroup(i.mac) || macIsLocal(i.mac)) { seen.add('random'); return; }
+        if (v.kind !== 'oui' || !v.vendor) { seen.add('unknown'); return; }
+        if (OUI_CHIP_ONLY.has(v.vendor)) { seen.add('chip'); return; }
+        const name = ouiVendorShown(v.vendor, node);
+        if (!found.has(name)) found.set(name, []);
+        found.get(name).push(asText(i.name).trim() || i.id);
+    });
+    if (found.size > 1) return { why: 'disagree' };
+    if (found.size === 1) { const [vendor, from] = [...found][0]; return { vendor, from }; }
+    return { why: ['chip', 'virtual', 'unknown', 'random'].find((w) => seen.has(w)) };
+}
+// -> { vendor, from } or null.
+function macVendorSuggestion(node) {
+    const r = macVendorRead(node);
+    return r.vendor ? r : null;
+}
+// What the device editor and the table offer: the suggestion, only while
+// the device has no vendor of its own.
+const vendorHintFor = (node) => (node && isBlank(node.vendor) ? macVendorSuggestion(node) : null);
+const VENDOR_HINT_TITLE = "Suggested from the network card's MAC address. Not saved until you use it or type a vendor.";
+const MAC_VENDOR_WHY = {
+    none: 'No MAC address is recorded.',
+    random: 'Its MAC is randomised or a group address, so it names no maker.',
+    chip: "Its MAC names the network chip's maker, not the device's.",
+    virtual: "Its MAC is a virtual machine's, so it names no maker.",
+    unknown: "Its MAC's maker is not in the built-in list (about 35 makers, few printers, cameras or phones).",
+    disagree: 'Its MACs name different makers.'
+};
+const macVendorWhy = (why) => t(MAC_VENDOR_WHY[why] || MAC_VENDOR_WHY.none);
+
+// The Vendor field's grey text and its Use button.
+function renderVendorHint(node) {
+    const input = document.getElementById('propVendor'), btn = document.getElementById('vendorUseBtn');
+    if (!input || !btn) return;
+    const s = vendorHintFor(node);
+    input.placeholder = s ? t('{value} · from the MAC', { value: s.vendor }) : '';
+    input.title = s ? t(VENDOR_HINT_TITLE) : '';
+    const use = !!s && !state.readOnly;
+    btn.classList.toggle('hidden', !use);
+    btn.title = use ? t(VENDOR_HINT_TITLE) : '';
+}
+// Use: the suggestion written as the device's vendor, one undo step.
+// -> the vendor written, or null.
+function useVendorHint(node) {
+    if (!node || readOnlyRefuses()) return null;
+    const s = vendorHintFor(node);
+    if (!s) return null;
+    batch(() => {
+        node.vendor = s.vendor;
+        save(); renderCanvasOnly();
+    });
+    if (selectedNodeForEdit() === node) renderAssetFields(node);
+    if (typeof tableShown === 'function' && tableShown()) renderTableView(true);
+    return s.vendor;
+}
+
 // ---- The Asset group in the side panel ----
 const assetEl = (id) => document.getElementById(id);
 const ASSET_INPUTS = [
+    { key: 'vendor', id: 'propVendor' },
+    { key: 'model', id: 'propModel' },
     { key: 'serial', id: 'propSerial' },
     { key: 'assetTag', id: 'propAssetTag' },
     { key: 'location', id: 'propLocation' }
@@ -151,6 +441,9 @@ function assetSummaryText(node) {
 }
 function renderAssetFields(node) {
     ASSET_INPUTS.forEach(({ key, id }) => { assetEl(id).value = node && typeof node[key] === 'string' ? node[key] : ''; });
+    updateModelDatalist(node && node.vendor);
+    renderModelSplitNote(node);
+    renderVendorHint(node);
     assetEl('propStatus').value = node && asStatus(node.status) ? node.status : '';
     assetEl('statusNote').classList.toggle('hidden', !isRetired(node));
     renderUpkeepFields(node);
@@ -189,11 +482,20 @@ ASSET_INPUTS.forEach(({ key, id }) => {
         const node = selectedNodeForEdit();
         if (!node) return;
         if (isBlank(e.target.value)) delete node[key]; else node[key] = e.target.value;
+        if (key === 'vendor') { updateModelDatalist(node.vendor); renderVendorHint(node); }   // the models this vendor's devices have (js/app.js); the MAC's hint while it is blank
+        renderModelSplitNote(node);
         assetEl('assetSummary').textContent = assetSummaryText(node);
         saveTyping();
         renderTyped();
     });
 });
+assetEl('propOs').addEventListener('input', (e) => renderModelSplitNote(selectedNodeForEdit(), e.target.value));
+assetEl('modelSplitBtn').addEventListener('click', () => {
+    const node = selectedNodeForEdit();
+    const row = node && modelSplitRowFor(node.id);
+    if (row) applyModelSplit([row]);
+});
+assetEl('vendorUseBtn').addEventListener('click', () => useVendorHint(selectedNodeForEdit()));
 assetEl('propNotes').addEventListener('input', (e) => renderNotesLint(selectedNodeForEdit(), e.target.value));
 assetEl('propStatus').addEventListener('change', (e) => {
     const node = selectedNodeForEdit();
@@ -507,7 +809,7 @@ async function openAssetLink(tag) {
     window.history.replaceState(null, '', cleanUrl());
     if (state.nodes.length && !landingIsOpen()) {
         const here = nodeWithTag(state.nodes, tag);
-        if (here) { save(); _arrivalFocus = here.id; select(here.id, 'node'); return true; }
+        if (here) { save(); _arrivalFocus = here.id; select(here.id, 'node'); arrivalLocate(); return true; }
     }
     const cards = libraryNetworks().filter((e) => nodeWithTag(e.doc.nodes, tag));
     let card = cards[0] || null;
@@ -526,8 +828,14 @@ async function openAssetLink(tag) {
     await openFromLibrary(card.id);
     if (state.libraryId !== card.id) { if (state.nodes.length) save(); return false; }   // declined the replace
     const node = nodeWithTag(state.nodes, tag);
-    if (node) { _arrivalFocus = node.id; select(node.id, 'node'); }
+    if (node) { _arrivalFocus = node.id; select(node.id, 'node'); arrivalLocate(); }
     return !!node;
+}
+// A scanned label answers "where is this plugged in": the Full editor opens
+// the device's Locate section (openLocate, js/locate.js); a reduced view
+// shows its plain sentence instead (stage 4).
+function arrivalLocate() {
+    if (typeof openLocate === 'function') openLocate();
 }
 // Not found, or no choice made: as if the visit had been bare, or, over an
 // open network, as if nothing had happened.
@@ -573,7 +881,7 @@ function labelsFor(entries) {
             const ifaces = (n.interfaces || []);
             const ip = (ifaces.find((i) => parseValidCIDR(i.ip)) || {}).ip || '';
             const macIf = ifaces.find((i) => !isBlank(i.mac));
-            devices.push({ tag: n.assetTag.trim(), name: n.name || n.id, model: asText(n.os).trim(), serial: asText(n.serial).trim(),
+            devices.push({ tag: n.assetTag.trim(), name: n.name || n.id, model: assetLabelModel(n), serial: asText(n.serial).trim(),
                 // Where it is, as the report prints it: its group's path (and
                 // units) when it is in one, else the free text it was given.
                 location: nodePlaceText(n), ip, mac: macIf ? fmtColonSafe(macIf.mac) : '' });

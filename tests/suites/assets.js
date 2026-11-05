@@ -136,7 +136,12 @@ window.addEventListener('load', () => { setTimeout(async () => {
     getNode('pc1').status = 'retired'; save();
     ok('a retired device\'s address is offered again as free', freeAddresses('10.0.0.0/24', 10).includes('10.0.0.10') && !takenAddresses(null).has('10.0.0.10'),
        freeAddresses('10.0.0.0/24', 10).join(','));
-    ok('and the Subnets tab counts it free', networkStats(state.networks[0]).used === 2, String(networkStats(state.networks[0]).used));
+    // 3, not 2: the gateway 10.0.0.1 is held only by the retired router, so
+    // no in-service device has it, but it is still the network's gateway and
+    // Add devices never hands it out (takenAddresses); the count says so too
+    // (subnetCapacity). The retired PC's 10.0.0.10 is what must not count.
+    ok('and the Subnets tab counts it free', networkStats(state.networks[0]).used === 3
+       && subnetCapacity(state.networks[0]).reserved.join() === '10.0.0.1', JSON.stringify(subnetCapacity(state.networks[0])));
 
     // ---- 3. Labels on the map, duplicates as findings ----
     open();
@@ -161,7 +166,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     select('pc1', 'node');
     ok('the Asset group shows the device\'s fields', el('propSerial').value === 'SN123' && el('propAssetTag').value === 'CS-0042'
        && el('propLocation').value === 'Room 2 · rack A · U12' && el('propStatus').value === 'active');
-    ok('Model / firmware is the OS field, inside the group', el('assetGroup').contains(el('propOs')) && /Model \/ firmware/.test(el('assetGroup').textContent));
+    ok('Firmware / OS is the OS field, inside the group, beside Vendor and Model', el('assetGroup').contains(el('propOs')) && /Firmware \/ OS/.test(el('assetGroup').textContent)
+       && el('assetGroup').contains(el('propVendor')) && el('assetGroup').contains(el('propModel')));
     ok('the closed group still says the tag and status', el('assetSummary').textContent === 'CS-0042 · Active', el('assetSummary').textContent);
     initHistory();
     typeInto(el('propAssetTag'), 'CS-0043');
@@ -411,7 +417,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     select('pc1', 'node');
     ok('the plain labels are in Spanish', /Número de serie/.test(el('assetGroup').textContent) && /Ubicación/.test(el('assetGroup').textContent)
        && el('propStatus').options[1].textContent === 'Planificado', el('propStatus').options[1].textContent);
-    ok('the technical one stays English', /Model \/ firmware/.test(el('assetGroup').textContent));
+    ok('the technical one stays English, the vendor and model are translated', /Firmware \/ OS/.test(el('assetGroup').textContent) && /Fabricante/.test(el('assetGroup').textContent) && /Modelo/.test(el('assetGroup').textContent));
     ok('the summary speaks it too', el('assetSummary').textContent === 'CS-0042 · En servicio', el('assetSummary').textContent);
     ok('so do the status names in the table', statusName('retired') === 'Retirado' && TV_COLS.devices.find((c) => c.key === 'status').parse('Retirado').value === 'retired');
     delete state.settings.lang; setLocale('en'); applyLocale();

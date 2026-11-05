@@ -59,8 +59,12 @@ const TV_TABS = [
     { key: 'subnets', label: 'Subnets' },
     { key: 'groups', label: 'Groups', plain: true },
     // Only while the network has something wireless (wifiOffered, js/wifi.js).
-    { key: 'wifi', label: 'Wi-Fi', when: () => wifiOffered() }
+    { key: 'wifi', label: 'Wi-Fi', when: () => wifiOffered() },
+    // Counts by vendor, model and firmware (reportInventory, js/report.js),
+    // only while some device has one of them typed.
+    { key: 'inventory', label: 'Inventory', plain: true, when: () => tvInventoryOffered() }
 ];
+const tvInventoryOffered = () => state.nodes.some((n) => !isBlank(n.vendor) || !isBlank(n.model) || !isBlank(n.os));
 const tvTabOffered = (key) => { const tb = TV_TABS.find((x) => x.key === key); return !!tb && (!tb.when || tb.when()); };
 
 const _tv = {
@@ -69,7 +73,10 @@ const _tv = {
     expanded: new Set(),            // device ids whose interfaces are open
     // Interfaces and subnets are not things the map can select, so their rows
     // are ticked here; devices and cables are ticked in state.selection.
-    checked: { interfaces: new Set(), ports: new Set(), subnets: new Set(), groups: new Set(), wifi: new Set() },
+    checked: { interfaces: new Set(), ports: new Set(), subnets: new Set(), groups: new Set(), wifi: new Set(), inventory: new Set() },
+    // The Inventory tab's By switch: vendor, model or firmware. Per visit,
+    // never stored.
+    invBy: 'vendor',
     anchor: null,                   // the last row ticked, for shift-range
     cursor: { row: null, col: null },
     rows: [],                       // on screen, in display order (after the search)
@@ -138,6 +145,14 @@ function applyView() {
     }
     // The search box counts rows over the table and devices over the map.
     if (typeof updateQueryBar === 'function') updateQueryBar();
+}
+
+// The Inventory tab's By switch: vendor, model or firmware.
+function setInventoryBy(by) {
+    if (!TV_INV_BY[by]) return;
+    cancelEdit();
+    if (_tv.invBy !== by) { _tv.invBy = by; _tv.cursor = { row: null, col: null }; _tv.cursorChosen = false; _tv.anchor = null; _tv.checked.inventory.clear(); }
+    renderTableView(true);
 }
 
 function showTableTab(key) {
@@ -212,6 +227,20 @@ function inheritedCell(row, key, reportKey) {
     if (!used) return shown('');
     const src = key === 'gw' ? gatewaySource(node) : dnsSource(node);
     return shown(used, { muted: true, title: src && src.network ? t('{value} · from {network}', { value: used, network: networkLabel(src.network) }) : '' });
+}
+
+// The Vendor column: the device's own, or the MAC's suggestion greyed.
+function tvVendorCell(row) {
+    const node = getNode(row.ref.nodeId);
+    if (node && !isBlank(node.vendor)) return shown(row.data.vendor);
+    const s = typeof vendorHintFor === 'function' ? vendorHintFor(node) : null;
+    return s ? shown(s.vendor, { muted: true, title: t(VENDOR_HINT_TITLE) }) : shown('');
+}
+
+// The vendor the record holds, never the suggestion: what a paste replaces.
+function tvVendorOwn(row) {
+    const node = getNode(row.ref.nodeId);
+    return node && !isBlank(node.vendor) ? String(row.data.vendor || node.vendor.trim()) : '';
 }
 
 const SEV_WORD = { bad: 'Critical', warn: 'Advisory' };
@@ -299,6 +328,68 @@ function portColumn(key, opts) {
         show: (row) => shown(row.data[key] === null ? '' : row.data[key]) }, opts);
 }
 
+// A port's PoE typed into a cell: what the ports sheet reads (af, PoE+,
+// 802.3bt type 3, bare watts) and what the cell shows ("PoE+ 30 W", "PoE 25 W").
+function tvPoeParse(text) {
+    const v = String(text == null ? '' : text).trim();
+    const shownAs = Object.keys(POE_CLASSES).find((k) => poeText(k).toLowerCase() === v.toLowerCase());
+    if (shownAs) return shownAs;
+    const m = /^poe\s+(\d+(?:[.,]\d+)?)\s*w$/i.exec(v);
+    if (m) return wattsFromText(m[1], 0.5, 100, 1);
+    return portPoeFromText(v);
+}
+// What a port's PoE cell shows and edits: a standard as "PoE 15.4 W", custom
+// watts as "15.4 W". poeText says both "PoE 15.4 W", and a cell opened and
+// left as it was must not turn a custom 15.4 W into the 802.3af standard.
+function tvPoeCellText(poe) {
+    const v = asPortPoe(poe);
+    if (v === undefined) return '';
+    return typeof v === 'number' ? wattsText(v) + ' W' : poeText(v);
+}
+// Whether anything in the network records PoE: a budget, a draw or a port.
+const tvPoeOffered = () => state.nodes.some((n) => asPoeBudget(n.poeBudget) !== undefined || asPoeDraw(n.poeDraw) !== undefined
+    || (hasPortGrid(n) && Object.keys(n.portAttrs || {}).some((id) => portAttrOf(n, id).poe !== null)));
+function poeColumn(key, can, read) {
+    const f = tvField(NODE_FIELDS, key);
+    return schemaColumn(NODE_FIELDS, key, 'node', { mono: true, sort: 'num', editor: 'text', when: tvPoeOffered,
+        can: (row) => { const n = getNode(row.ref.nodeId); return !!n && can(n); },
+        parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v || v === '—') return { value: undefined }; return fromTextResult(f.fromText, v); },
+        get: (target) => (read(target[key]) === undefined ? '' : read(target[key])),
+        set: (target, value) => { if (value === undefined || value === '') delete target[key]; else target[key] = value; },
+        edit: (row) => { const n = getNode(row.ref.nodeId); return n && read(n[key]) !== undefined ? wattsText(read(n[key])) : ''; },
+        // By the watts, not the words: the cell says "12,5" in Spanish and a
+        // dash where it cannot be held, neither of which Number() reads.
+        sortKey: (row) => { const n = getNode(row.ref.nodeId); const v = n && can(n) ? read(n[key]) : undefined; return v === undefined ? null : v; },
+        show: (row) => { const n = getNode(row.ref.nodeId); if (!n || !can(n)) return shown('—', { muted: true }); return shown(read(n[key]) === undefined ? '' : wattsText(read(n[key]))); } });
+}
+// Whether an interface row holds VLANs of its own. Not a radio; not a bond
+// member (portVlans reads its bond's, js/model.js), and not a faceplate port
+// on a switch or an AP (its VLANs are the Ports tab's, node.portAttrs).
+const tvIfaceVlanOwn = (row) => {
+    if (tvIsRadio(row) || (row.data && row.data.member)) return false;
+    const n = getNode(row.ref.nodeId);
+    return !(n && hasPortGrid(n) && PORT_ID_RE.test(row.ref.ifaceId || ''));
+};
+// The untagged VLAN the cell sorts by: its own or its subnet's; null (last)
+// where it has none or cannot hold one.
+function tvIfaceVlanSort(row) {
+    if (!tvIfaceVlanOwn(row)) return null;
+    const i = tvIfaceOf(row);
+    if (!i) return null;
+    if (asVlan(i.vlan) !== undefined) return asVlan(i.vlan);
+    const auto = typeof ifaceVlanAuto === 'function' ? ifaceVlanAuto(i) : null;
+    return auto ? auto.vlan : null;
+}
+// An interface's untagged VLAN: its own, else its subnet's greyed.
+function tvIfaceVlanCell(row) {
+    if (!tvIfaceVlanOwn(row)) return tvDash();
+    const i = tvIfaceOf(row);
+    if (!i) return shown('');
+    if (asVlan(i.vlan) !== undefined) return shown(String(asVlan(i.vlan)));
+    const auto = typeof ifaceVlanAuto === 'function' ? ifaceVlanAuto(i) : null;
+    return auto ? shown(String(auto.vlan), { muted: true, title: t('{value} · from {network}', { value: auto.vlan, network: auto.name || 'VLAN ' + auto.vlan }) }) : shown('');
+}
+
 // ---- Groups (js/groups.js) ----
 // A device's group, typed or picked: a path ("Building A / Rack 3"), a name
 // one group has, or blank for none. A path the map does not have is refused,
@@ -383,6 +474,13 @@ const TV_COLS = {
           } },
         schemaColumn(NODE_FIELDS, 'gw', 'node', { mono: true, sort: 'ip', show: (row) => inheritedCell(row, 'gw', 'gw') }),
         schemaColumn(NODE_FIELDS, 'dns', 'node', { mono: true, sort: 'ip', show: (row) => inheritedCell(row, 'dns', 'dns') }),
+        // Vendor and model (document v16) sit beside Firmware / OS, also in a
+        // saved order from before they existed (beside, tvDevicesOrder).
+        // A blank Vendor shows what the MACs suggest, greyed, with a title
+        // saying it is not saved (vendorHintFor, js/assets.js): typing into
+        // the cell starts from blank, as a greyed gateway's does.
+        assetColumn('vendor', { beside: 'os', show: tvVendorCell, now: tvVendorOwn }),
+        assetColumn('model', { beside: 'os' }),
         schemaColumn(NODE_FIELDS, 'os', 'node', { sort: 'text' }),
         assetColumn('assetTag', { mono: true }),
         assetColumn('serial', { mono: true }),
@@ -433,24 +531,34 @@ const TV_COLS = {
                 const own = n && state.expectedLife && state.expectedLife[n.type];
                 return usual ? shown(String(usual), { muted: true, title: t(own ? 'Set for its type in this network' : 'Usual for its type') }) : shown('');
             } }),
-        // Worked out, never typed: from today's date (js/model.js "Age and upkeep").
+        // Worked out, never typed: from today's date (js/model.js "Age and upkeep"),
+        // or a report's own date when a saved search prints the column
+        // (reportSearches, js/report.js, inside onChecksDay): checksDay() is
+        // today everywhere else.
         { key: 'age', label: 'Age', plain: true, rec: 'node', editor: null, sort: 'num', mono: true,
-          sortKey: (row) => { const a = deviceAge(getNode(row.ref.nodeId)); return a ? a.months : null; },
+          sortKey: (row) => { const a = deviceAge(getNode(row.ref.nodeId), checksDay()); return a ? a.months : null; },
           show: (row) => {
               const n = getNode(row.ref.nodeId);
-              const old = upkeepState(n).old;
-              return shown(ageText(deviceAge(n)), old ? { sev: 'warn', title: t(old.life === 1 ? 'Past its expected life ({n} year)' : 'Past its expected life ({n} years)', { n: old.life }) } : {});
+              const old = upkeepState(n, checksDay()).old;
+              return shown(ageText(deviceAge(n, checksDay())), old ? { sev: 'warn', title: t(old.life === 1 ? 'Past its expected life ({n} year)' : 'Past its expected life ({n} years)', { n: old.life }) } : {});
           } },
         // Coloured as its finding is: overdue (warn), missed twice over (bad).
         { key: 'nextService', label: 'Next service', plain: true, rec: 'node', editor: null, sort: 'text', mono: true,
           show: (row) => {
               const n = getNode(row.ref.nodeId), due = nextServiceDate(n);
               if (!due) return shown('');
-              const s = upkeepState(n).service;
+              const s = upkeepState(n, checksDay()).service;
               const level = s && (s.level === 'bad' || s.level === 'warn') ? s.level : '';
               return shown(due, level ? { sev: level, title: t('Overdue') } : {});
           } },
         schemaColumn(NODE_FIELDS, 'ports', 'node', { mono: true, sort: 'text', show: (row) => shown(row.data.allowedPorts) }),
+        // PoE (document v16): a switch's or an AP's budget, a powered
+        // device's draw. A dash where it cannot be held (a budget on a PC, a
+        // draw on a VM); typed as the side panel reads them ("12,5", "class 4").
+        // Offered once the network records any PoE (tvPoeOffered), so a
+        // network that never said anything about it keeps its columns.
+        poeColumn('poeBudget', (n) => hasPortGrid(n), asPoeBudget),
+        poeColumn('poeDraw', (n) => canDrawPoe(n.type), asPoeDraw),
         // Only a routing device does NAT (the sidebar shows the switch only
         // there), so the cell is a dash anywhere else.
         schemaColumn(NODE_FIELDS, 'nat', 'node', { label: 'NAT', editor: 'bool', sort: 'text', parse: tvBoolParse,
@@ -477,6 +585,22 @@ const TV_COLS = {
         schemaColumn(IFACE_FIELDS, 'wireless', 'iface', { sort: 'text', show: (row) => shown(row.data.wireless ? '✓' : '') }),
         { key: 'cable', label: 'Cable', plain: true, rec: 'iface', editor: null, sort: 'text', show: (row) => cableCell(row) },
         { key: 'subnet', label: 'Subnet', rec: 'iface', editor: null, mono: true, sort: 'ip', show: (row) => subnetCell(row) },
+        // A wired interface's own untagged VLAN, else its subnet's greyed
+        // (typing over it makes it its own), and its tagged ones. A dash on
+        // a radio: a wireless interface holds neither (js/model.js).
+        schemaColumn(IFACE_FIELDS, 'vlan', 'iface', { mono: true, sort: 'num', editor: 'text', same,
+            can: tvIfaceVlanOwn, sortKey: tvIfaceVlanSort,
+            parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v || v === '—') return { value: undefined }; const n = asVlan(v); return n === undefined ? { error: true } : { value: n }; },
+            set: (target, value) => { if (value === undefined) delete target.vlan; else target.vlan = value; },
+            get: (target) => (asVlan(target.vlan) === undefined ? '' : asVlan(target.vlan)),
+            edit: (row) => { const i = tvIfaceOf(row); return i && asVlan(i.vlan) !== undefined ? String(asVlan(i.vlan)) : ''; },
+            show: (row) => tvIfaceVlanCell(row) }),
+        schemaColumn(IFACE_FIELDS, 'tagged', 'iface', { label: 'Tagged', mono: true, sort: 'text', editor: 'text', same,
+            can: tvIfaceVlanOwn,
+            parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v || v === '—') return { value: undefined }; const l = asVlanList(v); return l === undefined ? { error: true } : { value: l }; },
+            set: (target, value) => { if (value === undefined) delete target.tagged; else target.tagged = value; },
+            get: (target) => asVlanList(target.tagged) || '',
+            show: (row) => { if (!tvIfaceVlanOwn(row)) return tvDash(); const i = tvIfaceOf(row); return shown(i ? asVlanList(i.tagged) || '' : ''); } }),
         { key: 'radio:standard', label: 'Wi-Fi standard', rec: 'iface', editor: 'select', sort: 'text', same, when: () => wifiOffered(),
           can: tvIsRadio,
           options: () => [{ value: '', label: '—' }].concat(WIFI_STANDARDS.map((k) => ({ value: k, label: wifiStandardName(k) }))),
@@ -576,6 +700,15 @@ const TV_COLS = {
             parse: (text) => { const v = String(text == null ? '' : text).trim(); return fieldOk.tag(v) ? { value: v } : { error: true }; } }),
         portColumn('vlan', { label: 'VLAN', mono: true, sort: 'num',
             parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v) return { value: undefined }; const n = asVlan(v); return n === undefined ? { error: true } : { value: n }; } }),
+        // A trunk's tagged VLANs ("10,20,30-39" or "all", kept canonical) and
+        // what the port gives by PoE (a standard's words or watts, shown as
+        // "PoE+ 30 W"; typed as af, PoE+, 802.3bt type 3, 25 W...).
+        portColumn('tagged', { label: 'Tagged', mono: true,
+            parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v || v === '—') return { value: undefined }; const l = asVlanList(v); return l === undefined ? { error: true } : { value: l }; } }),
+        portColumn('poe', { label: 'PoE', mono: true,
+            parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v || v === '—') return { value: undefined }; const p = tvPoeParse(v); return p === null ? { error: true } : { value: p }; },
+            show: (row) => shown(tvPoeCellText(row.data.poe)),
+            edit: (row) => tvPoeCellText(row.data.poe) }),
         { key: 'peer', label: 'Connected to', plain: true, rec: 'port', editor: null, sort: 'text',
           show: (row) => (row.data.peer ? shown(`${row.data.peer} · ${row.data.peerIface}`) : shown(t('Free'), { muted: true })) },
         { key: 'cable', label: 'Cable', plain: true, rec: 'port', editor: null, mono: true, sort: 'text', show: (row) => shown(row.data.cable) }
@@ -592,8 +725,47 @@ const TV_COLS = {
         schemaColumn(NETWORK_FIELDS, 'dhcp', 'net', { editor: 'bool', sort: 'text', parse: tvBoolParse,
             get: (target) => !!target.dhcp, set: (target, v) => { target.dhcp = v ? true : undefined; }, same: (a, b) => !!a === !!b,
             show: (row) => shown(row.data.dhcp ? '✓' : '') }),
+        // The DHCP pool's ends (document v16), as typed; a declared row's
+        // only, as every column here that writes to the network.
+        schemaColumn(NETWORK_FIELDS, 'dhcpFirst', 'net', { mono: true, sort: 'ip',
+            show: (row) => shown(row.data.dhcpFirst, { bad: !!row.data.dhcpFirst && !fieldOk.ip(row.data.dhcpFirst) }) }),
+        schemaColumn(NETWORK_FIELDS, 'dhcpLast', 'net', { mono: true, sort: 'ip',
+            show: (row) => shown(row.data.dhcpLast, { bad: !!row.data.dhcpLast && !fieldOk.ip(row.data.dhcpLast) }) }),
         { key: 'members', label: 'Devices', plain: true, rec: 'net', editor: null, sort: 'num', mono: true,
           show: (row) => shown(row.data.devices.length, { title: row.data.devices.join(', ') }) },
+        // Worked out, never typed (subnetCapacity, js/model.js, through the
+        // reportSubnets row): in use counts the devices and the subnet's own
+        // gateway and DNS, free is what Add devices can still hand out, the
+        // numbers the Subnets card and the report's Capacity section print.
+        // An IPv6 subnet has no free count to show; one the address-capacity
+        // note names is marked.
+        { key: 'used', label: 'In use', plain: true, rec: 'net', editor: null, sort: 'num', mono: true,
+          sortKey: (row) => row.data.used,
+          show: (row) => shown(row.data.used) },
+        { key: 'free', label: 'Free', plain: true, rec: 'net', editor: null, sort: 'num', mono: true,
+          sortKey: (row) => row.data.free,
+          show: (row) => (row.data.size === null ? shown('—', { muted: true, title: t('{used} used · 2^{bits} addresses', { used: row.data.used, bits: row.data.bits }) })
+              : shown(row.data.free, row.data.near && !(row.data.pool && row.data.pool.valid) ? { sev: 'warn', title: t('Almost out of free addresses') } : {})) },
+        // How many of a valid pool's addresses are recorded here (never the
+        // leases), of its size, and the fixed ones free outside it, which
+        // the address-capacity note measures then; a pool that does not
+        // count is a muted dash that says why.
+        { key: 'inPool', label: 'In pool', plain: true, rec: 'net', editor: null, sort: 'num', mono: true,
+          sortKey: (row) => (row.data.pool && row.data.pool.valid ? row.data.pool.used : -1),
+          show: (row) => {
+              const pool = row.data.pool;
+              if (!pool) return shown('');
+              if (!pool.valid) {
+                  const net = row.data.id ? networkById(row.data.id) : null;
+                  const why = net ? (pool.problem === 'off' ? [t('DHCP is off: the pool is not counted.')] : poolProblemTexts(net)) : [];
+                  return shown('—', { muted: true, title: why.join(' ') });
+              }
+              return shown(`${pool.used} / ${pool.size === null ? '—' : pool.size}`);
+          } },
+        { key: 'fixedFree', label: 'Fixed free', plain: true, rec: 'net', editor: null, sort: 'num', mono: true,
+          sortKey: (row) => (row.data.pool && row.data.pool.valid && row.data.fixed.free !== null ? row.data.fixed.free : -1),
+          show: (row) => (!(row.data.pool && row.data.pool.valid) || row.data.fixed.free === null ? shown('')
+              : shown(row.data.fixed.free, row.data.near ? { sev: 'warn', title: t('Almost out of free addresses') } : {})) },
         // An undeclared subnet is one Enter (or click) from being a network.
         { key: 'declare', label: '', rec: 'net', editor: null, action: true,
           show: (row) => (row.data.declared ? shown('') : shown(t('Declare'), { action: 'declare' })) }
@@ -723,8 +895,40 @@ const TV_COLS = {
           show: (row) => shown(row.data.aps.join(', ')) },
         { key: 'wf:clients', label: 'Clients', plain: true, rec: 'wifi', editor: null, mono: true, sort: 'num',
           show: (row) => shown(row.data.clients.length, { title: row.data.clients.join(', ') }) }
+    ],
+    // Inventory (docs/BACKLOG.md feature 3, stage 5): one read-only row per
+    // vendor, model or firmware, as the By switch says (reportInventory).
+    // A row is its devices: clicking it selects them, for Change all of them.
+    inventory: [
+        { key: 'inv:vendor', label: 'Vendor', plain: true, rec: 'inv', editor: null, sort: 'text', when: () => _tv.invBy !== 'firmware',
+          sortText: (row) => (_tv.invBy === 'model' ? row.data.vendor : row.data.value),
+          show: (row) => (_tv.invBy === 'model' ? (row.data.vendor ? shown(row.data.vendor) : tvDash()) : tvInvValue(row)) },
+        { key: 'inv:model', label: 'Model', plain: true, rec: 'inv', editor: null, sort: 'text', when: () => _tv.invBy === 'model',
+          sortText: (row) => row.data.model,
+          show: (row) => (row.data.value ? shown(row.data.model) : tvInvValue(row)) },
+        { key: 'inv:fw', label: 'Firmware / OS', plain: true, rec: 'inv', editor: null, mono: true, sort: 'text', when: () => _tv.invBy === 'firmware',
+          sortText: (row) => row.data.value,
+          show: (row) => tvInvValue(row) },
+        { key: 'inv:count', label: 'Devices', plain: true, rec: 'inv', editor: null, mono: true, sort: 'num', sortKey: (row) => row.data.count,
+          show: (row) => shown(row.data.count) },
+        { key: 'inv:retired', label: 'Retired', plain: true, rec: 'inv', editor: null, mono: true, sort: 'num', sortKey: (row) => row.data.retired,
+          show: (row) => (row.data.retired ? shown(row.data.retired, { muted: true }) : tvDash()) },
+        // A model's firmware versions, marked as its firmware finding is.
+        { key: 'inv:versions', label: 'Firmware / OS', plain: true, rec: 'inv', editor: null, mono: true, sort: 'text', when: () => _tv.invBy === 'model',
+          sortText: (row) => inventoryVersionsText(row.data.firmware),
+          show: (row) => {
+              const text = inventoryVersionsText(row.data.firmware);
+              if (!text) return tvDash();
+              if (row.data.mismatch === 'open') return shown(text, { sev: 'warn', title: t('Devices of the same model run different software versions') });
+              return shown(text, row.data.mismatch === 'accepted' ? { title: t('Accepted') } : {});
+          } },
+        { key: 'inv:names', label: 'Members', plain: true, rec: 'inv', editor: null, wide: true,
+          show: (row) => shown(row.data.names.join(', ')) }
     ]
 };
+// An Inventory row's value, or "Not recorded" for the devices with none.
+const tvInvValue = (row) => (row.data.value ? shown(row.data.value) : shown(t('Not recorded'), { muted: true }));
+const TV_INV_BY = { vendor: 'vendors', model: 'models', firmware: 'firmware' };
 // ---- Custom columns (js/model.js "Custom columns") ----
 // The document's own columns, after Topo's on the Devices tab. Their names
 // are the user's words, shown as typed (never translated). A cell is typed
@@ -760,7 +964,25 @@ function tvDevicesOrder() {
     const all = TV_COLS.devices.concat((state.columns || []).map(customColumn)).filter((c) => c.key !== TV_FIXED_COL);
     const rank = new Map((tvDevicesView().order || []).map((k, i) => [k, i]));
     const known = all.filter((c) => rank.has(c.key)).sort((a, b) => rank.get(a.key) - rank.get(b.key));
-    return known.concat(all.filter((c) => !rank.has(c.key)));
+    // A column the saved order does not name goes after the named ones,
+    // except one placed `beside` a column the order does name: it goes just
+    // before that one, in Topo's own order (Vendor, Model, then Firmware / OS
+    // in an order saved before vendor and model existed).
+    const unnamed = all.filter((c) => !rank.has(c.key));
+    const beside = unnamed.filter((c) => c.beside && rank.has(c.beside));
+    const out = [];
+    known.forEach((c) => { beside.filter((b) => b.beside === c.key).forEach((b) => out.push(b)); out.push(c); });
+    return out.concat(unnamed.filter((c) => !beside.includes(c)));
+}
+// One Devices column by its key, Topo's or a custom one (x:<id>), or null
+// when this build or this network has none: a saved search printed in the
+// report (reportSearches, js/report.js) skips a key it cannot draw.
+function tvDeviceColumn(key) {
+    const own = TV_COLS.devices.find((c) => c.key === key);
+    if (own) return own;
+    const m = /^x:(.+)$/.exec(String(key || ''));
+    const def = m && (state.columns || []).find((c) => c.id === m[1]);
+    return def ? customColumn(def) : null;
 }
 function tvDevicesArranged() {
     const hidden = new Set(tvDevicesView().hidden || []);
@@ -864,6 +1086,10 @@ function tvBuildRows(tab) {
     if (tab === 'ports') return reportPorts().map((p) => ({ key: `p:${p.nodeId}:${p.portId}`, rec: 'port', ref: { nodeId: p.nodeId, portId: p.portId }, data: p }));
     if (tab === 'groups') return reportGroups().map((g) => ({ key: `g:${g.id}`, rec: 'group', ref: { groupId: g.id }, data: g }));
     if (tab === 'wifi') return reportWifi().map((w) => ({ key: `w:${w.id}`, rec: 'wifi', ref: { wifiId: w.id }, data: w }));
+    if (tab === 'inventory') {
+        const by = TV_INV_BY[_tv.invBy] ? _tv.invBy : 'vendor';
+        return reportInventory()[TV_INV_BY[by]].map((r) => ({ key: `v:${by}:${r.key}`, rec: 'inv', ref: {}, data: r }));
+    }
     return reportSubnets().map((s) => ({ key: `s:${s.network}`, rec: 'net', ref: { netId: s.id }, data: s }));
 }
 
@@ -876,15 +1102,20 @@ function ipSortKey(text) {
     return { kind: ip.kind() === 'ipv4' ? 0 : 1, n: ipToBig(ip) };
 }
 const SEV_RANK = { bad: 2, warn: 1 };
-function compareRows(col, a, b) {
+// dir: the direction the caller multiplies the result by, so a blank stays
+// last either way (the table's own sort by default; a saved search printed
+// in the report passes its own, and never touches the table's).
+function compareRows(col, a, b, dir = _tvSortDir) {
     if (col.sort === 'sev') return (SEV_RANK[a.data.severity] || 0) - (SEV_RANK[b.data.severity] || 0);
     if (col.sortKey) {
         const x = col.sortKey(a), y = col.sortKey(b);
-        if (x === null || y === null) return x === null && y === null ? 0 : (x === null ? 1 : -1) * _tvSortDir;
+        if (x === null || y === null) return x === null && y === null ? 0 : (x === null ? 1 : -1) * dir;
         return x - y;
     }
-    const va = col.show(a).text, vb = col.show(b).text;
-    if (!va || !vb) return !va && !vb ? 0 : (!va ? 1 : -1) * _tvSortDir;
+    // sortText: the value a column sorts on when what it shows for a blank
+    // is words or a dash (the Inventory tab's Not recorded), so it stays last.
+    const va = col.sortText ? col.sortText(a) : col.show(a).text, vb = col.sortText ? col.sortText(b) : col.show(b).text;
+    if (!va || !vb) return !va && !vb ? 0 : (!va ? 1 : -1) * dir;
     if (col.sort === 'ip') {
         const x = ipSortKey(va), y = ipSortKey(vb);
         if (x && y) return x.kind - y.kind || (x.n < y.n ? -1 : x.n > y.n ? 1 : 0);
@@ -939,6 +1170,7 @@ function rowName(row) {
     if (row.rec === 'port') return `${row.data.device} / ${row.data.port}`;
     if (row.rec === 'group') return row.data.path;
     if (row.rec === 'wifi') return row.data.ssid || t('Wi-Fi network');
+    if (row.rec === 'inv') return row.data.value || t('Not recorded');
     return row.data.network;
 }
 
@@ -1077,6 +1309,22 @@ function renderTableView(force, diag) {
         ? `${t('Rows: {n}', { n: top.length })} · ${t('Selected: {n}', { n: ticked })}` : t('Rows: {n}', { n: top.length });
     document.getElementById('tvPasteBtn').disabled = !rows.length || !!state.readOnly;
     document.getElementById('tvColsBtn').classList.toggle('hidden', tab !== 'devices');
+    // The Inventory tab: its rows are counts, so nothing to paste, its own
+    // hint, and the By switch.
+    const inv = tab === 'inventory';
+    document.getElementById('tvPasteBtn').classList.toggle('hidden', inv);
+    document.getElementById('tvInvBy').classList.toggle('hidden', !inv);
+    document.getElementById('tvHint').classList.toggle('hidden', inv);
+    document.getElementById('tvInvHint').classList.toggle('hidden', !inv);
+    document.querySelectorAll('#tvInvBy [data-invby]').forEach((b) => {
+        const on = b.dataset.invby === _tv.invBy;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', String(on));
+    });
+    // Offered while some device's Firmware / OS text reads as a model
+    // (planModelSplit, js/assets.js), never on a read-only network.
+    document.getElementById('tvSplitBtn').classList.toggle('hidden',
+        (tab !== 'devices' && tab !== 'inventory') || !!state.readOnly || typeof planModelSplit !== 'function' || !planModelSplit().rows.length);
 
     placeCursor(hadFocus);
     if (typeof updateQueryBar === 'function') updateQueryBar();
@@ -1355,6 +1603,16 @@ function afterTableEdit() {
 // ---- Selecting ----
 // A row is the thing on the map: clicking one selects it there and centres
 // the map on it, as a finding in the Findings tab does.
+function selectInventoryRow(row) {
+    const nodes = row.data.nodeIds.map(getNode).filter(Boolean);
+    // A plain click is a set of one row, so the ticks say what is selected.
+    _tv.checked.inventory.clear();
+    _tv.checked.inventory.add(row.key);
+    if (!nodes.length) return [];
+    selectEntries(nodes.map((n) => ({ type: 'node', id: n.id })));
+    centreOnNodes(nodes);
+    return nodes.map((n) => n.id);
+}
 function focusRow(row) {
     if (!row) return;
     if (row.rec === 'node' || row.rec === 'iface') { focusOnMap({ type: 'node', id: row.ref.nodeId }); return; }
@@ -1364,6 +1622,8 @@ function focusRow(row) {
     if (row.rec === 'group') { selectGroupMembers(row.ref.groupId); return; }
     // A Wi-Fi network: its clients, as its card's Select clients does.
     if (row.rec === 'wifi') { selectWifiClients(row.ref.wifiId); return; }
+    // An Inventory row: its devices, so Change all of them works on them.
+    if (row.rec === 'inv') { selectInventoryRow(row); return; }
     if (row.ref.netId) { selectNetworkMembers(row.ref.netId); return; }
     const nodes = row.data.nodeIds.map(getNode).filter(Boolean);
     selectEntries(nodes.map((n) => ({ type: 'node', id: n.id })));
@@ -1383,6 +1643,13 @@ function checkRows(rows, on) {
     }
     const set = _tv.checked[_tv.tab];
     rows.forEach((r) => { if (on) set.add(r.key); else set.delete(r.key); });
+    // Inventory rows are sets of devices: the ticked rows' devices together
+    // are the selection, so Change all of them works on them all.
+    if (_tv.tab === 'inventory') {
+        const ids = new Set();
+        _tv.rows.forEach((r) => { if (!r.sub && set.has(r.key)) r.data.nodeIds.forEach((id) => ids.add(id)); });
+        selectEntries([...ids].filter((id) => getNode(id)).map((id) => ({ type: 'node', id })));
+    }
     renderTableView();
 }
 function checkRow(row, on, range) {
@@ -1456,7 +1723,9 @@ function planPaste(colKey, text, targets = pasteTargets(), tab = _tv.tab) {
         const row = targets.rows[i];
         if (!row) { extra++; return; }
         const target = col && findTarget(col.rec, row.ref);
-        const now = col ? col.show(row).text : '';
+        // A column whose screen cell can show what is not stored (the MAC's
+        // vendor suggestion) says what the record holds through col.now.
+        const now = col ? (col.now ? col.now(row) : col.show(row).text) : '';
         if (!col || !line.trim() || !canEdit(row, col) || !target) { cells.push({ row, status: 'skip', now, text: line }); return; }
         // A length pasted as a bare number is in the unit the cable is kept
         // in: "25" over an 8 ft cable is 25 ft, not 25 m.
@@ -1691,6 +1960,8 @@ function onTableClick(e) {
     const t0 = e.target;
     const tabBtn = t0.closest('[data-tvtab]');
     if (tabBtn) { showTableTab(tabBtn.dataset.tvtab); return; }
+    const byBtn = t0.closest('[data-invby]');
+    if (byBtn) { setInventoryBy(byBtn.dataset.invby); return; }
     const sortBtn = t0.closest('[data-sort]');
     if (sortBtn) {
         const key = sortBtn.dataset.sort, s = _tv.sort[_tv.tab];
@@ -1787,6 +2058,8 @@ function deleteCustomColumn(id) {
                 d.order = (d.order || []).filter((k) => k !== `x:${id}`);
                 d.hidden = (d.hidden || []).filter((k) => k !== `x:${id}`);
             });
+            // And from every saved search's columns and sort, in the same step.
+            normalizeSearchRefs(state.searches, state.columns);
         });
         return true;
     };
@@ -1954,6 +2227,8 @@ function closeColumnsDialog() {
 
     document.querySelectorAll('#viewSwitch [data-view]').forEach((b) => { b.onclick = () => setView(b.dataset.view); });
     document.getElementById('tvPasteBtn').onclick = () => openPasteColumn();
+    // Split model and firmware (js/assets.js): a review, one undo step.
+    document.getElementById('tvSplitBtn').onclick = () => reviewModelSplit();
     pasteEl('pasteText').addEventListener('input', () => refreshPastePreview());
     pasteEl('pasteColumn').addEventListener('change', () => refreshPastePreview(true));
     pasteEl('pasteApplyBtn').addEventListener('click', applyPasteDialog);

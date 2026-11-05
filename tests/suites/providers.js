@@ -247,6 +247,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     applyCsvPlan(edited);
     ok('applied', providerById('pT').phone === '800 999 0000' && state.providers.some((p) => p.name === 'New Alarm Co' && p.service === 'security'));
     undo();
+    // Two new rows under one unused provider_id: one provider, the second
+    // row is the same one, never a second record under that id.
+    const twin = planOf('provider_id,name\r\npv_9,Alpha Co\r\npv_9,Beta Co\r\n');
+    ok('two new rows by one unused provider_id: the later is a conflict', twin.rows.map((r) => r.status).join() === 'add,conflict' && /Another row is this provider/.test(twin.rows[1].why)
+       && twin.ops.length === 1, JSON.stringify(twin.rows.map((r) => r.status + ':' + r.why)));
     const badRef = planOf('name,provider\r\nGateway,Nobody Inc\r\n');
     ok('a device sheet naming an unknown provider is refused for that row', badRef.counts.conflict === 1, JSON.stringify(badRef.rows.map((r) => r.why)));
     // The whole round trip into a blank map: providers first, as Wi-Fi.

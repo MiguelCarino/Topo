@@ -41,10 +41,14 @@ function spawnNodeNow(type, opts) {
     // seeded profiles still take the best guess onto the device, as they
     // always have: they hide these fields, and their networks are drawn from
     // the seeds.
+    let pooledNote = null;
     if (connectTo && node.interfaces.length) {
         const ctx = subnetContext(connectTo);
         if (ctx) {
-            const free = nextFreeHost(ctx.networkStr, ctx.prefix);
+            const dealt = {};
+            const free = nextFreeHost(ctx.networkStr, ctx.prefix, type, dealt);
+            if (free && dealt.pooled) pooledNote = t('No address is left outside the DHCP pool {pool}, so {names} takes one from inside it.',
+                { pool: dealt.pooled, names: `${node.name || node.id} (${free.split('/')[0]})` });
             if (free) {
                 node.interfaces[0].ip = free;
                 if (!ctx.network) {
@@ -62,6 +66,9 @@ function spawnNodeNow(type, opts) {
     }
     select(node.id, 'node'); save();
     renderNodeDiagnostics(node, drawnDiag(renderCanvasOnly()));
+    // A printer or server that found no address outside the pool: said, as
+    // the Add devices preview says it (there is no preview here).
+    if (pooledNote) showToast(pooledNote, 'warn');
     return node;   // as spawnAnnotation does, so a caller can go on to configure it
 }
 
@@ -223,10 +230,18 @@ function fieldHints(node) {
 // The next free host address on a subnet, as "ip/prefix". The declared
 // network's gateway and resolvers count as taken even when nobody drew them
 // (nextFreeAddress, js/model.js), so a new device is never handed the
-// router's address.
-function nextFreeHost(networkStr, prefix) {
+// router's address. On a subnet whose network records a DHCP pool that
+// counts, a device that keeps a fixed address (a printer, a server, a
+// switch: keepsFixedAddress) steps round the pool as Add devices' do
+// (poolDealer, js/model.js); with no pool, the bottom of the subnet as ever.
+// said (optional) gains pooled: the pool's range, when a fixed-address
+// device found no room outside it and took a pool address.
+function nextFreeHost(networkStr, prefix, type, said) {
     if (!networkStr || prefix >= 31) return null;
-    const ip = nextFreeAddress(networkStr);
+    const dealer = poolDealer(networkStr);
+    const got = dealer && dealer.next(keepsFixedAddress(type));
+    if (got && got.pooled && said) said.pooled = poolRangeText(dealer.pool);
+    const ip = dealer ? (got && got.ip) : nextFreeAddress(networkStr);
     return ip ? `${ip}/${prefix}` : null;
 }
 
@@ -691,7 +706,7 @@ function tidyPositionsGrouped(nodes, links) {
 // ---- Settings (localStorage) ----
 // UI preferences live in localStorage, not the URL hash — a shared diagram should
 // not carry the sharer's panel state. The trace (traceMode, tracePort,
-// tracePortOn) is deliberately not persisted: reopening into an active trace
+// tracePortOn, traceVlan) is deliberately not persisted: reopening into an active trace
 // with nothing selected is confusing, and a port is one session's question.
 const SETTINGS_KEY = 'nettopo_settings';
 // The map's backgrounds besides light (setMapInk, below).
@@ -722,13 +737,19 @@ function loadSettings() {
         if (typeof saved.reportEngineer === 'string') state.settings.reportEngineer = saved.reportEngineer.slice(0, 120);
         if (saved.reportSummaryOn === false) state.settings.reportSummaryOn = false;
         if (saved.reportTechnicalOn === false) state.settings.reportTechnicalOn = false;
+        // Address history (js/trail.js) records unless turned off; what is
+        // stored decides, either way.
+        if (saved.trailRecording === false) state.settings.trailRecording = false; else delete state.settings.trailRecording;
+        // Its plain lines in the Simple views are off unless turned on.
+        if (saved.trailSimple === true) state.settings.trailSimple = true; else delete state.settings.trailSimple;
     } catch (e) { /* first run or blocked storage */ }
 }
 
 function saveSettings() {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ profile: state.settings.profile, advanced: !!state.settings.advanced, lang: state.settings.lang, libraryTab: state.settings.libraryTab, subnetZones: state.settings.subnetZones !== false, view: state.settings.view, mapInk: state.settings.mapInk || '',
         providerHover: state.settings.providerHover === true || undefined, reportEngineer: state.settings.reportEngineer || undefined,
-        reportSummaryOn: state.settings.reportSummaryOn === false ? false : undefined, reportTechnicalOn: state.settings.reportTechnicalOn === false ? false : undefined })); } catch (e) { /* private mode */ }
+        reportSummaryOn: state.settings.reportSummaryOn === false ? false : undefined, reportTechnicalOn: state.settings.reportTechnicalOn === false ? false : undefined,
+        trailRecording: state.settings.trailRecording === false ? false : undefined, trailSimple: state.settings.trailSimple === true || undefined })); } catch (e) { /* private mode */ }
 }
 
 // Saved templates used to have a store of their own here (USER_TPL_KEY,
@@ -810,9 +831,27 @@ function fitToView(nodes) {
     applyCamera();
 }
 
+// The Asset group's suggestions, from what is already typed on this map:
+// firmware / OS, vendors, and the models (updateModelDatalist). The name is
+// the old one, from when the firmware was the only list.
+function fillDatalist(id, values) {
+    const dl = document.getElementById(id);
+    if (!dl) return;
+    dl.innerHTML = '';
+    new Set(values.filter((v) => typeof v === 'string' && !isBlank(v))).forEach((v) => { dl.appendChild(new Option(v, v)); });
+}
 function updateOsDatalist() {
-    const dl = document.getElementById('osDatalist'); dl.innerHTML = '';
-    new Set(state.nodes.map((n) => n.os).filter(Boolean)).forEach((os) => { dl.appendChild(new Option(os, os)); });
+    fillDatalist('osDatalist', state.nodes.map((n) => n.os));
+    fillDatalist('vendorDatalist', state.nodes.map((n) => n.vendor));
+    const sel = state.selectedType === 'node' && state.selectedId ? getNode(state.selectedId) : null;
+    updateModelDatalist(sel && sel.vendor);
+}
+// The models typed on this map, only the given vendor's when one is typed
+// (any case and spacing), else every one.
+function updateModelDatalist(vendor) {
+    const key = (v) => asText(v).trim().replace(/\s+/g, ' ').toLowerCase();
+    const want = isBlank(vendor) ? '' : key(vendor);
+    fillDatalist('modelDatalist', state.nodes.filter((n) => !want || key(n.vendor) === want).map((n) => n.model));
 }
 
 // ---- The one document serializer ----
@@ -865,8 +904,9 @@ function serializeDoc() {
     // allowlisted through GROUP_FIELDS, no key when there are none. And
     // `wifi` (v12): the Wi-Fi networks, through WIFI_FIELDS, likewise. And
     // `columns` and `tableView` (v13): the custom columns and the Devices
-    // table's arrangement (js/model.js "Custom columns").
-    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), providers: serializeProviders(state.providers), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView) };
+    // table's arrangement (js/model.js "Custom columns"). And `searches`
+    // (v16): the saved searches, through SEARCH_FIELDS, no key when none.
+    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), providers: serializeProviders(state.providers), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView), searches: serializeSearches(state.searches) };
 }
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
@@ -1575,6 +1615,10 @@ function loadDocState(doc) {
     state.columns = normalizeCustomColumns(d.columns);
     normalizeCustomRefs(state.nodes, state.columns);
     state.tableView = normalizeTableView(d.tableView);
+    // The saved searches after the columns: a custom column's key in one
+    // names a column the document still has.
+    state.searches = normalizeSearches(d.searches);
+    normalizeSearchRefs(state.searches, state.columns);
     // A note too: deleting the second of two notes under one id deleted both,
     // and the second could never be edited.
     state.annotations = keepIdsUnique(list(d.annotations).filter((a) => a && typeof a === 'object').map(normalizeLoadedAnnotation), 't');
@@ -2302,6 +2346,11 @@ const SHORTCUTS = [
     { keys: ['3'], label: 'Blocks tab', simpleHidden: true, test: (e) => e.key === '3', run: () => showLibraryTab('blocks') },
     { keys: ['/'], label: 'Search the map and table', simpleHidden: true, test: (e) => e.key === '/',
       run: () => { const f = document.getElementById('queryInput'); f.focus(); f.select(); } },
+    // Locate (js/locate.js): the selected device's Locate section (in the
+    // reduced views its plain sentence, docs/BACKLOG.md feature 1, stage 4),
+    // or with nothing selected the search box as / does.
+    { keys: ['W'], label: 'Where is it plugged in?', simpleHidden: false, test: (e) => e.key.toLowerCase() === 'w',
+      run: () => locateKey() },
     { keys: ['0'], label: 'Reset zoom to 1:1', test: (e) => e.key === '0',
       run: () => document.getElementById('zoomResetBtn').click() },
     { keys: ['+', '−'], label: 'Zoom in / out', test: (e) => ['+', '=', '-', '_'].includes(e.key),
@@ -2522,6 +2571,10 @@ function applyProfile() {
     }
     renderShortcutHelp(); // the cheatsheet drops keys whose UI is hidden
     applyView();          // js/table.js: a reduced view has no table, only the map
+    // js/locate.js (loaded later): a reduced view empties the Locate section,
+    // so coming back to Full with a device selected draws it again.
+    if (typeof renderLocate === 'function') renderLocate(locateNode());
+    if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();   // js/trail.js, the same way
 }
 
 // ---- Locale (js/i18n.js holds the dictionaries) ----
@@ -2847,6 +2900,8 @@ function syncTraceControls() {
     const port = document.getElementById('tracePort');
     if (box) box.checked = !!state.settings.traceMode;
     if (portBox) portBox.checked = !!state.settings.tracePortOn;
+    const vlanBox = document.getElementById('traceVlan');
+    if (vlanBox) vlanBox.checked = state.settings.traceVlan !== false;
     // Only when it differs: rewriting a field the user is typing into moves the caret.
     if (port && port.value !== (state.settings.tracePort || '')) port.value = state.settings.tracePort || '';
     updateTracePortUi();
@@ -2878,6 +2933,12 @@ document.getElementById('tracePort').addEventListener('input', (event) => {
 });
 document.getElementById('tracePortToggle').addEventListener('change', (event) => {
     state.settings.tracePortOn = event.target.checked;
+    onTraceControlsChanged();
+});
+// The VLAN tick: unticked, the Trace walks every VLAN (as before VLANs were
+// modelled). The checks never read it (calculateReachability, js/diagnostics.js).
+document.getElementById('traceVlan').addEventListener('change', (event) => {
+    state.settings.traceVlan = event.target.checked;
     onTraceControlsChanged();
 });
 
@@ -2958,8 +3019,16 @@ async function applyImportedDoc(parsed, opts = {}) {
         // else (outgoingDoc). The file is still the copy to keep.
         replaceDocument(doc, { origin: 'file' });
     } else if (known) {
-        const choice = await askAboutKnownCopy({ doc, updated: ident.updated }, known, { title: t('Open a file') });
+        const choice = await askAboutKnownCopy({ doc, updated: ident.updated }, known, { title: t('Open a file'), history: true });
         if (!choice) return false;
+        // An older back-up read into the card's address history (js/trail.js):
+        // the card and the canvas stay as they are.
+        if (choice === 'history') {
+            const result = readIntoTrail(known.id, doc, ident.updated);
+            showToast(readIntoTrailText(result, known.name), result === 'added' ? 'ok' : 'warn');
+            if (landingIsOpen()) renderLanding();
+            return result === 'added' || result === 'known';
+        }
         if (choice === 'update') {
             // The card stays what it was: a template's file brought back
             // updates the template, it does not turn it into a network.
@@ -3345,6 +3414,8 @@ showLibraryTab(state.settings.libraryTab || 'nodes');
         // The baselines for "changes since the last back-up" (js/changes.js).
         // Not awaited: a card shows its line once they arrive.
         openSnapshotStore();
+        // The address history kept beside each card (js/trail.js), the same way.
+        openTrailStore();
         // Saved templates from before they were cards have to be in it.
         migrateUserTemplates();
         renderUserTemplates();

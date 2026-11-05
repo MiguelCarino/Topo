@@ -505,7 +505,7 @@ const templatesData = {
             { id: 'edge', type: 'edge',         name: 'Building Edge GW',    x: 300, y: 300, group: 'g_rka', rackU: 40, rackHeight: 1, rackFace: 'front', nat: true, gw: '203.0.113.1', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.2/30' }, { id: 'i2', name: 'eth1', ip: '198.51.100.6/30' }, { id: 'i3', name: 'eth2', ip: '10.0.0.1/24' }] },
             { id: 'vpn',  type: 'vpn',          name: 'VPN Concentrator',    x: 500, y: 300, group: 'g_rka', rackU: 39, rackHeight: 1, rackFace: 'front', nat: true, gw: '203.0.113.9', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '203.0.113.10/30' }, { id: 'i2', name: 'eth1', ip: '10.0.0.3/24' }], ports: '443, 500, 4500' },
             { id: 'fw',   type: 'firewall',     name: 'Core Firewall',       x: 300, y: 420, group: 'g_rka', rackU: 36, rackHeight: 2, rackFace: 'front', nat: true, gw: '10.0.0.1', dns: '1.1.1.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.2/24' }, { id: 'i2', name: 'eth1', ip: '10.10.0.1/24' }, { id: 'i3', name: 'eth2', ip: '10.20.0.1/24' }], ports: '443, 22' },
-            { id: 'l3',   type: 'l3switch',     name: 'Core Distribution',   x: 400, y: 540, group: 'g_rka', rackU: 31, rackHeight: 1, rackFace: 'front', gw: '10.10.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.2/24' }, { id: 'i2', name: 'eth1', ip: '10.10.10.1/24' }, { id: 'i3', name: 'eth2', ip: '10.10.20.1/24' }, { id: 'i4', name: 'eth3', ip: '10.10.30.1/24' }, { id: 'i5', name: 'eth4', ip: '10.10.40.1/24' }] },
+            { id: 'l3',   type: 'l3switch',     name: 'Core Distribution',   x: 400, y: 540, group: 'g_rka', rackU: 31, rackHeight: 1, rackFace: 'front', gw: '10.10.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.0.2/24' }, { id: 'i2', name: 'eth1', ip: '10.10.10.1/24' }, { id: 'i3', name: 'eth2', ip: '10.10.20.1/24', tagged: '20' }, { id: 'i4', name: 'eth3', ip: '10.10.30.1/24' }, { id: 'i5', name: 'eth4', ip: '10.10.40.1/24' }] },
             { id: 'lb',   type: 'loadbalancer', name: 'Web Load Balancer',   x: 500, y: 420, group: 'g_rka', rackU: 33, rackHeight: 2, rackFace: 'front', nat: true, gw: '10.20.0.1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.0.5/24' }, { id: 'i2', name: 'eth1', ip: '10.30.0.1/24' }], ports: '80, 443' },
             // --- Server farm (behind the LB) ---
             { id: 'as',   type: 'server',       name: 'App Server',          x: 760, y: 300, group: 'g_rkb', rackU: 30, rackHeight: 2, rackFace: 'front', gw: '10.30.0.1', ports: '80, 443',
@@ -528,13 +528,18 @@ const templatesData = {
             { id: 'wvm',  type: 'vm',           name: 'Web VM',              x: 860, y: 420, host: 'as', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.12/24' }], gw: '10.30.0.1' },
             { id: 'ctr',  type: 'container',    name: 'API Container',       x: 860, y: 540, host: 'wvm', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.13/24' }], gw: '10.30.0.1', ports: '8080' },
             // --- Hospital tenant (VLAN 10) ---
-            { id: 'hsw',  type: 'switch',       name: 'Hospital Switch',     x: 160, y: 860, group: 'g_hosp', portCount: 8,  interfaces: [] },
+            { id: 'hsw',  type: 'switch',       name: 'Hospital Switch',     x: 160, y: 860, group: 'g_hosp', portCount: 8,  poeBudget: 65, portAttrs: { p5: { poe: 'af' } }, interfaces: [] },
             { id: 'dcm',  type: 'dicom',        name: 'CT Modality',         x: 60, y: 980, group: 'g_hosp', serial: 'CT64-1187-A', assetTag: 'HT-0042', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.20/24' }], gw: '10.10.10.1', ports: '104' },
             { id: 'pacs', type: 'server',       name: 'PACS Server',         x: 160, y: 980, group: 'g_hosp', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.10/24' }], gw: '10.10.10.1', ports: '104, 11112' },
             { id: 'radpc',type: 'pc',           name: 'Radiology WS',        x: 260, y: 980, group: 'g_hosp', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.50/24' }], gw: '10.10.10.1' },
-            { id: 'wcam', type: 'camera',       name: 'Ward Camera',         x: 160, y: 1100, group: 'g_hosp', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.90/24' }], gw: '10.10.10.1', ports: '554' },
+            { id: 'wcam', type: 'camera',       name: 'Ward Camera',         x: 160, y: 1100, group: 'g_hosp', poeDraw: 6.49, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.90/24' }], gw: '10.10.10.1', ports: '554' },
             // --- Studio tenant (VLAN 20) ---
-            { id: 'ssw',  type: 'switch',       name: 'Studio Switch',       x: 600, y: 860, group: 'g_studio', portCount: 8,  interfaces: [] },
+            // A clean trunk (feature 4, stage 2a): the Studio's uplink carries
+            // VLAN 20 tagged at both ends (an SVI on a trunk, so its address's
+            // VLAN travels tagged), and the two access ports are VLAN 20, so
+            // the VLAN checks have something to read and find nothing.
+            { id: 'ssw',  type: 'switch',       name: 'Studio Switch',       x: 600, y: 860, group: 'g_studio', portCount: 8,
+              portAttrs: { p1: { tagged: '20' }, p2: { vlan: 20 }, p3: { vlan: 20 } }, interfaces: [] },
             { id: 'scam', type: 'camera',       name: 'Studio Cam',          x: 550, y: 980, group: 'g_studio', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.20.90/24' }], gw: '10.10.20.1', ports: '554' },
             { id: 'epc',  type: 'pc',           name: 'Edit Bay',            x: 650, y: 980, group: 'g_studio', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.20.50/24' }], gw: '10.10.20.1' },
             // --- On-site office tenant (VLAN 30, wireless) ---
@@ -545,9 +550,12 @@ const templatesData = {
             { id: 'oph',  type: 'voip',         name: 'Desk Phone',          x: 1090, y: 980, group: 'g_office', gw: '10.10.30.1', ports: '5060', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.60/24', radio: { standard: 'ax' } }] },
             { id: 'osen', type: 'iot',          name: 'Smart Sensor',        x: 990, y: 1100, group: 'g_office', gw: '10.10.30.1', ports: '1883', interfaces: [{ id: 'i1', name: 'wlan0', ip: '10.10.30.100/24', radio: { standard: 'n', bands: [{ band: '2.4' }] } }] },
             // --- Call center tenant (VLAN 40) ---
-            { id: 'csw',  type: 'switch',       name: 'Call Center Switch',  x: 1760, y: 860, group: 'g_ccrk', rackU: 10, rackHeight: 1, rackFace: 'front', portCount: 24, interfaces: [] },
-            { id: 'cp1',  type: 'voip',         name: 'Agent Phone 1',       x: 1400, y: 860, group: 'g_cc', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.61/24' }], gw: '10.10.40.1', ports: '5060' },
-            { id: 'cp2',  type: 'voip',         name: 'Agent Phone 2',       x: 1500, y: 860, group: 'g_cc', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.62/24' }], gw: '10.10.40.1', ports: '5060' },
+            { id: 'csw',  type: 'switch',       name: 'Call Center Switch',  x: 1760, y: 860, group: 'g_ccrk', rackU: 10, rackHeight: 1, rackFace: 'front', portCount: 24,
+              // PoE (feature 4): the two desk phones are powered by their cables,
+              // well inside the budget, so the sample still opens with no finding.
+              poeBudget: 120, portAttrs: { p2: { poe: 'at' }, p3: { poe: 'at' } }, interfaces: [] },
+            { id: 'cp1',  type: 'voip',         name: 'Agent Phone 1',       x: 1400, y: 860, group: 'g_cc', poeDraw: 6.49, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.61/24' }], gw: '10.10.40.1', ports: '5060' },
+            { id: 'cp2',  type: 'voip',         name: 'Agent Phone 2',       x: 1500, y: 860, group: 'g_cc', poeDraw: 6.49, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.62/24' }], gw: '10.10.40.1', ports: '5060' },
             { id: 'capc', type: 'pc',           name: 'Agent WS',            x: 1450, y: 980, group: 'g_cc', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.50/24' }], gw: '10.10.40.1' },
             { id: 'pbx',  type: 'custom',       name: 'PBX Controller',      x: 1760, y: 980, group: 'g_ccrk', rackU: 6, rackHeight: 2, rackFace: 'front', rackDepth: 'half', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.40.10/24' }], gw: '10.10.40.1', ports: '5060' },
             // --- Branch office (over VPN) ---

@@ -161,7 +161,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     older.doc.updated = 1000;
     offered = null; choose = 'copy';
     await applyImportedDoc(older);
-    ok('an older copy says yours is newer, and offers Open mine', !!offered && offered.ids.join(',') === 'copy,mine' && /yours is newer/.test(offered.message),
+    ok('an older copy says yours is newer, and offers its history and Open mine', !!offered && offered.ids.join(',') === 'copy,history,mine' && /yours is newer/.test(offered.message),
        offered && offered.message);
     ok('Open as a copy makes a second card of its own', cards().length === 2 && state.libraryId !== id
        && CarinoLibrary.loadLibrary()[state.libraryId].name === 'Casa Roma (copy)');

@@ -295,6 +295,90 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('and does not touch the document either', JSON.stringify(serializeDoc()) === canvasDocBefore);
   state.report = null;
 
+  // ---- Capacity: each site's sheet has its own section, built inside withDoc ----
+  // A site with a nearly full switch, while the canvas holds one with
+  // nothing near full: the binder's sheet must count the site's switch, not
+  // the canvas's, and a site with none gets no Capacity section.
+  const closet = { v: DOC_VERSION, nodes: [{ id: 'sw', type: 'switch', name: 'Closet switch', x: 0, y: 0, portCount: 8, interfaces: [] }], links: [] };
+  for (let p = 1; p <= 7; p++) {
+    closet.nodes.push({ id: `h${p}`, type: 'pc', name: `Phone ${p}`, x: 0, y: 0, interfaces: [{ id: 'i1', name: 'eth0' }] });
+    closet.links.push({ id: `l${p}`, source: 'sw', target: `h${p}`, sourceIface: `p${p}`, targetIface: 'i1' });
+  }
+  const roomy = { v: DOC_VERSION, nodes: [{ id: 'sw', type: 'switch', name: 'Roomy switch', x: 0, y: 0, portCount: 48, interfaces: [] }], links: [] };
+  loadDocState(cloneData(roomy));
+  const capCanvas = JSON.stringify(serializeDoc());
+  const capEntries = [{ id: 'c1', name: 'Closet', updated: 1, doc: cloneData(closet) }, { id: 'c2', name: 'Roomy', updated: 1, doc: cloneData(roomy) }];
+  const capBinder = binderModel(capEntries, { site: 'Capacity', client: '', engineer: '', ref: '', date: '', scope: '' });
+  const capOf = (name) => (capBinder.sites.find((s) => s.name === name) || {}).model;
+  ok('a site\'s Capacity section counts its own switches, not the open canvas\'s',
+     !!capOf('Closet') && JSON.stringify(capOf('Closet').capacity.ports.map((r) => [r.name, r.free])) === JSON.stringify([['Closet switch', 1]])
+     && capOf('Roomy').capacity.ports.length === 0 && capOf('Roomy').capacity.room.free === 48,
+     JSON.stringify(capBinder.sites.map((s) => s.model && s.model.capacity)));
+  // With the Ports table ticked (off by default; tests/suites/reportsections.js).
+  const capHtml = binderHtml(capBinder, {}, { technical: true, sections: { capPorts: true } });
+  // Each site's sheet starts at its anchor; cut the document there.
+  const sheetAt = (name) => capHtml.indexOf(`id="${(capBinder.sites.find((s) => s.name === name) || {}).anchor}"`);
+  const closetAt = sheetAt('Closet'), roomyAt = sheetAt('Roomy');
+  const [firstAt, secondAt] = closetAt < roomyAt ? [closetAt, roomyAt] : [roomyAt, closetAt];
+  const sheetOf = (at) => (at === firstAt ? capHtml.slice(firstAt, secondAt) : capHtml.slice(secondAt));
+  const closetPart = closetAt >= 0 && roomyAt >= 0 ? sheetOf(closetAt) : '', roomyPart = closetAt >= 0 && roomyAt >= 0 ? sheetOf(roomyAt) : '';
+  ok('the binder prints the section on that site\'s sheet only', (capHtml.match(/<h2>Capacity<\/h2>/g) || []).length === 1
+     && closetPart.includes('<h2>Capacity</h2>') && closetPart.includes('Closet switch') && !roomyPart.includes('<h2>Capacity</h2>')
+     && roomyPart.includes('Roomy switch'), JSON.stringify({ closetAt, roomyAt }));
+  ok('and its note stays out of the estate\'s counts', capBinder.counts.critical === 0 && capBinder.counts.advisory === 0
+     && !capBinder.findings.some((f) => f.key === 'port-capacity'));
+  ok('the canvas is handed back unchanged', JSON.stringify(serializeDoc()) === capCanvas);
+
+  // ---- Saved searches: each site's sheet prints its own marked ones ----
+  // The canvas holds a search of its own, marked to print, that would match
+  // both sites' devices: neither sheet may print it. Each site prints its
+  // own marked search over its own devices, and an unmarked one nowhere.
+  const sqSite = (name, dev, searches) => ({ v: DOC_VERSION, nodes: [{ id: 'd1', type: 'pc', name: dev, x: 0, y: 0, interfaces: [] }], links: [], searches });
+  const north = sqSite('North', 'North PC', [{ id: 'sq_1', name: 'North PCs', query: 'type:pc', print: true }, { id: 'sq_2', name: 'North quiet', query: 'type:pc' }]);
+  const south = sqSite('South', 'South PC', [{ id: 'sq_1', name: 'South PCs', query: 'type:pc', print: true }]);
+  loadDocState({ v: DOC_VERSION, nodes: [], links: [], searches: [{ id: 'sq_9', name: 'Canvas search', query: 'type:pc', print: true }] });
+  const sqCanvas = JSON.stringify(serializeDoc());
+  const sqBinder = binderModel([{ id: 'n1', name: 'North', updated: 1, doc: cloneData(north) }, { id: 's1', name: 'South', updated: 1, doc: cloneData(south) }],
+    { site: 'Searches', client: '', engineer: '', ref: '', date: '', scope: '' });
+  const sqOf = (name) => ((sqBinder.sites.find((s) => s.name === name) || {}).model || {}).searches || [];
+  ok('a site\'s model holds its own marked searches, matched over its own devices',
+     JSON.stringify(sqOf('North').map((s) => [s.name, s.rows.map((r) => r.name)])) === JSON.stringify([['North PCs', ['North PC']]])
+     && JSON.stringify(sqOf('South').map((s) => [s.name, s.rows.map((r) => r.name)])) === JSON.stringify([['South PCs', ['South PC']]]),
+     JSON.stringify(sqBinder.sites.map((s) => s.model && s.model.searches)));
+  const sqHtml = binderHtml(sqBinder, {});
+  const sqAt = (name) => sqHtml.indexOf(`id="${(sqBinder.sites.find((s) => s.name === name) || {}).anchor}"`);
+  const nAt = sqAt('North'), sAt = sqAt('South');
+  const northPart = sqHtml.slice(nAt, sAt > nAt ? sAt : undefined), southPart = sqHtml.slice(sAt, nAt > sAt ? nAt : undefined);
+  ok('each sheet prints its own section', northPart.includes('<h3>North PCs</h3>') && !northPart.includes('South PCs')
+     && southPart.includes('<h3>South PCs</h3>') && !southPart.includes('North PCs'), JSON.stringify({ nAt, sAt }));
+  ok('an unmarked search and the canvas\'s are on no sheet', !sqHtml.includes('North quiet') && !sqHtml.includes('Canvas search'));
+  ok('the canvas\'s searches are handed back unchanged', JSON.stringify(serializeDoc()) === sqCanvas);
+
+  // ---- Inventory: each site's sheet counts its own vendors and models ----
+  // The canvas holds a vendor of its own; neither sheet may count it, and a
+  // site with nothing typed gets no Inventory section.
+  const invSite = (vendor, model) => ({ v: DOC_VERSION, links: [], nodes: [
+    { id: 'a', type: 'switch', name: `${vendor} A`, x: 0, y: 0, interfaces: [], vendor, model, os: '1.0' },
+    { id: 'b', type: 'switch', name: `${vendor} B`, x: 0, y: 0, interfaces: [], vendor, model, os: '2.0' }] });
+  const bare = { v: DOC_VERSION, links: [], nodes: [{ id: 'a', type: 'pc', name: 'Bare PC', x: 0, y: 0, interfaces: [] }] };
+  loadDocState({ v: DOC_VERSION, links: [], nodes: [{ id: 'z', type: 'switch', name: 'Canvas', x: 0, y: 0, interfaces: [], vendor: 'CanvasCo', model: 'Z9', os: '9' }] });
+  const invCanvas = JSON.stringify(serializeDoc());
+  const invBinder = binderModel([{ id: 'e1', name: 'East', updated: 1, doc: invSite('Aruba', 'CX 6100') }, { id: 'w1', name: 'West', updated: 1, doc: invSite('Juniper', 'EX2300') },
+    { id: 'b1', name: 'Bare', updated: 1, doc: bare }], { site: 'Inventory', client: '', engineer: '', ref: '', date: '', scope: '' });
+  const invOf = (name) => ((invBinder.sites.find((s) => s.name === name) || {}).model || {}).inventory;
+  ok('a site\'s inventory counts its own devices, not the canvas\'s',
+     JSON.stringify(invOf('East').models.map((r) => [r.value, r.count, r.mismatch])) === JSON.stringify([['Aruba CX 6100', 2, 'open']])
+     && JSON.stringify(invOf('West').vendors.map((r) => r.value)) === JSON.stringify(['Juniper']) && invOf('Bare').any === false,
+     JSON.stringify(invBinder.sites.map((s) => s.model && s.model.inventory)));
+  const invHtml = binderHtml(invBinder, {});
+  const invAt = (name) => invHtml.indexOf(`id="${(invBinder.sites.find((s) => s.name === name) || {}).anchor}"`);
+  const invStarts = ['East', 'West', 'Bare'].map((n) => [n, invAt(n)]).sort((p, q) => p[1] - q[1]);
+  const invPart = (name) => { const k = invStarts.findIndex((p) => p[0] === name); return invHtml.slice(invStarts[k][1], k + 1 < invStarts.length ? invStarts[k + 1][1] : undefined); };
+  ok('each sheet prints its own Inventory section', invPart('East').includes('<h2>Inventory</h2>') && invPart('East').includes('CX 6100') && !invPart('East').includes('EX2300')
+     && invPart('West').includes('EX2300') && !invPart('West').includes('CX 6100') && !invPart('Bare').includes('<h2>Inventory</h2>')
+     && !invHtml.includes('CanvasCo'), JSON.stringify(invStarts));
+  ok('the canvas is handed back unchanged after the inventory', JSON.stringify(serializeDoc()) === invCanvas);
+
   persistLibrary(heldStore);
   window.history.replaceState(null, '', window.location.pathname + window.location.search + heldHash);
   window.alert = realAlert; window.confirm = realConfirm; window.prompt = realPrompt;

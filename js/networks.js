@@ -98,7 +98,7 @@ function networkCardHtml(net) {
     const shown = names.length > 6 ? t('{names} and {n} more', { names: names.slice(0, 6).join(', '), n: names.length - 6 }) : names.join(', ');
     const field = (key, label, attrs = '') => `<div class="${key === 'dns' || key === 'purpose' ? 'span2' : ''}">
             <label class="prop-lbl" for="net-${id}-${key}">${escapeHtml(label)}</label>
-            <input id="net-${id}-${key}" type="text" class="input${key === 'gateway' || key === 'dns' || key === 'vlan' ? ' mono' : ''}${fieldBad(net, key) ? ' bad' : ''}"
+            <input id="net-${id}-${key}" type="text" class="input${MONO_NET_FIELDS.includes(key) ? ' mono' : ''}${fieldBad(net, key) ? ' bad' : ''}"
                 data-field="${key}" data-net="${id}" value="${escapeHtml(net[key] === undefined ? '' : String(net[key]))}" ${attrs} autocomplete="off" spellcheck="false">
         </div>`;
     const zone = net.drawZone === true ? 'on' : net.drawZone === false ? 'off' : 'auto';
@@ -110,6 +110,7 @@ function networkCardHtml(net) {
         ${name || !isBlank(net.purpose) ? `<div class="net-name">${escapeHtml(name)}${!isBlank(net.purpose) ? ` <span class="net-muted">· ${escapeHtml(net.purpose.trim())}</span>` : ''}</div>` : ''}
         <div class="net-line mono">${escapeHtml(use)} · ${escapeHtml(next)}</div>
         <div class="net-line mono">${svc}</div>
+        ${poolLine(st)}
         <div class="net-line net-members">${names.length ? escapeHtml(shown) : `<span class="net-muted">${escapeHtml(t('Nobody on it yet.'))}</span>`}</div>
         <div class="net-actions">
             <button type="button" class="link-btn" data-act="members" data-net="${id}" ${names.length ? '' : 'disabled'}
@@ -133,9 +134,44 @@ function networkCardHtml(net) {
             </div>
             ${field('dns', 'DNS', 'placeholder="10.0.0.53, 10.0.0.54"')}
             <label class="prop-check span2"><input type="checkbox" data-field="dhcp" data-net="${id}"${net.dhcp ? ' checked' : ''}><span class="prop-lbl">DHCP</span></label>
+            ${net.dhcp ? `${field('dhcpFirst', 'DHCP first', `placeholder="${escapeHtml(poolPlaceholder(st.parsed, 99))}"`)}
+            ${field('dhcpLast', 'DHCP last', `placeholder="${escapeHtml(poolPlaceholder(st.parsed, 198))}"`)}` : ''}
             ${gatewayAdvice(net, st)}
+            ${poolAdvice(net)}
         </div>
     </article>`;
+}
+
+const MONO_NET_FIELDS = ['gateway', 'dns', 'vlan', 'dhcpFirst', 'dhcpLast'];
+
+// A valid DHCP pool's own line under the use line: its range, how many of its
+// addresses are recorded here (devices, the gateway and DNS: recorded, never
+// leases, which Topo cannot see) and the fixed addresses left outside it.
+function poolLine(st) {
+    const pool = st.pool;
+    if (!pool || !pool.valid) return '';
+    const parts = [
+        t('Pool {range}', { range: `${pool.first}–${pool.last}` }),
+        pool.size === null ? t('{n} recorded', { n: pool.used }) : t('{n} recorded of {size}', { n: pool.used, size: pool.size }),
+        st.fixed && st.fixed.free !== null ? t('fixed {free} free', { free: st.fixed.free }) : ''
+    ].filter(Boolean);
+    return `<div class="net-line mono">${escapeHtml(parts.join(' · '))}</div>`;
+}
+// An example pool end in the subnet: the 100th or 199th host, or its last.
+function poolPlaceholder(p, offset) {
+    if (!p) return '';
+    const r = usableRange(p);
+    const big = r.first + BigInt(offset) > r.last ? r.last : r.first + BigInt(offset);
+    return bigToIp(big, p.kind).toString();
+}
+// What is wrong with the pool, said where it is typed (poolProblemTexts,
+// js/model.js, the 'dhcp-pool' finding's own words), and that a pool with
+// DHCP off is kept but not counted.
+function poolAdvice(net) {
+    const def = dhcpPoolOf(net);
+    if (!def) return '';
+    const texts = def.problem === 'off' ? [t('DHCP is off: the pool is not counted.')] : poolProblemTexts(net, def);
+    return texts.map((text) => `<p class="rail-note span2 net-warn">${escapeHtml(text)}</p>`).join('');
 }
 
 // The schema row's own validator (NETWORK_FIELDS), so the tab and a future
@@ -166,7 +202,18 @@ function onNetworkField(e) {
     const net = networkById(el.dataset.net);
     if (!net || readOnlyRefuses()) return;
     const key = el.dataset.field;
-    if (key === 'dhcp') net.dhcp = el.checked ? true : undefined;
+    if (key === 'dhcp') {
+        net.dhcp = el.checked ? true : undefined;
+        // The pool's fields come and go with the tick: drawn now, not when
+        // the focus leaves the card, and the tick keeps the focus.
+        save(); refreshSelectedNodeDiagnostics(drawnDiag(renderCanvasOnly()));
+        renderNetworksPanel(true);
+        const again = netPanel().querySelector(`[data-field="dhcp"][data-net="${net.id}"]`);
+        if (again) again.focus();
+        const selNode = state.selectedType === 'node' && getNode(state.selectedId);
+        if (selNode) refreshInheritance(selNode);
+        return;
+    }
     else if (key === 'drawZone') net.drawZone = el.value === 'on' ? true : el.value === 'off' ? false : undefined;
     else if (key === 'vlan') {
         net.vlan = isBlank(el.value) ? undefined : (asVlan(el.value) !== undefined ? asVlan(el.value) : el.value);

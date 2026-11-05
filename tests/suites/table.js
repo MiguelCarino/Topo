@@ -115,7 +115,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('rows read the report model', reportDevices().every((d) => cellEl(`n:${d.id}`, 'name').textContent === d.name));
     const tableable = (fields) => fields.filter((f) => f.table).map((f) => f.key);
     ok('every device field the schema marks for the table is a column',
-       tableable(NODE_FIELDS).every((k) => heads().includes(k)), `${tableable(NODE_FIELDS)} vs ${heads()}`);
+       // The PoE columns are offered once the network records any PoE (tvPoeOffered; vlanui.js).
+       tableable(NODE_FIELDS).filter((k) => tvPoeOffered() || (k !== 'poeBudget' && k !== 'poeDraw')).every((k) => heads().includes(k)), `${tableable(NODE_FIELDS)} vs ${heads()}`);
     ok('the Gateway header is the schema label, in English', grid().querySelector('th[data-col="gw"]').textContent.includes('Gateway'));
     const inh = cellEl('n:a', 'gw');
     ok('a blank gateway shows the inherited one, greyed', inh.textContent === '10.0.0.1' && inh.classList.contains('tv-muted'));

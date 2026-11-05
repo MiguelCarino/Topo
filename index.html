@@ -306,6 +306,8 @@
                         <div id="bulkPane-set" class="bulk-pane">
                             <p class="rail-note" data-i18n>A field that says "mixed" differs between them. A field left blank, or as it is, is not changed.</p>
                             <div id="bulkFields" class="bulk-fields"></div>
+                            <!-- While some device of the set has no vendor (js/bulk.js bulkPlanVendorFromMac). -->
+                            <p id="bulkVendorMac" class="bulk-vendor-mac hidden"><button type="button" id="bulkVendorMacBtn" class="link-btn" data-i18n>Fill vendor from MAC</button></p>
                         </div>
                         <div id="bulkPane-rename" class="bulk-pane hidden">
                             <div class="bulk-field">
@@ -398,6 +400,10 @@
                         <button id="bulkPreviewBtn" type="button" class="btn btn-primary bulk-go" data-i18n>Preview</button>
                     </div>
                     <button id="printLabelsBtn" type="button" class="rail-btn" data-adv data-i18n>Print labels</button>
+                    <!-- Locate's print sheet (js/locate.js printLocate): where each
+                         selected device is plugged in, one block per device.
+                         Hidden while the set holds no device (renderSelection). -->
+                    <button id="printLocateBtn" type="button" class="rail-btn" data-adv data-i18n>Print where they are plugged in</button>
                     <button id="deleteSelectionBtn" type="button" class="rail-btn danger" data-i18n>Delete Selected</button>
                 </div>
 
@@ -468,7 +474,7 @@
                                 <label class="prop-lbl">Interfaces (Port & IP)</label>
                                 <div class="prop-links">
                                     <button id="bondIfaceBtn" class="link-btn hidden" data-i18n-title title="Fold every wired NIC into one bond: one MAC, one address">⇄ Bond NICs</button>
-                                    <button id="addMacBtn" class="link-btn quiet" data-i18n-title title="Show the hardware address under each interface — paste one and it is decoded">+ MAC</button>
+                                    <button id="addMacBtn" class="link-btn quiet" data-i18n-title title="Show the hardware address and the VLANs under each interface — paste a MAC and it is decoded">+ MAC / VLAN</button>
                                     <button id="addIfaceBtn" class="link-btn">+ Add Interface</button>
                                 </div>
                             </div>
@@ -496,6 +502,15 @@
                             <input type="checkbox" id="propNat">
                             <span class="prop-lbl">NAT / Masquerade</span>
                         </label>
+                        <!-- PoE (document v16, js/ui.js renderPoeDraw): what this
+                             device draws from its cable, in watts or as a class
+                             ("class 4"). Not on a cloud, a VM or a container. -->
+                        <div id="poeDrawRow" class="prop-grid hidden">
+                            <div>
+                                <label class="prop-lbl" for="propPoeDraw" data-i18n>PoE draw (W)</label>
+                                <input type="text" id="propPoeDraw" class="input mono" inputmode="decimal" autocomplete="off" placeholder="6.5 · class 2" />
+                            </div>
+                        </div>
 
                         <!-- Netplan hand-off: an action, not a stored setting. It used to be
                              a per-node "Network config file" checkbox (netcfg) that revealed
@@ -530,18 +545,41 @@
                              addressing. Collapsible, its open state remembered in
                              this browser; full editor only, like the notes were
                              (the reduced views drop it, tests/suites/simple.js).
-                             "Model / firmware" is the old OS field relabelled and
-                             stays English with the other technical labels; the
-                             plain words (Serial number, Location, Status…) are
-                             translated. -->
+                             "Firmware / OS" is the old OS field (relabelled
+                             "Model / firmware" until the model had a field of its
+                             own, document v16) and stays English with the other
+                             technical labels; the plain words (Vendor, Model,
+                             Serial number, Location, Status…) are translated. -->
                         <details id="assetGroup" class="asset-group" data-adv open>
                             <summary class="asset-sum"><span data-i18n>Asset</span><span id="assetSummary" class="asset-sum-note"></span></summary>
                             <div class="prop-grid">
+                                <div>
+                                    <!-- Use: writes the vendor the MACs suggest (the
+                                         field's grey text, js/assets.js
+                                         renderVendorHint); nothing is written
+                                         until it is pressed or a vendor typed. -->
+                                    <div class="prop-headrow">
+                                        <label class="prop-lbl" for="propVendor" data-i18n>Vendor</label>
+                                        <button type="button" id="vendorUseBtn" class="link-btn vendor-use hidden" data-i18n>Use</button>
+                                    </div>
+                                    <input type="text" id="propVendor" list="vendorDatalist" class="input" autocomplete="off" />
+                                    <datalist id="vendorDatalist"></datalist>
+                                </div>
+                                <div>
+                                    <label class="prop-lbl" for="propModel" data-i18n>Model</label>
+                                    <input type="text" id="propModel" list="modelDatalist" class="input" autocomplete="off" />
+                                    <datalist id="modelDatalist"></datalist>
+                                </div>
                                 <div class="span2">
-                                    <label class="prop-lbl" for="propOs">Model / firmware</label>
+                                    <label class="prop-lbl" for="propOs">Firmware / OS</label>
                                     <input type="text" id="propOs" list="osDatalist" class="input" />
                                     <datalist id="osDatalist"></datalist>
                                 </div>
+                                <!-- Split model and firmware (inventory stage 2,
+                                     js/assets.js planModelSplit): offered when
+                                     this device's Firmware / OS text reads as a
+                                     model, applied only on the button. -->
+                                <p id="modelSplitNote" class="rail-note span2 model-split-note hidden" role="status"><span data-i18n>Model and firmware are in one field.</span> <button type="button" id="modelSplitBtn" class="link-btn" data-i18n>Split</button></p>
                                 <div>
                                     <label class="prop-lbl" for="propSerial" data-i18n>Serial number</label>
                                     <input type="text" id="propSerial" class="input mono" maxlength="64" autocomplete="off" spellcheck="false" />
@@ -668,6 +706,36 @@
                                 <p id="notesLint" class="rail-note notes-lint hidden" role="status"></p>
                             </div>
                         </details>
+                        <!-- Locate (docs/BACKLOG.md feature 1, js/locate.js): where
+                             this device is plugged in, worked out from the cables
+                             and never stored. Right after the Asset group (then,
+                             later, History); its open state is remembered in this
+                             browser. Full editor only. Key W opens it. -->
+                        <details id="locateGroup" class="asset-group locate-group" data-adv>
+                            <summary class="asset-sum"><span data-i18n>Locate</span><span id="locateSummary" class="asset-sum-note"></span></summary>
+                            <div id="locateBody" class="locate-body"></div>
+                        </details>
+                        <!-- Locate in plain words (feature 1, stage 4): the reduced
+                             views' read-only answer, one short sentence per step
+                             (locatePlainSentence, js/model.js). Never in Full,
+                             which has the section above. -->
+                        <p id="locateSentence" class="locate-sentence" aria-live="polite"></p>
+                        <!-- History (docs/BACKLOG.md feature 5 stage 2, js/trail.js):
+                             what this device held at earlier back-ups and
+                             reports, read from the trail kept in this browser
+                             and never from the document. After Locate (Asset,
+                             Locate, History); its open state is remembered in
+                             this browser. Full editor only. -->
+                        <details id="historyGroup" class="asset-group history-group" data-adv>
+                            <summary class="asset-sum"><span data-i18n>History</span><span id="historySummary" class="asset-sum-note"></span></summary>
+                            <div id="historyBody" class="hist-body"></div>
+                        </details>
+                        <!-- Address history in plain words (the owner, 2026-11-05):
+                             the reduced views' read-only lines (historySimpleHtml,
+                             js/trail.js), only when Settings' Show address history
+                             in Simple view is ticked. Never in Full, which has the
+                             section above; empty, and so hidden, by default. -->
+                        <div id="historySimple" class="hist-simple" aria-live="polite"></div>
                     </div>
 
                     <!-- A cable's own facts (link.cable, js/assets.js): the label
@@ -712,7 +780,7 @@
                 <div id="cfgPanel-diagnostics" data-adv class="cfg-panel hidden">
                     <!-- Trace: everything the selected device can reach, optionally
                          only what answers on a port. The controls mirror
-                         state.settings (traceMode, tracePort, tracePortOn) and are
+                         state.settings (traceMode, tracePort, tracePortOn, traceVlan) and are
                          never read back: js/diagnostics.js reads the settings.
                          English labels, like the rest of this tab's technical
                          vocabulary (js/i18n.js). Ticking it with nothing selected
@@ -730,6 +798,12 @@
                             <label class="prop-check" data-i18n-title title="Filter the trace by a port. Off = IP reachability only — the port stays typed in, just ignored.">
                                 <input type="checkbox" id="tracePortToggle">
                                 <span class="prop-lbl" data-i18n>Port filter</span>
+                            </label>
+                            <!-- One VLAN at a time (docs/BACKLOG.md feature 4 stage 3):
+                                 state.settings.traceVlan, on by default, never persisted. -->
+                            <label class="prop-check trace-vlan" data-i18n-title title="Follow one VLAN at a time: the start's own, and after a router the VLAN of each subnet it routes into. Off = every VLAN.">
+                                <input type="checkbox" id="traceVlan" checked>
+                                <span class="prop-lbl">VLAN</span>
                             </label>
                             <input type="text" id="tracePort" placeholder="443" class="input mono trace-port" autocomplete="off" spellcheck="false" data-i18n-title title="Port to test when the Port filter is on">
                         </div>
@@ -899,11 +973,23 @@
                  understands (type:, ip:, vlan:…) are syntax and stay English;
                  the sentences around them are translated. -->
             <div id="queryBar" class="topo-query" role="search" data-adv>
+                <span class="q-field">
                 <input type="search" id="queryInput" class="input" autocomplete="off" spellcheck="false"
                     data-i18n-placeholder placeholder="Search, e.g. type:camera"
                     data-i18n-aria-label aria-label="Search the map and table"
-                    data-i18n-title title="Plain words match any field. Narrow with name:, type:, ip: (an address or a network such as 10.0.0.0/24), mac:, vlan:, switch: and has:finding. Put - in front of a word to leave it out. Enter frames the matches on the map.">
+                    data-i18n-title title="Plain words match any field. Narrow with name:, type:, ip: (an address or a network such as 10.0.0.0/24), mac:, vendor:, model:, fw:, vlan:, switch:, has:finding and was: (what a device had before, from this browser's history). Put - in front of a word to leave it out. Enter frames the matches on the map.">
                 <button id="queryClearBtn" type="button" class="q-clear hidden" data-i18n-title title="Clear the search" data-i18n-aria-label aria-label="Clear the search">✕</button>
+                </span>
+                <!-- Saved searches (js/searches.js, docs/BACKLOG.md feature 6):
+                     only while the network has one. Its menu runs a search
+                     (setQuery), edits it or deletes it; on a phone the panel is
+                     a sheet under the bar, as wide as the bar. -->
+                <div id="querySavedMenu" class="cs-menu q-saved hidden">
+                    <button id="querySavedBtn" type="button" class="cs-btn q-saved-btn" aria-haspopup="true" aria-expanded="false" data-i18n-title title="Saved searches" data-i18n-aria-label aria-label="Saved searches"><span class="q-saved-icon" aria-hidden="true">★</span><span class="q-saved-label" data-i18n>Saved</span><span class="cs-caret" aria-hidden="true">▾</span></button>
+                    <div id="querySavedPanel" class="cs-menu-panel q-saved-panel" role="menu" aria-labelledby="querySavedBtn" hidden>
+                        <ul id="querySavedList" class="sq-list"></ul>
+                    </div>
+                </div>
             </div>
             <!-- Only while a search is on. A card of its own, so on a phone it
                  wraps under the switch and the box instead of squeezing them. -->
@@ -911,8 +997,22 @@
                 <span id="queryCount" class="q-count" aria-live="polite"></span>
                 <button id="queryZoomBtn" type="button" class="cs-btn q-btn" data-i18n>Zoom to matches</button>
                 <button id="querySelectBtn" type="button" class="cs-btn q-btn" data-i18n-title title="Select every device that matches (on the Cables tab, every cable)" data-i18n>Select matches</button>
+                <!-- Locate (js/locate.js): on exactly one device match, that
+                     device and its Locate section. Shown on the map, the rack
+                     view and the table's Devices tab; disabled on several, with
+                     a tooltip that updateQueryBar sets through t(). The tools
+                     that act on the matches end here: the card's later buttons
+                     (saved searches) go after it, and the card wraps. -->
+                <button id="queryLocateBtn" type="button" class="cs-btn q-btn" data-i18n>Locate</button>
+                <!-- Save search (js/searches.js): ☆ on a search Topo
+                     understands, ★ "Update saved search" when the box holds a
+                     saved one. Its text is set by updateSavedSearchBar. -->
+                <button id="querySaveBtn" type="button" class="cs-btn q-btn q-save">☆ Save search</button>
             </div>
             <p id="queryError" class="q-error hidden" role="status" data-adv></p>
+            <!-- was: and has:history (js/query.js queryTrailNote): a removed
+                 device that held the value, or that no history is kept. -->
+            <p id="queryNote" class="q-error q-note hidden" role="status" data-adv></p>
             </div>
             <section id="tableView" class="topo-table hidden" data-adv data-i18n-aria-label aria-label="Table">
                 <div class="tv-head">
@@ -924,14 +1024,24 @@
                         <button type="button" class="tabbtn" role="tab" data-tvtab="subnets">Subnets</button>
                         <button type="button" class="tabbtn" role="tab" data-tvtab="groups" data-i18n>Groups</button>
                         <button type="button" class="tabbtn hidden" role="tab" data-tvtab="wifi">Wi-Fi</button>
+                        <!-- By vendor, model and firmware (js/report.js reportInventory),
+                             only while some device has one of them. -->
+                        <button type="button" class="tabbtn hidden" role="tab" data-tvtab="inventory" data-i18n>Inventory</button>
                     </div>
                     <div class="tv-bar">
                         <span id="tvCount" class="tv-count"></span>
                         <button id="tvPasteBtn" type="button" class="cs-btn" data-i18n-title title="Paste a list of values into one column, one per row, with a preview first" data-i18n>Paste a column…</button>
+                        <div id="tvInvBy" class="view-switch tv-invby hidden" role="group" data-i18n-aria-label aria-label="Inventory">
+                            <button type="button" class="toggle-btn active" data-invby="vendor" aria-pressed="true" data-i18n>By vendor</button>
+                            <button type="button" class="toggle-btn" data-invby="model" aria-pressed="false" data-i18n>By model</button>
+                            <button type="button" class="toggle-btn" data-invby="firmware" aria-pressed="false" data-i18n>By firmware / OS</button>
+                        </div>
                         <button id="tvColsBtn" type="button" class="cs-btn" data-i18n-title title="Show, hide and reorder the columns, and add your own" data-i18n>Columns…</button>
+                        <button id="tvSplitBtn" type="button" class="cs-btn hidden" data-i18n-title title="Move a model typed in Firmware / OS into the Vendor and Model fields, with a review first" data-i18n>Split model and firmware…</button>
                     </div>
                 </div>
-                <p class="tv-hint" data-i18n>Click a row to find it on the map. Enter or a double click edits a cell, Esc cancels. Ctrl+V pastes a list down a column.</p>
+                <p id="tvInvHint" class="tv-hint hidden" data-i18n>Click a row to select its devices, then use Change all of them to edit them together.</p>
+                <p id="tvHint" class="tv-hint" data-i18n>Click a row to find it on the map. Enter or a double click edits a cell, Esc cancels. Ctrl+V pastes a list down a column.</p>
                 <div id="tvScroll" class="tv-scroll">
                     <table id="tvGrid" class="data tv-grid"></table>
                     <p id="tvEmpty" class="tv-empty hidden">Nothing here yet.</p>
@@ -1201,6 +1311,22 @@
                                 <span data-i18n>Technical details ticked to start</span>
                             </label>
                         </section>
+                        <!-- Address history (js/trail.js): kept in this browser
+                             only. Shown in every view (the owner, 2026-11-05):
+                             the recording switch, and whether the Simple views'
+                             device panel shows a short read-only history (off
+                             unless ticked). -->
+                        <section class="set-sec" aria-labelledby="setHistoryHead">
+                            <h3 id="setHistoryHead" class="set-head" data-i18n>History</h3>
+                            <label class="set-row">
+                                <input type="checkbox" id="setTrailRecording">
+                                <span><span data-i18n>Keep address history at back-ups and reports</span><br><span class="dlg-dim" data-i18n>Each back-up and report notes every device's addresses, MAC, switch port and group, in this browser only. Off stops recording and keeps what is already there; Clear history on a network's card removes it.</span></span>
+                            </label>
+                            <label class="set-row">
+                                <input type="checkbox" id="setTrailSimple">
+                                <span><span data-i18n>Show address history in Simple view</span><br><span class="dlg-dim" data-i18n>A few plain lines under the selected device: the addresses, names and sockets it had at earlier back-ups and reports. Read only. Off by default.</span></span>
+                            </label>
+                        </section>
                     </div>
                     <div class="modal-foot">
                         <button type="button" id="settingsDoneBtn" class="btn btn-primary" data-i18n>Done</button>
@@ -1294,6 +1420,27 @@
                                 <div id="reportLargeCells" class="dlg-cells" role="group"></div>
                                 <span class="dlg-dim" data-i18n>Tap a square here or on the preview's overview to leave its sheet out.</span>
                             </div>
+                        </div>
+                        <!-- With Technical details only: a tick per section of
+                             the technical sheet (REPORT_SECTIONS, drawn by
+                             js/report.js), each at its default every time the
+                             dialog opens. Read for this report only
+                             (reportParts.sections), site and binder alike. -->
+                        <div id="reportSectionsRow" class="dlg-sections" role="group" aria-labelledby="reportSectionsLbl">
+                            <span id="reportSectionsLbl" class="prop-lbl" data-i18n>Sections</span>
+                            <span class="dlg-dim" data-i18n>Untick a section to leave it out of the technical details. The summary does not change.</span>
+                            <div id="reportSectionsList" class="dlg-section-list"></div>
+                        </div>
+                        <!-- With Technical details only, and only while the
+                             network has saved searches (a site report, not a
+                             binder): a tick per search, each starting from its
+                             own "print" mark. Read for this report only
+                             (reportParts.searches), never written back, so it
+                             works on a read-only network (js/report.js). -->
+                        <div id="reportSearchesRow" class="dlg-searches hidden" role="group" aria-labelledby="reportSearchesLbl">
+                            <span id="reportSearchesLbl" class="prop-lbl" data-i18n>Saved searches</span>
+                            <span class="dlg-dim" data-i18n>Each one prints as a table of the devices it finds. Ticking here changes this report only.</span>
+                            <div id="reportSearchesList" class="dlg-search-list"></div>
                         </div>
                     </fieldset>
                     <div id="reportLint" class="alert warn hidden" role="status"></div>
@@ -1391,6 +1538,10 @@
                             <label id="topoAskDateLabel" for="topoAskDate"></label>
                             <input id="topoAskDate" type="date" class="input">
                         </div>
+                        <!-- A review with a tick per row (askTicks): Split model
+                             and firmware lists each device's proposal. -->
+                        <ul id="topoAskTicks" class="ask-ticks" hidden></ul>
+                        <p id="topoAskAfter" class="ask-msg ask-after" hidden></p>
                     </div>
                     <div id="topoAskFoot" class="modal-foot"></div>
                 </div>
@@ -1429,6 +1580,42 @@
                     <div class="modal-foot">
                         <button type="button" id="colsResetBtn" class="btn" data-i18n>Reset order</button>
                         <button type="button" class="btn" data-close data-i18n>Close</button>
+                    </div>
+                </div>
+            </div>
+            <!-- Save search / Update saved search (js/searches.js): a name,
+                 the search as typed (parsed live), the Devices columns to
+                 print and their order, a sort, and whether the site report
+                 prints it. Saving is one undo step. -->
+            <div id="searchDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-sq" role="dialog" aria-modal="true" aria-labelledby="sqTitle">
+                    <div class="modal-head">
+                        <h2 id="sqTitle" class="modal-title">Save search</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body sq-body">
+                        <label class="sq-field"><span class="prop-lbl" data-i18n>Name</span>
+                            <input id="sqName" type="text" class="input" maxlength="60" autocomplete="off"></label>
+                        <label class="sq-field"><span class="prop-lbl" data-i18n>Search</span>
+                            <input id="sqQuery" type="text" class="input mono" maxlength="500" autocomplete="off" spellcheck="false"></label>
+                        <p id="sqQueryError" class="sq-err hidden" role="status"></p>
+                        <p id="sqTypeHint" class="dlg-dim sq-hint hidden" data-i18n>A type name in another language matches only in that language. Its key (type:camera) matches in every language.</p>
+                        <fieldset class="sq-cols">
+                            <legend class="prop-lbl" data-i18n>Columns</legend>
+                            <label class="sq-check"><input type="checkbox" id="sqColsTable"> <span data-i18n>As the Devices table shows them</span></label>
+                            <ul id="sqColsList" class="cols-list sq-cols-list"></ul>
+                        </fieldset>
+                        <div class="sq-sort">
+                            <label class="sq-field"><span class="prop-lbl" data-i18n>Sort by</span>
+                                <select id="sqSort" class="select"></select></label>
+                            <label class="sq-check"><input type="checkbox" id="sqDesc"> <span data-i18n>Descending</span></label>
+                        </div>
+                        <label class="sq-check"><input type="checkbox" id="sqPrint"> <span data-i18n>Print in the site report</span></label>
+                        <p id="sqProblem" class="sq-err hidden" role="status"></p>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" class="btn" data-close data-i18n>Cancel</button>
+                        <button type="button" id="sqSaveBtn" class="btn btn-primary" data-i18n>Save</button>
                     </div>
                 </div>
             </div>
@@ -1648,6 +1835,7 @@
     <script src="js/report.js"></script>
     <script src="js/library.js"></script>
     <script src="js/changes.js"></script>
+    <script src="js/trail.js"></script>
     <script src="js/share.js"></script>
     <script src="js/networks.js"></script>
     <script src="js/groups.js"></script>
@@ -1658,7 +1846,9 @@
     <script src="js/groupmap.js"></script>
     <script src="js/table.js"></script>
     <script src="js/rackview.js"></script>
+    <script src="js/locate.js"></script>
     <script src="js/query.js"></script>
+    <script src="js/searches.js"></script>
     <script src="js/bulk.js"></script>
     <script src="js/add.js"></script>
     <script src="js/csv.js"></script>

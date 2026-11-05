@@ -18,7 +18,9 @@
 //                   the first one on the map, else nothing. New devices take
 //                   its next free ports in order (freePorts, js/model.js) and
 //                   the next free addresses of its network (freeAddresses):
-//                   the network's gateway and DNS then reach them by
+//                   on a subnet with a DHCP pool, the devices that keep
+//                   a fixed address step round it (poolDealer), and the
+//                   preview names them; the network's gateway and DNS then reach them by
 //                   inheritance, nothing is copied onto each device. Onto
 //                   an access point the devices that join it by radio join
 //                   one of its Wi-Fi networks: its only one, else the one
@@ -187,6 +189,8 @@ function addDefaultSsid(target) {
 // -> { target, devices: [{ type, name, port, ip, wireless }], total, cidr,
 //      prefix, network, portsPast, noAddress, sameNames, sharedRun, ssid,
 //      wifiCidr, wifiNetwork }
+//    and, only when a subnet records a DHCP pool that counts, pools (its
+//    range) and each device's keptOut / inPool (dealPool below)
 function planAddDevices(req) {
     const target = req.targetId ? getNode(req.targetId) : null;
     const items = (req.items || []).map((i) => ({ type: i.type, count: clampCount(i.count) })).filter((i) => i.count > 0);
@@ -237,19 +241,72 @@ function planAddDevices(req) {
     const given = new Set();
     if (ctx && ctx.prefix < 31) {
         const want = devices.filter((d) => wants(d) && !onWifiNet(d));
-        const ips = freeAddresses(ctx.networkStr, want.length);
-        ips.forEach((ip) => given.add(ip));
-        want.forEach((d, i) => { if (ips[i]) d.ip = `${ips[i]}/${ctx.prefix}`; });
-        plan.noAddress = want.length - ips.length;
+        const dealer = poolDealer(ctx.networkStr);
+        if (dealer) plan.noAddress = dealPool(plan, dealer, want, ctx.prefix, given);
+        else {
+            const ips = freeAddresses(ctx.networkStr, want.length);
+            ips.forEach((ip) => given.add(ip));
+            want.forEach((d, i) => { if (ips[i]) d.ip = `${ips[i]}/${ctx.prefix}`; });
+            plan.noAddress = want.length - ips.length;
+        }
         Object.assign(plan, { cidr: ctx.networkStr, prefix: ctx.prefix, network: ctx.network || networkOfIp(ctx.networkStr.split('/')[0]) });
     }
     if (plan.wifiCidr) {
         const want = devices.filter((d) => wants(d) && onWifiNet(d));
-        const ips = freeAddresses(plan.wifiCidr, want.length + given.size).filter((ip) => !given.has(ip)).slice(0, want.length);
-        want.forEach((d, i) => { if (ips[i]) d.ip = `${ips[i]}/${plan.wifiPrefix}`; });
-        plan.noAddress += want.length - ips.length;
+        const dealer = poolDealer(plan.wifiCidr, { exclude: given });
+        if (dealer) plan.noAddress += dealPool(plan, dealer, want, plan.wifiPrefix, given);
+        else {
+            const ips = freeAddresses(plan.wifiCidr, want.length + given.size).filter((ip) => !given.has(ip)).slice(0, want.length);
+            want.forEach((d, i) => { if (ips[i]) d.ip = `${ips[i]}/${plan.wifiPrefix}`; });
+            plan.noAddress += want.length - ips.length;
+        }
     }
     return plan;
+}
+// A subnet with a DHCP pool that counts (poolDealer, js/model.js): the
+// devices that keep a fixed address step round it (keepsFixedAddress), the
+// clients take the lowest free address as ever. A device kept out of the pool
+// is marked keptOut, one that found nothing outside it inPool; plan.pools
+// gains the pool's range. Only here: on a subnet with no pool, or one that
+// does not count, the plan carries none of these keys, as before.
+// -> how many got no address
+function dealPool(plan, dealer, want, prefix, given) {
+    let missing = 0;
+    want.forEach((d) => {
+        const got = dealer.next(keepsFixedAddress(d.type));
+        if (!got) { missing++; return; }
+        given.add(got.ip);
+        d.ip = `${got.ip}/${prefix}`;
+        if (got.kept) d.keptOut = true;
+        if (got.pooled) d.inPool = true;
+        // Which pool, for the preview: an AP's cabled LAN and its SSID's
+        // subnet can each record one, and each line names only its own.
+        if (got.kept || got.pooled) d.pool = poolRangeText(dealer.pool);
+    });
+    plan.pools = (plan.pools || []).concat(poolRangeText(dealer.pool));
+    return missing;
+}
+
+// The devices named for the pool lines of the preview, with their addresses:
+// "Printer 1 (10.0.1.200), Server 1 (10.0.1.201)", the first four and how
+// many more.
+function addPoolNames(devices) {
+    const shown = devices.slice(0, 4).map((d) => `${d.name || d.id || '?'} (${d.ip.split('/')[0]})`).join(', ');
+    return devices.length > 4 ? t('{names} and {n} more', { names: shown, n: devices.length - 4 }) : shown;
+}
+// The preview's words for the pool, shared by Add devices and bulk Move:
+// who was kept out of it (a plain line), and who found no address outside it
+// and takes one from inside (a warning). [] for either when there is nobody.
+function poolNotes(pools, kept, pooled) {
+    const pool = [...new Set(pools)].join(', ');
+    return {
+        kept: kept.length ? [t(kept.length === 1
+            ? 'Kept out of the DHCP pool {pool}, because it keeps a fixed address: {names}.'
+            : 'Kept out of the DHCP pool {pool}, because they keep fixed addresses: {names}.', { pool, names: addPoolNames(kept) })] : [],
+        pooled: pooled.length ? [t(pooled.length === 1
+            ? 'No address is left outside the DHCP pool {pool}, so {names} takes one from inside it.'
+            : 'No address is left outside the DHCP pool {pool}, so {names} take addresses from inside it.', { pool, names: addPoolNames(pooled) })] : []
+    };
 }
 
 // Rows of up to ADD_ROW devices, centred under (cx, top).
@@ -537,6 +594,9 @@ function renderAddSummary() {
                 else lines.push(t('Cabled to {name}.', { name: target.name }));
                 if (radio && plan.ssid) lines.push(t('On the Wi-Fi network {ssid}.', { ssid: wifiLabel(wifiById(plan.ssid)) }));
                 const ips = plan.devices.filter((d) => d.ip).map((d) => d.ip.split('/')[0]);
+                // Stepping round a pool hands them out of order (a printer
+                // past the pool, the PCs below it): the range runs low to high.
+                if (plan.pools) ips.sort((a, b) => (ipToBig(ipaddr.parse(a)) < ipToBig(ipaddr.parse(b)) ? -1 : 1));
                 // All of them on the Wi-Fi network's subnet: that one is named.
                 const allWifi = plan.wifiNetwork && plan.devices.every((d) => !d.ip || d.wireless);
                 const net = allWifi ? networkLabel(plan.wifiNetwork) : plan.network ? networkLabel(plan.network) : plan.cidr;
@@ -545,6 +605,16 @@ function renderAddSummary() {
                 else if (!plan.cidr && !plan.wifiCidr) lines.push(t('No addresses: {name} is on no network.', { name: target.name }));
                 if (plan.portsPast) warn.push(t('{n} of them land past the {ports}-port faceplate of {name} and show as a port overflow.',
                     { n: plan.portsPast, ports: portCountOf(target), name: target.name }));
+                if (plan.pools) {
+                    // One sentence per pool, naming only the devices that pool
+                    // concerned (a cabled LAN and an SSID's subnet can differ).
+                    [...new Set(plan.pools)].forEach((range) => {
+                        const of = (d) => d.pool === range;
+                        const said = poolNotes([range], plan.devices.filter((d) => d.keptOut && of(d)), plan.devices.filter((d) => d.inPool && of(d)));
+                        lines.push(...said.kept);
+                        warn.push(...said.pooled);
+                    });
+                }
                 if (plan.noAddress > 0) warn.push(t('{network} has no free address left for {n} of them.', { network: net, n: plan.noAddress }));
             } else lines.push(t('Connected to {name}.', { name: target.name }));
         }
@@ -644,7 +714,11 @@ function readdressBlock(doc) {
         n.gw = shift(n.gw); n.dns = shift(n.dns);
         (n.interfaces || []).forEach((i) => { if (i) i.ip = shift(i.ip); });
     });
-    (doc.networks || []).forEach((n) => { n.cidr = shift(n.cidr); n.gateway = shift(n.gateway); n.dns = shift(n.dns); });
+    // A network's DHCP pool moves with it, at the same host bits.
+    (doc.networks || []).forEach((n) => {
+        n.cidr = shift(n.cidr); n.gateway = shift(n.gateway); n.dns = shift(n.dns);
+        n.dhcpFirst = shift(n.dhcpFirst); n.dhcpLast = shift(n.dhcpLast);
+    });
     return { doc, moves: moves.map((m) => ({ from: `${numToIp(m.from.base)}/${m.from.prefix}`, to: `${numToIp(m.to)}/${m.from.prefix}` })) };
 }
 

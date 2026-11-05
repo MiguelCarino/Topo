@@ -81,13 +81,18 @@ window.addEventListener('load', () => {
   // The Showcase's CT Modality ships its serial and asset tag too.
   // And since v15 the samples carry providers, serials, tags and dates
   // (SAMPLE_EXTRAS, js/data.js).
-  const LATER_KEYS = ['host', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'serial', 'assetTag', 'provider', 'inService', 'serviced', 'serviceEvery'];
+  // And since VLAN/PoE stage 2b (docs/BACKLOG.md feature 4) the Showcase's
+  // two PoE switches and their powered devices (portAttrs, poeBudget,
+  // poeDraw; tests/suites/vlanmodel.js holds the keys themselves).
+  const LATER_KEYS = ['host', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'serial', 'assetTag', 'provider', 'inService', 'serviced', 'serviceEvery', 'portAttrs', 'poeBudget', 'poeDraw'];
   // The fourth: Wi-Fi (v12). Smart Home, Retail, Hotel, the Showcase and
   // Common Errors ship radios on their wireless interfaces and associations
   // on their wireless links, which the reference drops (a radio) or never
   // knew (link.wifi); both sides are read without them here, and
-  // tests/suites/wifimodel.js holds the keys themselves.
-  const minusRadio = (o) => { (o.interfaces || []).forEach((i) => { delete i.radio; }); return o; };
+  // tests/suites/wifimodel.js holds the keys themselves. Since VLAN stage 2a
+  // the Showcase's Studio uplink is a trunk, so an interface's VLAN facts
+  // (vlan, tagged: v16) are read without too (tests/suites/vlanmodel.js).
+  const minusRadio = (o) => { (o.interfaces || []).forEach((i) => { delete i.radio; delete i.vlan; delete i.tagged; }); return o; };
   const currentMinusHost = (n) => { const o = serializeNode(n); LATER_KEYS.forEach((k) => delete o[k]); return minusRadio(o); };
   const legacyMinusLater = (n) => minusRadio(legacyMinusNetcfg(n));
   // So is a cable's tag (link.cable): the Data Centre and the Showcase ship
@@ -221,10 +226,10 @@ window.addEventListener('load', () => {
   loadRaw(loaded);
   const dev = reportDevices().find((d) => d.name === 'R');
   ok('report rows carry the schema-marked fields', dev.gw === '0.0.0.0' && dev.dns === '1.1.1.1' && dev.os === 'RouterOS' && dev.allowedPorts === '22' && dev.notes === 'rack 2' && dev.nat === false);
-  ok('the inventory columns are Gateway, DNS, Model / firmware, in that order', reportColumns().map((f) => f.report.column).join('|') === 'Gateway|DNS|Model / firmware');
+  ok('the inventory columns are Gateway, DNS, Model, Firmware / OS, in that order', reportColumns().map((f) => f.report.column).join('|') === 'Gateway|DNS|Model|Firmware / OS');
   const table = devicesSection(reportDevices());
   // One line per interface (p2-report): its name, address and MAC, then the schema's columns.
-  ok('and the printed table has them as headers', /<th>Interface<\/th><th>Address<\/th><th>MAC<\/th><th>Gateway<\/th><th>DNS<\/th><th>Model \/ firmware<\/th><\/tr>/.test(table));
+  ok('and the printed table has them as headers', /<th>Interface<\/th><th>Address<\/th><th>MAC<\/th><th>Gateway<\/th><th>DNS<\/th><th>Model<\/th><th>Firmware \/ OS<\/th><\/tr>/.test(table));
   ok('with gateway and DNS in monospace and an em dash when empty', table.indexOf('<td class="mono">0.0.0.0</td>') > -1 && table.indexOf('<td><span class="muted">—</span></td>') > -1);
 
   // ---- 7: honest defaults in the full editor ----

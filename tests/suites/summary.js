@@ -36,8 +36,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
   try {
     // ---- 1: what a report holds ----
     ok('nothing said is the technical sheet; both is both; neither is the technical sheet',
-       show(reportParts()) === show({ summary: false, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [] }) && show(reportParts({ summary: true, technical: true })) === show({ summary: true, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [] })
-       && show(reportParts({ summary: false, technical: false })) === show({ summary: false, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [] }));
+       show(reportParts()) === show({ summary: false, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [], searches: null, sections: reportSections() }) && show(reportParts({ summary: true, technical: true })) === show({ summary: true, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [], searches: null, sections: reportSections() })
+       && show(reportParts({ summary: false, technical: false })) === show({ summary: false, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [], searches: null, sections: reportSections() }));
     const m = model(clean());
     const plain = reportHtml(m, null);
     ok('a caller that says nothing gets the report as it was: no summary', !plain.includes('class="sheet summary"') && plain.includes('Device inventory'));
@@ -112,9 +112,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 5: the dialog ----
     replaceDocument(clean(), { origin: 'file' });
     openReportDialog();
-    ok('both are ticked when the dialog opens', el('reportSummary').checked && el('reportTechnical').checked && show(readReportParts()) === show({ summary: true, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [] }));
+    ok('both are ticked when the dialog opens', el('reportSummary').checked && el('reportTechnical').checked && show(readReportParts()) === show({ summary: true, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [], searches: null, sections: reportSections() }));
     el('reportSummary').checked = false; el('reportSummary').dispatchEvent(new Event('change'));
-    ok('one can be unticked', show(readReportParts()) === show({ summary: false, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [] }));
+    ok('one can be unticked', show(readReportParts()) === show({ summary: false, technical: true, largeMap: false, largeCols: 2, largeRows: 2, largeSkip: [], searches: null, sections: reportSections() }));
     el('reportTechnical').checked = false; el('reportTechnical').dispatchEvent(new Event('change'));
     ok('unticking the last one ticks the other', el('reportSummary').checked && !el('reportTechnical').checked);
     closeReportDialog();
