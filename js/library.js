@@ -624,7 +624,7 @@ function libraryRename(id, name) {
 // effort.
 const BINDER_KIND = 'nettopo-binder';
 const BINDER_VERSION = 1;
-const BINDER_FILENAME = 'networks.nettopo-binder.json';
+const BINDER_FILENAME = 'networks.json';
 
 function binderFile() {
     // The open network's last edits belong in any copy of the library. When

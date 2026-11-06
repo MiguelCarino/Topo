@@ -157,7 +157,7 @@
                     <button id="exportWebpBtn" data-adv class="cs-menu-item" role="menuitem" data-i18n>🖼️ WEBP image</button>
                     <!-- The same drawing as a vector file (js/app.js, canvasSvgFile). -->
                     <button id="exportSvgBtn" data-adv class="cs-menu-item" role="menuitem">🖼️ SVG image <span class="cs-menu-note">vector</span></button>
-                    <button id="exportJsonBtn" data-adv class="cs-menu-item" role="menuitem">📄 Back up this network <span class="cs-menu-note">.nettopo</span></button>
+                    <button id="exportJsonBtn" data-adv class="cs-menu-item" role="menuitem">📄 Back up this network <span class="cs-menu-note">.json</span></button>
                     <!-- Devices, interfaces, cables and findings as CSV / TSV, and a
                          sheet imported back with a column mapping and a review
                          (js/csv.js). The full editor's: a register's tool. -->
@@ -171,7 +171,7 @@
 
             <!-- This browser's preferences: the language, what the map shows,
                  and the report's defaults (js/settings.js). -->
-            <button id="settingsBtn" type="button" class="cs-btn" data-i18n-title title="Settings: language, what the map shows and the report's defaults">⚙ Settings</button>
+            <button id="settingsBtn" type="button" class="cs-btn" data-i18n-title title="Settings: what the map shows and the report's defaults">⚙ Settings</button>
 
     </div>
 
@@ -1175,7 +1175,7 @@
                             <rect x="30" y="26" width="16" height="11" rx="2" />
                         </svg>
                         <h2 data-i18n>Start a new network</h2>
-                        <p><span data-i18n>A blank canvas that saves itself in this browser from the first device.</span><br><span data-i18n>Or drop a</span> <code>.nettopo</code> <span data-i18n>build file, or a whole binder, here.</span></p>
+                        <p><span data-i18n>A blank canvas that saves itself in this browser from the first device.</span><br><span data-i18n>Or drop a</span> <code>.json</code> <span data-i18n>build file, or a whole binder, here.</span></p>
                         <div class="landing-drop-actions">
                             <button class="landing-drop-btn primary" id="landingNewBtn" data-i18n>✚ New network</button>
                             <button class="landing-drop-btn" id="landingOpenFileBtn" data-i18n>📂 Open a file</button>
@@ -1266,22 +1266,6 @@
                         <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
                     </div>
                     <div class="modal-body set-body">
-                        <!-- The fleet language (carino-lang.js owns the preference;
-                             its navbar button is hidden here, css/app.css). -->
-                        <section class="set-sec" aria-labelledby="setLangHead">
-                            <h3 id="setLangHead" class="set-head" data-i18n>Language</h3>
-                            <div class="set-field">
-                                <select id="setLang" class="select" aria-labelledby="setLangHead">
-                                    <option value="auto" data-i18n>Automatic (this browser's language)</option>
-                                    <option value="en" lang="en">English</option>
-                                    <option value="es" lang="es">Español</option>
-                                    <option value="pt-BR" lang="pt-BR">Português</option>
-                                    <option value="ja" lang="ja">日本語</option>
-                                    <option value="ru" lang="ru">Русский</option>
-                                </select>
-                                <span class="dlg-dim" data-i18n>The same choice applies on every carino.systems site.</span>
-                            </div>
-                        </section>
                         <section class="set-sec" aria-labelledby="setMapHead">
                             <h3 id="setMapHead" class="set-head" data-i18n>Map</h3>
                             <label class="set-row">
@@ -1485,7 +1469,8 @@
                         <span data-i18n>Lock the link with a passphrase</span>
                     </label>
                     <div id="sharePassRow" class="dlg-row">
-                        <input id="sharePass" type="text" aria-label="Passphrase" data-i18n-aria-label autocomplete="off" spellcheck="false" class="input mono">
+                        <input id="sharePass" type="password" aria-label="Passphrase" data-i18n-aria-label autocomplete="off" data-1p-ignore data-lpignore="true" spellcheck="false" class="input mono">
+                        <button id="sharePassShow" type="button" class="cs-btn" aria-pressed="false" aria-controls="sharePass">Show</button>
                         <button id="shareNewPass" data-i18n data-i18n-title class="cs-btn" title="Make a new random passphrase">New</button>
                     </div>
                     <p id="shareHint" class="dlg-blurb"></p>

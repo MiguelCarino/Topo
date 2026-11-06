@@ -54,7 +54,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('exporting still hands over a file', downloads === 1, String(downloads));
   ok('and it is the binder, correctly named',
      // Dated by the local calendar, like every download (docFileStem).
-     !!lastDownload && lastDownload.name === `networks-${todayISO()}.nettopo-binder.json`
+     !!lastDownload && lastDownload.name === `networks-${todayISO()}.json`
      && lastDownload.payload.kind === 'nettopo-binder' && lastDownload.payload.sites.length === 2,
      lastDownload ? lastDownload.name : 'nothing was handed over');
   ok('the export is recorded, so the landing stops saying "never"',

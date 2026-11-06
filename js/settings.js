@@ -36,8 +36,6 @@ const reportEngineerDefault = () => (typeof state.settings.reportEngineer === 's
 const reportPartDefault = (key) => state.settings[key] !== false;   // reportSummaryOn, reportTechnicalOn
 
 function renderSettings() {
-    const lang = setEl('setLang');
-    if (lang && window.CarinoLang) lang.value = CarinoLang.mode === 'auto' ? 'auto' : CarinoLang.current;
     const hover = setEl('setProviderHover');
     if (hover) hover.checked = providerHoverOn();
     const ink = setEl('setMapInk');
@@ -79,8 +77,7 @@ const settingsOpen = () => { const s = setEl('settingsDialog'); return !!s && !s
 
 function onSettingsChange(e) {
     const el = e.target;
-    if (el.id === 'setLang') { if (window.CarinoLang) CarinoLang.set(el.value); }
-    else if (el.id === 'setProviderHover') { state.settings.providerHover = el.checked; saveSettings(); renderCanvasOnly(); }
+    if (el.id === 'setProviderHover') { state.settings.providerHover = el.checked; saveSettings(); renderCanvasOnly(); }
     else if (el.id === 'setMapInk') { setMapInk(el.value); saveSettings(); }
     else if (el.id === 'setSubnetZones') { state.settings.subnetZones = el.checked; saveSettings(); renderCanvasOnly(); renderNetworksPanel(true); }
     else if (el.id === 'setTrailRecording') {

@@ -1808,7 +1808,7 @@ function identifiedDoc(doc) {
 
 // What a download of this network is called: <site-slug>-<local date>. The
 // card's name if it is kept, the report's site if one was typed, "network"
-// otherwise. Fixed names ("network-build.nettopo.json") filled a downloads
+// otherwise. Fixed names ("network-build.json") filled a downloads
 // folder with copies nobody could tell apart.
 function docDisplayName() {
     const card = state.libraryId ? libraryEntry(state.libraryId) : null;
@@ -2895,7 +2895,7 @@ function applyLocale(lang) {
     document.getElementById('copyUrlBtn').innerHTML = `🔗 ${t('Copy link')} <span class="cs-menu-note">${t('short URL')}</span>`;
     document.getElementById('exportPngBtn').textContent = `🖼️ ${t('PNG image')}`;
     document.getElementById('exportSvgBtn').innerHTML = `🖼️ ${t('SVG image')} <span class="cs-menu-note">${t('vector')}</span>`;
-    document.getElementById('exportJsonBtn').innerHTML = `📄 ${t('Back up this network')} <span class="cs-menu-note">.nettopo</span>`;
+    document.getElementById('exportJsonBtn').innerHTML = `📄 ${t('Back up this network')} <span class="cs-menu-note">.json</span>`;
     document.getElementById('csvMenuBtn').innerHTML = `📊 ${t('Spreadsheet')} <span class="cs-menu-note">CSV · TSV</span>`;
     document.getElementById('reportBtn').innerHTML = `📋 ${t('Site report')} <span class="cs-menu-note">${t('printable')}</span>`;
     document.getElementById('myNetworksBtn').innerHTML = `🗂️ ${t('My networks')} <span class="cs-menu-note">${t('saved here')}</span>`;
@@ -3272,7 +3272,7 @@ function encodeCanvas(canvas, requested) {
     return { url, ext: actual === 'jpeg' ? 'jpg' : actual };
 }
 
-// ---- Portable build files (.nettopo) ----
+// ---- Portable build files (.json; older ones were named .nettopo) ----
 // The escape hatch for builds too big or too archival for a URL: a file has no
 // length ceiling, travels as an email/chat attachment, and diffs in git. Same
 // serializer as everything else, wrapped in a tiny self-identifying envelope so
@@ -3293,7 +3293,7 @@ function exportJsonFile() {
     if (!state.nodes.length) { showToast(t('Nothing to export. Add at least one node first.')); return; }
     const doc = state.readOnly ? outgoingDoc() : identifiedDoc(serializeDoc());
     const name = docDisplayName();
-    downloadJson(Object.assign({ kind: 'nettopology', version: 1 }, name ? { name } : {}, { doc }), `${docFileStem()}.nettopo.json`);
+    downloadJson(Object.assign({ kind: 'nettopology', version: 1 }, name ? { name } : {}, { doc }), `${docFileStem()}.json`);
     // Backed up: the landing stops counting it as changed, and what went into
     // the file is the card's new baseline for "changes since" (js/changes.js).
     if (isKept()) { recordBuildExport(state.libraryId, doc.updated); takeSnapshot(state.libraryId, 'backup', doc); }

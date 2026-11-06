@@ -37,6 +37,7 @@ function openShareDialog(mode) {
     seal.checked = canSeal();
     seal.disabled = !canSeal();
     _shareEl('sharePass').value = canSeal() ? generatePassphrase() : '';
+    setPassphraseShown(false);   // masked each time; the visitor reveals or copies it
     _shareLintHits = secretHitsFor(_shareMode);
     resetShareResult();
     renderShareDialog();
@@ -75,6 +76,17 @@ function renderShareDialog() {
     copy.textContent = _shareBusy ? `⏳ ${t('Locking…')}` : sealed ? `🔒 ${t('Copy locked link')}` : `🔗 ${t('Copy plain link')}`;
     renderSecretLint(_shareEl('shareLint'), _shareLintHits, binder ? null : closeShareDialog);
     _shareEl('sharePassCopyBtn').textContent = `🔑 ${t('Copy passphrase')}`;
+    const shown = _shareEl('sharePass').type === 'text';
+    const eye = _shareEl('sharePassShow');
+    eye.textContent = shown ? t('Hide') : t('Show');
+    eye.title = shown ? t('Hide the passphrase') : t('Show the passphrase');
+}
+
+// The passphrase is masked by default, so it is not read off the screen or a
+// screen share; Show reveals it and Copy passphrase copies it either way.
+function setPassphraseShown(on) {
+    _shareEl('sharePass').type = on ? 'text' : 'password';
+    _shareEl('sharePassShow').setAttribute('aria-pressed', on ? 'true' : 'false');
 }
 
 // A link that no longer matches what is on screen is worse than none, so any
@@ -166,6 +178,7 @@ async function copySharePassphrase() {
 _shareEl('shareSeal').addEventListener('change', () => { resetShareResult(); renderShareDialog(); });
 _shareEl('sharePass').addEventListener('input', () => { resetShareResult(); renderShareDialog(); });
 _shareEl('shareNewPass').onclick = () => { _shareEl('sharePass').value = generatePassphrase(); resetShareResult(); renderShareDialog(); };
+_shareEl('sharePassShow').onclick = () => { setPassphraseShown(_shareEl('sharePass').type !== 'text'); renderShareDialog(); };
 _shareEl('shareCopyBtn').onclick = copyShareLink;
 _shareEl('sharePassCopyBtn').onclick = copySharePassphrase;
 _shareEl('shareCloseBtn').onclick = closeShareDialog;

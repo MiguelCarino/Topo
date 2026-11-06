@@ -61,7 +61,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     replaceDocument(templatesData.house, { origin: 'file' });
     clicked.length = 0; made.length = 0;
     exportJsonFile();
-    ok('Export saves the JSON through saveBlob, not empty', clicked.length === 1 && /\.nettopo\.json$/.test(clicked[0].name) && made.length === 1 && made[0].b.size > 100, JSON.stringify(clicked));
+    ok('Export saves the JSON through saveBlob, not empty', clicked.length === 1 && /^[a-z0-9-]+-\d{4}-\d\d-\d\d\.json$/.test(clicked[0].name) && made.length === 1 && made[0].b.size > 100, JSON.stringify(clicked));
     ok('its URL still alive after the click', made.length === 1 && !revoked.includes(made[0].u));
     const json = made.length ? JSON.parse(await made[0].b.text()) : {};
     ok('with the document in it', json.kind === 'nettopology' && json.doc && json.doc.nodes.length === state.nodes.length);

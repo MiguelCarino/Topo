@@ -116,7 +116,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     downloads = [];
     exportJsonFile();
     const file = downloads[0];
-    ok('Back up this network downloads <slug>-<date>.nettopo.json', !!file && file.name === `casa-roma-${todayISO()}.nettopo.json`, file && file.name);
+    ok('Back up this network downloads <slug>-<date>.json', !!file && file.name === `casa-roma-${todayISO()}.json`, file && file.name);
     ok('the file carries the card’s id, its version and its name', !!file && file.payload.doc.id === id
        && file.payload.doc.updated === CarinoLibrary.loadLibrary()[id].updated && file.payload.name === 'Casa Roma'
        && Object.keys(file.payload.doc)[0] === 'v');
@@ -127,7 +127,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     downloads = [];
     await exportBinder();
     ok('Back up all clears it too, and is dated', CarinoLibrary.backupStatus().stale === false && downloads[0]
-       && downloads[0].name === `networks-${todayISO()}.nettopo-binder.json`, downloads[0] && downloads[0].name);
+       && downloads[0].name === `networks-${todayISO()}.json`, downloads[0] && downloads[0].name);
     node.name = 'Router'; save(); flushAutosave();
 
     // ---- Bringing it back ----
