@@ -77,23 +77,78 @@ function notesRidingWith(nodes) {
 // Shift, Ctrl or Cmd held: the press adds to the selection or takes out of it.
 const addsToSelection = (event) => !!(event.shiftKey || event.ctrlKey || event.metaKey);
 
+// Select more (phones, Mobile batch 2): the selection bar's toggle
+// (js/mobile.js) for a finger, which has no Shift. While it is on, a tap on a
+// device or a cable adds it to the set or takes it out, a tap on empty map
+// keeps the set (js/app.js), and a finger's drag on a member moves the whole
+// set. Only a tap counts as one: its own mousedown is a real MouseEvent,
+// while touchPress's drag (js/app.js) hands pressNode a plain object.
+let _selectMore = false;
+const selectMoreOn = () => _selectMore;
+function setSelectMore(on) {
+    if (_selectMore === !!on) return;
+    _selectMore = !!on;
+    announceSelection();
+}
+const selectMoreTap = (event) => _selectMore && typeof MouseEvent !== 'undefined' && event instanceof MouseEvent;
+// A press in the mode is a tap or a drag, and only the release can tell: a
+// mouse or a pen sends a real mousedown for both. So the press arms the drag
+// and this, and a release that moved nothing (js/app.js mapPointerUp) adds
+// these entries to the set or takes them out. A finger's drag, a plain object
+// from touchPress, arms none.
+let _moreToggle = null;
+function armMoreToggle(event, entries) { _moreToggle = selectMoreTap(event) ? entries : null; }
+function takeMoreToggle() { const e = _moreToggle; _moreToggle = null; return e; }
+// Every entry already selected: all of them go; otherwise the missing ones join.
+function toggleEntries(entries) {
+    const has = (x) => [...state.selection].some((e) => e.type === x.type && e.id === x.id);
+    if (entries.every(has)) {
+        const out = new Set(entries.map((x) => x.type + ':' + x.id));
+        selectEntries([...state.selection].filter((e) => !out.has(e.type + ':' + e.id)));
+    } else selectEntries([...state.selection, ...entries.filter((x) => !has(x))]);
+}
+
+// The last press on a card (a device or a note) and when, for the map's
+// double-tap (js/app.js, the canvas dblclick): the first tap's redraw takes
+// the card out from under the second, whose dblclick then lands on the bare
+// canvas and would zoom (Mobile batch 2).
+// Only a tap's own mousedown counts (a real MouseEvent; touchPress's drag
+// hands over a plain object), and only near where the double-tap lands.
+let _cardPress = { id: null, at: -Infinity, x: 0, y: 0 };
+function noteCardPress(event, id) {
+    if (typeof MouseEvent === 'undefined' || !(event instanceof MouseEvent)) return;
+    _cardPress = { id, at: performance.now(), x: event.clientX, y: event.clientY };
+}
+const CARD_DOUBLE_TAP_MS = 500;
+const CARD_DOUBLE_TAP_PX = 40;
+function cardPressedWithin(event, ms = CARD_DOUBLE_TAP_MS) {
+    return performance.now() - _cardPress.at < ms
+        && Math.hypot(event.clientX - _cardPress.x, event.clientY - _cardPress.y) <= CARD_DOUBLE_TAP_PX;
+}
+
 // A press on a device's card: a mouse's, or a finger's once it has travelled
 // past a tap (touchPressNode, js/app.js), which hands over where it came down.
 function pressNode(event, node) {
     event.stopPropagation();
+    noteCardPress(event, node.id);
     if (state.linkSourceId) return;
     // Shift/Ctrl/Cmd edits the set and arms no drag: the press was
     // about what is selected, not about where it is.
     if (addsToSelection(event)) { toggleSelected('node', node.id); return; }
     // One of a set: the whole set moves (startDrag), and a release
     // that moved nothing selects this one alone (dragCollapse).
-    const ofSet = state.selection.size > 1 && inSelection('node', node.id);
+    // In Select more a drag moves the set from any member, and moves a
+    // device outside it alone, the set kept; a release that moved nothing
+    // adds this one or takes it out (armMoreToggle).
+    const more = selectMoreOn();
+    const ofSet = (more || state.selection.size > 1) && inSelection('node', node.id);
     const moving = ofSet ? selectedOf('node').map(getNode).filter(Boolean) : [node];
     startDrag(event, moving.concat(notesRidingWith(moving)), node);
     // Let go in a group's frame, it goes into that group; on a host, it runs
     // on it; on another device, a new group is offered (js/groupmap.js).
     armGroupDrop(dragGroup.map((g) => g.item));
-    dragCollapse = ofSet ? node.id : null;
+    dragCollapse = ofSet && !more ? node.id : null;
+    if (more) { armMoreToggle(event, [{ type: 'node', id: node.id }]); return; }
     // A folded host: a tap unfolds it, as one on a collapsed
     // group's node expands the group, and selects nothing; a drag
     // moves it (js/groupmap.js, "Hosts on the map").
@@ -111,7 +166,13 @@ paletteDefs.forEach((d) => {
     btn.title = 'Click to add (connects to the selected node) — or drag onto the canvas';
     btn.setAttribute('data-i18n-title', ''); // translated by applyLocale(), which runs after the locale is known
     // Click: add connected to the current selection (fast tree building)
-    btn.onclick = () => spawnNode(d.type, { connectTo: (state.selectedType === 'node' && state.selectedId) ? state.selectedId : null });
+    // On a phone js/mobile.js takes it: the drawer stays open at the new
+    // device's fields, and it is panned into view when the drawer closes.
+    btn.onclick = () => {
+        const connectTo = (state.selectedType === 'node' && state.selectedId) ? state.selectedId : null;
+        if (typeof window.phonePaletteDevice === 'function' && window.phonePaletteDevice(d.type, connectTo)) return;
+        spawnNode(d.type, { connectTo });
+    };
     // Drag: drop onto the canvas at the cursor
     btn.setAttribute('draggable', 'true');
     btn.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/carino-node', d.type); e.dataTransfer.effectAllowed = 'copy'; });
@@ -131,7 +192,12 @@ paletteDefs.forEach((d) => {
     btn.className = 'palette-item';
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${d.icon}</svg><span data-i18n>${d.name}</span>`;
     btn.title = d.title; btn.setAttribute('data-i18n-title', ''); // applyLocale() translates both
-    btn.onclick = () => spawnAnnotation({ style: d.style, edit: true });
+    // On a phone js/mobile.js closes the drawer first, so the editor and the
+    // keyboard it brings up are not under the drawer and its scrim.
+    btn.onclick = () => {
+        if (typeof window.phonePaletteAnnotation === 'function' && window.phonePaletteAnnotation(d.style)) return;
+        spawnAnnotation({ style: d.style, edit: true });
+    };
     btn.setAttribute('draggable', 'true');
     btn.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/carino-annotation', d.style); e.dataTransfer.effectAllowed = 'copy'; });
     paletteContainer.appendChild(btn);
@@ -242,11 +308,20 @@ function portLabelHalf(text) {
 // margin through touchPress, js/app.js).
 function pressAnnotation(event, a) {
     event.stopPropagation();
+    // A finger's second tap on the same note soon after the first is a
+    // double-tap even when the browser counts it as a first press (the first
+    // tap's redraw replaced the card it came down on).
+    const prev = _cardPress;
+    noteCardPress(event, a.id);
+    const fingerTwice = !state.linkSourceId && prev.id === a.id && event instanceof MouseEvent
+        && performance.now() - prev.at < CARD_DOUBLE_TAP_MS
+        && Math.hypot(event.clientX - prev.x, event.clientY - prev.y) <= CARD_DOUBLE_TAP_PX
+        && typeof fromTouch === 'function' && fromTouch(event);
     // Second press of a double-click: straight into typing. Handled here on
     // mousedown (event.detail) rather than dblclick, because the first
     // press re-renders the canvas and replaces this element mid-gesture —
     // and it must not arm a drag either.
-    if (event.detail > 1) { openAnnotationEditor(a); return; }
+    if (event.detail > 1 || fingerTwice) { openAnnotationEditor(a); return; }
     if (state.linkSourceId) {
         // Armed from a node or another note → complete a red leader onto
         // this card. Armed from this same note → cancel.
@@ -258,7 +333,11 @@ function pressAnnotation(event, a) {
     }
     delete a._ctlPin;   // moving the card ends any pinned size-control run
     // A note is only ever selected (and dragged) on its own.
-    dragCollapse = null; startDrag(event, [a], a);
+    dragCollapse = null;
+    // Select more gathers devices and cables: a tap on a note keeps the set,
+    // and a finger's drag moves the note alone, the set kept.
+    if (selectMoreOn()) { startDrag(event, [a], a); return; }
+    startDrag(event, [a], a);
     select(a.id, 'annotation');
 }
 
@@ -442,7 +521,8 @@ function renderNoteLeaders() {
             hit.setAttribute('stroke', 'transparent'); hit.setAttribute('stroke-width', '12');
             hit.style.cursor = 'pointer';
             applyNoteLinkGeometry(hit, geo);
-            hit.addEventListener('mousedown', (e) => { e.stopPropagation(); select(selId, 'notelink'); });
+            // Select more gathers devices and cables: a press here keeps the set.
+            hit.addEventListener('mousedown', (e) => { e.stopPropagation(); if (!selectMoreOn()) select(selId, 'notelink'); });
             grp.appendChild(hit);
             // selected → a midpoint ✕, same affordance as everywhere else
             if (isSel && geo) {
@@ -803,7 +883,10 @@ function drawCanvas() {
     lZones.innerHTML = ''; lLinks.innerHTML = ''; lLabels.innerHTML = ''; lNodes.innerHTML = ''; lAnn.innerHTML = '';
     state.annotations.forEach(renderAnnotation);
     renderNoteLeaders();
-    document.getElementById('networkCanvas').className = `topo-svg${state.linkSourceId ? ' linking' : ''}`;
+    // setAttribute: the canvas is an <svg>, whose className is not a string
+    // and took no assignment, so link mode's crosshair never showed. The
+    // phone's connect banner (js/mobile.js) watches this attribute too.
+    document.getElementById('networkCanvas').setAttribute('class', `topo-svg${state.linkSourceId ? ' linking' : ''}`);
 
     // Groups on the map (js/groupmap.js): which devices a collapsed group
     // folds out of sight and which cables it stands for. Null with no groups.
@@ -985,7 +1068,7 @@ function drawCanvas() {
         }
         line.addEventListener('mousedown', (event) => {
             event.stopPropagation();
-            if (addsToSelection(event)) toggleSelected('link', link.id); else select(link.id, 'link');
+            if (addsToSelection(event) || selectMoreTap(event)) toggleSelected('link', link.id); else select(link.id, 'link');
         });
         if (qm && !qm.links.has(link.id)) line.classList.add('q-dim');
         // Who is responsible for the run, on hover, when Settings says so.
@@ -1093,7 +1176,7 @@ function drawCanvas() {
             chip.appendChild(title);
             chip.addEventListener('mousedown', (event) => {
                 event.stopPropagation();
-                if (addsToSelection(event)) toggleSelected('link', link.id); else select(link.id, 'link');
+                if (addsToSelection(event) || selectMoreTap(event)) toggleSelected('link', link.id); else select(link.id, 'link');
             });
             lLinks.appendChild(chip);
         }
@@ -2847,7 +2930,10 @@ function updateRailWrap() {
     const rail = document.querySelector('.topo-rail');
     const row = document.getElementById('libWrapRow');
     if (!rail || !row) return;
-    const wrapped = state.selection.size > 0 && !_libPinned;
+    // On a phone, js/mobile.js holds it open while the drawer stays open after
+    // a palette add, so the next tap still finds the palette.
+    const held = typeof window.phoneLibraryHeld === 'function' && window.phoneLibraryHeld();
+    const wrapped = state.selection.size > 0 && !_libPinned && !held;
     rail.classList.toggle('lib-wrapped', wrapped);
     row.classList.toggle('hidden', !wrapped && !_libPinned);
     row.setAttribute('aria-expanded', wrapped ? 'false' : 'true');
@@ -2880,6 +2966,7 @@ function renderSelection() {
     if (typeof renderBulkPanel === 'function') renderBulkPanel();
     refreshSelectedNodeDiagnostics();   // which says to select one device
     renderCanvasOnly();
+    announceSelection();
 }
 
 function selectEntries(entries) { setSelectionEntries(entries); renderSelection(); }
@@ -2943,7 +3030,15 @@ function centreOnNodes(nodes) {
     applyCamera();
 }
 
+// Whoever shows the selection outside the rail (the phone's selection bar,
+// js/mobile.js) hears of every change, as the trace button does of trace
+// ('topo:tracechange', js/app.js).
+function announceSelection() { document.dispatchEvent(new CustomEvent('topo:selectionchange')); }
+
 function select(id, type) {
+    try { selectNow(id, type); } finally { announceSelection(); }
+}
+function selectNow(id, type) {
     setSelectionEntries(id ? [{ type, id }] : []); state.linkSourceId = null;
     updateRailWrap();
     // The set has ended: what was typed into the bulk panel for it goes too.

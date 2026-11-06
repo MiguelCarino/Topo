@@ -283,7 +283,11 @@
                         <button id="selOnlyNodesBtn" type="button" class="rail-btn" data-i18n>Select only devices</button>
                         <button id="selOnlyLinksBtn" type="button" class="rail-btn" data-i18n>Select only cables</button>
                     </div>
-                    <p class="rail-note" data-i18n>Shift-click adds or removes one. Esc clears the selection.</p>
+                    <!-- A finger has no Shift: on touch the second line shows
+                         instead (css/app.css, pointer: coarse), for the selection
+                         bar's Select more (js/mobile.js, Mobile batch 2). -->
+                    <p class="rail-note hint-fine" data-i18n>Shift-click adds or removes one. Esc clears the selection.</p>
+                    <p class="rail-note hint-coarse" data-i18n>Tap devices to add or remove them.</p>
                     <!-- The bulk panel (plan 3.4, js/bulk.js): two or more
                          devices and no cables (or two or more cables and no
                          devices: Set fields only), full editor only. Each action

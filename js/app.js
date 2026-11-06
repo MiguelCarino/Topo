@@ -813,7 +813,7 @@ const PHONE_READABLE_ZOOM = 0.7;   // names are 10 map units: about 7px and up
 const PHONE_MIN_ZOOM = 0.1;        // a phone may zoom out this far, so any map fits
 const PHONE_FIT_PAD = 16;
 const MAP_TOP_OVERLAYS = '#canvasContainer > .topo-topbar';
-const MAP_BOTTOM_OVERLAYS = '#docBar, #handyBar, #readOnlyBanner, #storageBanner';
+const MAP_BOTTOM_OVERLAYS = '#docBar, #handyBar, #readOnlyBanner, #storageBanner, #selBar, #linkBanner';
 function mapViewport() {
     const r = document.getElementById('networkCanvas').getBoundingClientRect();
     const full = { left: 0, top: 0, width: r.width, height: r.height };
@@ -2118,7 +2118,11 @@ window.addEventListener('mousedown', (event) => {
         // release (mapPointerUp): a pan keeps the device and its trace, only
         // a click that did not move lets them go.
         _panPress = null;
-        if (event.button === 0 && !isDraggingNode && !event.ctrlKey && !event.metaKey && (state.selection.size || state.linkSourceId)) {
+        // Select more (a phone's, js/ui.js): a tap on empty map keeps the set
+        // and only drops link mode, if it was armed.
+        if (event.button === 0 && selectMoreOn()) {
+            if (state.linkSourceId) { state.linkSourceId = null; renderCanvasOnly(); }
+        } else if (event.button === 0 && !isDraggingNode && !event.ctrlKey && !event.metaKey && (state.selection.size || state.linkSourceId)) {
             if (tracingSelected() && !state.linkSourceId) _panPress = { x: event.clientX, y: event.clientY, slop: gmSlopOf(event) };
             else select(null, null);
         }
@@ -2220,13 +2224,18 @@ function mapPointerUp(event) {
     // (js/groupmap.js). Taken before anything else so a drag never leaves it armed.
     const drop = takeGroupDrop(event);
     if (tapped) {
-        isDraggingNode = false; draggedNode = null; dragGroup = []; dragCollapse = null; _dragPress = null;
+        isDraggingNode = false; draggedNode = null; dragGroup = []; dragCollapse = null; _dragPress = null; takeMoreToggle();
         expandFoldTapped(tapped);
         return;
     }
     // A press on one device of a set that moved nothing was a click on it.
-    const collapse = dragCollapse && dragGroup.every((g) => g.item.x === g.x0 && g.item.y === g.y0) ? dragCollapse : null;
+    const still = dragGroup.every((g) => g.item.x === g.x0 && g.item.y === g.y0);
+    const collapse = dragCollapse && still ? dragCollapse : null;
     dragCollapse = null;
+    // Select more: a press that moved nothing was a tap, which adds what it
+    // was on to the set or takes it out (armMoreToggle, js/ui.js).
+    const moreToggle = takeMoreToggle();
+    const toggle = moreToggle && still ? moreToggle : null;
     // Whether the press ever travelled past the tap margin (startDrag, js/ui.js).
     const started = !!(_dragPress && _dragPress.started);
     _dragPress = null;
@@ -2256,11 +2265,13 @@ function mapPointerUp(event) {
         }
         if (said) { refreshGroupViews(true); showToast(said, 'ok'); }
         if (collapse) { select(collapse, 'node'); return; }   // select() redraws
+        if (toggle) { toggleEntries(toggle); return; }
         // Render zones/traces only ONCE when mouse is released; a drag that
         // came back to its start still clears its drop cues.
         if (moved || started) renderCanvasOnly();
         if (motion) mapMotionPlay(motion, { pulse: drop.target && drop.target.gid });
     } else if (collapse) select(collapse, 'node');
+    else if (toggle) toggleEntries(toggle);
     dragGroup = [];
 }
 
@@ -2339,7 +2350,7 @@ function abandonTouchPress() {
     _touchPress = null;
     if (!p.started) return;
     dragGroup.forEach(({ item, x0, y0 }) => { item.x = x0; item.y = y0; });
-    isDraggingNode = false; draggedNode = null; dragGroup = []; dragCollapse = null; _dragPress = null;
+    isDraggingNode = false; draggedNode = null; dragGroup = []; dragCollapse = null; _dragPress = null; takeMoreToggle();
     takeFoldTap(null); takeGroupDrop(null);
     renderCanvasOnly();
 }
@@ -2478,6 +2489,8 @@ function mapTouchEnd(e) {
 // What sits on the map (the zoom buttons, the document bar, the banners) is
 // map too: two fingers there pinch the map, never the page (touch-action none
 // on them, css/app.css). A tap on their buttons is still a tap.
+// js/mobile.js hands its selection bar and connect banner to mapOverlay
+// itself, since it builds them after this runs.
 const MAP_OVERLAYS = '.zoom-ctl, #docBar, #readOnlyBanner, #storageBanner';
 // Safari's own pinch (GestureEvent): on a Mac's trackpad it is how a pinch
 // arrives (no Ctrl-wheel), so it zooms the map about the pointer as the wheel
@@ -2496,13 +2509,18 @@ function mapGesture(e) {
 }
 (function () {
     const canvas = document.getElementById('networkCanvas');
-    [canvas, ...document.querySelectorAll(MAP_OVERLAYS)].forEach((el) => {
-        el.addEventListener('touchstart', mapTouchStart, { passive: false });
-        ['gesturestart', 'gesturechange', 'gestureend'].forEach((type) => el.addEventListener(type, mapGesture, { passive: false }));
-    });
+    [canvas, ...document.querySelectorAll(MAP_OVERLAYS)].forEach(mapOverlay);
 })();
+function mapOverlay(el) {
+    if (!el) return;
+    el.addEventListener('touchstart', mapTouchStart, { passive: false });
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach((type) => el.addEventListener(type, mapGesture, { passive: false }));
+}
 // Did this dblclick come from a finger (a double-tap)? Chromium says so on the
 // event; elsewhere a finger that has just left the map does.
+// js/mobile.js keeps a touch in the top band from the map (it shows the
+// navbar) and notes its lift here, so its dblclick still reads as a finger's.
+function mapTouchNoted() { _mapTouchEndAt = performance.now(); }
 function fromTouch(event) {
     if ('sourceCapabilities' in event) return !!(event.sourceCapabilities && event.sourceCapabilities.firesTouchEvents);
     return performance.now() - _mapTouchEndAt < 700;
@@ -2632,7 +2650,9 @@ const SHORTCUTS = [
       run: () => selectAll() },
     { keys: ['Esc'], label: 'Cancel link mode / deselect', test: (e) => e.key === 'Escape',
       // Over the landing or a dialog, Esc closes that instead (closeTopoOverlay).
-      run: () => { state.linkSourceId = null; select(null, null); renderCanvasOnly(); } },
+      // It ends Select more too (js/ui.js): only an Esc that reached the map,
+      // not one a dialog, an overlay or a field took.
+      run: () => { setSelectMore(false); state.linkSourceId = null; select(null, null); renderCanvasOnly(); } },
     { keys: ['?'], label: 'Show this list', test: (e) => e.key === '?', run: () => toggleShortcutHelp() }
 ];
 
@@ -2747,10 +2767,15 @@ function renderShortcutHelp() {
     // A touch screen gets how to move the map with a finger (mapTouchStart).
     let coarse = false;
     try { coarse = matchMedia('(pointer: coarse)').matches; } catch (e) { /* no media queries */ }
+    // A touch screen 900px wide or less: the fleet navbar waits above the top
+    // edge (js/mobile.js navReveal).
+    let navAway = false;
+    try { navAway = matchMedia('(max-width: 900px) and (pointer: coarse)').matches; } catch (e) { /* no media queries */ }
     const touch = coarse ? subhead('Touch') + `
         <div class="sc-hint" id="touchHint">
             <span>👆</span>
-            <span>${escapeHtml(t('Drag the map with one finger. Pinch to zoom. Double-tap to zoom in.'))}</span>
+            <span>${escapeHtml(t('Drag the map with one finger. Pinch to zoom. Double-tap to zoom in.'))}${navAway
+                ? ' ' + escapeHtml(t('Swipe down from the top edge to show the menu bar.')) : ''}</span>
         </div>` : '';
     document.getElementById('shortcutBody').innerHTML =
         touch + subhead('Mouse') + mouse +
@@ -3076,6 +3101,11 @@ document.getElementById('networkCanvas').addEventListener('dblclick', (event) =>
     // a note and its editor (and a phone's keyboard) were too easy to drop by
     // accident. Notes stay on the palette's note buttons.
     if (fromTouch(event)) {
+        // The second tap of a double-tap on a card (a note opens its editor,
+        // pressAnnotation, js/ui.js): the first tap's redraw took the card
+        // away, so this landed on the bare canvas, but it was no double-tap on
+        // empty map and zooms nothing (Mobile batch 2).
+        if (cardPressedWithin(event)) return;
         const r = document.getElementById('networkCanvas').getBoundingClientRect();
         zoomCameraAt(state.camera.zoom * 2, event.clientX - r.left, event.clientY - r.top);
         return;

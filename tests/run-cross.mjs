@@ -87,7 +87,7 @@ async function buildRunfile(suite) {
 }
 
 // A suite whose first lines say '@touch' runs on a phone: a touch screen at
-// 390x844, DPR 2, and window.__touch(type, points) dispatches real touch input
+// 390x844 ('@touch 360x780' for another size), DPR 2, and window.__touch(type, points) dispatches real touch input
 // (CDP Input.dispatchTouchEvent: type 'touchStart' | 'touchMove' | 'touchEnd',
 // points [{ x, y, id }] in CSS pixels of the viewport), which goes through the
 // browser's own gesture handling (touch-action, scrolling, page zoom, the
@@ -99,10 +99,32 @@ async function suiteHead(suite) {
 
 // One suite on one already-launched engine → { total, failed, bad[], boot } or { skipped }.
 async function runSuite(browser, suite, engine) {
-  const touch = /@touch\b/.test(await suiteHead(suite));
+  const head = await suiteHead(suite);
+  const touch = /@touch\b/.test(head);
   if (touch && engine !== 'chromium') return { skipped: 'needs CDP touch input (Chromium only)' };
+  // '@touch 360x780' asks for another phone size; plain '@touch' is 390x844.
+  const size = head.match(/@touch\s+(\d{3,4})x(\d{3,4})\b/);
+  const viewport = size ? { width: +size[1], height: +size[2] } : { width: 390, height: 844 };
+  // '@hashes -|simple|setup' loads the suite once per hash on a fresh page
+  // ('-' is the plain URL, no hash), its lines marked [#hash]; otherwise
+  // #advanced, as run.sh does.
+  const hl = head.match(/@hashes\s+(\S+)/);
+  const hashes = hl ? hl[1].split('|') : ['advanced'];
+  const all = { total: 0, failed: 0, bad: [], boot: '', perf: [] };
+  for (const hash of hashes) {
+    const r = await runSuiteOnce(browser, suite, touch, viewport, hash === '-' ? '' : '#' + hash);
+    const tag = hl ? `[${hash === '-' ? 'plain URL' : '#' + hash}] ` : '';
+    all.total += r.total; all.failed += r.failed;
+    all.bad.push(...r.bad.map((l) => l.replace(/^FAIL :: /, 'FAIL :: ' + tag)));
+    if (r.boot && !all.boot) all.boot = tag + r.boot;
+    all.perf.push(...(r.perf || []));
+  }
+  return all;
+}
+
+async function runSuiteOnce(browser, suite, touch, viewport, hash) {
   const context = touch
-    ? await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
+    ? await browser.newContext({ hasTouch: true, isMobile: true, viewport, deviceScaleFactor: 2 })
     : null;
   const page = context ? await context.newPage() : await browser.newPage();
   if (touch) {
@@ -111,10 +133,19 @@ async function runSuite(browser, suite, engine) {
       await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: (points || []).map((p) => ({ x: p.x, y: p.y, id: p.id || 0 })) });
     });
     await page.exposeBinding('__type', async (_src, text) => { await page.keyboard.type(String(text)); });
+    // window.__key(name): one key press (a hardware keyboard: 'Tab', 'Escape').
+    await page.exposeBinding('__key', async (_src, key) => { await page.keyboard.press(String(key)); });
+    // window.__mouse(x, y): a mouse moves there (a tablet with a mouse).
+    await page.exposeBinding('__mouse', async (_src, x, y) => { await page.mouse.move(+x, +y); });
+    // window.__media(reducedMotion): 'reduce' or 'no-preference'.
+    await page.exposeBinding('__media', async (_src, rm) => { await page.emulateMedia({ reducedMotion: String(rm) }); });
+    // window.__viewport(w, h): the screen grows or shrinks (a rotation, a
+    // tablet), so the page's media queries and resize handlers run for real.
+    await page.exposeBinding('__viewport', async (_src, w, h) => { await page.setViewportSize({ width: +w, height: +h }); });
   }
   try {
     // ?lang=en and #advanced for the same reasons run.sh uses them — see the note there.
-    await page.goto(`http://127.0.0.1:${PORT}/${RUNFILE}?lang=en#advanced`, { waitUntil: 'load' });
+    await page.goto(`http://127.0.0.1:${PORT}/${RUNFILE}?lang=en${hash}`, { waitUntil: 'load' });
     let text = '';
     try {
       // 45 s: the timing suites (perf, perfedit) take ten or more on a busy

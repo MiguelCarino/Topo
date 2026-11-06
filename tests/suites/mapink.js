@@ -4,7 +4,8 @@
 //      Colourful): pressed, titled for the way back, kept in this browser;
 //      the drawing's white cards and grey writing take the map's colours;
 //      an export carries no stylesheet, so it stays on paper;
-//   2. the properties panel is half the rail whatever is selected;
+//   2. the properties panel is half the rail whatever is selected (as tall
+//      as what it holds in the phone's drawer, this 780px window);
 //   3. a few cables take a track each, spread over their channel, wider apart
 //      than the least gap; the cables out of one box run under it at levels of their own;
 //      a selected box stacks over the lines, the flags over it.
@@ -102,7 +103,15 @@ window.addEventListener('load', () => { setTimeout(async () => {
     select('a');
     const full = props.getBoundingClientRect().height;
     const rail = props.parentElement.getBoundingClientRect().height;
-    ok('the properties panel is half the rail, selected or not', Math.abs(empty - full) < 1 && Math.abs(empty - rail / 2) < 2, [empty, full, rail].join(' '));
+    // This run's window is 780px, a phone to the drawer's breakpoint, where
+    // the drawer scrolls as one and the panel is as tall as what it holds
+    // (Mobile batch 2); the docked rail's fixed half is held at 1280px in
+    // tests/suites/railboxes.js.
+    if (matchMedia('(max-width: 900px)').matches) {
+      ok('in the phone\'s drawer the panel is as tall as what it holds', getComputedStyle(props).overflowY === 'visible' && full > empty, [empty, full, rail].join(' '));
+    } else {
+      ok('the properties panel is half the rail, selected or not', Math.abs(empty - full) < 1 && Math.abs(empty - rail / 2) < 2, [empty, full, rail].join(' '));
+    }
     select(null);
 
     // ---- 3. The rack's cables ----

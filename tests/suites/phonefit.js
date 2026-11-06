@@ -184,7 +184,10 @@ window.addEventListener('load', () => { setTimeout(async () => {
     centreOnNodes([getNode('a'), getNode('b')]);
     ok('phone centreOnNodes comes in to 0.7 for a set that fits', near(state.camera.zoom, 0.7, 1e-9), String(state.camera.zoom));
     at = { x: 150 * state.camera.zoom + state.camera.x, y: state.camera.y };
-    ok('centred in the view', near(at.x, mid.x, 1e-6) && near(at.y, mid.y, 1e-6), json([at, mid]));
+    // What is seen with a device selected: the phone's selection bar (Mobile
+    // batch 2) lifts the document bar over it, so the view is shorter now.
+    const vSel = mapViewport(), midSel = { x: vSel.left + vSel.width / 2, y: vSel.top + vSel.height / 2 };
+    ok('centred in the view', near(at.x, midSel.x, 1e-6) && near(at.y, midSel.y, 1e-6), json([at, midSel]));
     state.camera.zoom = 1; applyCamera();
     centreOnNodes([getNode('a'), getNode('c')]);
     const fitZ = Math.min((vb.width - 120) / 3000, (vb.height - 120) / 2000);

@@ -1970,6 +1970,8 @@ body.rack-view #conflictPill { display: none !important; }
    ============================================================ */
 #mobileActions { display: none; }
 .handy-bar { display: none; }
+/* The phone's selection bar and connect banner (js/mobile.js, Mobile batch 2). */
+.sel-bar, .link-banner { display: none; }
 
 @media (max-width: 900px) {
     /* The closed drawer's shadow would show along the light canvas's edge. */
@@ -2026,7 +2028,84 @@ body.rack-view #conflictPill { display: none !important; }
     .handy-btn:disabled { opacity: 0.35; cursor: default; }
     .handy-btn:disabled:hover { border-color: transparent; color: var(--text); background: transparent; }
     .handy-div { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; }
+
+    /* Selection bar: what is selected and what a finger does with it, just
+       above the handy bar and clear of the zoom control's column on the
+       right. The banner takes the same place while link mode is armed. */
+    .sel-bar, .link-banner {
+        position: fixed; left: 12px; right: 72px; bottom: 76px;
+        z-index: 2147480000;
+        display: flex; align-items: center; gap: 4px;
+        min-height: 54px; padding: 4px 4px 4px 12px;
+        background: rgba(13, 13, 13, 0.92);
+        border: 1px solid var(--border); border-radius: 12px;
+        box-shadow: 0 14px 38px rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(8px);
+        color: #f5f5f4;
+        /* Map to a finger, as the docbar is: two fingers here pinch the map
+           (mapOverlay, js/app.js), never the page. A tap is still a tap. */
+        touch-action: none;
+    }
+    .sel-bar[hidden], .link-banner[hidden] { display: none; }
+    body:has(.ws.drawer-open) :is(.sel-bar, .link-banner) { display: none; }
+    .sel-bar-name {
+        flex: 1 1 auto; min-width: 0;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: var(--fs-sm); font-weight: 700;
+    }
+    .sel-bar-btns { display: flex; gap: 4px; flex: none; }
+    .sel-bar-btn {
+        min-width: 44px; height: 44px; padding: 0 10px; flex: none;
+        display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+        background: transparent; border: 1px solid transparent; border-radius: 8px;
+        color: inherit; font: inherit; font-size: var(--fs-sm); line-height: 1;
+        cursor: pointer; white-space: nowrap;
+    }
+    .sel-bar-btn:hover, .sel-bar-btn:focus-visible { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); outline: none; }
+    .sel-bar-btn.danger { color: #fca5a5; }
+    .sel-bar-glyph { font-size: 1.05rem; font-weight: 700; }
+    .sel-bar.compact .sel-bar-label:not(.keep), .sel-bar.compact-all .sel-bar-label { display: none; }
+    .sel-bar.compact .sel-bar-btn:not(:has(.keep)), .sel-bar.compact-all .sel-bar-btn { padding: 0; }
+    .link-banner { padding: 5px 5px 5px 12px; border-color: var(--accent); }
+    .link-banner-text {
+        flex: 1 1 auto; min-width: 0; font-size: var(--fs-sm); font-weight: 600; line-height: 1.3;
+        /* Two lines at most, so a long device name never grows the banner
+           past the 54px the docbar's lift (body.selbar-on) leaves it. */
+        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+        overflow: hidden; overflow-wrap: anywhere;
+    }
+    .link-banner-cancel { flex: none; min-height: 44px; min-width: 44px; }
+    /* Colourful: the handy bar's glass (index.html's theme block), so the
+       two bars read as one set. */
+    :root[data-carino-theme="color"] :is(.sel-bar, .link-banner) { background: var(--ct-glass); box-shadow: var(--ct-shadow-3); color: var(--text); }
+    :root[data-carino-theme="color"] .sel-bar-btn.danger { color: var(--err); }
+    /* A selection with many tools on a narrow phone: the name gives way. */
+    .sel-bar.noname .sel-bar-name { display: none; }
+    .sel-bar.noname .sel-bar-btns { flex: 1; justify-content: space-between; }
+    /* What sits above the handy bar rises above the selection bar too. */
+    body.selbar-on .alert.topo-readonly, body.selbar-on .topo-docbar { bottom: 140px; }
+    body.selbar-on .alert.topo-storage { bottom: 188px; }
+    /* The drawer's Edit lands the name a little under the top. */
+    #propName { scroll-margin-top: 8px; }
 }
+/* A finger's map draws no little discs: the ✕ and a note's A− / A+ are 10px
+   targets inside the card's corner at a phone's zoom. The selection bar holds
+   them at 44px (js/mobile.js). */
+@media (max-width: 900px) and (pointer: coarse) {
+    .topo-svg .node-delete { display: none; }
+}
+@media print { .sel-bar, .link-banner { display: none !important; } }
+/* The multi-selection hint (index.html): Shift-click for a mouse, a tap
+   for a finger (the selection bar's Select more, js/mobile.js), only where
+   that bar is: a touch screen wider than 900px (a tablet in landscape) has
+   no Select more, so it keeps the Shift-click sentence. */
+.rail-note.hint-coarse { display: none; }
+@media (max-width: 900px) and (pointer: coarse) {
+    .rail-note.hint-fine { display: none; }
+    .rail-note.hint-coarse { display: block; }
+}
+/* Select more on: the bar's edge says the mode is on. */
+.sel-bar[data-more="on"] { border-color: var(--accent); }
 
 /* ---- Simple mode (body.simple-mode) --------------------------------------
    For non-technical users: hides every panel that assumes networking
@@ -2387,6 +2466,7 @@ body.landing-open .topo-actions { display: none !important; }
 body.chrome-pending .topo-actions { display: none !important; }
 body.chrome-pending .topo-rail, body.chrome-pending #canvasContainer { visibility: hidden; }
 body.chrome-pending .handy-bar { display: none !important; }
+body.chrome-pending :is(.sel-bar, .link-banner) { display: none !important; }
 /* The one exception: a sealed link asks for its passphrase during boot, before
    the work area it lives in is revealed. visibility is inherited but not
    enforced, so a descendant can opt back in. */
@@ -2394,6 +2474,7 @@ body.chrome-pending #unlockDialog { visibility: visible; }
 /* Same argument for the phone: js/mobile.js floats a bar of Undo/Redo/Delete
    over the canvas, and on the landing there is no canvas for it to act on. */
 body.landing-open .handy-bar { display: none !important; }
+body.landing-open :is(.sel-bar, .link-banner) { display: none !important; }
 .topo-card .field { min-width: 0; gap: 4px; }
 
 /* A device on its way into a collapsed group (js/motion.js): a copy, never hit. */
@@ -2517,3 +2598,91 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
 .tpl-item .tpl-head .lib-item-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tpl-item .tpl-head .lib-item-blurb { display: block; }
 .tpl-item .tpl-head .lib-item-icon { flex: none; }
+
+/* ---- The phone's drawer as one scroller (Mobile batch 2) ----------------
+   At 900px and below the rail is carino-ui's drawer, and it scrolls as one
+   column: the Controls header (js/mobile.js) stays at its top with its ✕,
+   the panel tabs stick under it, and nothing inside scrolls on its own (no
+   220px library box, no fixed half for the panel, no port list inside the
+   panel), so a finger's swipe anywhere moves the drawer. Textareas keep
+   their own scroll. Above 900px the docked rail is untouched: the library
+   takes what is left and the panel a fixed half (css above). */
+.rail-head { display: none; }
+@media (max-width: 900px) {
+    .topo-rail { --rail-head-h: 56px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+    /* scrollIntoView and focus scrolls land below the sticky header and tabs
+       (--rail-sticky-h is measured by js/mobile.js; the fallback is the
+       header and one row of tabs). */
+    .topo-rail { scroll-padding-top: calc(var(--rail-sticky-h, calc(var(--rail-head-h) + 48px)) + 8px); }
+    .topo-rail > * { flex-shrink: 0; }
+    .topo-rail .rail-lib, .topo-rail .rail-props, .topo-rail.lib-wrapped .rail-props {
+        flex: none; height: auto; min-height: 0; overflow: visible;
+    }
+    .topo-rail .rail-props { padding-bottom: 32px; }
+    .rail-head {
+        position: sticky; top: 0; z-index: 6;
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        box-sizing: border-box; height: var(--rail-head-h); padding: 0 6px 0 14px;
+        background: var(--bg-elev); border-bottom: 1px solid var(--border);
+    }
+    .rail-head .mobile-actions-title { margin: 0; }
+    .rail-close {
+        width: 44px; height: 44px; flex: none;
+        display: inline-flex; align-items: center; justify-content: center;
+        background: transparent; border: 1px solid transparent; border-radius: 8px;
+        color: var(--text); font-size: 1.1rem; line-height: 1; cursor: pointer;
+    }
+    .rail-close:hover, .rail-close:focus-visible { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); outline: none; }
+    /* The actions scroll away with the rest; the header keeps the title. */
+    #mobileActions { flex: none; padding-top: 10px; }
+    /* The panel tabs stay in reach under the header while their panel
+       scrolls, edge to edge so nothing shows past them. */
+    .topo-rail .cfg-tabs {
+        position: sticky; top: var(--rail-head-h); z-index: 5;
+        margin: -16px -16px 12px; padding: 4px 16px 0;
+        background: var(--bg-card);
+    }
+    .port-attr-list { max-height: none; overflow: visible; }
+}
+
+/* === The fleet navbar on a phone (Mobile batch 2) ===
+   On a touch screen 900px wide or less (a phone, a tablet upright; a
+   narrow desktop window with a mouse keeps the pinned bar) #carinoNav
+   leaves the page's flow and waits above the top edge, so the map and the
+   table get the whole height; --nav-h is 0, so the drawer, the scrim and
+   every sticky bar start at the top. js/mobile.js adds html.topo-nav-shown
+   on a swipe down from the top (or the handle), and the bar slides in OVER the content: nothing reflows and the camera stays put.
+   Hidden, it is visibility:hidden, so Tab and screen readers skip it. Not
+   transform: a transformed bar would hold its own About window (fixed,
+   inside it) to the bar's 60px. html prefix: outranks the bar's own
+   '#carinoNav{position:sticky}', injected after this file. */
+.nav-handle { display: none; }
+@media (max-width: 900px) and (pointer: coarse) {
+    html:root { --nav-h: 0px; }
+    html #carinoNav {
+        position: fixed; top: -72px; left: 0; right: 0; margin: 0;
+        visibility: hidden; transition: top .22s ease, visibility 0s linear .22s;
+    }
+    html.topo-nav-shown #carinoNav {
+        top: 0; visibility: visible; box-shadow: var(--topo-float-shadow);
+        transition: top .22s ease, visibility 0s;
+    }
+    /* The gesture's visible cue: a short pill at the top edge; the button is
+       72px wide (a finger's target across) and stays out of the top row's
+       way below it (that starts 12px down). */
+    .nav-handle {
+        display: block; position: fixed; top: 0; left: 50%; z-index: 1002;
+        width: 72px; height: 14px; margin: 0 0 0 -36px; padding: 0;
+        background: transparent; border: 0; cursor: pointer; touch-action: none;
+    }
+    .nav-handle > span {
+        display: block; width: 40px; height: 4px; margin: 4px auto 0; border-radius: 2px;
+        background: var(--text-muted); opacity: .75;
+    }
+    .nav-handle:hover > span, .nav-handle:focus-visible > span { background: var(--accent); opacity: 1; }
+    .nav-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 0 0 6px 6px; }
+}
+@media (max-width: 900px) and (pointer: coarse) and (prefers-reduced-motion: reduce) {
+    html #carinoNav, html.topo-nav-shown #carinoNav { transition: none; }
+}
+@media print { .nav-handle { display: none !important; } }

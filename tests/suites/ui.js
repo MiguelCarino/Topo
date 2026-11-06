@@ -192,7 +192,12 @@ window.addEventListener('load', () => { setTimeout(() => {
      && document.querySelector('.rail-lib').offsetHeight > 0);
   select('sw', 'node');
   ok('a device selected: the library folds to its row, the panels take the rail', rail.classList.contains('lib-wrapped') && !row.classList.contains('hidden')
-     && document.querySelector('.rail-lib').offsetHeight === 0 && getComputedStyle(document.querySelector('.rail-props')).flexGrow === '1',
+     && document.querySelector('.rail-lib').offsetHeight === 0
+     // flex 1 on the docked rail; in the phone's drawer (this 780px window)
+     // the panel is laid out at its full height in the one scroller (Mobile
+     // batch 2, tests/suites/railboxes.js holds the docked rail at 1280px).
+     && (matchMedia('(max-width: 900px)').matches ? getComputedStyle(document.querySelector('.rail-props')).overflowY === 'visible'
+         : getComputedStyle(document.querySelector('.rail-props')).flexGrow === '1'),
      [document.querySelector('.rail-lib').offsetHeight, getComputedStyle(document.querySelector('.rail-props')).flexGrow].join(' '));
   setSelectionEntries([{ type: 'node', id: 'sw' }, { type: 'node', id: Object.keys(Object.fromEntries(state.nodes.map((n) => [n.id, 1]))).find((id) => id !== 'sw') || 'sw' }]);
   renderSelection();

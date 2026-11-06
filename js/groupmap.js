@@ -426,6 +426,16 @@ function pressGroup(event, members) {
         selectEntries(all ? [...state.selection].filter((e) => !(e.type === 'node' && ids.has(e.id))) : [...state.selection, ...entries]);
         return;
     }
+    // Select more (phones, js/ui.js): the set stays. A drag moves the group's
+    // devices, or the whole set when they are all in it; a tap (a release
+    // that moved nothing) adds them to the set or takes them out.
+    if (selectMoreOn()) {
+        const set = all ? selectedOf('node').map(getNode).filter(Boolean) : members;
+        dragCollapse = null;
+        startDrag(event, set, members[0]);
+        armMoreToggle(event, entries);
+        return;
+    }
     // Already the selection: leave it be, so the bulk panel's draft stays.
     if (!(all && state.selection.size === members.length)) selectEntries(entries);
     dragCollapse = null;
@@ -445,7 +455,9 @@ const gmSlopOf = (event) => (GM_COARSE || (event.sourceCapabilities && event.sou
 
 function pressFold(event, group, members) {
     // Shift/Ctrl/Cmd: about the selection, as it is on a device.
-    if (addsToSelection(event)) { _gmFoldPress = null; pressGroup(event, members); return; }
+    // So is Select more's tap, which gathers the group's devices instead of
+    // expanding it (pressGroup).
+    if (addsToSelection(event) || (selectMoreOn() && !(event.button > 0))) { _gmFoldPress = null; pressGroup(event, members); return; }
     event.stopPropagation();
     _gmFoldPress = null;
     // Only the main button taps or drags. A right press is the rack's Open
@@ -1030,7 +1042,9 @@ function drawGroupEdges(view, ctx) {
         line.addEventListener('mousedown', (event) => {
             event.stopPropagation();
             const entries = edge.links.map((l) => ({ type: 'link', id: l.id }));
-            if (addsToSelection(event)) selectEntries([...state.selection, ...entries]);
+            // Select more (js/ui.js): they join the set, or leave it when all are in.
+            if (selectMoreOn()) toggleEntries(entries);
+            else if (addsToSelection(event)) selectEntries([...state.selection, ...entries]);
             else selectEntries(entries);
         });
         lLinks.appendChild(line);
