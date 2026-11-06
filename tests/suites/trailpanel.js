@@ -24,7 +24,7 @@
 //   7. the section gone in the reduced views and hidden in a multi-selection,
 //      a point recorded while it shows drawn again, 44px on a phone;
 //   8. the strings in es, pt-BR, ja (PC, never コンピューター) and ru;
-//   9. the Settings toggle 'Keep address history at back-ups and reports':
+//   9. the Settings toggle 'Remember how each device changes':
 //      a History section after Reports (in every view since the owner's
 //      2026-11-05 call; tests/suites/trailsimple.js holds the Simple side),
 //      ticked by default, off kept through saveSettings/loadSettings and
@@ -291,8 +291,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     setLocale('en'); applyStaticI18n();
 
     // ---- 9. The Settings toggle ----
-    const LABEL = 'Keep address history at back-ups and reports';
-    const HINT = "Each back-up and report notes every device's addresses, MAC, switch port and group, in this browser only. Off stops recording and keeps what is already there; Clear history on a network's card removes it.";
+    const LABEL = 'Remember how each device changes';
+    const HINT = "Each time you back up a network or make a report, Topo notes each device's name, address and where it is plugged in. This stays in this browser. Turning it off stops new notes and keeps the old ones; to delete them, use Clear history on the network's card.";
     const box = () => el('setTrailRecording');
     const savedSetting = () => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').trailRecording; } catch (e) { return 'unreadable'; } };
     const flip = (on) => { box().checked = on; box().dispatchEvent(new Event('change', { bubbles: true })); };

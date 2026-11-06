@@ -3386,13 +3386,13 @@ function applyCsvPlan(plan) {
     const ids = plan.newIds.concat(plan.touchedIds).filter((id) => getNode(id));
     if (ids.length) {
         selectEntries(ids.map((id) => ({ type: 'node', id })));
-        const rect = document.getElementById('networkCanvas').getBoundingClientRect();
+        const v = mapViewport();   // what is seen of the map (on a phone, under the bars)
         const { x, y, zoom } = state.camera;
         const added = plan.newIds.map(getNode).filter(Boolean);
         // Inset by a device's own size: one whose centre is on the edge, or
         // under the floating map controls, is not one anybody sees.
         const m = 70;
-        if (added.some((nd) => nd.x * zoom + x < m || nd.x * zoom + x > rect.width - m || nd.y * zoom + y < m || nd.y * zoom + y > rect.height - m)) fitToView();
+        if (added.some((nd) => nd.x * zoom + x < v.left + m || nd.x * zoom + x > v.left + v.width - m || nd.y * zoom + y < v.top + m || nd.y * zoom + y > v.top + v.height - m)) fitToView();
     } else renderSelection();
     showToast(t('Imported: {added} added, {changed} changed.', n), 'ok');
     return n;

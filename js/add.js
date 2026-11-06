@@ -309,13 +309,33 @@ function poolNotes(pools, kept, pooled) {
     };
 }
 
-// Rows of up to ADD_ROW devices, centred under (cx, top).
+// Rows of up to cols devices (ADD_ROW when not said), centred under (cx, top).
 const ADD_ROW = 12, ADD_COLW = 100, ADD_ROWH = 110;
-function addSlots(count, cx, top) {
+function addSlots(count, cx, top, cols) {
+    const per = Math.max(1, Math.floor(cols) || ADD_ROW);
     return Array.from({ length: count }, (_, i) => {
-        const row = Math.floor(i / ADD_ROW), inRow = Math.min(ADD_ROW, count - row * ADD_ROW);
-        return { x: cx + (i % ADD_ROW - (inRow - 1) / 2) * ADD_COLW, y: top + row * ADD_ROWH };
+        const row = Math.floor(i / per), inRow = Math.min(per, count - row * per);
+        return { x: cx + (i % per - (inRow - 1) / 2) * ADD_COLW, y: top + row * ADD_ROWH };
     });
+}
+// How many devices a row takes (Mobile batch 1). Off a phone, ADD_ROW, so
+// every coordinate is what it always was. On a phone (phoneView,
+// js/table.js), as many as fit across the visible map (mapViewport,
+// js/app.js) at the readable zoom, inside the fit's 16px margins and beside
+// the zoom buttons' column over its right edge: 4 at 360 and 390. A build of
+// a couple of dozen then opens readable, the router at the top, and the rest
+// is a pan down rather than a strip of 12 at a postage-stamp zoom.
+const ADD_ZOOM_COLUMN = 36;   // the zoom buttons' width when they can't be measured
+function phoneAddColumns(width, reserve) {
+    const side = reserve == null ? ADD_ZOOM_COLUMN : reserve;
+    const fit = Math.floor((width - PHONE_FIT_PAD * 2 - side) / (ADD_COLW * PHONE_READABLE_ZOOM));
+    return Math.min(ADD_ROW, Math.max(3, fit || 0));
+}
+function addColumns() {
+    if (!phoneView()) return ADD_ROW;
+    const ctl = document.querySelector('#canvasContainer > .zoom-ctl');
+    const cw = ctl ? ctl.getBoundingClientRect().width : 0;
+    return phoneAddColumns(mapViewport().width || window.innerWidth, cw || ADD_ZOOM_COLUMN);
 }
 function viewCentre() {
     const rect = document.getElementById('networkCanvas').getBoundingClientRect();
@@ -333,19 +353,22 @@ function addDevicesNow(req) {
     // the new devices inherit them instead of each carrying a copy.
     if (target && plan.cidr && !plan.network) declareSubnet(plan.cidr);
     // Below the target and anything already hanging under it.
+    const cols = addColumns();
     let at;
     if (target) {
         const below = linksAtNode(target.id).map((l) => getNode(l.source === target.id ? l.target : l.source))
             .filter((n) => n && n.y > target.y + 40);
-        at = { x: target.x, y: Math.max(target.y + 130, ...below.map((n) => n.y + 120)) };
+        // req.minTop: a floor the caller knows of (a build's hosts go below
+        // every infrastructure row, not only the switch's own children).
+        at = { x: target.x, y: Math.max(target.y + 130, ...below.map((n) => n.y + 120), req.minTop == null ? -Infinity : req.minTop) };
     } else {
         // Loose: beside what is drawn (as a block goes), or mid-view on an
         // empty map; either way, not on top of anything.
-        const rows = addSlots(plan.total, 0, 0);
+        const rows = addSlots(plan.total, 0, 0, cols);
         at = besideTheMap(rows);
-        if (!state.nodes.length) at.y -= Math.floor((plan.total - 1) / ADD_ROW) * ADD_ROWH / 2;
+        if (!state.nodes.length) at.y -= Math.floor((plan.total - 1) / cols) * ADD_ROWH / 2;
     }
-    const slots = addSlots(plan.total, at.x, at.y);
+    const slots = addSlots(plan.total, at.x, at.y, cols);
     const added = [];
     plan.devices.forEach((d, i) => {
         const node = newNodeRecord(d.type, slots[i].x, slots[i].y);
@@ -382,9 +405,16 @@ function addDevices(req) {
         selectEntries(added.map((n) => ({ type: 'node', id: n.id })));
         // What was just added is looked at next: when any of it is off the
         // screen, the whole map is framed (fitToView) rather than left there.
-        const rect = document.getElementById('networkCanvas').getBoundingClientRect();
+        // Off the screen means outside what is seen of it (mapViewport: on a
+        // phone the bars over the map hide some; elsewhere the whole canvas).
+        const v = mapViewport();
         const { x, y, zoom } = state.camera;
-        if (added.some((n) => n.x * zoom + x < 0 || n.x * zoom + x > rect.width || n.y * zoom + y < 0 || n.y * zoom + y > rect.height)) fitToView();
+        // A phone frames what was added instead, at the readable zoom or more
+        // (frameCamera's initial): the whole map there could be framed far
+        // below it, names under 7px. The rest of the map is a pan away.
+        if (added.some((n) => n.x * zoom + x < v.left || n.x * zoom + x > v.left + v.width || n.y * zoom + y < v.top || n.y * zoom + y > v.top + v.height)) {
+            if (phoneView()) fitToView(added, { initial: true }); else fitToView();
+        }
         showToast(t('Devices added: {n}', { n: added.length }), 'ok');
     }
     return added;
@@ -416,13 +446,18 @@ function buildNewNetwork(req) {
         state.nodes.push(hub);
         const lan = hub.interfaces[0].id;
         const items = (req.items || []).filter((i) => clampCount(i.count) > 0);
-        addDevicesNow({ items: items.filter((i) => ADD_INFRA.has(i.type)), pattern: req.pattern, targetId: hub.id, targetIface: lan });
+        const infra = addDevicesNow({ items: items.filter((i) => ADD_INFRA.has(i.type)), pattern: req.pattern, targetId: hub.id, targetIface: lan });
         const sw = state.nodes.find((n) => n.type === 'switch');
-        addDevicesNow({ items: items.filter((i) => !ADD_INFRA.has(i.type)), pattern: req.pattern, targetId: (sw || hub).id, targetIface: sw ? null : lan });
+        // Below the whole infrastructure block: on a phone its rows are short
+        // (addColumns), so a switch in its first row can have APs wrapped
+        // onto a second, where the hosts would otherwise land. One row (every
+        // desktop build of up to 12) leaves this under the switch's own floor.
+        const minTop = infra.length ? Math.max(...infra.map((n) => n.y)) + 120 : null;
+        addDevicesNow({ items: items.filter((i) => !ADD_INFRA.has(i.type)), pattern: req.pattern, targetId: (sw || hub).id, targetIface: sw ? null : lan, minTop });
         select(null, null);
         save();
     });
-    fitToView();
+    fitToView(null, { initial: true });
     initHistory();
     renderCanvasOnly();
 }

@@ -2812,8 +2812,11 @@ function focusOnMap(target) {
         if (a && b) at = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     }
     if (!at) return false;
-    const rect = document.getElementById('networkCanvas').getBoundingClientRect();
-    state.camera.x = (rect.width / 2) - at.x * state.camera.zoom; state.camera.y = (rect.height / 2) - at.y * state.camera.zoom;
+    // In the middle of what is seen of the map (mapViewport, js/app.js); a
+    // phone also comes in to a zoom its names can be read at.
+    const v = mapViewport();
+    if (phoneView()) state.camera.zoom = Math.max(state.camera.zoom, PHONE_READABLE_ZOOM);
+    state.camera.x = (v.left + v.width / 2) - at.x * state.camera.zoom; state.camera.y = (v.top + v.height / 2) - at.y * state.camera.zoom;
     applyCamera(); select(target.id, target.type);
     return true;
 }
@@ -2919,20 +2922,24 @@ function pruneSelection() {
 
 // Centre the map on a group of devices, zooming out only as far as it takes
 // to show them all (never in: the visitor chose this zoom). A network's
-// "Select members" lands here.
+// "Select members" lands here. On a phone it is centred in what is seen of
+// the map (mapViewport, js/app.js) and comes in as far as the readable zoom
+// when they all fit at it.
 function centreOnNodes(nodes) {
     if (!nodes.length) return;
     nodes = mapPointsOf(nodes);   // folded ones: their collapsed group's node (js/groupmap.js)
-    const rect = document.getElementById('networkCanvas').getBoundingClientRect();
+    const v = mapViewport(), phone = phoneView();
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     nodes.forEach((n) => { minX = Math.min(minX, n.x); minY = Math.min(minY, n.y); maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y); });
     const PAD = 120;
-    if (rect.width && rect.height) {
-        const fit = Math.min((rect.width - PAD) / ((maxX - minX) || 1), (rect.height - PAD) / ((maxY - minY) || 1));
-        state.camera.zoom = Math.max(0.2, Math.min(state.camera.zoom, fit));
+    if (v.width && v.height) {
+        const fit = Math.min((v.width - PAD) / ((maxX - minX) || 1), (v.height - PAD) / ((maxY - minY) || 1));
+        let zoom = Math.min(state.camera.zoom, fit);
+        if (phone) zoom = Math.max(zoom, Math.min(PHONE_READABLE_ZOOM, fit));
+        state.camera.zoom = Math.max(phone ? PHONE_MIN_ZOOM : 0.2, zoom);
     }
-    state.camera.x = rect.width / 2 - ((minX + maxX) / 2) * state.camera.zoom;
-    state.camera.y = rect.height / 2 - ((minY + maxY) / 2) * state.camera.zoom;
+    state.camera.x = v.left + v.width / 2 - ((minX + maxX) / 2) * state.camera.zoom;
+    state.camera.y = v.top + v.height / 2 - ((minY + maxY) / 2) * state.camera.zoom;
     applyCamera();
 }
 

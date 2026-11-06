@@ -106,6 +106,9 @@ const tableShown = () => { const v = tvEl(); return !!v && !v.classList.contains
 // visitor who left on it and opens a network without one gets the view the
 // width decides, and the rack view again on the next network that has one.
 const PHONE_MQ = '(max-width: 640px)';
+// The phone's layout, read live: the map's framing on a phone (js/app.js
+// mapViewport, frameCamera) asks it at the moment it frames.
+function phoneView() { return !!(window.matchMedia && window.matchMedia(PHONE_MQ).matches); }
 function effectiveView() {
     if (isReduced()) return 'map';
     if (state.settings.view === 'rack' && rackViewOffered()) return 'rack';

@@ -235,6 +235,66 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('with nothing selected it asks for a selection first', (await saveSelectionAsBlock()) === null);
   persistLibrary({});
 
+  // ---- Rows sized to the screen (Mobile batch 1) ----
+  // addSlots takes a column count; a phone's is what fits across its visible
+  // map at the readable zoom, and off a phone it stays ADD_ROW (12), so every
+  // coordinate a desktop build makes is the one it always made.
+  {
+    const s14 = addSlots(14, 500, 100, 4);
+    const rowsOf = (slots) => { const m = new Map(); slots.forEach((p) => m.set(p.y, (m.get(p.y) || []).concat(p.x))); return [...m.entries()]; };
+    const r14 = rowsOf(s14);
+    ok('addSlots(14, cols 4) makes rows of 4, 4, 4 and 2', r14.map(([, xs]) => xs.length).join(',') === '4,4,4,2', JSON.stringify(r14));
+    ok('a row apart each', r14.map(([y]) => y).join(',') === '100,210,320,430', r14.map(([y]) => y).join(','));
+    ok('each row centred under its parent', r14.every(([, xs]) => Math.abs((Math.min(...xs) + Math.max(...xs)) / 2 - 500) < 1e-9)
+       && r14[0][1].join(',') === '350,450,550,650' && r14[3][1].join(',') === '450,550', JSON.stringify(r14));
+    // The old placement, as it was before a column count was taken.
+    const oldSlots = (count, cx, top) => Array.from({ length: count }, (_, i) => {
+      const row = Math.floor(i / 12), inRow = Math.min(12, count - row * 12);
+      return { x: cx + (i % 12 - (inRow - 1) / 2) * 100, y: top + row * 110 };
+    });
+    ok('left out, the count is 12 and the slots are the old ones (1 to 30 devices)',
+       [1, 2, 5, 11, 12, 13, 24, 30].every((n) => JSON.stringify(addSlots(n, 37, -20)) === JSON.stringify(oldSlots(n, 37, -20))));
+    ok('phone columns: 4 at 360 and at 390, 12 at 1280',
+       phoneAddColumns(360) === 4 && phoneAddColumns(390) === 4 && phoneAddColumns(1280) === 12,
+       [360, 390, 1280].map((w) => phoneAddColumns(w)).join(','));
+    ok('never under 3 on the narrowest screen, never over 12', phoneAddColumns(200) === 3 && phoneAddColumns(0) === 3 && phoneAddColumns(5000) === 12);
+    ok('this runner is not a phone, so a row takes 12', !phoneView() && addColumns() === 12, String(addColumns()));
+    // A small build at the runner's (desktop) size, against a snapshot of
+    // where it always put things, relative to the router.
+    buildNewNetwork({ items: [{ type: 'switch', count: 1 }, { type: 'ap', count: 1 }, { type: 'pc', count: 14 }, { type: 'printer', count: 1 }] });
+    const hub = state.nodes.find((n) => n.type === 'router');
+    const rel = state.nodes.map((n) => n.type + ':' + (n.x - hub.x) + ',' + (n.y - hub.y)).join(' ');
+    const snap = 'router:0,0 switch:-40,140 ap:60,140 '
+      + [-580, -480, -380, -280, -180, -80, 20, 120, 220, 320, 420, 520].map((x) => 'pc:' + x + ',280').join(' ')
+      + ' pc:-140,380 pc:-40,380 printer:60,380';
+    ok('a desktop build keeps the old coordinates (snapshot)', rel === snap, rel);
+    // Phone columns (4) with the infrastructure wrapping onto a second row:
+    // the hosts go below the whole block, never on top of a wrapped AP or
+    // switch. addColumns is swapped for the phone's 4 here (a global function).
+    const realColumns = window.addColumns;
+    window.addColumns = () => 4;
+    try {
+      const clash = () => {
+        const bad = [];
+        state.nodes.forEach((a, i) => state.nodes.slice(i + 1).forEach((b) => {
+          if (Math.abs(a.x - b.x) < 60 && Math.abs(a.y - b.y) < 60) bad.push(a.name + '/' + b.name);
+        }));
+        return bad;
+      };
+      [[{ type: 'switch', count: 1 }, { type: 'ap', count: 4 }, { type: 'pc', count: 4 }],
+       [{ type: 'ap', count: 2 }, { type: 'switch', count: 3 }, { type: 'pc', count: 4 }],
+       [{ type: 'ap', count: 3 }, { type: 'switch', count: 2 }, { type: 'pc', count: 9 }, { type: 'printer', count: 2 }]].forEach((items) => {
+        buildNewNetwork({ items });
+        const label = items.map((i) => i.type + ' ' + i.count).join(', ');
+        const bad = clash();
+        ok('phone columns, infrastructure in two rows (' + label + '): no two cards overlap', bad.length === 0, JSON.stringify(bad));
+        const infraLow = Math.max(...state.nodes.filter((n) => ADD_INFRA.has(n.type)).map((n) => n.y));
+        const hosts = state.nodes.filter((n) => n.type !== 'router' && !ADD_INFRA.has(n.type));
+        ok('the hosts start below every infrastructure row (' + label + ')', hosts.length > 0 && hosts.every((n) => n.y >= infraLow + 110), JSON.stringify([infraLow, hosts.map((n) => n.y)]));
+      });
+    } finally { window.addColumns = realColumns; }
+  }
+
   // ---- Translated: plain words in the reporter's language ----
   setLocale('es'); applyStaticI18n();
   openAddDevices({ mode: 'add' });

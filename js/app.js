@@ -300,7 +300,9 @@ function tidyLayoutNow(scope) {
     nodes.forEach((n) => { const p = pos.get(n.id); if (p) { n.x = snap(p.x + dx); n.y = snap(p.y + dy); } });
     tidyNotesAlong(was);
     save(); renderCanvasOnly();
-    if (!only) fitToView();
+    // A new layout is looked at like a new map: on a phone, at a zoom its
+    // names can be read at, never the whole-map 0.1 an explicit fit allows.
+    if (!only) fitToView(null, { initial: true });
 }
 
 // A group's devices and what runs on them: a VM or container on a host in
@@ -800,14 +802,94 @@ function applyCamera() {
     canvasContainer.style.backgroundPosition = `${state.camera.x}px ${state.camera.y}px`;
 }
 
+// ---- Framing the map (Mobile batch 1) ----
+// On a phone (phoneView, js/table.js) the map is mostly covered: the Map |
+// Table switch and the search box over its top, the document bar and the
+// handy bar over its bottom. mapViewport() is the part of #networkCanvas that
+// none of them covers, in the canvas's own coordinates; framing and centring
+// aim there. Anywhere wider it is the whole canvas, as it always was. The
+// zoom buttons' narrow column at the side is not counted.
+const PHONE_READABLE_ZOOM = 0.7;   // names are 10 map units: about 7px and up
+const PHONE_MIN_ZOOM = 0.1;        // a phone may zoom out this far, so any map fits
+const PHONE_FIT_PAD = 16;
+const MAP_TOP_OVERLAYS = '#canvasContainer > .topo-topbar';
+const MAP_BOTTOM_OVERLAYS = '#docBar, #handyBar, #readOnlyBanner, #storageBanner';
+function mapViewport() {
+    const r = document.getElementById('networkCanvas').getBoundingClientRect();
+    const full = { left: 0, top: 0, width: r.width, height: r.height };
+    if (!phoneView() || !r.width || !r.height) return full;
+    // While boot is still deciding (body.chrome-pending, css/app.css) the
+    // bars are hidden, and boot's first fit would frame under them. They are
+    // measured as they will be: the class comes off for the measuring and
+    // goes back in the same task, so nothing is painted in between.
+    const pending = document.body.classList.contains('chrome-pending');
+    if (pending) document.body.classList.remove('chrome-pending');
+    try { return measureMapViewport(); }
+    finally { if (pending) document.body.classList.add('chrome-pending'); }
+}
+function measureMapViewport() {
+    const r = document.getElementById('networkCanvas').getBoundingClientRect();
+    const full = { left: 0, top: 0, width: r.width, height: r.height };
+    const shown = (el) => {
+        if (el.classList.contains('hidden')) return null;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return null;
+        const b = el.getBoundingClientRect();
+        return b.width && b.height ? b : null;
+    };
+    // An overlay counts on its own half of the map only: one that has grown
+    // past the middle (a search box's list) is left to cover what it covers.
+    let top = 0, bottom = r.height;
+    document.querySelectorAll(MAP_TOP_OVERLAYS).forEach((el) => {
+        const b = shown(el);
+        if (b && b.bottom - r.top > 0 && b.bottom - r.top < r.height / 2) top = Math.max(top, b.bottom - r.top);
+    });
+    document.querySelectorAll(MAP_BOTTOM_OVERLAYS).forEach((el) => {
+        const b = shown(el);
+        if (b && b.top - r.top > r.height / 2 && b.top < r.bottom) bottom = Math.min(bottom, b.top - r.top);
+    });
+    if (bottom - top < 80) return full;
+    return { left: 0, top, width: r.width, height: bottom - top };
+}
+const mapZoomLimits = () => ({ min: phoneView() ? PHONE_MIN_ZOOM : 0.2, max: 5 });
+
+// The camera that frames bounds ({ minX, minY, maxX, maxY }, map units) in
+// view ({ left, top, width, height }, canvas pixels). Pure, so it is tested
+// at any size (tests/suites/phonefit.js).
+// Not a phone: centred in the view, an 80px margin, zoom 0.2 to 1.4, the
+//   framing this always had.
+// A phone: a 16px margin, down to PHONE_MIN_ZOOM so a big map still fits.
+//   initial (the first view of a document) never goes below the readable
+//   zoom: a map too big for it is centred across, with its top (the uplink
+//   or the router) at the top of the view, and the rest is a pan away.
+function frameCamera(b, view, opts) {
+    const o = opts || {};
+    const w = (b.maxX - b.minX) || 1, h = (b.maxY - b.minY) || 1;
+    const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2;
+    if (!o.phone) {
+        const PAD = 80;
+        const zoom = Math.min(1.4, Math.max(0.2, Math.min((view.width - PAD * 2) / w, (view.height - PAD * 2) / h)));
+        return { zoom, x: view.left + view.width / 2 - cx * zoom, y: view.top + view.height / 2 - cy * zoom };
+    }
+    const PAD = PHONE_FIT_PAD;
+    const vw = Math.max(1, view.width - PAD * 2), vh = Math.max(1, view.height - PAD * 2);
+    const fit = Math.min(vw / w, vh / h);
+    const zoom = Math.min(1.4, Math.max(o.initial ? PHONE_READABLE_ZOOM : PHONE_MIN_ZOOM, fit));
+    const x = view.left + view.width / 2 - cx * zoom;
+    const y = h * zoom <= vh ? view.top + view.height / 2 - cy * zoom : view.top + PAD - b.minY * zoom;
+    return { zoom, x, y };
+}
+
 // Frame the whole topology in the viewport (centered + zoomed to fit).
 // nodes: frame these instead of the whole map (the search box's "Zoom to
 // matches", js/query.js). Left out, it is every device.
-function fitToView(nodes) {
+// opts.initial: this is a document's first view (boot, opening one,
+// Back/Forward, a build), which a phone keeps readable (frameCamera).
+function fitToView(nodes, opts) {
     const list = Array.isArray(nodes) ? nodes : state.nodes;
     if (!list.length) { state.camera = { x: 0, y: 0, zoom: 1 }; applyCamera(); return; }
     const rect = document.getElementById('networkCanvas').getBoundingClientRect();
-    if (!rect.width || !rect.height) { requestAnimationFrame(() => fitToView(nodes)); return; }
+    if (!rect.width || !rect.height) { requestAnimationFrame(() => fitToView(nodes, opts)); return; }
     const NODE = 30, LABEL = 46; // node half-box + label allowance below
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     list.forEach((n) => {
@@ -821,13 +903,10 @@ function fitToView(nodes) {
         minX = Math.min(minX, frames.minX); minY = Math.min(minY, frames.minY);
         maxX = Math.max(maxX, frames.maxX); maxY = Math.max(maxY, frames.maxY);
     }
-    const PAD = 80;
-    const w = (maxX - minX) || 1, h = (maxY - minY) || 1;
-    const zoom = Math.min(1.4, Math.max(0.2, Math.min((rect.width - PAD * 2) / w, (rect.height - PAD * 2) / h)));
-    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-    state.camera.zoom = zoom;
-    state.camera.x = rect.width / 2 - cx * zoom;
-    state.camera.y = rect.height / 2 - cy * zoom;
+    const c = frameCamera({ minX, minY, maxX, maxY }, mapViewport(), { phone: phoneView(), initial: !!(opts && opts.initial) });
+    state.camera.zoom = c.zoom;
+    state.camera.x = c.x;
+    state.camera.y = c.y;
     applyCamera();
 }
 
@@ -1699,7 +1778,7 @@ function replaceDocument(doc, opts = {}) {
     renderReadOnly();
     renderDocBar();
     renderCanvasOnly();
-    if (opts.fit !== false) fitToView();
+    if (opts.fit !== false) fitToView(null, { initial: true });
     if (window.TOPO_CHECKS && JSON.stringify(serializeDoc()) !== now) throw new Error('replaceDocument: the document changed while it was opened');
 }
 
@@ -2238,19 +2317,202 @@ function touchPress(event, press, alive) {
         mapPointerUp(as(at.clientX, at.clientY));
     };
     const done = () => {
-        _touchPress = null;
+        if (_touchPress === p) _touchPress = null;
         el.removeEventListener('touchmove', move);
         el.removeEventListener('touchend', end);
         el.removeEventListener('touchcancel', end);
     };
+    p.done = done;
     el.addEventListener('touchmove', move, { passive: false });
     el.addEventListener('touchend', end);
     el.addEventListener('touchcancel', end);
 }
 const touchPressNode = (event, node) => touchPress(event, (ev) => pressNode(ev, node), () => !!getNode(node.id));
 
+// A second finger while a card is being pressed: the gesture is a pinch, not
+// a drag. Whatever had moved goes back to where it started, and nothing is
+// saved, so no undo step is filed; the drop cues go with it.
+function abandonTouchPress() {
+    const p = _touchPress;
+    if (!p) return;
+    if (p.done) p.done();
+    _touchPress = null;
+    if (!p.started) return;
+    dragGroup.forEach(({ item, x0, y0 }) => { item.x = x0; item.y = y0; });
+    isDraggingNode = false; draggedNode = null; dragGroup = []; dragCollapse = null; _dragPress = null;
+    takeFoldTap(null); takeGroupDrop(null);
+    renderCanvasOnly();
+}
+
+// ---- The map under one or two fingers ----
+// The map itself takes no pan or pinch of the browser's (touch-action none,
+// css/app.css), so a gesture on it moves the camera and never zooms the page.
+// One finger that has travelled past the tap margin pans, 1:1; two pinch
+// about their midpoint and pan with it. A finger on a card that drags
+// (touchPress, above) is that card's until a second finger lands, which
+// abandons the drag and pinches. A touch that never travels is left alone:
+// the browser's own mouse events tap it as they always have (deselect on
+// empty map, pick a cable). Once a pan or pinch has happened, its lift is the
+// page's, so no tap, click or deselect follows it.
+// The maths, pure, on points of #networkCanvas (client minus its corner).
+function panCamera(cam, dx, dy) { return { x: cam.x + dx, y: cam.y + dy, zoom: cam.zoom }; }
+// a0, b0 the two fingers before, a1, b1 after: the world point under the
+// first midpoint ends under the second, and the zoom follows the spread
+// within the limits (a camera already outside them is never jumped back in).
+function pinchCamera(cam, a0, b0, a1, b1, limits) {
+    const lim = limits || mapZoomLimits();
+    const d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y), d1 = Math.hypot(b1.x - a1.x, b1.y - a1.y);
+    const lo = Math.min(lim.min, cam.zoom), hi = Math.max(lim.max, cam.zoom);
+    const z = d0 > 0 && d1 > 0 ? Math.min(hi, Math.max(lo, cam.zoom * d1 / d0)) : cam.zoom;
+    const m0x = (a0.x + b0.x) / 2, m0y = (a0.y + b0.y) / 2, m1x = (a1.x + b1.x) / 2, m1y = (a1.y + b1.y) / 2;
+    const wx = (m0x - cam.x) / cam.zoom, wy = (m0y - cam.y) / cam.zoom;
+    return { x: m1x - wx * z, y: m1y - wy * z, zoom: z };
+}
+
+let _mapTouch = null;          // { pts: Map(id -> {x, y, x0, y0}), mode, prev, els, travelled, rect, seen }
+let _mapTouchEndAt = -Infinity; // when the last finger left the map (a double-tap's dblclick reads it)
+function mapTouchPoints(g) { return [...g.pts.values()]; }
+// The canvas's corner is read once per gesture (g.rect, mapTouchStart): read
+// on every move, right after applyCamera restyled the map, it forced a style
+// pass of the whole map per finger per event.
+function mapTouchLocal(pt, r) {
+    return { x: pt.x - r.left, y: pt.y - r.top };
+}
+// Read where every finger of this gesture is now. A touch event lists all the
+// fingers on the screen in touches, so one event is enough for both.
+function mapTouchUpdate(g, e) {
+    const seen = [...(e.touches || [])].concat([...(e.changedTouches || [])]);
+    seen.forEach((t) => {
+        const p = g.pts.get(t.identifier);
+        if (p) { p.x = t.clientX; p.y = t.clientY; }
+    });
+}
+function mapTouchSetCamera(c) {
+    state.camera.x = c.x; state.camera.y = c.y; state.camera.zoom = c.zoom;
+    applyCamera();
+}
+// The fingers' positions now, kept as the next move's "before".
+const mapTouchSnap = (g) => mapTouchPoints(g).slice(0, 2).map((p) => ({ x: p.x, y: p.y }));
+function mapTouchStart(e) {
+    const t = e.target;
+    if (t && t.closest && t.closest('input, textarea, select, [contenteditable], foreignObject')) return;
+    let g = _mapTouch;
+    if (!g) g = _mapTouch = { pts: new Map(), mode: 'wait', prev: null, els: new Set(), travelled: false, rect: null, seen: null };
+    if (!g.rect) g.rect = document.getElementById('networkCanvas').getBoundingClientRect();
+    [...(e.changedTouches || [])].forEach((tp) => {
+        if (!g.pts.has(tp.identifier)) g.pts.set(tp.identifier, { x: tp.clientX, y: tp.clientY, x0: tp.clientX, y0: tp.clientY });
+    });
+    mapTouchUpdate(g, e);
+    // The moves and the lift go to the element the finger came down on, which
+    // may leave the page when the map is redrawn (see touchPress): heard there.
+    if (t && !g.els.has(t)) {
+        g.els.add(t);
+        t.addEventListener('touchmove', mapTouchMove, { passive: false });
+        t.addEventListener('touchend', mapTouchEnd);
+        t.addEventListener('touchcancel', mapTouchEnd);
+    }
+    if (g.pts.size >= 2) {
+        abandonTouchPress();
+        g.mode = 'pinch'; g.travelled = true; g.prev = mapTouchSnap(g);
+    } else if (g.mode === 'wait' && _touchPress && g.pts.has(_touchPress.id)) {
+        g.mode = 'card';
+    }
+}
+function mapTouchMove(e) {
+    const g = _mapTouch;
+    // One event can reach this twice: on a finger's own element (a cable, a
+    // label) and again on #networkCanvas as it bubbles. Once is enough.
+    if (!g || g.seen === e) return;
+    g.seen = e;
+    mapTouchUpdate(g, e);
+    if (g.mode === 'card') {
+        if (_touchPress && g.pts.has(_touchPress.id)) return;   // touchPress drags it
+        // touchPress let the press go without a drag (the card went away
+        // under the finger): the finger is the map's again.
+        g.mode = 'wait';
+    }
+    const pts = mapTouchPoints(g);
+    if (!pts.length) return;
+    if (g.mode === 'wait') {
+        const p = pts[0];
+        if (Math.hypot(p.x - p.x0, p.y - p.y0) <= GM_TAP_SLOP.touch) return;
+        g.mode = 'pan'; g.travelled = true; g.prev = [{ x: p.x0, y: p.y0 }];
+    }
+    if (e.cancelable) e.preventDefault();
+    if (g.mode === 'pan') {
+        const p = pts[0], q = g.prev[0];
+        mapTouchSetCamera(panCamera(state.camera, p.x - q.x, p.y - q.y));
+        g.prev = [{ x: p.x, y: p.y }];
+    } else if (g.mode === 'pinch' && pts.length >= 2) {
+        const now = mapTouchSnap(g);
+        const loc = (p) => mapTouchLocal(p, g.rect);
+        const [a0, b0] = g.prev.map(loc), [a1, b1] = now.map(loc);
+        mapTouchSetCamera(pinchCamera(state.camera, a0, b0, a1, b1, mapZoomLimits()));
+        g.prev = now;
+    }
+}
+function mapTouchEnd(e) {
+    const g = _mapTouch;
+    if (!g) return;
+    [...(e.changedTouches || [])].forEach((tp) => g.pts.delete(tp.identifier));
+    // A finger the browser no longer lists has gone, whatever was missed.
+    if (e.touches) {
+        const live = new Set([...e.touches].map((tp) => tp.identifier));
+        [...g.pts.keys()].forEach((id) => { if (!live.has(id)) g.pts.delete(id); });
+    }
+    if (g.travelled && e.cancelable) e.preventDefault();   // no tap or click after a pan
+    if (!g.pts.size) {
+        g.els.forEach((el) => {
+            el.removeEventListener('touchmove', mapTouchMove);
+            el.removeEventListener('touchend', mapTouchEnd);
+            el.removeEventListener('touchcancel', mapTouchEnd);
+        });
+        _mapTouch = null;
+        _mapTouchEndAt = performance.now();
+        return;
+    }
+    // Two fingers down to one: a pan from where the one left is, no jump.
+    if (g.mode === 'pinch' && g.pts.size === 1) { g.mode = 'pan'; g.prev = mapTouchSnap(g); }
+    else if (g.mode === 'pinch') g.prev = mapTouchSnap(g);
+}
+// What sits on the map (the zoom buttons, the document bar, the banners) is
+// map too: two fingers there pinch the map, never the page (touch-action none
+// on them, css/app.css). A tap on their buttons is still a tap.
+const MAP_OVERLAYS = '.zoom-ctl, #docBar, #readOnlyBanner, #storageBanner';
+// Safari's own pinch (GestureEvent): on a Mac's trackpad it is how a pinch
+// arrives (no Ctrl-wheel), so it zooms the map about the pointer as the wheel
+// does; on an iPhone the fingers' touch events are already pinching
+// (_mapTouch), so there it only keeps the page from zooming.
+let _gestureZoom = null;
+function mapGesture(e) {
+    if (e.cancelable) e.preventDefault();
+    if (e.type === 'gestureend') { _gestureZoom = null; return; }
+    if (_mapTouch) { _gestureZoom = null; return; }
+    if (e.type === 'gesturestart' || _gestureZoom === null) { _gestureZoom = state.camera.zoom; if (e.type === 'gesturestart') return; }
+    const scale = Number(e.scale);
+    if (!(scale > 0)) return;
+    const rect = document.getElementById('networkCanvas').getBoundingClientRect();
+    zoomCameraAt(_gestureZoom * scale, e.clientX - rect.left, e.clientY - rect.top);
+}
+(function () {
+    const canvas = document.getElementById('networkCanvas');
+    [canvas, ...document.querySelectorAll(MAP_OVERLAYS)].forEach((el) => {
+        el.addEventListener('touchstart', mapTouchStart, { passive: false });
+        ['gesturestart', 'gesturechange', 'gestureend'].forEach((type) => el.addEventListener(type, mapGesture, { passive: false }));
+    });
+})();
+// Did this dblclick come from a finger (a double-tap)? Chromium says so on the
+// event; elsewhere a finger that has just left the map does.
+function fromTouch(event) {
+    if ('sourceCapabilities' in event) return !!(event.sourceCapabilities && event.sourceCapabilities.firesTouchEvents);
+    return performance.now() - _mapTouchEndAt < 700;
+}
+
 // The screen point (sx, sy) in #networkCanvas stays put: the pointer for the wheel, the middle of the view for the buttons.
-function zoomCameraAt(nextZoom, sx, sy) { const z = Math.min(5, Math.max(0.2, nextZoom)), k = z / state.camera.zoom; state.camera.x = sx - (sx - state.camera.x) * k; state.camera.y = sy - (sy - state.camera.y) * k; state.camera.zoom = z; applyCamera(); }
+// A camera already past a limit (a phone's 0.1 fit, then the window widened
+// past the phone's width) is never pushed the wrong way: zooming out from 0.12
+// stays at 0.12 rather than jumping in to 0.2, as pinchCamera does.
+function zoomCameraAt(nextZoom, sx, sy) { const lim = mapZoomLimits(), cur = state.camera.zoom, z = Math.min(Math.max(lim.max, cur), Math.max(Math.min(lim.min, cur), nextZoom)), k = z / state.camera.zoom; state.camera.x = sx - (sx - state.camera.x) * k; state.camera.y = sy - (sy - state.camera.y) * k; state.camera.zoom = z; applyCamera(); }
 document.getElementById('networkCanvas').addEventListener('wheel', (event) => {
     event.preventDefault(); const rect = document.getElementById('networkCanvas').getBoundingClientRect();
     zoomCameraAt(state.camera.zoom * Math.exp(-event.deltaY * 0.001), event.clientX - rect.left, event.clientY - rect.top);
@@ -2482,8 +2744,16 @@ function renderShortcutHelp() {
     const modes = isReduced() ? '' : `<div class="sc-keyboard">
             <button type="button" id="helpModeBtn" class="btn">${escapeHtml(t('Switch to a simpler view or the setup wizard'))}</button>
         </div>`;
+    // A touch screen gets how to move the map with a finger (mapTouchStart).
+    let coarse = false;
+    try { coarse = matchMedia('(pointer: coarse)').matches; } catch (e) { /* no media queries */ }
+    const touch = coarse ? subhead('Touch') + `
+        <div class="sc-hint" id="touchHint">
+            <span>👆</span>
+            <span>${escapeHtml(t('Drag the map with one finger. Pinch to zoom. Double-tap to zoom in.'))}</span>
+        </div>` : '';
     document.getElementById('shortcutBody').innerHTML =
-        subhead('Mouse') + mouse +
+        touch + subhead('Mouse') + mouse +
         `<div class="sc-keyboard">${subhead('Keyboard')}${keys}</div>` + modes;
     const modeBtn = document.getElementById('helpModeBtn');
     if (modeBtn) modeBtn.onclick = () => { toggleShortcutHelp(false); openModePicker(); };
@@ -2795,12 +3065,21 @@ document.getElementById('redoBtn').onclick = redo;
     });
 })();
 
-// Double-click on empty canvas: drop a text note right there, editor open.
+// Double-click on empty canvas: drop a text note right there, editor open
+// (a mouse's; a finger's double-tap zooms, below).
 document.getElementById('networkCanvas').addEventListener('dblclick', (event) => {
     if (event.target.id !== 'networkCanvas') return;
     // The first click opened a collapsed group and its node went: the second
     // landed where it was, and is not a double-click on empty canvas.
     if (groupTapJustExpanded()) return;
+    // A finger's double-tap zooms in about where it tapped and makes nothing:
+    // a note and its editor (and a phone's keyboard) were too easy to drop by
+    // accident. Notes stay on the palette's note buttons.
+    if (fromTouch(event)) {
+        const r = document.getElementById('networkCanvas').getBoundingClientRect();
+        zoomCameraAt(state.camera.zoom * 2, event.clientX - r.left, event.clientY - r.top);
+        return;
+    }
     spawnAnnotation({ at: getWorkspacePoint(event.clientX, event.clientY), text: '', edit: true });
 });
 
@@ -2850,10 +3129,19 @@ document.getElementById('deleteElementBtn').onclick = deleteSelected;
 document.getElementById('deleteSelectionBtn').onclick = deleteSelectionAsked;
 document.getElementById('selOnlyNodesBtn').onclick = () => selectOnly('node');
 document.getElementById('selOnlyLinksBtn').onclick = () => selectOnly('link');
-const zoomCentred = (f) => { const r = document.getElementById('networkCanvas').getBoundingClientRect(); zoomCameraAt(state.camera.zoom * f, r.width / 2, r.height / 2); };
+// The buttons zoom about the middle of what is seen of the map (mapViewport:
+// on a phone, between the bars over it; elsewhere the whole canvas).
+const zoomCentred = (f) => { const v = mapViewport(); zoomCameraAt(state.camera.zoom * f, v.left + v.width / 2, v.top + v.height / 2); };
 document.getElementById('zoomInBtn').onclick = () => zoomCentred(1.2);
 document.getElementById('zoomOutBtn').onclick = () => zoomCentred(1 / 1.2);
-document.getElementById('zoomResetBtn').onclick = () => { state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera(); };
+document.getElementById('zoomFitBtn').onclick = () => fitToView();
+// 1:1 on a phone is zoom 1 about the middle of the view, keeping what is
+// there; anywhere wider it is still the reset to the world's corner, which
+// the 0 key (it clicks this) has always done.
+document.getElementById('zoomResetBtn').onclick = () => {
+    if (phoneView()) { const v = mapViewport(); zoomCameraAt(1, v.left + v.width / 2, v.top + v.height / 2); return; }
+    state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera();
+};
 // The map's background (css/app.css .map-ink): '' light, 'dark' (white
 // outlines on black) or 'blue' (a blueprint). The button steps through them
 // and is titled for the next one. A preference of this browser, like the
@@ -3366,7 +3654,7 @@ window.addEventListener('popstate', async () => {
     await load();
     if (nav !== _popRun) return;   // a newer Back/Forward has taken over
     renderCanvasOnly();
-    if (JSON.stringify(serializeDoc()) !== before) { fitToView(); initHistory(); }
+    if (JSON.stringify(serializeDoc()) !== before) { fitToView(null, { initial: true }); initHistory(); }
     applyArrivalFocus();   // an '#asset/<tag>' typed over the page: centre on it after the fit
 });
 
@@ -3423,7 +3711,7 @@ showLibraryTab(state.settings.libraryTab || 'nodes');
         // shelf already in hand — openBinderLink() only runs for the hash that
         // carried it, and a plain reload of a doc hash must still show it.
         restoreGuestBinder();
-        await load(); renderCanvasOnly(); fitToView();
+        await load(); renderCanvasOnly(); fitToView(null, { initial: true });
         applyArrivalFocus(); // '#asset/<tag>': the device it found, centred once the map is fitted
         initHistory(); // the loaded document is the floor of the undo timeline, not a step
         syncTraceControls();

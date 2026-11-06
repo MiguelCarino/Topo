@@ -86,9 +86,32 @@ async function buildRunfile(suite) {
   await writeFile(join(ROOT, RUNFILE), html);
 }
 
-// One suite on one already-launched engine → { total, failed, bad[], boot }.
-async function runSuite(browser, suite) {
-  const page = await browser.newPage();
+// A suite whose first lines say '@touch' runs on a phone: a touch screen at
+// 390x844, DPR 2, and window.__touch(type, points) dispatches real touch input
+// (CDP Input.dispatchTouchEvent: type 'touchStart' | 'touchMove' | 'touchEnd',
+// points [{ x, y, id }] in CSS pixels of the viewport), which goes through the
+// browser's own gesture handling (touch-action, scrolling, page zoom, the
+// mouse events of a tap) as a finger's does. window.__type(text) types it
+// with the keyboard. CDP is Chromium's, so elsewhere the suite is skipped.
+async function suiteHead(suite) {
+  return (await readFile(join(ROOT, 'tests/suites', suite + '.js'), 'utf8')).split('\n').slice(0, 5).join('\n');
+}
+
+// One suite on one already-launched engine → { total, failed, bad[], boot } or { skipped }.
+async function runSuite(browser, suite, engine) {
+  const touch = /@touch\b/.test(await suiteHead(suite));
+  if (touch && engine !== 'chromium') return { skipped: 'needs CDP touch input (Chromium only)' };
+  const context = touch
+    ? await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
+    : null;
+  const page = context ? await context.newPage() : await browser.newPage();
+  if (touch) {
+    const cdp = await context.newCDPSession(page);
+    await page.exposeBinding('__touch', async (_src, type, points) => {
+      await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: (points || []).map((p) => ({ x: p.x, y: p.y, id: p.id || 0 })) });
+    });
+    await page.exposeBinding('__type', async (_src, text) => { await page.keyboard.type(String(text)); });
+  }
   try {
     // ?lang=en and #advanced for the same reasons run.sh uses them — see the note there.
     await page.goto(`http://127.0.0.1:${PORT}/${RUNFILE}?lang=en#advanced`, { waitUntil: 'load' });
@@ -109,6 +132,7 @@ async function runSuite(browser, suite) {
     return { total: lines.length, failed: bad.length, bad, boot: '', perf };
   } finally {
     await page.close();
+    if (context) await context.close();
   }
 }
 
@@ -144,7 +168,8 @@ try {
     let eTotal = 0, eFailed = 0;
     for (const suite of suites) {
       await buildRunfile(suite);
-      const r = await runSuite(browser, suite);
+      const r = await runSuite(browser, suite, engine.name);
+      if (r.skipped) { console.log(`skip ${suite.padEnd(12)} ${r.skipped}`); continue; }
       eTotal += r.total; eFailed += r.failed;
       if (r.boot) { console.log(`FAIL ${suite.padEnd(12)} ${r.boot}`); }
       else if (r.failed) {
