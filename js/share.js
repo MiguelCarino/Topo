@@ -199,7 +199,10 @@ function askPassphrase(error, blocked) {
     _shareEl('unlockOpenBtn').classList.toggle('hidden', !!blocked);
     field.disabled = !!blocked;
     dialog.classList.remove('hidden');
-    if (!blocked) { field.focus(); field.select(); }
+    // On a touch screen the passphrase field waits for a tap, so the question
+    // and the last error are read first; a retry sent with Enter keeps the
+    // field and its keyboard (focusForTyping, js/dialog.js).
+    if (!blocked) focusForTyping(field, _shareEl('unlockForm'), { select: true });
     return new Promise((resolve) => { _unlockResolve = resolve; });
 }
 function _answerUnlock(value) {

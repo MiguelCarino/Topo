@@ -211,6 +211,8 @@ function schemaColumn(fields, key, rec, opts) {
     return Object.assign({
         key, rec, field: f, label: f.label,
         editor: editable ? 'text' : null,
+        // The phone keyboard its editor asks for (KEYBOARDS, js/ui.js).
+        keys: f.keys || 'prose',
         parse: tvTextParse(f),
         get: (target) => target[key],
         set: (target, value) => { target[key] = value; },
@@ -611,7 +613,7 @@ const TV_COLS = {
           get: (i) => (radioOf(i) || {}).standard || '',
           set: (i, v) => tvSetRadio(i, { standard: v }),
           show: (row) => (tvIsRadio(row) ? shown(wifiStandardName((radioOf(tvIfaceOf(row)) || {}).standard)) : tvDash()) },
-        { key: 'radio:bands', label: 'Bands', rec: 'iface', editor: 'text', mono: true, sort: 'text', same, when: () => wifiOffered(),
+        { key: 'radio:bands', label: 'Bands', rec: 'iface', editor: 'text', keys: 'code', mono: true, sort: 'text', same, when: () => wifiOffered(),
           can: tvIsRadio,
           parse: (text) => { const v = tvBlank(text); if (!v) return { value: '' }; const l = wifiBandList(v); return l && l.length ? { value: l.join(' ') } : { error: true }; },
           get: (i) => radioPartValue(radioOf(i), 'bands') || '',
@@ -686,7 +688,7 @@ const TV_COLS = {
               const auto = linkWifiBand(l);
               return auto ? shown(wifiBandName(auto), { muted: true, title: t('Worked out by Topo') }) : shown('');
           } },
-        { key: 'wifi:signal', label: 'Signal (dBm)', rec: 'link', editor: 'text', mono: true, sort: 'num', same, when: () => wifiOffered(),
+        { key: 'wifi:signal', label: 'Signal (dBm)', rec: 'link', editor: 'text', keys: 'int', mono: true, sort: 'num', same, when: () => wifiOffered(),
           can: tvWifiLink,
           parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v) return { value: undefined }; const n = asWifiSignal(v); return n === undefined ? { error: true } : { value: n }; },
           get: (l) => linkWifiOf(l, 'signal'),
@@ -699,16 +701,18 @@ const TV_COLS = {
         { key: 'device', label: 'Device', plain: true, rec: 'port', editor: null, sort: 'text', show: (row) => shown(row.data.device) },
         { key: 'port', label: 'Port', rec: 'port', editor: null, mono: true, sort: 'port',
           show: (row) => shown(row.data.port, row.data.over ? { bad: true, title: t('Past the {total}-port faceplate', { total: portCountOf(getNode(row.ref.nodeId)) }) } : {}) },
-        portColumn('label', { label: 'Label', plain: true,
+        portColumn('label', { label: 'Label', plain: true, keys: 'code',
             parse: (text) => { const v = String(text == null ? '' : text).trim(); return fieldOk.tag(v) ? { value: v } : { error: true }; } }),
-        portColumn('vlan', { label: 'VLAN', mono: true, sort: 'num',
+        portColumn('vlan', { label: 'VLAN', mono: true, sort: 'num', keys: 'int',
             parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v) return { value: undefined }; const n = asVlan(v); return n === undefined ? { error: true } : { value: n }; } }),
         // A trunk's tagged VLANs ("10,20,30-39" or "all", kept canonical) and
         // what the port gives by PoE (a standard's words or watts, shown as
         // "PoE+ 30 W"; typed as af, PoE+, 802.3bt type 3, 25 W...).
-        portColumn('tagged', { label: 'Tagged', mono: true,
+        portColumn('tagged', { label: 'Tagged', mono: true, keys: 'code',
             parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v || v === '—') return { value: undefined }; const l = asVlanList(v); return l === undefined ? { error: true } : { value: l }; } }),
-        portColumn('poe', { label: 'PoE', mono: true,
+        // PoE is typed as words as often as watts (PoE+, af, 802.3bt type 3),
+        // so it takes the exact keyboard rather than the decimal pad.
+        portColumn('poe', { label: 'PoE', mono: true, keys: 'code',
             parse: (text) => { const v = String(text == null ? '' : text).trim(); if (!v || v === '—') return { value: undefined }; const p = tvPoeParse(v); return p === null ? { error: true } : { value: p }; },
             show: (row) => shown(tvPoeCellText(row.data.poe)),
             edit: (row) => tvPoeCellText(row.data.poe) }),
@@ -777,7 +781,7 @@ const TV_COLS = {
     // except U, the rack unit. In tree order until a column is sorted; the
     // name is stepped in by depth so the tree still reads.
     groups: [
-        groupColumn('name', { label: 'Name', plain: true,
+        groupColumn('name', { label: 'Name', plain: true, keys: 'name',
             parse: (text) => ({ value: groupName(text) }),
             get: (g) => g.name || '',
             set: (g, v) => { if (v) g.name = v; else delete g.name; },
@@ -817,7 +821,7 @@ const TV_COLS = {
         // A rack's size ("Round 2", item 4), as the rail's fields have it.
         // The height keeps every device on its printed units and asks first
         // when some would lose theirs (applyRackHeight, js/model.js).
-        groupColumn('uHeight', { label: 'Height (U)', plain: true, mono: true, sort: 'num',
+        groupColumn('uHeight', { label: 'Height (U)', plain: true, mono: true, sort: 'num', keys: 'int',
             can: (row) => !!row.data.uHeight,
             parse: (text) => { const n = asUnits(String(text == null ? '' : text).trim().replace(/\s*u$/i, '')); return n !== undefined && n >= 1 && n <= RACK_U_MAX ? { value: n } : { error: true }; },
             ask: (g, v) => { const message = rackShrinkQuestion(g, v); return message ? { message, ok: t('Make it {h}U', { h: v }) } : ''; },
@@ -832,7 +836,7 @@ const TV_COLS = {
             edit: (row) => row.data.width,
             show: (row) => (row.data.width ? shown(rackWidthLabel(row.data.width)) : shown('—', { muted: true })) }),
         // Optional: a blank cell takes it away.
-        groupColumn('depthMm', { label: 'Depth (mm)', plain: true, mono: true, sort: 'num',
+        groupColumn('depthMm', { label: 'Depth (mm)', plain: true, mono: true, sort: 'num', keys: 'int',
             can: (row) => !!row.data.width,
             parse: (text) => {
                 const v = String(text == null ? '' : text).trim().replace(/\s*mm$/i, '');
@@ -864,7 +868,7 @@ const TV_COLS = {
     // The rail's Wi-Fi tab as rows (js/wifi.js). The trade's words, English,
     // but for the hidden flag, the access points and the clients.
     wifi: [
-        wifiColumn('ssid', { label: 'SSID',
+        wifiColumn('ssid', { label: 'SSID', keys: 'code',
             parse: (text) => { const v = wifiSsidText(text); return v ? { value: v } : { error: true }; } }),
         wifiColumn('security', { label: 'Security', editor: 'select',
             options: () => [{ value: '', label: '—' }].concat(WIFI_SECURITY.map((k) => ({ value: k, label: wifiSecurityName(k) }))),
@@ -872,7 +876,7 @@ const TV_COLS = {
             get: (w) => w.security || '',
             show: (row) => shown(row.data.securityName) }),
         // Every band is the default, and is no value: "2.4 5 6" reads back as ''.
-        wifiColumn('bands', { label: 'Bands', mono: true,
+        wifiColumn('bands', { label: 'Bands', mono: true, keys: 'code',
             parse: (text) => { const v = tvBlank(text); if (!v) return { value: '' }; const l = wifiBandList(v); return l && l.length ? { value: (asWifiBands(l) || []).join(' ') } : { error: true }; },
             get: (w) => (asWifiBands(w.bands) || []).join(' '),
             set: (w, v) => { if (v) w.bands = v.split(' '); else delete w.bands; },
@@ -940,7 +944,7 @@ const TV_INV_BY = { vendor: 'vendors', model: 'models', firmware: 'firmware' };
 function customColumn(def) {
     const yesno = def.kind === 'yesno';
     return {
-        key: `x:${def.id}`, custom: def.id, label: def.name, rec: 'node',
+        key: `x:${def.id}`, custom: def.id, label: def.name, rec: 'node', keys: customKeys(def),
         editor: yesno ? 'bool' : 'text', mono: def.kind === 'number' || def.kind === 'date',
         sort: def.kind === 'number' ? 'num' : 'text',
         parse: (text) => parseCustomValue(def, text),
@@ -1313,12 +1317,16 @@ function renderTableView(force, diag) {
     document.getElementById('tvPasteBtn').disabled = !rows.length || !!state.readOnly;
     document.getElementById('tvColsBtn').classList.toggle('hidden', tab !== 'devices');
     // The Inventory tab: its rows are counts, so nothing to paste, its own
-    // hint, and the By switch.
+    // hint, the By switch, and no touch hint.
     const inv = tab === 'inventory';
     document.getElementById('tvPasteBtn').classList.toggle('hidden', inv);
     document.getElementById('tvInvBy').classList.toggle('hidden', !inv);
     document.getElementById('tvHint').classList.toggle('hidden', inv);
     document.getElementById('tvInvHint').classList.toggle('hidden', !inv);
+    // The touch hint promises an editor, so it is gone where a second tap
+    // opens none: on Inventory's read-only rows, and on a read-only network,
+    // which refuses every edit (readOnlyRefuses).
+    document.getElementById('tvTouchHint').classList.toggle('hidden', inv || !!state.readOnly);
     document.querySelectorAll('#tvInvBy [data-invby]').forEach((b) => {
         const on = b.dataset.invby === _tv.invBy;
         b.classList.toggle('active', on);
@@ -1425,6 +1433,14 @@ function moveFrom(td, dir, editable) {
         });
         return best || under;
     };
+    // The phone's → in an open cell (tvNextCell): the next cell along that
+    // takes typing, read-only cells, ticks and picks stepped over, on into
+    // the next row at the end of this one.
+    if (dir === 'nextEdit') {
+        let c = moveFrom(td, 'next');
+        while (c && !tvTypes(c)) c = moveFrom(c, 'next');
+        return c;
+    }
     if (dir === 'left') return cells[at - 1] || null;
     if (dir === 'right') return cells[at + 1] || null;
     if (dir === 'home') return cells[0];
@@ -1448,6 +1464,41 @@ function goTo(td) {
     return true;
 }
 
+// ---- Typing with a finger (Mobile review M19) ----
+// A phone's keyboard has no Tab key, and its Enter is the only key that moves
+// on. So on a coarse pointer Enter commits and opens the cell below, as the
+// keyboard's Next says, and a → in the open cell commits and opens the next
+// one along the row. A mouse and a keyboard keep Enter and Tab as they were.
+const tvTouchTyping = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+// How soon after a compositionend an Enter keydown counts as the one that
+// confirmed the word (onTableKey). WebKit sends the two one straight after
+// the other; a person's own next Enter, read and pressed, never comes this
+// soon.
+const TV_IME_ENTER_MS = 100;
+// Does td open a typed editor? A tick or a pick cannot take typing, so a
+// chain of edits stops at one rather than flipping it or opening its list.
+function tvTypes(td) {
+    if (!td || !td.classList.contains('tv-edit') || state.readOnly) return false;
+    const row = rowByKey(td.parentElement.dataset.row);
+    const col = row && colByKey(row, td.dataset.col);
+    return canEdit(row, col) && (col.editor === 'text' || col.editor === 'textarea');
+}
+// What the keyboard's Enter key says in td's editor: Next while Enter will
+// open a cell below, Done when it will only close this one.
+const tvEnterHint = (td) => (tvTypes(moveFrom(td, 'down', true)) ? 'next' : 'done');
+// Where a cell is, as the cursor names it. The edit's redraw replaces every
+// cell, so the one an edit left is known by this, not by its element.
+const tvCellAt = (td) => (td ? `${td.parentElement.dataset.row}\n${td.dataset.col}` : '');
+// Opens the editor on td after an edit that left the cell at `from`
+// (tvCellAt), if td takes typing. Not when the edit asked a question first
+// (askConfirm's dialog is up), or when nothing moved: the bottom row's Enter
+// stays on its cell, and that is the end of the chain.
+function tvEditOn(td, from) {
+    if (!td || tvCellAt(td) === from || _tv.editor || !tvTypes(td)) return false;
+    if (window.CarinoUI && CarinoUI.modal.top()) return false;
+    return startEdit(td);
+}
+
 // ---- Editing ----
 function startEdit(td, seed) {
     const tr = td && td.parentElement;
@@ -1467,7 +1518,9 @@ function startEdit(td, seed) {
     if (col.editor === 'select') {
         el.innerHTML = col.options(row).map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
     } else {
-        el.setAttribute('autocomplete', 'off'); el.setAttribute('spellcheck', 'false');
+        // The column's phone keyboard, with Enter's word for where it goes.
+        // quiet keeps autocomplete and spellcheck off on every cell, as ever.
+        setKeyboard(el, col.keys || 'prose', { enter: tvEnterHint(td), quiet: true });
         if (col.editor === 'textarea') el.rows = 1; else el.type = 'text';
     }
     const target = findTarget(col.rec, row.ref);
@@ -1496,12 +1549,59 @@ function startEdit(td, seed) {
         unitEl.addEventListener('change', () => el.focus());
         unitEl.addEventListener('blur', (e) => { if (e.relatedTarget !== el) finishEdit('blur'); });
     }
+    // The phone's way across a row (tvNextCell), made only on a coarse
+    // pointer, so a mouse's table has the same cells as before. It takes no
+    // focus: its press is cancelled, so the field keeps the focus and the
+    // keyboard stays up, and the table's own handlers never see the press.
+    if (tvTouchTyping() && col.editor !== 'select' && moveFrom(td, 'nextEdit')) {
+        const next = document.createElement('button');
+        next.type = 'button'; next.className = 'tv-next'; next.tabIndex = -1;
+        next.title = t('Next cell'); next.setAttribute('aria-label', t('Next cell'));
+        next.innerHTML = '<span aria-hidden="true">→</span>';
+        const hold = (e) => { e.preventDefault(); e.stopPropagation(); };
+        next.addEventListener('pointerdown', hold);
+        next.addEventListener('mousedown', hold);
+        next.addEventListener('click', (e) => { hold(e); tvNextCell(); });
+        td.classList.add('tv-has-next');
+        td.appendChild(next);
+    }
     _tv.editor = { el, unitEl, td, rowKey: row.key, colKey: col.key, done: false, legacy, legacyUnit: unitEl ? unitEl.value : undefined };
+    // When an IME last finished a word here (onTableKey's Enter on a phone):
+    // WebKit ends the composition before the keydown of the Enter that
+    // confirmed it, so that keydown no longer says isComposing.
+    el.addEventListener('compositionend', (e) => { if (_tv.editor && _tv.editor.el === el) _tv.editor.composedAt = e.timeStamp; });
     el.addEventListener('blur', (e) => { if (!unitEl || e.relatedTarget !== unitEl) finishEdit('blur'); });
+    // The field fitted to the room beside the pinned column before the
+    // focus, so that the browser's own scroll to it is to its final size.
+    if (td.classList.contains('tv-has-next')) tvFitNext(td);
     el.focus();
+    // The cell grew by the → at its end: brought into view whole, the →
+    // with it, which the focus alone does not do.
+    if (td.classList.contains('tv-has-next')) scrollCellIntoView(td, true);
     if (seed === undefined && el.select) el.select();
     else if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length);
     return true;
+}
+
+// The width an open cell's field may take on a phone, so that the cell and
+// its → fit between the pinned key column and the scroller's right edge
+// (--tv-fit, css/app.css .tv-next). A fixed allowance cannot do it: the
+// pinned column is as wide as the longest name in the table, up to 9rem on a
+// phone, and scrollCellIntoView lines the cell up against it. A key cell is
+// itself the pinned one, so it has the room from its own left edge. Never
+// under TV_FIT_MIN, a few characters, nor over the field's usual 16rem.
+const TV_FIT_MIN = 64;
+function tvFitNext(td) {
+    const box = document.getElementById('tvScroll');
+    const pin = !td.classList.contains('tv-key') && td.parentElement.querySelector('.tv-key');
+    if (!box || !box.clientWidth) return;
+    const b = box.getBoundingClientRect();
+    const from = pin ? pin.getBoundingClientRect().right : td.getBoundingClientRect().left;
+    const cs = getComputedStyle(td);
+    const room = b.left + box.clientLeft + box.clientWidth - from
+        - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0) - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0);
+    const most = 16 * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16);
+    td.style.setProperty('--tv-fit', `${Math.round(Math.max(TV_FIT_MIN, Math.min(most, room)))}px`);
 }
 
 // Leaves the cell as it was. `quiet`: a rebuild is about to redraw it anyway.
@@ -1561,6 +1661,29 @@ function finishEdit(how, move) {
     // an unchanged one still has to put the cell back.
     if (!commitValue(row, col, res.value)) renderTableView(how !== 'blur');
     return true;
+}
+
+// The → in an open cell on a phone: keeps the value and opens the next cell
+// along that takes typing. It all runs inside the tap's click, which is what
+// lets iOS raise the keyboard again on the new field. A value that does not
+// pass stays open and marked, as it would on Enter.
+function tvNextCell() {
+    // The table holds its redraw while a pointer is down on it (its
+    // capturing pointerdown listener saw this press too), so that a tapped
+    // row is still there for the click. The click has come: the edit made
+    // here must redraw at once, or the next cell would open in the old grid.
+    _tv.pointerDown = false;
+    const ed = _tv.editor;
+    const from = tvCellAt(ed ? ed.td : cursorCell());
+    if (ed) { if (!finishEdit('tab', 'nextEdit')) return; }
+    else {
+        // The field lost the focus during the press after all, and its blur
+        // kept the value; that redraw was held, so it is done first.
+        if (_tv.dirty) { _tv.keepFocus = true; renderTableView(true); }
+        const at = cursorCell();
+        if (at) goTo(moveFrom(at, 'nextEdit'));
+    }
+    tvEditOn(cursorCell(), from);
 }
 
 // One edit, one transaction: written to the record through the column's
@@ -1838,7 +1961,9 @@ function openPasteColumn(opts = {}) {
     const scrim = pasteEl('pasteDialog');
     if (window.CarinoUI) CarinoUI.modal.open(scrim, { onClose: () => { _paste = null; _tv.keepFocus = true; renderTableView(true); } });
     else scrim.hidden = false;
-    if (!opts.text) pasteEl('pasteText').focus();
+    // The list is pasted next, except on a touch screen, where the keyboard
+    // waits for a tap on the box (focusForTyping, js/dialog.js).
+    if (!opts.text) focusForTyping(pasteEl('pasteText'), scrim.querySelector('.modal'));
 }
 function closePasteColumn() {
     const scrim = pasteEl('pasteDialog');
@@ -1925,7 +2050,28 @@ function onTableKey(e) {
         e.stopPropagation();
         const k = e.key;
         if (k === 'Escape') { e.preventDefault(); cancelEdit(); return; }
-        if (k === 'Enter' && !(ed.el.tagName === 'TEXTAREA' && e.shiftKey)) { e.preventDefault(); finishEdit('enter', e.shiftKey ? 'up' : 'down'); return; }
+        if (k === 'Enter' && !(ed.el.tagName === 'TEXTAREA' && e.shiftKey)) {
+            // On a phone, Enter still fills a column downwards, as it does
+            // with a keyboard and as moveFrom's note says (a row is better
+            // filled in the rail's form, which the drawer gives). It only
+            // goes on to open the cell below, the keyboard's Next; with no
+            // cell below to type in it is Done and the keyboard goes. Across
+            // is the → in the cell. An IME's Enter that confirms a word
+            // (Japanese) is left to the IME there. Chrome sends that Enter
+            // while still composing; WebKit, which every iOS browser runs
+            // on, ends the composition first and then sends it with keyCode
+            // 229 and isComposing false, so an Enter like that straight
+            // after a compositionend is the IME's too. keyCode 229 alone is
+            // not enough to go on: Gboard gives it to every key, an ordinary
+            // Enter included.
+            const touch = tvTouchTyping();
+            if (touch && (e.isComposing || (e.keyCode === 229 && ed.composedAt !== undefined && e.timeStamp - ed.composedAt < TV_IME_ENTER_MS))) return;
+            e.preventDefault();
+            const from = tvCellAt(ed.td);
+            const ok = finishEdit('enter', e.shiftKey ? 'up' : 'down');
+            if (ok && touch) tvEditOn(cursorCell(), from);
+            return;
+        }
         if (k === 'Tab') { e.preventDefault(); finishEdit('tab', e.shiftKey ? 'prev' : 'next'); return; }
         if ((k === 'ArrowUp' || k === 'ArrowDown') && ed.el.tagName === 'INPUT') { e.preventDefault(); finishEdit('arrow', k === 'ArrowUp' ? 'up' : 'down'); }
         return;
@@ -2123,7 +2269,7 @@ function renderColumnsDialog() {
         const label = custom ? custom.name : tvLabel(c);
         const fixed = c.key === TV_FIXED_COL;
         const nameCell = custom
-            ? `<input type="text" class="input cols-name" data-rename="${escapeHtml(custom.id)}" value="${escapeHtml(custom.name)}" maxlength="${CUSTOM_NAME_MAX}" aria-label="${escapeHtml(t('Column name'))}">
+            ? `<input type="text" class="input cols-name"${keyboardAttrs('name', { enter: 'done' })} data-rename="${escapeHtml(custom.id)}" value="${escapeHtml(custom.name)}" maxlength="${CUSTOM_NAME_MAX}" aria-label="${escapeHtml(t('Column name'))}">
                <select class="select cols-kind" data-kind="${escapeHtml(custom.id)}" aria-label="${escapeHtml(t('Kind'))}">${CUSTOM_KINDS.map((k) =>
                    `<option value="${k}"${k === custom.kind ? ' selected' : ''}>${escapeHtml(t(CUSTOM_KIND_NAMES[k]))}</option>`).join('')}</select>`
             : `<span class="cols-label">${escapeHtml(label)}</span>`;
@@ -2187,7 +2333,10 @@ function closeColumnsDialog() {
     const add = () => {
         if (addCustomColumn(colsEl('colsNewName').value, colsEl('colsNewKind').value)) {
             colsEl('colsNewName').value = '';
-            colsEl('colsNewName').focus();
+            // Ready for the next name, except after a tap on Add on a touch
+            // screen, where it would raise the keyboard again. Enter in the
+            // field keeps it (focusForTyping, js/dialog.js).
+            focusForTyping(colsEl('colsNewName'), colsEl('colsDialog').querySelector('.modal'));
         }
     };
     colsEl('colsAddBtn').addEventListener('click', add);

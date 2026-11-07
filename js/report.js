@@ -19,12 +19,12 @@
 // settings so it rides the share URL and the .nettopo file: one link is then the
 // whole engagement, not just the picture.
 const REPORT_FIELDS = [
-    { key: 'site', label: 'Site', placeholder: 'Hospital San José — Torre B' },
-    { key: 'client', label: 'Client', placeholder: 'Grupo Médico del Norte, S.A. de C.V.' },
-    { key: 'engineer', label: 'Prepared by', placeholder: 'Miguel Carino — Carino Systems' },
-    { key: 'ref', label: 'Reference', placeholder: 'CS-2026-014' },
-    { key: 'date', label: 'Date', placeholder: '' },
-    { key: 'scope', label: 'Scope & notes', placeholder: 'What was surveyed, what was not, and anything the reader needs to know.', multiline: true }
+    { key: 'site', label: 'Site', keys: 'words', placeholder: 'Hospital San José — Torre B' },
+    { key: 'client', label: 'Client', keys: 'words', placeholder: 'Grupo Médico del Norte, S.A. de C.V.' },
+    { key: 'engineer', label: 'Prepared by', keys: 'words', placeholder: 'Miguel Carino — Carino Systems' },
+    { key: 'ref', label: 'Reference', keys: 'code', placeholder: 'CS-2026-014' },
+    { key: 'date', label: 'Date', keys: 'code', placeholder: '' },
+    { key: 'scope', label: 'Scope & notes', keys: 'prose', placeholder: 'What was surveyed, what was not, and anything the reader needs to know.', multiline: true }
 ];
 
 // The LOCAL calendar date (todayISO, js/model.js) dates every report and
@@ -2972,7 +2972,7 @@ function renderReportFields(seed) {
     const meta = normalizeReportMeta(seed || state.report);
     host.innerHTML = '';
 
-    REPORT_FIELDS.forEach(({ key, label, placeholder, multiline }) => {
+    REPORT_FIELDS.forEach(({ key, label, keys, placeholder, multiline }) => {
         const wrap = document.createElement('label');
         wrap.className = 'field';
         const cap = document.createElement('span');
@@ -2983,6 +2983,8 @@ function renderReportFields(seed) {
         else input.rows = 3;
         input.id = `report-${key}`;
         input.className = multiline ? 'textarea' : 'input';
+        // keys: the phone keyboard the field asks for (KEYBOARDS, js/ui.js).
+        setKeyboard(input, keys || 'prose');
         input.placeholder = (key === 'site' && _reportMode === 'site' && keptSiteName()) || t(placeholder) || '';
         // Who prepares it: the network's own, else this browser's default
         // (Settings, js/settings.js).
@@ -3073,7 +3075,10 @@ function openReportDialog(mode) {
     renderReportDialog();
     dropReportPreview();
     dialog.classList.remove('hidden');
-    document.getElementById('report-site')?.focus();
+    // Site is the first thing typed, except on a touch screen, where the
+    // keyboard would cover the dialog before it is read (focusForTyping,
+    // js/dialog.js): there the card takes the focus.
+    focusForTyping(document.getElementById('report-site'), dialog.querySelector('.modal'));
     scheduleReportPreview(0);
 }
 

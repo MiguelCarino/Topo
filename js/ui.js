@@ -443,6 +443,17 @@ function openAnnotationEditor(a) {
     if (gEl) gEl.style.visibility = 'hidden';   // the overlay replaces the card while typing
 
     const z = state.camera.zoom;
+    // iOS Safari zooms the page in on editable text under 16px when it takes
+    // the focus, and leaves it zoomed: a note at a phone's readable zoom (0.7)
+    // types at 8.4px. On a touch screen the overlay is laid out `up` times
+    // larger, its text at 16px, and drawn back down to the card's size by a
+    // transform from its top-left corner, so it still sits exactly on the card
+    // and the page stays where it was. A mouse's screen keeps up = 1: the same
+    // overlay as ever, with no transform.
+    const textPx = (a.size || 12) * z;
+    let up = 1;
+    try { if (textPx < 16 && matchMedia('(pointer: coarse)').matches) up = 16 / textPx; } catch (e) { /* no media queries */ }
+    const s = z * up;
     const ed = document.createElement('div');
     ed.id = 'annEditor';
     ed.dataset.annId = a.id;   // renderAnnotation keeps the card hidden while this is open
@@ -451,16 +462,18 @@ function openAnnotationEditor(a) {
     ed.className = 'ann-editor';
     ed.style.left = `${a.x * z + state.camera.x}px`;
     ed.style.top = `${a.y * z + state.camera.y}px`;
-    ed.style.font = `${(a.size || 12) * z}px 'IBM Plex Sans', sans-serif`;
+    // The literal 16, so that floating point never asks for 15.9999px.
+    ed.style.font = `${up === 1 ? textPx : 16}px 'IBM Plex Sans', sans-serif`;
     ed.style.lineHeight = '1.35';
     ed.style.whiteSpace = 'pre';
     ed.style.color = '#1e293b';
-    ed.style.padding = `${6 * z}px ${10 * z}px`;
-    ed.style.minWidth = `${44 * z}px`;
-    ed.style.minHeight = `${26 * z}px`;
-    ed.style.borderRadius = `${4 * z}px`;
-    if (a.style === 'note') { ed.style.background = '#fef9c3'; ed.style.border = `${Math.max(1, z)}px solid #ca8a04`; }
-    else { ed.style.background = 'rgba(255,255,255,0.92)'; ed.style.border = `${Math.max(1, z)}px dashed #eab308`; }
+    ed.style.padding = `${6 * s}px ${10 * s}px`;
+    ed.style.minWidth = `${44 * s}px`;
+    ed.style.minHeight = `${26 * s}px`;
+    ed.style.borderRadius = `${4 * s}px`;
+    if (a.style === 'note') { ed.style.background = '#fef9c3'; ed.style.border = `${Math.max(1, z) * up}px solid #ca8a04`; }
+    else { ed.style.background = 'rgba(255,255,255,0.92)'; ed.style.border = `${Math.max(1, z) * up}px dashed #eab308`; }
+    if (up !== 1) { ed.style.transformOrigin = '0 0'; ed.style.transform = `scale(${1 / up})`; }
     ed.innerText = a.text;
 
     let closed = false;
@@ -1519,6 +1532,7 @@ function renderFaceplate(node, container) {
 
     const count = document.createElement('input');
     count.id = 'portCountInput';
+    setKeyboard(count, 'int');
     count.type = 'number'; count.min = '0'; count.max = '96';
     count.value = String(portCountOf(node));
     count.className = 'if-in faceplate-count';
@@ -1687,6 +1701,7 @@ function renderPortScheme(node) {
     const scheme = node.portScheme || {};
     const prefix = document.createElement('input');
     prefix.type = 'text'; prefix.id = 'portPrefixInput';
+    setKeyboard(prefix, 'code');
     prefix.className = 'if-in port-prefix';
     prefix.value = typeof scheme.prefix === 'string' ? scheme.prefix : '';
     prefix.placeholder = t('Prefix, e.g. Gi1/0/');
@@ -1694,6 +1709,7 @@ function renderPortScheme(node) {
     prefix.maxLength = PORT_PREFIX_MAX;
     const start = document.createElement('input');
     start.type = 'number'; start.id = 'portStartInput';
+    setKeyboard(start, 'int');
     start.min = '0'; start.max = '9999';
     start.className = 'if-in port-start';
     start.value = String(Number.isInteger(scheme.start) ? scheme.start : 1);
@@ -1834,6 +1850,7 @@ function renderPortAttrs(node) {
         name.textContent = ifaceLabel(node, id);
         const label = document.createElement('input');
         label.type = 'text'; label.className = 'if-in port-attr-label';
+        setKeyboard(label, 'code');
         label.value = a.label;
         label.placeholder = t('Label');
         label.maxLength = 64;
@@ -1846,7 +1863,8 @@ function renderPortAttrs(node) {
         // The untagged VLAN: an access port's, a trunk's native one. 1-4094
         // or nothing; anything else is marked and not written (heldField).
         const vlan = document.createElement('input');
-        vlan.type = 'text'; vlan.inputMode = 'numeric'; vlan.className = 'if-in port-attr-vlan';
+        vlan.type = 'text'; vlan.className = 'if-in port-attr-vlan';
+        setKeyboard(vlan, 'int');
         vlan.value = a.vlan === null ? '' : String(a.vlan);
         vlan.placeholder = t('Untagged');
         vlan.title = t('Untagged VLAN');
@@ -1880,7 +1898,9 @@ function renderPortAttrs(node) {
             if (show) _portMoreOpen.add(key); else _portMoreOpen.delete(key);
             more.setAttribute('aria-expanded', String(show));
             more.classList.toggle('on', show);
-            if (show) { const first = extra.querySelector('input'); if (first) first.focus(); }
+            // The first field ready to type, but not on a touch screen, where
+            // it is only scrolled into view (focusForTyping, js/dialog.js).
+            if (show) { const first = extra.querySelector('input'); if (first) focusForTyping(first, null, { reveal: true }); }
         };
         line.appendChild(name); line.appendChild(label); line.appendChild(vlan); line.appendChild(more); line.appendChild(where);
         line.appendChild(extra);
@@ -1898,6 +1918,7 @@ function renderPortMore(node, id) {
     row.className = 'port-attr-more';
     const tagged = document.createElement('input');
     tagged.type = 'text'; tagged.className = 'if-in port-attr-tagged';
+    setKeyboard(tagged, 'code');
     tagged.value = a.tagged === null ? '' : a.tagged;
     tagged.placeholder = t('Tagged, e.g. 10,20,30-39');
     tagged.title = t('Tagged VLANs: a list such as 10,20,30-39, or all');
@@ -1917,7 +1938,8 @@ function renderPortMore(node, id) {
         poe.appendChild(opt);
     });
     const watts = document.createElement('input');
-    watts.type = 'text'; watts.inputMode = 'decimal'; watts.className = 'if-in port-attr-watts';
+    watts.type = 'text'; watts.className = 'if-in port-attr-watts';
+    setKeyboard(watts, 'dec');
     watts.placeholder = 'W';
     watts.title = t('Watts at the switch, 0.5 to 100');
     watts.setAttribute('aria-label', `${t('PoE watts')} · ${ifaceLabel(node, id)}`);
@@ -1931,6 +1953,7 @@ function renderPortMore(node, id) {
     poe.addEventListener('change', () => {
         if (poe.value === 'w') {
             // Nothing is written until a number of watts is typed.
+            // Focused even on a touch screen: choosing Watts… is asking to type them.
             watts.hidden = false; watts.value = ''; watts.focus();
             return;
         }
@@ -2022,6 +2045,8 @@ function renderPortSetRow(node) {
     cap.textContent = t('Set on ports');
     const run = document.createElement('input');
     run.type = 'text'; run.className = 'if-in port-set-run';
+    // Enter sets the run (below), so the key says Done.
+    setKeyboard(run, 'code', { enter: 'done' });
     // As the box numbers its ports: 1-24, or 0-23 on a scheme from 0.
     const first = node.portScheme && Number.isInteger(node.portScheme.start) ? node.portScheme.start : 1;
     const span = portCountOf(node) || faceplatePortIds(node).length;
@@ -2037,6 +2062,7 @@ function renderPortSetRow(node) {
     });
     const value = document.createElement('input');
     value.type = 'text'; value.className = 'if-in port-set-value';
+    setKeyboard(value, 'code', { enter: 'done' });
     const hint = () => { value.placeholder = what.value === 'vlan' ? '10' : what.value === 'tagged' ? '10,20' : 'PoE+'; };
     hint();
     what.addEventListener('change', hint);
@@ -2081,7 +2107,8 @@ function renderPoeBudget(node) {
     cap.htmlFor = 'poeBudgetInput';
     cap.textContent = t('PoE budget (W)');
     const input = document.createElement('input');
-    input.type = 'text'; input.id = 'poeBudgetInput'; input.inputMode = 'decimal';
+    input.type = 'text'; input.id = 'poeBudgetInput';
+    setKeyboard(input, schemaKeys(NODE_FIELDS, 'poeBudget'));
     input.className = 'if-in poe-budget-in';
     input.autocomplete = 'off';
     input.placeholder = '—';
@@ -2130,7 +2157,9 @@ function openPortAttr(node, portId) {
     box.open = true; _portAttrsOpen = true;
     const line = box.querySelector(`.port-attr[data-port="${portId}"]`);
     const input = line && line.querySelector('.port-attr-label');
-    if (input) { input.focus(); line.scrollIntoView({ block: 'nearest' }); }
+    // The chip opens the list there; on a touch screen the label waits for a
+    // tap (focusForTyping, js/dialog.js).
+    if (input) { focusForTyping(input, null); line.scrollIntoView({ block: 'nearest' }); }
 }
 
 // The ✖ at the end of a row: an interface, a MAC, a bond member here, a
@@ -2188,6 +2217,7 @@ function renderSidebarData(node) {
             const div = document.createElement('div'); div.className = 'if-row';
             const nameInp = document.createElement('input'); nameInp.type = 'text'; nameInp.value = iface.name; nameInp.placeholder = 'eth0';
             nameInp.className = 'if-in if-name';
+            setKeyboard(nameInp, schemaKeys(IFACE_FIELDS, 'name'));
             nameInp.setAttribute('aria-label', t('Interface'));
             // The address field is named after its interface, and so is the
             // MAC line's under it, so a rename renames both: one attribute
@@ -2202,6 +2232,7 @@ function renderSidebarData(node) {
 
             const ipInp = document.createElement('input'); ipInp.type = 'text'; ipInp.value = iface.ip; ipInp.placeholder = 'CIDR';
             ipInp.className = 'if-in if-ip';
+            setKeyboard(ipInp, schemaKeys(IFACE_FIELDS, 'ip'));
             // The placeholder is not a name: once there is an address, a
             // screen reader would have nothing to say what the field is.
             ipInp.setAttribute('aria-label', `${t('Address')} · ${iface.name || t('Interface')}`);
@@ -2362,7 +2393,8 @@ function renderIfaceVlanLine(node, iface) {
     const label = document.createElement('span');
     label.className = 'if-tick'; label.textContent = 'vlan';
     const untagged = document.createElement('input');
-    untagged.type = 'text'; untagged.inputMode = 'numeric'; untagged.className = 'if-in if-vlan-in';
+    untagged.type = 'text'; untagged.className = 'if-in if-vlan-in';
+    setKeyboard(untagged, schemaKeys(IFACE_FIELDS, 'vlan'));
     untagged.value = asVlan(iface.vlan) === undefined ? '' : String(asVlan(iface.vlan));
     // Redone when the address above it is typed (the row's IP field).
     row.refreshAuto = () => {
@@ -2379,6 +2411,7 @@ function renderIfaceVlanLine(node, iface) {
     });
     const tagged = document.createElement('input');
     tagged.type = 'text'; tagged.className = 'if-in if-ip if-tagged-in';
+    setKeyboard(tagged, schemaKeys(IFACE_FIELDS, 'tagged'));
     tagged.value = asVlanList(iface.tagged) || '';
     tagged.placeholder = t('Tagged, e.g. 10,20');
     tagged.title = t('Tagged VLANs: a list such as 10,20,30-39, or all');
@@ -2410,6 +2443,7 @@ function renderMacLine(node, iface) {
     inp.type = 'text'; inp.value = iface.mac || '';
     inp.placeholder = 'AA:BB:CC:DD:EE:FF';
     inp.className = 'if-in if-ip';
+    setKeyboard(inp, schemaKeys(IFACE_FIELDS, 'mac'));
     inp.setAttribute('aria-label', `MAC · ${iface.name || t('Interface')}`);
 
     const out = document.createElement('div');
@@ -2587,6 +2621,7 @@ function renderBondMember(node, member, bond, container) {
     const nameInp = document.createElement('input');
     nameInp.type = 'text'; nameInp.value = member.name; nameInp.placeholder = 'eno1';
     nameInp.className = 'if-in if-name';
+    setKeyboard(nameInp, schemaKeys(IFACE_FIELDS, 'name'));
     nameInp.setAttribute('aria-label', t('Interface'));
     nameInp.addEventListener('input', (e) => {
         const real = node.interfaces.find((x) => x.id === member.id);
@@ -3146,6 +3181,93 @@ function selectNow(id, type) {
     const drawn = renderCanvasOnly();
     if (type === 'node') refreshSelectedNodeDiagnostics(drawnDiag(drawn));
 }
+
+// ---- Phone keyboards (Mobile review M19) ----
+// A phone draws a different keyboard for each field, and it decides which
+// from four attributes: inputmode (letters, digits, a decimal pad), whether
+// it capitalises the first letter, whether it autocorrects, and what the
+// Enter key says. Left alone, iOS writes "Eth0" for eth0 and corrects a
+// hostname into a dictionary word. So every field says what its value is
+// made of, as one of the profiles below, and the profile sets all four.
+// Schema rows name theirs in `keys` (js/model.js), static fields in data-keys
+// (index.html), and fields built here call setKeyboard() or keyboardAttrs().
+//
+// No profile for an address has inputmode numeric, decimal or url. The iOS
+// number and decimal pads have no '/', ':', '-' or hex letters, and cannot be
+// switched to letters, so a CIDR, an IPv6 address, a MAC, a VLAN list such as
+// "10,20-30" or a date such as "2019-03" could not be typed on them at all;
+// the url keyboard has the letters but buries the digits a level down. Those
+// values get the full keyboard with capitals and corrections turned off.
+const KEYBOARDS = {
+    // Addresses, CIDRs, MACs, VLAN and port lists, serials, tags, labels,
+    // dates, patterns and SSIDs: typed exactly, never a word.
+    code: { autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', autocomplete: 'off' },
+    // Whole numbers only: a VLAN id, U, heights, counts, months, years, a
+    // depth, a Wi-Fi signal (67 reads as -67, so no minus sign is needed).
+    int: { inputmode: 'numeric', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', autocomplete: 'off' },
+    // Watts and a length's number, which take a decimal point.
+    dec: { inputmode: 'decimal', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', autocomplete: 'off' },
+    // A search box: exact like code, with a Search key for Enter.
+    search: { autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', autocomplete: 'off', enterkeyhint: 'search' },
+    // Device, network, group, vendor, model and firmware names. A hostname is
+    // not a dictionary word, so nothing corrects it; whether it starts with a
+    // capital is left to the phone's own default.
+    name: { autocorrect: 'off' },
+    // People and organisations, each word a capital.
+    words: { autocapitalize: 'words', autocorrect: 'off' },
+    email: { inputmode: 'email', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' },
+    tel: { inputmode: 'tel', autocorrect: 'off', spellcheck: 'false' },
+    // Notes, a purpose, a location, support hours: sentences, corrected as
+    // the phone corrects any sentence.
+    prose: {}
+};
+// The attributes a profile owns outright, set or removed on every call so a
+// reused field (the prompt dialog's) never keeps the last one's keyboard.
+// None of them does anything in a desktop browser, apart from Safari's
+// autocorrection, so a mouse's screen behaves as before.
+const KEYBOARD_OWN = ['inputmode', 'autocapitalize', 'autocorrect', 'enterkeyhint'];
+// Gives el the keyboard for kind (a KEYBOARDS name; an unknown one is prose).
+// enter: what the Enter key says, where Enter does something ('done',
+// 'search', 'next'). spellcheck and autocomplete are only ever turned off,
+// when the profile or `quiet` asks, and never removed, so a field whose
+// markup already turned them off keeps that, and a name or a note keeps the
+// squiggles and the form history it had on a desktop.
+function setKeyboard(el, kind, { enter, quiet } = {}) {
+    if (!el) return el;
+    const k = KEYBOARDS[kind] ? kind : 'prose';
+    const p = KEYBOARDS[k];
+    el.dataset.keys = k;
+    KEYBOARD_OWN.forEach((a) => {
+        const v = a === 'enterkeyhint' && enter ? enter : p[a];
+        if (v) el.setAttribute(a, v); else el.removeAttribute(a);
+    });
+    if (p.spellcheck || quiet) el.setAttribute('spellcheck', 'false');
+    if (p.autocomplete || quiet) el.setAttribute('autocomplete', 'off');
+    return el;
+}
+// The same, as attributes for a field written into a template string. The
+// values are the constants above, so nothing in them needs escaping.
+function keyboardAttrs(kind, { enter, quiet } = {}) {
+    const k = KEYBOARDS[kind] ? kind : 'prose';
+    const p = KEYBOARDS[k];
+    let s = ` data-keys="${k}"`;
+    KEYBOARD_OWN.forEach((a) => {
+        const v = a === 'enterkeyhint' && enter ? enter : p[a];
+        if (v) s += ` ${a}="${v}"`;
+    });
+    if (p.spellcheck || quiet) s += ' spellcheck="false"';
+    if (p.autocomplete || quiet) s += ' autocomplete="off"';
+    return s;
+}
+// A schema row's keyboard, for a field built from one by hand.
+const schemaKeys = (fields, key) => ((fields.find((f) => f.key === key) || {}).keys || 'prose');
+// A custom column's: a number may be negative and a date needs '-', so
+// neither gets a pad, only the exact keyboard.
+const customKeys = (def) => (def && (def.kind === 'number' || def.kind === 'date') ? 'code' : 'prose');
+// The static fields in index.html name their profile in data-keys (and their
+// Enter key in data-enter). The scripts sit at the end of <body>, so every
+// one of them has been parsed by the time this runs.
+document.querySelectorAll('[data-keys]').forEach((el) => setKeyboard(el, el.dataset.keys, { enter: el.dataset.enter }));
 
 // ---- A length and its unit (CABLE_UNITS, js/model.js) ----
 // The pick of the unit in front of a length field, wrapped with the field

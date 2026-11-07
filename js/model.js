@@ -1296,7 +1296,7 @@ function getPortStatus(node, portQuery) {
 // used it, and the normalizer passed `node.interfaces` through unchecked, so a
 // number in an `ip` crashed the sidebar, the filter and the gateway jump.
 //
-// A row is { key, kind, omit, label, report, csv, bulk, table, validate }:
+// A row is { key, kind, omit, label, keys, report, csv, bulk, table, validate }:
 //   kind      how the value is read on load and written on save (FIELD_KINDS).
 //   omit      the `|| undefined` rule: written only when it holds something, so
 //             a document that never used the field serializes exactly as it did
@@ -1308,6 +1308,9 @@ function getPortStatus(node, portQuery) {
 //   label     the English key for t(). Technical vocabulary stays English in
 //             the full editor (see applyProfile in app.js); the label is still
 //             passed through t() so a non-technical one can be translated.
+//   keys      the keyboard a phone shows for it (KEYBOARDS, js/ui.js): what
+//             the value is made of, so the rail, the table and the bulk panel
+//             type a field alike. A schema property, never written to a file.
 //   report    { key, column?, mono? }: the property on reportDevices()' rows,
 //             and when `column` is set, a column of the inventory table.
 //   csv       the header this field round-trips under. Unmapped CSV columns
@@ -1466,11 +1469,11 @@ const IFACE_FIELDS = [
     // A link names an interface by id, so a missing id is minted rather than
     // left blank: two blank ids on one node would bind the same cable twice.
     { key: 'id', kind: 'raw', read: (v) => asOptionalText(v) || nextId('i'), label: 'Interface ID', csv: 'interface_id' },
-    { key: 'name', kind: 'text', label: 'Interface', csv: 'interface', table: 'edit', write: (v) => v },
-    { key: 'ip', kind: 'text', label: 'IP / CIDR', csv: 'ip', bulk: false, table: 'edit', validate: fieldOk.cidr, write: (v) => v },
+    { key: 'name', kind: 'text', label: 'Interface', keys: 'code', csv: 'interface', table: 'edit', write: (v) => v },
+    { key: 'ip', kind: 'text', label: 'IP / CIDR', keys: 'code', csv: 'ip', bulk: false, table: 'edit', validate: fieldOk.cidr, write: (v) => v },
     // mac was the field the hand-kept list forgot. Omitted when empty, so a
     // document that never held a MAC serializes exactly as it did before.
-    { key: 'mac', kind: 'text', omit: true, label: 'MAC', csv: 'mac', table: 'edit', validate: fieldOk.mac,
+    { key: 'mac', kind: 'text', omit: true, label: 'MAC', keys: 'code', csv: 'mac', table: 'edit', validate: fieldOk.mac,
       read: (v) => (typeof v === 'string' ? v : undefined) },
     // drawZone used to sit here, one flag per interface, so a /24 of forty
     // hosts had forty switches for one bubble. It belongs to the network now
@@ -1494,10 +1497,10 @@ const IFACE_FIELDS = [
     // docs/BACKLOG.md feature 4): a router on a stick, a hypervisor's uplink.
     // Read and written on a wired interface only, as the radio is only a
     // wireless one's.
-    { key: 'vlan', kind: 'raw', omit: true, label: 'VLAN', csv: 'untagged_vlan',
+    { key: 'vlan', kind: 'raw', omit: true, label: 'VLAN', keys: 'int', csv: 'untagged_vlan',
       read: (v, src) => (ifaceIsWireless(src) ? undefined : asVlan(v)),
       write: (v, rec) => (rec && !ifaceIsWireless(rec) ? asVlan(v) : undefined) },
-    { key: 'tagged', kind: 'raw', omit: true, label: 'Tagged VLANs', csv: 'tagged_vlans',
+    { key: 'tagged', kind: 'raw', omit: true, label: 'Tagged VLANs', keys: 'code', csv: 'tagged_vlans',
       read: (v, src) => (ifaceIsWireless(src) ? undefined : asVlanList(v)),
       write: (v, rec) => (rec && !ifaceIsWireless(rec) ? asVlanList(v) : undefined) },
     // The radio's standard, bands, channels and broadcast SSIDs ("Wi-Fi"
@@ -1513,20 +1516,20 @@ const IFACE_FIELDS = [
 const NODE_FIELDS = [
     { key: 'id', kind: 'raw', read: (v) => v || nextId('n'), label: 'ID', csv: 'id' },
     { key: 'type', kind: 'raw', read: (v) => asOptionalText(v) || 'custom', label: 'Type', csv: 'type', bulk: true, table: 'show' },
-    { key: 'name', kind: 'raw', read: (v) => asText(v) || 'Unnamed Node', label: 'Name', csv: 'name', table: 'edit' },
+    { key: 'name', kind: 'raw', read: (v) => asText(v) || 'Unnamed Node', label: 'Name', keys: 'name', csv: 'name', table: 'edit' },
     { key: 'x', kind: 'coord', label: 'X', csv: 'x' },
     { key: 'y', kind: 'coord', label: 'Y', csv: 'y' },
-    { key: 'gw', kind: 'text', label: 'Gateway', csv: 'gateway', bulk: true, table: 'edit', validate: fieldOk.ip,
+    { key: 'gw', kind: 'text', label: 'Gateway', keys: 'code', csv: 'gateway', bulk: true, table: 'edit', validate: fieldOk.ip,
       report: { key: 'gw', column: 'Gateway', mono: true } },
-    { key: 'dns', kind: 'text', label: 'DNS', csv: 'dns', bulk: true, table: 'edit', validate: fieldOk.ipList,
+    { key: 'dns', kind: 'text', label: 'DNS', keys: 'code', csv: 'dns', bulk: true, table: 'edit', validate: fieldOk.ipList,
       report: { key: 'dns', column: 'DNS', mono: true } },
     // Who made the box and which model it is (document v16, docs/BACKLOG.md
     // feature 3): free text, omitted when blank, so a device that never used
     // them serializes byte for byte as before. The report prints them as one
     // "Model" column, vendor then model (reportColumns, js/report.js).
-    { key: 'vendor', kind: 'text', omit: true, read: asOmittedText, label: 'Vendor', csv: 'vendor', bulk: true, table: 'edit',
+    { key: 'vendor', kind: 'text', omit: true, read: asOmittedText, label: 'Vendor', keys: 'name', csv: 'vendor', bulk: true, table: 'edit',
       report: { key: 'vendor' } },
-    { key: 'model', kind: 'text', omit: true, read: asOmittedText, label: 'Model', csv: 'model', bulk: true, table: 'edit',
+    { key: 'model', kind: 'text', omit: true, read: asOmittedText, label: 'Model', keys: 'name', csv: 'model', bulk: true, table: 'edit',
       report: { key: 'model', column: 'Model' } },
     // The old OS field, relabelled "Model / firmware" with the Asset group
     // (plan section 4) and "Firmware / OS" once the model had a field of its
@@ -1534,11 +1537,11 @@ const NODE_FIELDS = [
     // links and sheets from before still read; text written under the old
     // label stays where it is (nothing is split by the upgrade). Still
     // written when empty, as it always was.
-    { key: 'os', kind: 'text', label: 'Firmware / OS', csv: 'os', bulk: true, table: 'edit',
+    { key: 'os', kind: 'text', label: 'Firmware / OS', keys: 'name', csv: 'os', bulk: true, table: 'edit',
       report: { key: 'os', column: 'Firmware / OS' } },
-    { key: 'ports', kind: 'text', label: 'Allowed Ports', csv: 'allowed_ports', bulk: true, table: 'edit', validate: fieldOk.ports,
+    { key: 'ports', kind: 'text', label: 'Allowed Ports', keys: 'code', csv: 'allowed_ports', bulk: true, table: 'edit', validate: fieldOk.ports,
       report: { key: 'allowedPorts' } },
-    { key: 'notes', kind: 'text', label: 'Notes', csv: 'notes', bulk: true, table: 'edit', report: { key: 'notes' } },
+    { key: 'notes', kind: 'text', label: 'Notes', keys: 'prose', csv: 'notes', bulk: true, table: 'edit', report: { key: 'notes' } },
     // A routing type's NAT default applies only when the document never said
     // either way, so an explicit `nat: false` on a firewall stays false.
     { key: 'nat', kind: 'bool', label: 'NAT / Masquerade', csv: 'nat', bulk: true, table: 'edit', report: { key: 'nat' },
@@ -1587,11 +1590,14 @@ const NODE_FIELDS = [
     // only on a box with a faceplate (as its port facts), the draw on
     // anything but a cloud, a VM or a container. fromText reads what a sheet
     // holds ("12,5", "12 W", and for a draw "class 4").
-    { key: 'poeBudget', kind: 'raw', label: 'PoE budget (W)', csv: 'poe_budget', bulk: true, table: 'edit',
+    { key: 'poeBudget', kind: 'raw', label: 'PoE budget (W)', keys: 'dec', csv: 'poe_budget', bulk: true, table: 'edit',
       read: (v, src) => (hasPortGrid(src) ? asPoeBudget(v) : undefined),
       write: (v, src) => (hasPortGrid(src) ? asPoeBudget(v) : undefined),
       fromText: (text) => poeBudgetFromText(text) },
-    { key: 'poeDraw', kind: 'raw', label: 'PoE draw (W)', csv: 'poe_draw', bulk: true, table: 'edit',
+    // The draw types on the exact keyboard, not the decimal pad: "class 2"
+    // is as good an answer as watts (the rail's placeholder offers it), and
+    // the iOS pad has no letters at all.
+    { key: 'poeDraw', kind: 'raw', label: 'PoE draw (W)', keys: 'code', csv: 'poe_draw', bulk: true, table: 'edit',
       read: (v, src) => (src && canDrawPoe(src.type) ? asPoeDraw(v) : undefined),
       write: (v, src) => (src && canDrawPoe(src.type) ? asPoeDraw(v) : undefined),
       fromText: (text) => poeDrawFromText(text) },
@@ -1605,14 +1611,14 @@ const NODE_FIELDS = [
     // Serial and asset tag name one box each, so the bulk panel does not set
     // them on many (a duplicate tag is a finding instead); location and status
     // are what a set of devices often shares.
-    { key: 'serial', kind: 'text', omit: true, read: asOmittedText, label: 'Serial number', csv: 'serial', table: 'edit',
+    { key: 'serial', kind: 'text', omit: true, read: asOmittedText, label: 'Serial number', keys: 'code', csv: 'serial', table: 'edit',
       validate: fieldOk.tag, report: { key: 'serial' } },
     // The id on the sticker, and the key of the `#asset/<tag>` route
     // (js/assets.js): a printed QR label opens this device.
-    { key: 'assetTag', kind: 'text', omit: true, read: asOmittedText, label: 'Asset tag', csv: 'asset_tag', table: 'edit',
+    { key: 'assetTag', kind: 'text', omit: true, read: asOmittedText, label: 'Asset tag', keys: 'code', csv: 'asset_tag', table: 'edit',
       validate: fieldOk.tag, report: { key: 'assetTag' } },
     // Room / rack / U, as text: Topo draws no racks (plan, "Not doing").
-    { key: 'location', kind: 'text', omit: true, read: asOmittedText, label: 'Location', csv: 'location', bulk: true, table: 'edit',
+    { key: 'location', kind: 'text', omit: true, read: asOmittedText, label: 'Location', keys: 'prose', csv: 'location', bulk: true, table: 'edit',
       report: { key: 'location' } },
     { key: 'status', kind: 'raw', read: asStatus, write: asStatus, label: 'Status', csv: 'status', bulk: true, table: 'edit',
       validate: (v) => isBlank(v) || asStatus(v) !== undefined, report: { key: 'status' } },
@@ -1621,15 +1627,18 @@ const NODE_FIELDS = [
     // year will do), when it was last serviced, and how often it should be,
     // in months. The age and the next service are worked out from these and
     // today's date, never stored. fromText reads what is typed or imported.
-    { key: 'inService', kind: 'raw', read: asLooseDate, write: asLooseDate, label: 'In service since', csv: 'in_service', bulk: true,
+    { key: 'inService', kind: 'raw', read: asLooseDate, write: asLooseDate, label: 'In service since', keys: 'code', csv: 'in_service', bulk: true,
       fromText: looseDateFromText },
-    { key: 'serviced', kind: 'raw', read: asLooseDate, write: asLooseDate, label: 'Last serviced', csv: 'last_serviced', bulk: true,
+    { key: 'serviced', kind: 'raw', read: asLooseDate, write: asLooseDate, label: 'Last serviced', keys: 'code', csv: 'last_serviced', bulk: true,
       fromText: looseDateFromText },
-    { key: 'serviceEvery', kind: 'raw', read: asServiceMonths, write: asServiceMonths, label: 'Service every (months)', csv: 'service_every_months', bulk: true,
+    // The exact keyboard rather than the number pad, for the same reason:
+    // "1 year" or "2 años" reads as well as 12. An expected life is in years
+    // already, so its number pad loses nothing.
+    { key: 'serviceEvery', kind: 'raw', read: asServiceMonths, write: asServiceMonths, label: 'Service every (months)', keys: 'code', csv: 'service_every_months', bulk: true,
       fromText: serviceMonthsFromText },
     // How many years this one is expected to last, when not its type's
     // (EXPECTED_LIFE_YEARS below): a server bought with a long contract.
-    { key: 'lifeYears', kind: 'raw', read: asLifeYears, write: asLifeYears, label: 'Expected life (years)', csv: 'expected_life_years', bulk: true,
+    { key: 'lifeYears', kind: 'raw', read: asLifeYears, write: asLifeYears, label: 'Expected life (years)', keys: 'int', csv: 'expected_life_years', bulk: true,
       fromText: lifeYearsFromText },
     // ---- Groups and racks (document v7, "Groups" below) ----
     // The group a device sits in, by id; its ancestors follow from the
@@ -1661,8 +1670,8 @@ const NODE_FIELDS = [
     // is how the rails are printed, not where a device is ("How a rack's
     // units are numbered", below), so a sheet means the same unit whichever
     // way the rack is numbered when it comes back.
-    { key: 'rackU', kind: 'count', label: 'Rack U', read: asRackU, write: asRackU, csv: 'rack_u' },
-    { key: 'rackHeight', kind: 'count', label: 'Rack height', read: asRackHeight, write: asRackHeight, csv: 'rack_height' },
+    { key: 'rackU', kind: 'count', label: 'Rack U', keys: 'int', read: asRackU, write: asRackU, csv: 'rack_u' },
+    { key: 'rackHeight', kind: 'count', label: 'Rack height', keys: 'int', read: asRackHeight, write: asRackHeight, csv: 'rack_height' },
     { key: 'rackFace', kind: 'raw', label: 'Rack face', read: asRackFace, write: asRackFace, csv: 'rack_face' },
     // 'half' or nothing (full depth, the default): asRackDepth above.
     { key: 'rackDepth', kind: 'raw', label: 'Rack depth', read: asRackDepth, write: asRackDepth, csv: 'rack_depth' },
@@ -1751,11 +1760,11 @@ const cableLengthMetres = (v) => { const p = cableLengthParts(v); return p ? Num
 const cableLengthTyped = (text) => String(text == null ? '' : text).replace(/[^\d.,]/g, '')
     .replace(/^([^.,]*[.,])(.*)$/, (all, head, rest) => head + rest.replace(/[.,]/g, ''));
 const CABLE_FIELDS = [
-    { key: 'label', kind: 'text', omit: true, read: asOmittedText, label: 'Cable label', csv: 'cable_label', table: 'edit', validate: fieldOk.tag },
-    { key: 'length', kind: 'text', omit: true, read: asOmittedText, label: 'Length', csv: 'cable_length', bulk: true, table: 'edit',
+    { key: 'label', kind: 'text', omit: true, read: asOmittedText, label: 'Cable label', keys: 'code', csv: 'cable_label', table: 'edit', validate: fieldOk.tag },
+    { key: 'length', kind: 'text', omit: true, read: asOmittedText, label: 'Length', keys: 'dec', csv: 'cable_length', bulk: true, table: 'edit',
       fromText: cableLengthFromText },
-    { key: 'color', kind: 'text', omit: true, read: asOmittedText, label: 'Colour', csv: 'cable_color', bulk: true, table: 'edit' },
-    { key: 'via', kind: 'text', omit: true, read: asOmittedText, label: 'Via', csv: 'cable_via', bulk: true, table: 'edit' }
+    { key: 'color', kind: 'text', omit: true, read: asOmittedText, label: 'Colour', keys: 'prose', csv: 'cable_color', bulk: true, table: 'edit' },
+    { key: 'via', kind: 'text', omit: true, read: asOmittedText, label: 'Via', keys: 'code', csv: 'cable_via', bulk: true, table: 'edit' }
 ];
 // Left off the link altogether when none of them says anything.
 function readCable(v) {
@@ -2231,13 +2240,13 @@ const dnsKey = (v) => parseDnsList(v).map((s) => (parseIpText(s) || { toString: 
 // network that never said its VLAN does not carry `vlan` at all.
 const NETWORK_FIELDS = [
     { key: 'id', kind: 'raw', read: (v) => asOptionalText(v) || nextId('net'), label: 'ID', csv: 'network_id' },
-    { key: 'cidr', kind: 'raw', read: readNetworkCidr, label: 'CIDR', csv: 'cidr', table: 'show', validate: fieldOk.cidr },
-    { key: 'name', kind: 'text', omit: true, label: 'Name', csv: 'name', table: 'edit' },
-    { key: 'vlan', kind: 'count', read: asVlan, write: asVlan, label: 'VLAN', csv: 'vlan', table: 'edit',
+    { key: 'cidr', kind: 'raw', read: readNetworkCidr, label: 'CIDR', keys: 'code', csv: 'cidr', table: 'show', validate: fieldOk.cidr },
+    { key: 'name', kind: 'text', omit: true, label: 'Name', keys: 'name', csv: 'name', table: 'edit' },
+    { key: 'vlan', kind: 'count', read: asVlan, write: asVlan, label: 'VLAN', keys: 'int', csv: 'vlan', table: 'edit',
       validate: (v) => v === undefined || isBlank(String(v)) || asVlan(v) !== undefined },
-    { key: 'purpose', kind: 'text', omit: true, label: 'Purpose', csv: 'purpose', table: 'edit' },
-    { key: 'gateway', kind: 'text', omit: true, label: 'Gateway', csv: 'gateway', table: 'edit', validate: fieldOk.ip },
-    { key: 'dns', kind: 'text', omit: true, label: 'DNS', csv: 'dns', table: 'edit', validate: fieldOk.ipList },
+    { key: 'purpose', kind: 'text', omit: true, label: 'Purpose', keys: 'prose', csv: 'purpose', table: 'edit' },
+    { key: 'gateway', kind: 'text', omit: true, label: 'Gateway', keys: 'code', csv: 'gateway', table: 'edit', validate: fieldOk.ip },
+    { key: 'dns', kind: 'text', omit: true, label: 'DNS', keys: 'code', csv: 'dns', table: 'edit', validate: fieldOk.ipList },
     // DHCP is served on this network: a fact for the register and the report.
     // Nothing infers addresses from it.
     { key: 'dhcp', kind: 'flag', label: 'DHCP', csv: 'dhcp', table: 'edit' },
@@ -2247,8 +2256,8 @@ const NETWORK_FIELDS = [
     // dhcpPoolOf()'s: counted only with DHCP on and both ends sound. Add
     // devices still hands out addresses from the bottom of the subnet, pool
     // or not (docs/BACKLOG.md "Decisions taken").
-    { key: 'dhcpFirst', kind: 'text', omit: true, label: 'DHCP first', csv: 'dhcp_first', table: 'edit', validate: fieldOk.ip },
-    { key: 'dhcpLast', kind: 'text', omit: true, label: 'DHCP last', csv: 'dhcp_last', table: 'edit', validate: fieldOk.ip },
+    { key: 'dhcpFirst', kind: 'text', omit: true, label: 'DHCP first', keys: 'code', csv: 'dhcp_first', table: 'edit', validate: fieldOk.ip },
+    { key: 'dhcpLast', kind: 'text', omit: true, label: 'DHCP last', keys: 'code', csv: 'dhcp_last', table: 'edit', validate: fieldOk.ip },
     // Tri-state, as the interface flag it replaces was: unset draws the zone
     // of a private network and not of a public one.
     { key: 'drawZone', kind: 'tristate', label: 'Zone', csv: 'draw_zone' }
@@ -3360,10 +3369,10 @@ const asWifiSecurity = (v) => wifiSecurityKey(v) || undefined;
 const WIFI_FIELDS = [
     // Links and radios name a network by id, so a missing one is minted.
     { key: 'id', kind: 'raw', read: (v) => asGroupRef(v) || nextId('wf'), label: 'ID', csv: 'wifi_id' },
-    { key: 'ssid', kind: 'raw', read: wifiSsidText, write: wifiSsidText, label: 'SSID', csv: 'ssid', table: 'edit' },
+    { key: 'ssid', kind: 'raw', read: wifiSsidText, write: wifiSsidText, label: 'SSID', keys: 'code', csv: 'ssid', table: 'edit' },
     { key: 'security', kind: 'raw', read: asWifiSecurity, write: asWifiSecurity, label: 'Security', csv: 'security', table: 'edit',
       validate: (v) => isBlank(v) || !!wifiSecurityKey(v) },
-    { key: 'bands', kind: 'raw', read: asWifiBands, write: asWifiBands, label: 'Bands', csv: 'bands', table: 'edit',
+    { key: 'bands', kind: 'raw', read: asWifiBands, write: asWifiBands, label: 'Bands', keys: 'code', csv: 'bands', table: 'edit',
       validate: (v) => isBlank(v) || !!(wifiBandList(v) || []).length },
     // A declared subnet, by id (normalizeWifiRefs drops one the document
     // does not hold). In a spreadsheet it is the subnet's CIDR.
@@ -3661,16 +3670,16 @@ const GROUP_FIELDS = [
     // interface's is.
     { key: 'id', kind: 'raw', read: (v) => asGroupRef(v) || nextId('g'), label: 'ID', csv: 'group_id' },
     // A blank name reads as the kind ("Rack"; groupLabel) and is not stored.
-    { key: 'name', kind: 'raw', read: groupName, write: (v) => groupName(v) || undefined, label: 'Name', csv: 'name' },
+    { key: 'name', kind: 'raw', read: groupName, write: (v) => groupName(v) || undefined, label: 'Name', keys: 'name', csv: 'name' },
     { key: 'kind', kind: 'raw', read: asGroupKind, write: asGroupKind, label: 'Kind', csv: 'kind',
       validate: (v) => isBlank(v) || GROUP_KINDS.includes(String(v).trim().toLowerCase()) },
     // Held as null at the top, written only when there is one (the way a
     // cable's port is). normalizeGroups() drops one that names no group or
     // closes a loop.
     { key: 'parent', kind: 'raw', read: (v) => asGroupRef(v) || null, write: (v) => v || undefined, label: 'Parent', csv: 'parent' },
-    { key: 'uHeight', kind: 'count', read: rackOnly(asRackSize), write: rackOnly(asRackSize), label: 'Height (U)', csv: 'u_height' },
+    { key: 'uHeight', kind: 'count', read: rackOnly(asRackSize), write: rackOnly(asRackSize), label: 'Height (U)', keys: 'int', csv: 'u_height' },
     { key: 'width', kind: 'raw', read: rackOnly(asRackWidth), write: rackOnly(asRackWidth), label: 'Width', csv: 'width' },
-    { key: 'depthMm', kind: 'count', read: rackOnly(asRackDepthMm), write: rackOnly(asRackDepthMm), label: 'Depth (mm)', csv: 'depth_mm' },
+    { key: 'depthMm', kind: 'count', read: rackOnly(asRackDepthMm), write: rackOnly(asRackDepthMm), label: 'Depth (mm)', keys: 'int', csv: 'depth_mm' },
     { key: 'numbering', kind: 'raw', read: rackOnly(asRackNumbering), write: rackOnly(asRackNumbering), label: 'Numbering', csv: 'numbering' },
     // The provider responsible for what is in it (document v15): every
     // device inside, at any depth, that names none of its own.
@@ -4913,16 +4922,16 @@ const providerEmailOk = (v) => isBlank(v) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(S
 const PROVIDER_FIELDS = [
     // Devices, cables and groups name a provider by id, so a missing one is minted.
     { key: 'id', kind: 'raw', read: (v) => asGroupRef(v) || nextId('pv'), label: 'ID', csv: 'provider_id' },
-    { key: 'name', kind: 'raw', read: providerLine(PROVIDER_NAME_MAX), write: providerLine(PROVIDER_NAME_MAX), label: 'Name', csv: 'name' },
+    { key: 'name', kind: 'raw', read: providerLine(PROVIDER_NAME_MAX), write: providerLine(PROVIDER_NAME_MAX), label: 'Name', keys: 'name', csv: 'name' },
     { key: 'service', kind: 'raw', read: asProviderService, write: asProviderService, label: 'Service', csv: 'service',
       validate: (v) => isBlank(v) || !!providerServiceKey(v) },
-    { key: 'contact', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Contact person', csv: 'contact' },
-    { key: 'phone', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Phone', csv: 'phone' },
-    { key: 'email', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Email', csv: 'email',
+    { key: 'contact', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Contact person', keys: 'words', csv: 'contact' },
+    { key: 'phone', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Phone', keys: 'tel', csv: 'phone' },
+    { key: 'email', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Email', keys: 'email', csv: 'email',
       validate: providerEmailOk },
-    { key: 'account', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Account / contract', csv: 'account' },
-    { key: 'hours', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Support hours / SLA', csv: 'support_hours' },
-    { key: 'notes', kind: 'raw', read: providerNotes, write: providerNotes, label: 'Notes', csv: 'notes' }
+    { key: 'account', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Account / contract', keys: 'code', csv: 'account' },
+    { key: 'hours', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Support hours / SLA', keys: 'prose', csv: 'support_hours' },
+    { key: 'notes', kind: 'raw', read: providerNotes, write: providerNotes, label: 'Notes', keys: 'prose', csv: 'notes' }
 ];
 // Load: coerced through the table, one record per id (a repeated id is
 // reminted), at most PROVIDER_MAX. Mutates nothing it is given.

@@ -92,11 +92,19 @@ function providerCardHtml(p) {
     const covers = providerCoversText(c);
     const reach = providerReachText(p);
     const option = (value, label, on) => `<option value="${escapeHtml(value)}"${on ? ' selected' : ''}>${escapeHtml(label)}</option>`;
-    const field = (key, label, attrs = '', cls = '') => `<div class="${cls}">
+    // Every field has its form history off, as it always had. Spellcheck is
+    // off on the names, numbers and addresses but not on the support hours,
+    // a sentence (its schema keys are prose), which a desktop browser goes on
+    // underlining as it did.
+    const field = (key, label, attrs = '', cls = '') => {
+        const keys = schemaKeys(PROVIDER_FIELDS, key);
+        const prose = keys === 'prose';
+        return `<div class="${cls}">
                 <label class="prop-lbl" for="pv-${id}-${key}">${escapeHtml(t(label))}</label>
                 <input id="pv-${id}-${key}" type="text" class="input" data-field="${key}" data-pv="${id}" value="${escapeHtml(p[key] || '')}"
-                    maxlength="${key === 'name' ? PROVIDER_NAME_MAX : PROVIDER_TEXT_MAX}" autocomplete="off" ${attrs}>
+                    maxlength="${key === 'name' ? PROVIDER_NAME_MAX : PROVIDER_TEXT_MAX}"${keyboardAttrs(keys, { quiet: !prose })}${prose ? ' autocomplete="off"' : ''} ${attrs}>
             </div>`;
+    };
     const covered = c.nodes.length + c.links.length;
     return `<article class="net-card pv-card" data-pv="${id}">
         <div class="net-head">
@@ -115,21 +123,21 @@ function providerCardHtml(p) {
             <button type="button" class="link-btn quiet" data-act="delete" data-pv="${id}">${escapeHtml(t('Delete'))}</button>
         </div>
         <div class="net-edit prop-grid"${open ? '' : ' hidden'}>
-            ${field('name', 'Name', 'spellcheck="false"', 'span2')}
+            ${field('name', 'Name', '', 'span2')}
             <div class="span2">
                 <label class="prop-lbl" for="pv-${id}-service">${escapeHtml(t('Service'))}</label>
                 <select id="pv-${id}-service" class="select" data-field="service" data-pv="${id}">
                     ${option('', '—', !p.service)}${PROVIDER_SERVICES.map((k) => option(k, providerServiceLabel(k), p.service === k)).join('')}
                 </select>
             </div>
-            ${field('contact', 'Contact person', 'spellcheck="false"', 'span2')}
-            ${field('phone', 'Phone', 'inputmode="tel" spellcheck="false"')}
-            ${field('email', 'Email', 'inputmode="email" spellcheck="false"')}
-            ${field('account', 'Account / contract', 'spellcheck="false"')}
+            ${field('contact', 'Contact person', '', 'span2')}
+            ${field('phone', 'Phone')}
+            ${field('email', 'Email')}
+            ${field('account', 'Account / contract')}
             ${field('hours', 'Support hours / SLA', '', '')}
             <div class="span2">
                 <label class="prop-lbl" for="pv-${id}-notes">${escapeHtml(t('Notes'))}</label>
-                <textarea id="pv-${id}-notes" class="input" rows="3" data-field="notes" data-pv="${id}" maxlength="${PROVIDER_NOTES_MAX}">${escapeHtml(p.notes || '')}</textarea>
+                <textarea id="pv-${id}-notes" class="input" rows="3" data-field="notes" data-pv="${id}" maxlength="${PROVIDER_NOTES_MAX}"${keyboardAttrs('prose')}>${escapeHtml(p.notes || '')}</textarea>
             </div>
             <p class="rail-note span2">${escapeHtml(t('Set it on a device, a cable or a group (everything inside a group that names none of its own).'))}</p>
         </div>
@@ -180,7 +188,8 @@ async function onProviderAction(e) {
     if (act === 'edit') {
         if (_pvEditOpen.has(id)) _pvEditOpen.delete(id); else _pvEditOpen.add(id);
         renderProvidersPanel(true);
-        if (_pvEditOpen.has(id)) { const f = pvPanel().querySelector(`[data-pv="${CSS.escape(id)}"][data-field="name"]`); if (f) f.focus(); }
+        // Its name ready to type, but not on a touch screen (onGroupAction, js/groups.js).
+        if (_pvEditOpen.has(id)) { const f = pvPanel().querySelector(`[data-pv="${CSS.escape(id)}"][data-field="name"]`); if (f) focusForTyping(f, null, { reveal: true }); }
         return;
     }
     if (act === 'covers') { selectProviderCovers(id); return; }
@@ -205,7 +214,8 @@ function addProviderPreset(service) {
     _pvEditOpen.add(p.id);
     refreshProviderViews(true);
     const f = pvPanel() && pvPanel().querySelector(`[data-pv="${CSS.escape(p.id)}"][data-field="name"]`);
-    if (f) f.focus();
+    // As a card's Edit does (onGroupAction, js/groups.js).
+    if (f) focusForTyping(f, null, { reveal: true });
     return p;
 }
 // + Provider: its name asked, the rest left to the card. -> the record, or null.

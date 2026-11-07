@@ -184,7 +184,7 @@ function wifiCardHtml(w) {
             <div class="span2">
                 <label class="prop-lbl" for="wf-${id}-ssid">SSID</label>
                 <input id="wf-${id}-ssid" type="text" class="input" data-field="ssid" data-wf="${id}" value="${escapeHtml(w.ssid || '')}"
-                    maxlength="${WIFI_SSID_MAX}" autocomplete="off" spellcheck="false">
+                    maxlength="${WIFI_SSID_MAX}"${keyboardAttrs(schemaKeys(WIFI_FIELDS, 'ssid'))}>
             </div>
             <div>
                 <label class="prop-lbl" for="wf-${id}-security">Security</label>
@@ -257,7 +257,8 @@ async function onWifiAction(e) {
     if (act === 'edit') {
         if (_wifiEditOpen.has(id)) _wifiEditOpen.delete(id); else _wifiEditOpen.add(id);
         renderWifiPanel(true);
-        if (_wifiEditOpen.has(id)) { const f = wifiPanel().querySelector(`[data-wf="${CSS.escape(id)}"][data-field="ssid"]`); if (f) f.focus(); }
+        // Its SSID ready to type, but not on a touch screen (onGroupAction, js/groups.js).
+        if (_wifiEditOpen.has(id)) { const f = wifiPanel().querySelector(`[data-wf="${CSS.escape(id)}"][data-field="ssid"]`); if (f) focusForTyping(f, null, { reveal: true }); }
         return;
     }
     if (act === 'clients') { selectWifiClients(id); return; }

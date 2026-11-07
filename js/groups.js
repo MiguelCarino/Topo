@@ -137,7 +137,7 @@ function groupCardHtml({ group: g, depth }, counts, tree = groupTree()) {
             <div class="span2">
                 <label class="prop-lbl" for="grp-${id}-name">${escapeHtml(t('Name'))}</label>
                 <input id="grp-${id}-name" type="text" class="input" data-field="name" data-grp="${id}" value="${escapeHtml(g.name || '')}"
-                    maxlength="${GROUP_NAME_MAX}" placeholder="${escapeHtml(groupKindName(g.kind))}" autocomplete="off" spellcheck="false">
+                    maxlength="${GROUP_NAME_MAX}" placeholder="${escapeHtml(groupKindName(g.kind))}"${keyboardAttrs(schemaKeys(GROUP_FIELDS, 'name'), { quiet: true })}>
             </div>
             <div>
                 <label class="prop-lbl" for="grp-${id}-kind">${escapeHtml(t('Kind'))}</label>
@@ -229,7 +229,7 @@ function rackSizeFieldsHtml(g, where) {
             <div>
                 <label class="prop-lbl" for="${pre}-depthMm">${escapeHtml(t('Depth (mm)'))}</label>
                 <input id="${pre}-depthMm" type="number" class="input mono" data-field="depthMm" data-grp="${id}" value="${Number.isInteger(g.depthMm) ? g.depthMm : ''}"
-                    min="1" max="${RACK_DEPTH_MM_MAX}" step="1" inputmode="numeric" autocomplete="off" placeholder="${escapeHtml(t('optional'))}"${dis}>
+                    min="1" max="${RACK_DEPTH_MM_MAX}" step="1"${keyboardAttrs(schemaKeys(GROUP_FIELDS, 'depthMm'))} placeholder="${escapeHtml(t('optional'))}"${dis}>
             </div>
             <div>
                 <label class="prop-lbl" for="${pre}-numbering">${escapeHtml(t('Numbering'))}</label>
@@ -256,7 +256,7 @@ async function onRackSizeField(el) {
         let n = asUnits(el.value);
         if (el.value === 'custom') {
             const answer = await askPrompt(t('How many units tall is {rack}? 1 to {max}.', { rack: groupLabel(g), max: RACK_U_MAX }),
-                { title: t('Height of the rack'), ok: t('Set height'), value: rackTop(g) });
+                { title: t('Height of the rack'), ok: t('Set height'), value: rackTop(g), keys: 'int' });
             n = answer === null ? undefined : asUnits(answer.trim());
             if (answer !== null && (n === undefined || n < 1 || n > RACK_U_MAX)) showToast(t('A rack is 1 to {max} units tall. Nothing was changed.', { max: RACK_U_MAX }));
         }
@@ -358,7 +358,12 @@ async function onGroupAction(e) {
     if (act === 'edit') {
         if (_grpEditOpen.has(id)) _grpEditOpen.delete(id); else _grpEditOpen.add(id);
         renderGroupsPanel(true);
-        if (_grpEditOpen.has(id)) { const f = grpPanel().querySelector(`[data-grp="${CSS.escape(id)}"][data-field="name"]`); if (f) f.focus(); }
+        // The card opens with its name ready to type. On a touch screen it is
+        // only scrolled into view, and the focus stays on Edit (put back by
+        // the render), so the form is read before any keyboard comes up
+        // (focusForTyping, js/dialog.js). The subnet, provider and Wi-Fi
+        // cards do the same.
+        if (_grpEditOpen.has(id)) { const f = grpPanel().querySelector(`[data-grp="${CSS.escape(id)}"][data-field="name"]`); if (f) focusForTyping(f, null, { reveal: true }); }
         return;
     }
     if (act === 'members') { selectGroupMembers(id); return; }
@@ -381,7 +386,7 @@ async function addGroup(parentId) {
     if (parentId && !parent) return null;
     const kind = parent ? CHILD_KIND[parent.kind] || 'custom' : 'building';
     const name = await askPrompt(parent ? t('Name of the group inside {parent}:', { parent: groupLabel(parent) }) : t('Name of the new group, like Building A or Server room:'),
-        { title: t('Add a group'), ok: t('Add') });
+        { title: t('Add a group'), ok: t('Add'), keys: 'name' });
     if (name === null || (parentId && !groupById(parentId))) return null;
     const g = makeGroup({ name: groupName(name), kind, parent: parent ? parent.id : null });
     // Drawn at once: a rack made inside a room puts Rack in the view switch.

@@ -316,11 +316,11 @@
                         <div id="bulkPane-rename" class="bulk-pane hidden">
                             <div class="bulk-field">
                                 <label for="bulkPattern" class="prop-lbl" data-i18n>New name</label>
-                                <input type="text" id="bulkPattern" class="input bulk-in mono" autocomplete="off" spellcheck="false" placeholder="CAM-{n:02}" />
+                                <input type="text" id="bulkPattern" data-keys="code" data-enter="done" class="input bulk-in mono" autocomplete="off" spellcheck="false" placeholder="CAM-{n:02}" />
                             </div>
                             <div class="bulk-field">
                                 <label for="bulkFind" class="prop-lbl" data-i18n>Find (optional)</label>
-                                <input type="text" id="bulkFind" class="input bulk-in" autocomplete="off" spellcheck="false" />
+                                <input type="text" id="bulkFind" data-keys="code" data-enter="done" class="input bulk-in" autocomplete="off" spellcheck="false" />
                             </div>
                             <div class="bulk-pair">
                                 <div class="bulk-field">
@@ -333,7 +333,7 @@
                                 </div>
                                 <div class="bulk-field bulk-start">
                                     <label for="bulkStart" class="prop-lbl" data-i18n>Start at</label>
-                                    <input type="number" id="bulkStart" class="input bulk-in mono" min="0" step="1" value="1" />
+                                    <input type="number" id="bulkStart" data-keys="int" data-enter="done" class="input bulk-in mono" min="0" step="1" value="1" />
                                 </div>
                             </div>
                             <p class="rail-note" data-i18n>{n} counts up, {n:02} pads it to two digits, {name} is the current name. With Find filled, only that text in each name is replaced.</p>
@@ -363,7 +363,7 @@
                                 </div>
                                 <div class="bulk-field bulk-start">
                                     <label for="bulkFrom" class="prop-lbl" data-i18n>From port</label>
-                                    <input type="text" id="bulkFrom" class="input bulk-in mono" autocomplete="off" spellcheck="false" placeholder="1" />
+                                    <input type="text" id="bulkFrom" data-keys="code" data-enter="done" class="input bulk-in mono" autocomplete="off" spellcheck="false" placeholder="1" />
                                 </div>
                             </div>
                             <p class="rail-note" data-i18n>Each one's cable moves to the next free port there. The device keeps its address: Move gives it one on another subnet.</p>
@@ -414,7 +414,7 @@
                 <div id="propertiesPane" class="hidden">
                     <div>
                         <label data-i18n class="prop-lbl" for="propName">Name</label>
-                        <input type="text" id="propName" class="input prop-name" />
+                        <input type="text" id="propName" data-keys="name" class="input prop-name" />
                     </div>
 
                     <div id="linkProps" data-adv class="hidden prop-sec">
@@ -466,7 +466,7 @@
                             </div>
                             <div>
                                 <label class="prop-lbl" for="propWifiSignal">Signal (dBm)</label>
-                                <input type="number" id="propWifiSignal" class="input mono" min="-100" max="0" step="1" inputmode="numeric" autocomplete="off" placeholder="-60" />
+                                <input type="number" id="propWifiSignal" data-keys="int" class="input mono" min="-100" max="0" step="1" autocomplete="off" placeholder="-60" />
                             </div>
                             <p id="wifiApLine" class="rail-note span2 wifi-ap-line hidden"></p>
                         </div>
@@ -489,11 +489,11 @@
                         <div class="prop-grid">
                             <div>
                                 <label class="prop-lbl" for="propGw">Gateway</label>
-                                <input type="text" id="propGw" placeholder="e.g. 10.0.0.1" class="input mono" />
+                                <input type="text" id="propGw" data-keys="code" placeholder="e.g. 10.0.0.1" class="input mono" />
                             </div>
                             <div>
                                 <label class="prop-lbl" for="propDns">DNS</label>
-                                <input type="text" id="propDns" placeholder="8.8.8.8" class="input mono" />
+                                <input type="text" id="propDns" data-keys="code" placeholder="8.8.8.8" class="input mono" />
                             </div>
                             <div class="span2">
                                 <!-- Which network a blank gateway / DNS comes from
@@ -512,7 +512,7 @@
                         <div id="poeDrawRow" class="prop-grid hidden">
                             <div>
                                 <label class="prop-lbl" for="propPoeDraw" data-i18n>PoE draw (W)</label>
-                                <input type="text" id="propPoeDraw" class="input mono" inputmode="decimal" autocomplete="off" placeholder="6.5 · class 2" />
+                                <input type="text" id="propPoeDraw" data-keys="code" class="input mono" autocomplete="off" placeholder="6.5 · class 2" />
                             </div>
                         </div>
 
@@ -541,7 +541,7 @@
                         <div class="prop-grid" id="osPortsRow" data-adv>
                             <div class="span2">
                                 <label class="prop-lbl" for="propPorts" data-i18n-title title="Blank = All ports open">Allowed Ports</label>
-                                <input type="text" id="propPorts" placeholder="80, 443" class="input mono" />
+                                <input type="text" id="propPorts" data-keys="code" placeholder="80, 443" class="input mono" />
                             </div>
                         </div>
                         <!-- The Asset group (plan section 4, js/assets.js): what a
@@ -566,17 +566,17 @@
                                         <label class="prop-lbl" for="propVendor" data-i18n>Vendor</label>
                                         <button type="button" id="vendorUseBtn" class="link-btn vendor-use hidden" data-i18n>Use</button>
                                     </div>
-                                    <input type="text" id="propVendor" list="vendorDatalist" class="input" autocomplete="off" />
+                                    <input type="text" id="propVendor" data-keys="name" list="vendorDatalist" class="input" autocomplete="off" />
                                     <datalist id="vendorDatalist"></datalist>
                                 </div>
                                 <div>
                                     <label class="prop-lbl" for="propModel" data-i18n>Model</label>
-                                    <input type="text" id="propModel" list="modelDatalist" class="input" autocomplete="off" />
+                                    <input type="text" id="propModel" data-keys="name" list="modelDatalist" class="input" autocomplete="off" />
                                     <datalist id="modelDatalist"></datalist>
                                 </div>
                                 <div class="span2">
                                     <label class="prop-lbl" for="propOs">Firmware / OS</label>
-                                    <input type="text" id="propOs" list="osDatalist" class="input" />
+                                    <input type="text" id="propOs" data-keys="name" list="osDatalist" class="input" />
                                     <datalist id="osDatalist"></datalist>
                                 </div>
                                 <!-- Split model and firmware (inventory stage 2,
@@ -586,15 +586,15 @@
                                 <p id="modelSplitNote" class="rail-note span2 model-split-note hidden" role="status"><span data-i18n>Model and firmware are in one field.</span> <button type="button" id="modelSplitBtn" class="link-btn" data-i18n>Split</button></p>
                                 <div>
                                     <label class="prop-lbl" for="propSerial" data-i18n>Serial number</label>
-                                    <input type="text" id="propSerial" class="input mono" maxlength="64" autocomplete="off" spellcheck="false" />
+                                    <input type="text" id="propSerial" data-keys="code" class="input mono" maxlength="64" autocomplete="off" spellcheck="false" />
                                 </div>
                                 <div>
                                     <label class="prop-lbl" for="propAssetTag" data-i18n>Asset tag</label>
-                                    <input type="text" id="propAssetTag" class="input mono" maxlength="64" autocomplete="off" spellcheck="false" placeholder="CS-0042" />
+                                    <input type="text" id="propAssetTag" data-keys="code" class="input mono" maxlength="64" autocomplete="off" spellcheck="false" placeholder="CS-0042" />
                                 </div>
                                 <div>
                                     <label class="prop-lbl" for="propLocation" data-i18n>Location</label>
-                                    <input type="text" id="propLocation" class="input" data-i18n-placeholder placeholder="Room · rack · U" />
+                                    <input type="text" id="propLocation" data-keys="prose" class="input" data-i18n-placeholder placeholder="Room · rack · U" />
                                 </div>
                                 <div>
                                     <label class="prop-lbl" for="propStatus" data-i18n>Status</label>
@@ -613,7 +613,7 @@
                                 <div>
                                     <label class="prop-lbl" for="propInService" data-i18n>In service since</label>
                                     <div class="date-field">
-                                        <input type="text" id="propInService" class="input mono" maxlength="10" autocomplete="off" spellcheck="false" placeholder="2019-03" />
+                                        <input type="text" id="propInService" data-keys="code" class="input mono" maxlength="10" autocomplete="off" spellcheck="false" placeholder="2019-03" />
                                         <button type="button" class="date-pick-btn" data-date-for="propInService" title="Pick from a calendar" aria-label="Pick from a calendar" data-i18n-title data-i18n-aria-label><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2 6.5h12M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
                                         <input type="date" class="date-pick-native" tabindex="-1" aria-hidden="true" />
                                     </div>
@@ -621,18 +621,18 @@
                                 <div>
                                     <label class="prop-lbl" for="propServiced" data-i18n>Last serviced</label>
                                     <div class="date-field">
-                                        <input type="text" id="propServiced" class="input mono" maxlength="10" autocomplete="off" spellcheck="false" placeholder="2026-05-14" />
+                                        <input type="text" id="propServiced" data-keys="code" class="input mono" maxlength="10" autocomplete="off" spellcheck="false" placeholder="2026-05-14" />
                                         <button type="button" class="date-pick-btn" data-date-for="propServiced" title="Pick from a calendar" aria-label="Pick from a calendar" data-i18n-title data-i18n-aria-label><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2 6.5h12M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
                                         <input type="date" class="date-pick-native" tabindex="-1" aria-hidden="true" />
                                     </div>
                                 </div>
                                 <div>
                                     <label class="prop-lbl" for="propServiceEvery" data-i18n>Service every (months)</label>
-                                    <input type="text" id="propServiceEvery" class="input mono" maxlength="12" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="12" />
+                                    <input type="text" id="propServiceEvery" data-keys="code" class="input mono" maxlength="12" autocomplete="off" spellcheck="false" placeholder="12" />
                                 </div>
                                 <div>
                                     <label class="prop-lbl" for="propLifeYears" data-i18n>Expected life (years)</label>
-                                    <input type="text" id="propLifeYears" class="input mono" maxlength="10" inputmode="numeric" autocomplete="off" spellcheck="false" />
+                                    <input type="text" id="propLifeYears" data-keys="int" class="input mono" maxlength="10" autocomplete="off" spellcheck="false" />
                                     <button type="button" id="lifeTypesBtn" class="link-btn quiet life-types-link" data-i18n>By type…</button>
                                 </div>
                                 <p id="upkeepNote" class="rail-note span2 hidden"></p>
@@ -671,11 +671,11 @@
                                 <div id="rackPlaceRow" class="span2 grp-rack hidden">
                                     <div>
                                         <label class="prop-lbl" for="propRackU" data-i18n-title title="The lowest unit it takes, counted from the bottom">U</label>
-                                        <input type="number" id="propRackU" class="input mono" min="1" step="1" inputmode="numeric" autocomplete="off" />
+                                        <input type="number" id="propRackU" data-keys="int" class="input mono" min="1" step="1" autocomplete="off" />
                                     </div>
                                     <div>
                                         <label class="prop-lbl" for="propRackHeight" data-i18n>Height (U)</label>
-                                        <input type="number" id="propRackHeight" class="input mono" min="1" step="1" inputmode="numeric" placeholder="1" autocomplete="off" />
+                                        <input type="number" id="propRackHeight" data-keys="int" class="input mono" min="1" step="1" placeholder="1" autocomplete="off" />
                                     </div>
                                     <div>
                                         <label class="prop-lbl" for="propRackFace" data-i18n>Face</label>
@@ -703,7 +703,7 @@
                             </div>
                             <div id="notesRow" data-adv class="prop-notes">
                                 <label class="prop-lbl" for="propNotes" data-i18n>Notes</label>
-                                <textarea id="propNotes" rows="2" class="textarea" data-i18n-placeholder placeholder="Where it is, who looks after it, anything the next person should know"></textarea>
+                                <textarea id="propNotes" data-keys="prose" rows="2" class="textarea" data-i18n-placeholder placeholder="Where it is, who looks after it, anything the next person should know"></textarea>
                                 <!-- The notes lint (notesSecretHits, js/assets.js):
                                      a password typed here would travel in every
                                      link, file and report. -->
@@ -749,7 +749,7 @@
                         <div class="prop-grid">
                             <div>
                                 <label class="prop-lbl" for="propCableLabel" data-i18n>Cable label</label>
-                                <input type="text" id="propCableLabel" class="input mono" maxlength="64" autocomplete="off" spellcheck="false" placeholder="WS-3B" />
+                                <input type="text" id="propCableLabel" data-keys="code" class="input mono" maxlength="64" autocomplete="off" spellcheck="false" placeholder="WS-3B" />
                             </div>
                             <div>
                                 <label class="prop-lbl" for="propCableLength" data-i18n>Length</label>
@@ -758,16 +758,16 @@
                                         <option value="m">m</option>
                                         <option value="ft">ft</option>
                                     </select>
-                                    <input type="text" id="propCableLength" class="input mono" inputmode="decimal" autocomplete="off" placeholder="2.5" />
+                                    <input type="text" id="propCableLength" data-keys="dec" class="input mono" autocomplete="off" placeholder="2.5" />
                                 </div>
                             </div>
                             <div>
                                 <label class="prop-lbl" for="propCableColor" data-i18n>Colour</label>
-                                <input type="text" id="propCableColor" class="input" autocomplete="off" />
+                                <input type="text" id="propCableColor" data-keys="prose" class="input" autocomplete="off" />
                             </div>
                             <div>
                                 <label class="prop-lbl" for="propCableVia" data-i18n data-i18n-title title="What the run passes through: patch panel ports, wall jacks">Via</label>
-                                <input type="text" id="propCableVia" class="input mono" autocomplete="off" spellcheck="false" placeholder="PP-A:12 > WJ-3B" />
+                                <input type="text" id="propCableVia" data-keys="code" class="input mono" autocomplete="off" spellcheck="false" placeholder="PP-A:12 > WJ-3B" />
                             </div>
                         </div>
                     </div>
@@ -809,7 +809,7 @@
                                 <input type="checkbox" id="traceVlan" checked>
                                 <span class="prop-lbl">VLAN</span>
                             </label>
-                            <input type="text" id="tracePort" placeholder="443" class="input mono trace-port" autocomplete="off" spellcheck="false" data-i18n-title title="Port to test when the Port filter is on">
+                            <input type="text" id="tracePort" data-keys="code" placeholder="443" class="input mono trace-port" autocomplete="off" spellcheck="false" data-i18n-title title="Port to test when the Port filter is on">
                         </div>
                     </div>
                     <div id="diagNoSelection" class="rail-empty" data-i18n>Select a node to see its diagnostics.</div>
@@ -979,7 +979,7 @@
                  the sentences around them are translated. -->
             <div id="queryBar" class="topo-query" role="search" data-adv>
                 <span class="q-field">
-                <input type="search" id="queryInput" class="input" autocomplete="off" spellcheck="false"
+                <input type="search" id="queryInput" data-keys="search" class="input" autocomplete="off" spellcheck="false"
                     data-i18n-placeholder placeholder="Search, e.g. type:camera"
                     data-i18n-aria-label aria-label="Search the map and table"
                     data-i18n-title title="Plain words match any field. Narrow with name:, type:, ip: (an address or a network such as 10.0.0.0/24), mac:, vendor:, model:, fw:, vlan:, switch:, has:finding and was: (what a device had before, from this browser's history). Put - in front of a word to leave it out. Enter frames the matches on the map.">
@@ -1047,6 +1047,11 @@
                 </div>
                 <p id="tvInvHint" class="tv-hint hidden" data-i18n>Click a row to select its devices, then use Change all of them to edit them together.</p>
                 <p id="tvHint" class="tv-hint" data-i18n>Click a row to find it on the map. Enter or a double click edits a cell, Esc cancels. Ctrl+V pastes a list down a column.</p>
+                <!-- The touch screen's own hint, which css/app.css shows only to a
+                     coarse pointer: a finger has no double click, so a second tap
+                     on the cell the cursor is on is the way into it (onTableClick,
+                     js/table.js). js/table.js hides it where nothing can be edited. -->
+                <p id="tvTouchHint" class="rail-note tv-touchhint" data-i18n>Tap a cell to select its row. Tap the same cell again to edit it.</p>
                 <div id="tvScroll" class="tv-scroll">
                     <table id="tvGrid" class="data tv-grid"></table>
                     <p id="tvEmpty" class="tv-empty hidden">Nothing here yet.</p>
@@ -1289,7 +1294,7 @@
                             <h3 id="setReportHead" class="set-head" data-i18n>Reports</h3>
                             <div class="set-field">
                                 <label class="prop-lbl" for="setEngineer" data-i18n>Prepared by, unless the network says</label>
-                                <input type="text" id="setEngineer" class="input" maxlength="120" autocomplete="off" data-i18n-placeholder placeholder="Your name — your company">
+                                <input type="text" id="setEngineer" data-keys="words" class="input" maxlength="120" autocomplete="off" data-i18n-placeholder placeholder="Your name — your company">
                             </div>
                             <label class="set-row">
                                 <input type="checkbox" id="setReportSummary">
@@ -1336,7 +1341,7 @@
                             <summary data-i18n>More options</summary>
                             <div class="field paste-field">
                                 <label for="addPattern" data-i18n>Name pattern</label>
-                                <input id="addPattern" class="input mono" autocomplete="off" spellcheck="false" placeholder="{type} {n}">
+                                <input id="addPattern" data-keys="code" data-enter="done" class="input mono" autocomplete="off" spellcheck="false" placeholder="{type} {n}">
                                 <p class="add-hint" data-i18n>{n} counts up, {n:02} pads it to two digits, {type} is the kind of device. Numbering carries on after the names already on the map.</p>
                             </div>
                             <div id="addTargetField" class="field paste-field">
@@ -1493,9 +1498,9 @@
                  z-50 and visibility:visible (css/app.css) so it shows while
                  chrome-pending still hides the rest of the work area. -->
             <div id="unlockDialog" class="hidden modal-scrim topo-dlg">
-                <form id="unlockForm" class="modal topo-card sm">
-                    <h4 data-i18n class="dlg-title">This link is locked</h4>
-                    <p data-i18n class="dlg-blurb">Whoever sent it should have given you a passphrase separately. Nothing is sent anywhere — it is checked in this browser.</p>
+                <form id="unlockForm" class="modal topo-card sm" role="dialog" aria-modal="true" aria-labelledby="unlockTitle" aria-describedby="unlockBlurb">
+                    <h4 id="unlockTitle" data-i18n class="dlg-title">This link is locked</h4>
+                    <p id="unlockBlurb" data-i18n class="dlg-blurb">Whoever sent it should have given you a passphrase separately. Nothing is sent anywhere — it is checked in this browser.</p>
                     <input id="unlockPass" type="password" aria-label="Passphrase" data-i18n-aria-label autocomplete="off" spellcheck="false" class="input mono">
                     <p id="unlockError" class="dlg-error"></p>
                     <div class="dlg-actions">
@@ -1514,7 +1519,7 @@
                     <div id="topoAskHead" class="modal-head"><h2 id="topoAskTitle" class="modal-title"></h2></div>
                     <div class="modal-body">
                         <p id="topoAskMsg" class="ask-msg"></p>
-                        <input id="topoAskInput" type="text" aria-labelledby="topoAskMsg" class="input" autocomplete="off" spellcheck="false" hidden>
+                        <input id="topoAskInput" data-keys="prose" type="text" aria-labelledby="topoAskMsg" class="input" autocomplete="off" spellcheck="false" hidden>
                         <!-- A prompt that also asks one choice from a list
                              (askPromptPick): a new group's kind, under its name. -->
                         <div id="topoAskPickRow" class="field ask-pick" hidden>
@@ -1556,7 +1561,7 @@
                         <div class="cols-add">
                             <h3 class="cols-add-title" data-i18n>Add a column</h3>
                             <div class="cols-add-row">
-                                <input id="colsNewName" type="text" class="input" maxlength="60" autocomplete="off" data-i18n-placeholder placeholder="Column name" data-i18n-aria-label aria-label="Column name">
+                                <input id="colsNewName" data-keys="name" data-enter="done" type="text" class="input" maxlength="60" autocomplete="off" data-i18n-placeholder placeholder="Column name" data-i18n-aria-label aria-label="Column name">
                                 <select id="colsNewKind" class="select" data-i18n-aria-label aria-label="Kind">
                                     <option value="text" data-i18n>Text</option>
                                     <option value="number" data-i18n>Number</option>
@@ -1585,9 +1590,9 @@
                     </div>
                     <div class="modal-body sq-body">
                         <label class="sq-field"><span class="prop-lbl" data-i18n>Name</span>
-                            <input id="sqName" type="text" class="input" maxlength="60" autocomplete="off"></label>
+                            <input id="sqName" data-keys="name" data-enter="done" type="text" class="input" maxlength="60" autocomplete="off"></label>
                         <label class="sq-field"><span class="prop-lbl" data-i18n>Search</span>
-                            <input id="sqQuery" type="text" class="input mono" maxlength="500" autocomplete="off" spellcheck="false"></label>
+                            <input id="sqQuery" data-keys="code" data-enter="done" type="text" class="input mono" maxlength="500" autocomplete="off" spellcheck="false"></label>
                         <p id="sqQueryError" class="sq-err hidden" role="status"></p>
                         <p id="sqTypeHint" class="dlg-dim sq-hint hidden" data-i18n>A type name in another language matches only in that language. Its key (type:camera) matches in every language.</p>
                         <fieldset class="sq-cols">
@@ -1643,7 +1648,7 @@
                         </div>
                         <div class="field paste-field">
                             <label for="pasteText" data-i18n>Values</label>
-                            <textarea id="pasteText" class="textarea mono" rows="5" autocomplete="off" spellcheck="false"></textarea>
+                            <textarea id="pasteText" data-keys="code" class="textarea mono" rows="5" autocomplete="off" spellcheck="false"></textarea>
                         </div>
                         <div id="pasteCounts" class="paste-counts" role="status" aria-live="polite"></div>
                         <p id="pasteDelta" class="paste-delta"></p>
@@ -1674,11 +1679,11 @@
                             <div class="rkp-span">
                                 <div class="field">
                                     <label for="rackPlaceU" data-i18n>Lowest unit</label>
-                                    <input id="rackPlaceU" type="number" class="input mono" min="1" step="1" inputmode="numeric" autocomplete="off">
+                                    <input id="rackPlaceU" data-keys="int" type="number" class="input mono" min="1" step="1" autocomplete="off">
                                 </div>
                                 <div class="field">
                                     <label for="rackPlaceHeight" data-i18n>Height (U)</label>
-                                    <input id="rackPlaceHeight" type="number" class="input mono" min="1" step="1" inputmode="numeric" autocomplete="off">
+                                    <input id="rackPlaceHeight" data-keys="int" type="number" class="input mono" min="1" step="1" autocomplete="off">
                                 </div>
                                 <div class="field">
                                     <label for="rackPlaceFace" data-i18n>Face</label>
@@ -1704,11 +1709,11 @@
                             <select id="rackPlaceType" class="select" hidden tabindex="-1" aria-hidden="true"></select>
                             <div class="field rkp-name-field">
                                 <label for="rackPlaceName" data-i18n>Name</label>
-                                <input id="rackPlaceName" type="text" class="input" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="Optional">
+                                <input id="rackPlaceName" data-keys="name" data-enter="done" type="text" class="input" autocomplete="off" spellcheck="false" data-i18n-placeholder placeholder="Optional">
                             </div>
                         </div>
                         <div id="rackPlaceMapPane" class="rkp-pane" role="tabpanel" aria-labelledby="rackPlaceTabMap" hidden>
-                            <input id="rackPlaceFilter" type="search" class="input" autocomplete="off" spellcheck="false"
+                            <input id="rackPlaceFilter" data-keys="search" type="search" class="input" autocomplete="off" spellcheck="false"
                                 data-i18n-aria-label aria-label="Filter by name, type or address" data-i18n-placeholder placeholder="Filter by name, type or address">
                             <ul id="rackPlaceList" class="rkp-list"></ul>
                         </div>
@@ -1769,7 +1774,7 @@
                                 <p class="ask-msg paste-blurb" data-i18n>Or paste an ARP table or a DHCP lease list as a router, a switch, a server or a PC prints it, from any vendor: each address seen with its MAC becomes a row.</p>
                                 <div class="field paste-field">
                                     <label for="csvText" data-i18n>Rows</label>
-                                    <textarea id="csvText" class="textarea mono" rows="5" autocomplete="off" spellcheck="false"></textarea>
+                                    <textarea id="csvText" data-keys="code" class="textarea mono" rows="5" autocomplete="off" spellcheck="false"></textarea>
                                 </div>
                                 <button type="button" id="csvFileBtn" class="btn csv-file-btn" data-i18n>Open a CSV file…</button>
                                 <input type="file" id="csvFileInput" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" hidden>

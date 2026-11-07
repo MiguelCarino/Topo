@@ -857,7 +857,7 @@ async function offerGroupFromPair(drop) {
     let answer = null;
     try {
         answer = await askPromptPick(lines.join('\n'), {
-            title: t('New group'), ok: t('Make group'), value: nextGroupName(kind),
+            title: t('New group'), ok: t('Make group'), value: nextGroupName(kind), keys: 'name',
             pick: { label: t('Kind'), value: kind, options: GROUP_KINDS.map((k) => ({ id: k, label: groupKindName(k), text: nextGroupName(k) })) }
         });
     } finally { _gmPairAsked = false; }

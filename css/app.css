@@ -1049,6 +1049,30 @@ body.table-view #conflictPill { display: none !important; }
 .tv-invby .toggle-btn { white-space: nowrap; }
 @media (max-width: 640px) { .tv-invby .toggle-btn { min-height: 44px; } }
 .tv-hint { margin: 8px 0; font-size: var(--fs-micro); color: var(--text-muted); }
+/* The table's touch hint (index.html #tvTouchHint). Its sentence is for a
+   finger, so it shows only to a coarse pointer, and at any width, because a
+   second tap on the same cell edits it on a tablet too (unlike Select more,
+   which only exists under 900px). On a touch screen it takes the place of
+   the keyboard hint, whose click, Enter and double click are not what a
+   finger has; phones up to 640px already hide that one (below). A mouse and
+   keyboard see exactly what they saw before, and the line is never printed.
+   The margin gives it the .tv-hint spacing over the grid while keeping the
+   rail note's size and colour. */
+.tv-touchhint { display: none; }
+@media (pointer: coarse) {
+    .tv-touchhint { display: block; margin: 8px 0; }
+    #tvHint { display: none; }
+}
+@media print { .tv-touchhint { display: none !important; } }
+/* The hint's "tap the same cell again" only holds if the cell stays put
+   between the two taps. The first tap ticks the row, and the count grows from
+   "Rows: 7" to "Rows: 7 · Selected: 1": at 360 that pushed Columns… onto a
+   second line and the whole grid down a row, so the second tap landed on the
+   row above and ticked it instead of editing. On a touch screen the count has
+   a line of its own, so its length never changes how the buttons wrap. */
+@media (pointer: coarse) {
+    .tv-bar > #tvCount { flex-basis: 100%; }
+}
 .tv-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); }
 .tv-empty { margin: 0; padding: 24px 16px; font-size: var(--fs-sm); color: var(--text-muted); }
 /* The tick and twist columns are a fixed width so the identifier column (the
@@ -1113,6 +1137,33 @@ table.data.tv-grid td.tv-editing { padding: 2px 4px; overflow: visible; max-widt
 }
 textarea.tv-in { min-width: 16rem; resize: vertical; line-height: 1.4; }
 .tv-in.bad { border-color: var(--err); box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 20%, transparent); }
+/* The phone's → in an open cell (tvNextCell, js/table.js): a phone keyboard
+   has no Tab, so this is how a finger moves along a row. It is only ever made
+   on a coarse pointer, and it sits at the cell's right end, a full 44px
+   target, with the cell widened so it never covers what is being typed. The
+   row keeps its resting height (the M16 rule below, so it never jumps under
+   the finger): the → is taller than the row and stands out of it above and
+   below, over the neighbouring rows, which is where its z-index puts it. The
+   pinned key cell is sticky, which already positions it. */
+@media (pointer: coarse) {
+    table.data.tv-grid td.tv-editing:not(.tv-key) { position: relative; }
+    table.data.tv-grid td.tv-editing.tv-has-next { padding-right: 50px; }
+    /* A text field's own width (about twenty characters) plus the → is wider
+       than a phone shows beside the pinned name column, which would leave
+       the → off the screen. So the field takes what is left there:
+       --tv-fit, measured when the cell opens (startEdit, js/table.js),
+       since the pinned column is as wide as the longest name in sight. The
+       clamp is only for a cell opened where nothing could be measured. A
+       long value scrolls inside the field. */
+    table.data.tv-grid td.tv-has-next > .tv-in,
+    table.data.tv-grid td.tv-has-next > .unit-field { width: var(--tv-fit, clamp(9rem, calc(100vw - 15rem), 16rem)); min-width: 0; }
+    .tv-next {
+        position: absolute; right: 2px; top: 50%; transform: translateY(-50%); z-index: 3;
+        width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; padding: 0;
+        border: 1px solid var(--accent); border-radius: 6px; background: var(--bg-elev); color: var(--accent);
+        font: inherit; font-size: 20px; line-height: 1; cursor: pointer; touch-action: manipulation;
+    }
+}
 
 /* ============================================================
    Rack (js/rackview.js): a rack group unit by unit, over the map like the
@@ -2687,3 +2738,90 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
     html #carinoNav, html.topo-nav-shown #carinoNav { transition: none; }
 }
 @media print { .nav-handle { display: none !important; } }
+
+/* ---- The on-screen keyboard on a phone (Mobile batch 3) ----------------
+   js/mobile.js puts `topo-kb` on <html> while a field a finger types into has
+   the focus on a touch screen 900px wide or less, or 600px tall or less (a
+   phone held sideways, wider than 900px). The floating bars then step
+   aside: under the keyboard they are out of sight anyway, and in a browser
+   that shrinks the layout for the keyboard (Firefox for Android, older
+   Chrome) they would ride up over the very field being typed in. They go with
+   visibility, not display, so syncBars' fit measurements of the selection bar
+   still see a laid-out row, and mapViewport (js/app.js) lifts the class to
+   measure them as they will be once the field is left.
+   Each dialog's scrim follows the visual viewport (--kb-top, --kb-h, from
+   js/mobile.js), so a dialog's field and its buttons sit above the keyboard
+   instead of under it. The viewport meta asks for no interactive-widget:
+   iOS ignores it, and on Android it would reflow the whole page on every
+   show and hide of the keyboard (js/mobile.js says more). Where a browser
+   does resize the layout, --kb-h equals the window's height and the fit
+   changes nothing. */
+@media (max-width: 900px) and (pointer: coarse) {
+    /* The buttons inside carry their own `transition: 0.2s` (all), which
+       would keep each one visible, and tappable, for that long after its bar
+       went: a finger reaching for the field could still land on Undo. These
+       bars are the phone layout's, so this part stays at 900px or less. */
+    html.topo-kb :is(.handy-bar, .sel-bar, .link-banner, .topo-docbar, .alert.topo-readonly, .alert.topo-storage),
+    html.topo-kb :is(.handy-bar, .sel-bar, .link-banner, .topo-docbar, .alert.topo-readonly, .alert.topo-storage) * { visibility: hidden; transition: none; }
+}
+/* The scrim's fit is wanted wherever the keyboard covers the screen, a phone
+   held sideways too: there it covers more than half of it. The same query as
+   KB_MQ in js/mobile.js. */
+@media (max-width: 900px) and (pointer: coarse), (max-height: 600px) and (pointer: coarse) {
+    html.topo-kb .modal-scrim { box-sizing: border-box; top: var(--kb-top, 0px); bottom: auto; height: var(--kb-h, 100%); padding-top: 8px; padding-bottom: 8px; }
+    /* carino-ui's min(90vh, 640px) is of the whole window; the dialog now
+       has only what the keyboard leaves. */
+    html.topo-kb .modal-scrim > .modal { max-height: 100%; }
+    html.topo-kb .report-dlg .rp-card { height: 100%; }
+}
+
+/* ---- Fields a finger types into (Mobile review M16) ----------------------
+   iOS Safari zooms the page in on any field whose text is under 16px when it
+   takes the focus, and does not zoom back out when it is left: one tap in the
+   search box or a cell and the whole app sits magnified and off-centre. So on
+   a touch screen every field a finger types into or picks from is 16px,
+   whatever its component asked for: one floor, !important because a dozen
+   component rules (the rail's, the table editor's font: inherit, the unit
+   pick, the UA's 13.33px select) each set their own size. (pointer: coarse)
+   with no width: an iPhone held sideways is wider than 900px and zooms all
+   the same, while a mouse's window of any width keeps its 12.8px fields. The
+   rules after it put right what the bigger text pushed out of its box. */
+@media (pointer: coarse) {
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="image"]),
+    select, textarea { font-size: 16px !important; }
+    /* The rail is 340px at most, docked or a drawer: two fields side by side
+       there cannot show a full date (2026-05-14) or a full address
+       (192.168.100.254) at 16px, so on a touch screen they stack. */
+    .prop-grid { grid-template-columns: minmax(0, 1fr); }
+    .prop-grid .span2 { grid-column: 1 / -1; }
+    /* An interface: its name and its address on the first line, wide enough
+       for wlp1s0 and the longest IPv4 CIDR (255.255.255.255/32), and the
+       kind, the cable mark and the ✕ under the address, at the right. The
+       2px in the basis is the row's gap; 4.25em on both resolves against
+       their own 16px. */
+    .if-row { flex-wrap: wrap; row-gap: 4px; }
+    .if-name { width: 4.25em; }
+    .if-row:not(.if-sub) > .if-ip { flex: 1 1 calc(100% - 4.25em - 2px); }
+    .if-row > .if-ip + * { margin-left: auto; }
+    /* A port's VLAN box holds its "Untagged" hint whole. */
+    .port-attr { grid-template-columns: minmax(36px, auto) minmax(0, 1fr) 88px 24px; }
+    /* A cell being edited is as tall as its row was: the 16px editor gives
+       back the padding it does not need, so the row never jumps under the
+       finger that opened it. */
+    table.data.tv-grid td.tv-editing { padding-top: 0; padding-bottom: 0; }
+    .tv-in, textarea.tv-in { padding-top: 1px; padding-bottom: 1px; line-height: 1.25; }
+}
+/* The phone's port row keeps its 44px ⋯ button (above, at 640px or less). */
+@media (max-width: 640px) and (pointer: coarse) {
+    .port-attr { grid-template-columns: minmax(36px, auto) minmax(0, 1fr) 88px 44px; }
+}
+
+/* ===== A dialog's card holding the focus (Mobile review M17) =====
+   On a touch screen a dialog that would have opened into a text field
+   focuses its card instead (focusForTyping, js/dialog.js), so a screen reader
+   starts at the title and no keyboard comes up. The card is not a control a
+   finger can act on, so it draws no focus ring; a mouse's screen never
+   focuses it this way and keeps its rings as they were. */
+@media (pointer: coarse) {
+    .modal[tabindex="-1"]:focus { outline: none; }
+}

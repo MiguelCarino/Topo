@@ -1582,7 +1582,7 @@ function rackOthersHtml(rack, qm) {
         <p class="rail-note">${escapeHtml(t('Drag one onto the units, or Place it: it moves into this rack.'))}
             ${escapeHtml(t('A VM or a container goes onto the device it runs on.'))}</p>
         <input type="search" class="input rk-filter" data-rk-filter value="${escapeHtml(_rv.othersFilter)}"
-            placeholder="${escapeHtml(t('Filter by name, type or address'))}" aria-label="${escapeHtml(t('Filter by name, type or address'))}" autocomplete="off" spellcheck="false">
+            placeholder="${escapeHtml(t('Filter by name, type or address'))}" aria-label="${escapeHtml(t('Filter by name, type or address'))}"${keyboardAttrs('search')}>
         <ul class="rk-unlist rk-others-list">${rackOthersItems(rack, qm)}</ul>
     </details>`;
 }
@@ -2963,9 +2963,10 @@ function openPlaceDialog(req) {
     else scrim.hidden = false;
     // Typing finds a device; on a phone a keyboard sliding up over the list
     // would hide it, so the list is what shows first there. On New device the
-    // type picked has the focus, so Enter adds it.
+    // type picked has the focus, so Enter adds it. A touch tablet wider than
+    // a phone is held the same way, by focusForTyping (js/dialog.js).
     if (!rvPhone()) {
-        if (_rp.tab === 'map') rpEl('rackPlaceFilter').focus();
+        if (_rp.tab === 'map') focusForTyping(rpEl('rackPlaceFilter'), scrim.querySelector('.modal'));
         else { const on = rpEl('rackPlaceTypes').querySelector('[aria-checked="true"]'); if (on) on.focus(); }
     }
     return true;
@@ -3235,7 +3236,8 @@ function pickInPlaceDialog(pick) {
         if (!tab) return;
         _rp.tab = tab.dataset.rkpTab;
         renderPlaceDialog();
-        if (_rp.tab === 'map') rpEl('rackPlaceFilter').focus();
+        // A tap on a tab is not a request to type (focusForTyping, js/dialog.js).
+        if (_rp.tab === 'map') focusForTyping(rpEl('rackPlaceFilter'), rpEl('rackPlaceDialog').querySelector('.modal'));
     });
     // The type grid: a click picks, a double click adds; arrows move the pick
     // as a radio group's do, and Enter adds the one picked.

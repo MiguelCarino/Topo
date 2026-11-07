@@ -821,11 +821,20 @@ function mapViewport() {
     // While boot is still deciding (body.chrome-pending, css/app.css) the
     // bars are hidden, and boot's first fit would frame under them. They are
     // measured as they will be: the class comes off for the measuring and
-    // goes back in the same task, so nothing is painted in between.
+    // goes back in the same task, so nothing is painted in between. The same
+    // holds for html.topo-kb: the bars are hidden only while a field has the
+    // on-screen keyboard (js/mobile.js), and a framing made then must frame
+    // under them as they will be once the field is left.
+    const root = document.documentElement;
     const pending = document.body.classList.contains('chrome-pending');
+    const typing = root.classList.contains('topo-kb');
     if (pending) document.body.classList.remove('chrome-pending');
+    if (typing) root.classList.remove('topo-kb');
     try { return measureMapViewport(); }
-    finally { if (pending) document.body.classList.add('chrome-pending'); }
+    finally {
+        if (pending) document.body.classList.add('chrome-pending');
+        if (typing) root.classList.add('topo-kb');
+    }
 }
 function measureMapViewport() {
     const r = document.getElementById('networkCanvas').getBoundingClientRect();

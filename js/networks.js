@@ -99,7 +99,7 @@ function networkCardHtml(net) {
     const field = (key, label, attrs = '') => `<div class="${key === 'dns' || key === 'purpose' ? 'span2' : ''}">
             <label class="prop-lbl" for="net-${id}-${key}">${escapeHtml(label)}</label>
             <input id="net-${id}-${key}" type="text" class="input${MONO_NET_FIELDS.includes(key) ? ' mono' : ''}${fieldBad(net, key) ? ' bad' : ''}"
-                data-field="${key}" data-net="${id}" value="${escapeHtml(net[key] === undefined ? '' : String(net[key]))}" ${attrs} autocomplete="off" spellcheck="false">
+                data-field="${key}" data-net="${id}" value="${escapeHtml(net[key] === undefined ? '' : String(net[key]))}" ${attrs}${keyboardAttrs(schemaKeys(NETWORK_FIELDS, key), { quiet: true })}>
         </div>`;
     const zone = net.drawZone === true ? 'on' : net.drawZone === false ? 'off' : 'auto';
     return `<article class="net-card" data-net="${id}">
@@ -121,7 +121,7 @@ function networkCardHtml(net) {
         </div>
         <div class="net-edit prop-grid"${open ? '' : ' hidden'}>
             ${field('name', t('Name'))}
-            ${field('vlan', 'VLAN', 'inputmode="numeric" placeholder="1–4094"')}
+            ${field('vlan', 'VLAN', 'placeholder="1–4094"')}
             ${field('purpose', t('Purpose'))}
             ${field('gateway', 'Gateway')}
             <div>
@@ -246,7 +246,8 @@ async function onNetworkAction(e) {
     if (act === 'edit') {
         if (_netEditOpen.has(id)) _netEditOpen.delete(id); else _netEditOpen.add(id);
         renderNetworksPanel(true);
-        if (_netEditOpen.has(id)) { const f = netPanel().querySelector(`[data-net="${id}"][data-field="name"]`); if (f) f.focus(); }
+        // Its name ready to type, but not on a touch screen (onGroupAction, js/groups.js).
+        if (_netEditOpen.has(id)) { const f = netPanel().querySelector(`[data-net="${id}"][data-field="name"]`); if (f) focusForTyping(f, null, { reveal: true }); }
         return;
     }
     if (act === 'members') { selectNetworkMembers(id); return; }
@@ -268,7 +269,7 @@ function declareAndShow(cidrs) {
 
 async function addNetwork() {
     if (readOnlyRefuses()) return;
-    const text = await askPrompt(t('The subnet\'s address and prefix, like 10.0.9.0/24.'), { title: t('Add a subnet'), ok: t('Add') });
+    const text = await askPrompt(t('The subnet\'s address and prefix, like 10.0.9.0/24.'), { title: t('Add a subnet'), ok: t('Add'), keys: 'code' });
     if (text === null) return;
     const cidr = canonicalCidr(text);
     if (!cidr) { showToast(t('{cidr} is not a subnet with a prefix, like 10.0.9.0/24.', { cidr: text.trim() || '—' })); return; }
@@ -337,7 +338,7 @@ async function renumberNetwork(id) {
     const net = networkById(id);
     if (!net) return;
     const text = await askPrompt(t('Move {cidr} to which range? Every device keeps its host part.', { cidr: net.cidr }),
-        { title: t('Renumber subnet'), value: net.cidr, ok: t('Next') });
+        { title: t('Renumber subnet'), value: net.cidr, ok: t('Next'), keys: 'code' });
     if (text === null) return;
     const first = planRenumber(id, text);
     if (first.errors.length) {

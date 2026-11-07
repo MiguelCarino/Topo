@@ -1061,6 +1061,9 @@ function renderBulkFields(nodes, draft, force, kind = 'node') {
             input.type = 'text'; input.className = 'input bulk-in';
             if (bf.key === 'gw' || bf.key === 'dns' || bf.key === 'ports') input.classList.add('mono');
             input.autocomplete = 'off'; input.spellcheck = false;
+            // The field's phone keyboard, as the rail and the table give it
+            // (KEYBOARDS, js/ui.js); Enter anywhere here opens the Preview.
+            setKeyboard(input, bf.field ? (bf.field.keys || 'prose') : bf.custom ? customKeys(bf.custom) : 'prose', { enter: 'done' });
             let initial = common.mixed ? '' : common.value;
             if (bf.unit) {
                 // The number alone in the field; the unit in the pick in front.
@@ -1069,7 +1072,6 @@ function renderBulkFields(nodes, draft, force, kind = 'node') {
                 const shown = cableLengthShown(initial);
                 input.dataset.stored = initial;
                 input.dataset.length = '1';
-                input.inputMode = 'decimal';
                 input.classList.add('mono');
                 initial = shown.text;
             }

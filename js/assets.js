@@ -618,7 +618,8 @@ function renderLifeDialog() {
         n.textContent = count.get(type) ? t('{n} here', { n: count.get(type) }) : '';
         const input = document.createElement('input');
         input.type = 'text'; input.className = 'input mono'; input.id = `lifeY-${type}`;
-        input.inputMode = 'numeric'; input.autocomplete = 'off'; input.maxLength = 10;
+        // Enter keeps the number (below), so the key says Done.
+        setKeyboard(input, 'int', { enter: 'done' }); input.autocomplete = 'off'; input.maxLength = 10;
         input.dataset.type = type;
         input.placeholder = String(EXPECTED_LIFE_YEARS[type]);
         input.value = own[type] ? String(own[type]) : '';

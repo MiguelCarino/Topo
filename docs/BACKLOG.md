@@ -19,7 +19,7 @@ Each spec below was written against the code by one agent and then cross-checked
 
 One order across every stage of every feature, from the cross-check. Status is kept here as stages land.
 
-- [x] 0. Owner gate: confirm these go ahead of, or interleaved with, the M1-M60 mobile batches (Topo/CLAUDE.md Status), because several stages add phone UI.
+- [x] 0. Owner gate: confirm these go ahead of, or interleaved with, the M1-M60 mobile batches (now [docs/MOBILE.md](MOBILE.md); Topo/CLAUDE.md is gone), because several stages add phone UI.
 - [x] 1. Shared refactor: uplinkOf(node, {skipNoPort, links, nodes}) in js/model.js, with csvUplink and patchPoint on top of it and a byte-identical guard on devices.csv and BULK_ORDERS.port on every template. Both locate and history depend on it, and it is pure. (done 2026-11-04)
 - [x] 2. capacity stage 1 (subnetCapacity/portCapacity; networkStats, portUsage, reportPortMaps and evaluatePorts all read them). It fixes a real gateway off-by-one with no format change, and settles the 'used port' definition that vlan and locate later read. (done 2026-11-04)
 - [x] 3. locate stage 1 (pure locatePath with typed gaps). No format, nothing visible, and it exercises uplinkOf. (done 2026-11-04)
@@ -65,7 +65,7 @@ One order across every stage of every feature, from the cross-check. Status is k
 - **History.** Never travels: kept in this browser only, not in files, links, binders or sheets. Recording is on by default, with an off switch in Settings. Full editor by default; the Simple views show it only on request (below). No history.csv. The report section (stage 5) was built on the owner's call (2026-11-05, "Do build optional address history"): off by default behind the report dialog's Address history tick, so a report prints the trail only when someone ticks it.
 - **History in the Simple views (owner, 2026-11-05).** "Add optional history on simple view." This settles history's open question on the Simple view: optional, off by default. Settings' History section (the recording switch) shows in every view, not only Full, and gains **Show address history in Simple view** (state.settings.trailSimple, saved only when on, followed across tabs like the recording switch). Ticked, the reduced views' device panel shows #historySimple after the Locate sentence: plain read-only sentences, newest first ('Was 192.168.1.20 until 2026-10-03.', plugged into, in, called), at most four then 'Earlier changes are in the Full editor.'; no MAC, no was: buttons, no Forget or Clear, no kinds, no edit and no undo step; dates by localDateOf as in the Full section. Unticked, the reduced views, SIMPLE_SAMPLES and every report are as before; the Simple summary never prints history either way. (done 2026-11-05)
 - **Reports.** Saved searches print in the technical sheet only, are not counted in "changes since the last back-up" (they are a view), and are capped at 30 per network. Browser-local terms (was:, has:history) cannot be printed.
-- **Order.** These go ahead of the mobile review batches (M1-M60) because the owner asked to start them on 2026-11-04; phone layouts of each new UI are still checked at 360 and 390.
+- **Order.** These go ahead of the mobile review batches (M1-M60, [docs/MOBILE.md](MOBILE.md)) because the owner asked to start them on 2026-11-04; phone layouts of each new UI are still checked at 360 and 390.
 
 ## Cross-feature collisions (resolved)
 
@@ -87,7 +87,7 @@ One order across every stage of every feature, from the cross-check. Status is k
 
 ## Gaps the specs had to cover
 
-- Status gate: Topo/CLAUDE.md says 'no more features for now … the mobile review (M1-M60) comes next', and memory topo-review-2026-10-31 says the same. The user's 'add them to the backlog and start doing them' adds these to the backlog. Implementation should confirm whether they go before or after the M1-M60 batches, especially for the four that add phone UI (locate, reports, vlan port editor, inventory table tab).
+- Status gate (the list itself, rebuilt 2026-11-06 after Topo/CLAUDE.md and the memory note were lost, is [docs/MOBILE.md](MOBILE.md)): Topo/CLAUDE.md said 'no more features for now … the mobile review (M1-M60) comes next', and memory topo-review-2026-10-31 says the same. The user's 'add them to the backlog and start doing them' adds these to the backlog. Implementation should confirm whether they go before or after the M1-M60 batches, especially for the four that add phone UI (locate, reports, vlan port editor, inventory table tab).
 - The version log entry for v15 (providers) is missing from js/model.js:3794-3886. Add it before any v16 entry.
 - A prerequisite fix that no spec owns: managed switches forward L2 in the reachability walk (reachL2Domain/isDumbDevice). Without it, vlan-path is dead on managed networks, and Trace already under-reports today. It needs its own suite (trace.js) and the owner's agreement, because it changes today's Trace and gateway findings on files that have a switch with a management IP. (Resolved: landing order step 6, done 2026-11-04.)
 - Search discoverability: the #queryInput tooltip (index.html:905) and the How-to-use cheatsheet list prefixes, and no spec updates them for vendor:/model:/fw:/was:/has:full|trunk|poe|history, or their i18n.

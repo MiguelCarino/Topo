@@ -197,10 +197,13 @@ function openSearchDialog(id) {
     sqEl('sqPrint').checked = s ? !!s.print : true;
     renderSearchDialog(s ? s.sort || '' : '', !!(s && s.desc));
     const scrim = sqEl('searchDialog');
-    if (window.CarinoUI) CarinoUI.modal.open(scrim, { returnFocus: sqEl('queryInput') });
+    // On a touch screen, closing goes back to the card's ☆ (★ once saved),
+    // not into the search box and its keyboard; and the name waits for a tap
+    // (focusForTyping, js/dialog.js). Not the ▾: it is hidden until a first
+    // search is kept, and a hidden button cannot take the focus.
+    if (window.CarinoUI) CarinoUI.modal.open(scrim, { returnFocus: typingTarget(sqEl('queryInput'), sqEl('querySaveBtn')) });
     else scrim.hidden = false;
-    sqEl('sqName').focus();
-    sqEl('sqName').select();
+    focusForTyping(sqEl('sqName'), scrim.querySelector('.modal'), { select: true });
     return true;
 }
 function closeSearchDialog() {

@@ -1547,7 +1547,7 @@ function landingCard(entry, opts = {}) {
     // tooltip on the line: a tooltip never opens on a phone.
     if (changed) tool('±', t('What changed'), () => showCardChanges(entry));
     tool('✎', t('Rename'), async () => {
-        const name = await askPrompt(t('Rename network — new name:'), { title: t('Rename'), value: entry.name, ok: t('Rename') });
+        const name = await askPrompt(t('Rename network — new name:'), { title: t('Rename'), value: entry.name, ok: t('Rename'), keys: 'name' });
         if (name === null) return;
         if (!libraryRename(entry.id, name)) showToast(t('Could not save — browser storage is unavailable (private mode or full).'), 'err');
         renderLanding(); renderDocBar();
@@ -1656,7 +1656,7 @@ async function keepThisNetwork() {
         // card by a later Keep, export or link.
         suggested = t('{name} (copy)', { name: known.name });
     }
-    const name = await askPrompt(t('Name this network:'), { title: t('Keep this network'), value: suggested, ok: t('Keep') });
+    const name = await askPrompt(t('Name this network:'), { title: t('Keep this network'), value: suggested, ok: t('Keep'), keys: 'name' });
     if (name === null) return null;
     const id = claimDocument(name, known ? null : state.docId);
     if (!id) { showToast(t('Could not save — browser storage is unavailable (private mode or full).'), 'err'); return null; }
@@ -1888,7 +1888,7 @@ function renderDocBar() {
 async function renameOpenNetwork() {
     const entry = isKept() && libraryEntry(state.libraryId);
     if (!entry) return;
-    const name = await askPrompt(t('Rename network — new name:'), { title: t('Rename'), value: entry.name, ok: t('Rename') });
+    const name = await askPrompt(t('Rename network — new name:'), { title: t('Rename'), value: entry.name, ok: t('Rename'), keys: 'name' });
     if (name === null) return;
     if (!libraryRename(entry.id, name)) showToast(t('Could not save — browser storage is unavailable (private mode or full).'), 'err');
     renderDocBar();
@@ -1942,7 +1942,7 @@ function migrateUserTemplates() {
 async function saveAsTemplate() {
     if (!docHasContent()) { showToast(t('Nothing to save — add some nodes first.')); return null; }
     if (readOnlyRefuses()) return null;
-    const name = await askPrompt(t('Save current canvas as template — name:'), { title: t('Save as template'), ok: t('Save') });
+    const name = await askPrompt(t('Save current canvas as template — name:'), { title: t('Save as template'), ok: t('Save'), keys: 'name' });
     if (name === null || !name.trim()) return null;
     const same = libraryTemplates().find((e) => e.name === name.trim());
     const id = librarySave(name.trim(), same ? same.id : null, { template: true });

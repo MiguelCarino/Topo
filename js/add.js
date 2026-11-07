@@ -489,7 +489,7 @@ function openAddDevices(opts = {}) {
             <label class="st-label" for="${id}">${escapeHtml(t(kind.label))}</label>
             <span class="st-steps">
               <button type="button" class="cs-btn add-dec" aria-label="${escapeHtml(t('One fewer'))}">−</button>
-              <input id="${id}" class="input add-count" type="number" inputmode="numeric" min="0" max="${ADD_MAX}" step="1" value="${count}" data-type="${kind.type}">
+              <input id="${id}" class="input add-count" type="number"${keyboardAttrs('int', { enter: 'done' })} min="0" max="${ADD_MAX}" step="1" value="${count}" data-type="${kind.type}">
               <button type="button" class="cs-btn add-inc" aria-label="${escapeHtml(t('One more'))}">+</button></span>`;
         const input = tile.querySelector('input');
         const step = (by) => { input.value = String(clampCount(Number(input.value) + by)); onAddChanged(); };
@@ -878,7 +878,7 @@ async function saveSelectionAsBlock() {
     const doc = blockFromSelection();
     if (!doc) { showToast(t('Select the devices to keep as a block first.')); return null; }
     if (readOnlyRefuses()) return null;
-    const name = await askPrompt(t('Name for this block:'), { title: t('Save the selection as a block'), ok: t('Save') });
+    const name = await askPrompt(t('Name for this block:'), { title: t('Save the selection as a block'), ok: t('Save'), keys: 'name' });
     if (name === null || !name.trim()) return null;
     const same = libraryBlocks().find((e) => e.name === name.trim());
     const id = librarySave(name.trim(), same ? same.id : null, { template: true, block: true, doc });

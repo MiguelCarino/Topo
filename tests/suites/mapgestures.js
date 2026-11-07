@@ -422,6 +422,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
       cv.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: r.left + 200, clientY: r.top + 150 }));
       ok('a mouse double-click still drops a note, editor open', state.annotations.length === annsAt + 1 && !!el('annEditor') && state.camera.zoom === 1, state.annotations.length);
       const ed = el('annEditor');
+      const dropped = state.annotations[state.annotations.length - 1];
+      ok('on a mouse\'s screen the note editor is the card\'s own size, unscaled', !!ed && !!dropped && ed.style.transform === '' && Math.abs(parseFloat(getComputedStyle(ed).fontSize) - (dropped.size || 12) * state.camera.zoom) < 0.01, ed && json([ed.style.transform, getComputedStyle(ed).fontSize]));
       if (ed) ed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       while (_undoStack.length > undoAt) undo();
       ok('(the note undone)', state.annotations.length === annsAt, state.annotations.length);

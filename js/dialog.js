@@ -68,10 +68,15 @@ function askConfirm(message, opts = {}) {
         .then((v) => v === true);
 }
 
+// opts.keys names the phone keyboard the line is typed on (KEYBOARDS,
+// js/ui.js): 'code' for a CIDR, 'name' for a name. It joins the request only
+// when given, so a test's responder sees the same request as before.
+const promptKeys = (req, opts) => (opts.keys ? Object.assign(req, { keys: opts.keys }) : req);
+
 // A line of text, or null when dismissed. An empty answer is '' rather than
 // null, as prompt() returned it, so a caller can tell "left blank" from "no".
 function askPrompt(message, opts = {}) {
-    return ask({ kind: 'prompt', message, title: opts.title || '', value: opts.value == null ? '' : String(opts.value), ok: opts.ok })
+    return ask(promptKeys({ kind: 'prompt', message, title: opts.title || '', value: opts.value == null ? '' : String(opts.value), ok: opts.ok }, opts))
         .then((v) => (v === null || v === undefined ? null : String(v)));
 }
 
@@ -86,8 +91,8 @@ function askPromptPick(message, opts = {}) {
     const pick = opts.pick || {};
     const options = (pick.options || []).filter((o) => o && o.id);
     const first = options.some((o) => o.id === pick.value) ? pick.value : (options[0] ? options[0].id : '');
-    return ask({ kind: 'prompt', message, title: opts.title || '', value: opts.value == null ? '' : String(opts.value), ok: opts.ok,
-        pick: { label: pick.label || '', options, value: first } })
+    return ask(promptKeys({ kind: 'prompt', message, title: opts.title || '', value: opts.value == null ? '' : String(opts.value), ok: opts.ok,
+        pick: { label: pick.label || '', options, value: first } }, opts))
         .then((v) => {
             if (v === null || v === undefined) return null;
             if (typeof v !== 'object') return { value: String(v), pick: first };
@@ -102,8 +107,8 @@ function askPromptPick(message, opts = {}) {
 // only in part. A test's responder answers with that object.
 function askPromptDate(message, opts = {}) {
     const d = opts.date || {};
-    return ask({ kind: 'prompt', message, title: opts.title || '', value: opts.value == null ? '' : String(opts.value), ok: opts.ok,
-        date: { label: d.label || '', value: d.value || '', min: d.min || '' } })
+    return ask(promptKeys({ kind: 'prompt', message, title: opts.title || '', value: opts.value == null ? '' : String(opts.value), ok: opts.ok,
+        date: { label: d.label || '', value: d.value || '', min: d.min || '' } }, opts))
         .then((v) => {
             if (v === null || v === undefined) return null;
             if (typeof v !== 'object') return { value: String(v), date: '' };
@@ -147,8 +152,16 @@ function showAsk(req) {
         title.textContent = req.title || '';
         head.hidden = !req.title;
         msg.textContent = req.message || '';
-        input.hidden = req.kind !== 'prompt';
+        // CarinoUI.modal.open focuses the card's first control, which for a
+        // prompt is this field. On a touch screen that focus would bring the
+        // keyboard up before the question is read, so there the field joins
+        // the card only after the focus has landed on one of its buttons.
+        const holdField = req.kind === 'prompt' && holdKeyboard();
+        input.hidden = req.kind !== 'prompt' || holdField;
         input.value = req.kind === 'prompt' ? req.value : '';
+        // Every prompt sets its own keyboard, so one asking for a CIDR never
+        // leaves its capitals-off keyboard on the next one asking for a name.
+        if (req.kind === 'prompt') setKeyboard(input, req.keys || 'prose', { enter: 'done' });
         foot.innerHTML = '';
         // The list under the line, for askPromptPick; hidden for every other
         // question. Its options are text nodes, never markup: a group's kind
@@ -265,13 +278,66 @@ function showAsk(req) {
         const onDismiss = () => finish(ASK_DISMISSED[req.kind]);
         if (window.CarinoUI) CarinoUI.modal.open(scrim, { onDismiss });
         else scrim.hidden = false;
+        if (holdField) input.hidden = false;
         // CarinoUI focuses the first control. A prompt wants its text selected
         // for retyping; a notice wants its one button; a question keeps the
-        // focus on Cancel, so a stray Enter is the cautious answer.
-        if (req.kind === 'prompt') { input.focus(); input.select(); }
+        // focus on Cancel, so a stray Enter is the cautious answer. On a touch
+        // screen the prompt's field waits for a tap (focusForTyping), and the
+        // button CarinoUI focused keeps the focus.
+        if (req.kind === 'prompt') focusForTyping(input, scrim.querySelector('.modal'), { select: true });
         else if (req.kind === 'tell' && main) main.focus();
     });
 }
 
+// Opening without a keyboard (Mobile review M17). A dialog or a card that
+// opens with its text field focused saves a mouse user a click. On a touch
+// screen the same focus raises the on-screen keyboard over half the phone
+// before anyone has read what opened. So on a coarse pointer nothing opens
+// into a text field: the focus goes to the dialog's card instead, so that a
+// screen reader starts at its title and a hardware keyboard's Esc and Tab
+// still work there, and the field waits for a tap. A field the visitor asked
+// for by name (a table cell, a note's text, '/', W, Custom watts) is focused
+// as before, at its own call site, not through these helpers.
+function holdKeyboard() {
+    try { return matchMedia('(pointer: coarse)').matches; } catch (e) { return false; }
+}
+const KEYBOARD_INPUTS = new Set(['text', 'search', 'password', 'email', 'url', 'tel', 'number']);
+// Would focusing el bring up a touch screen's keyboard? A date, a tick, a
+// select or a read-only field does not.
+function raisesKeyboard(el) {
+    if (!el || el.disabled || el.readOnly) return false;
+    if (el.isContentEditable || el.tagName === 'TEXTAREA') return true;
+    return el.tagName === 'INPUT' && KEYBOARD_INPUTS.has(el.type);
+}
+// Focuses field as a mouse's screen always has (and selects its text when
+// opts.select), unless that would raise a touch screen's keyboard; then the
+// focus goes to box, the dialog's card, when there is one. -> true when the
+// field got the focus.
+function focusForTyping(field, box, opts = {}) {
+    if (!field) return false;
+    // A field that already has the focus keeps it: its keyboard is already up,
+    // from the visitor's own tap. This keeps Enter-to-add in Columns and an
+    // Enter retry on the unlock dialog from dropping the keyboard.
+    if (!holdKeyboard() || !raisesKeyboard(field) || document.activeElement === field) {
+        field.focus();
+        if (opts.select && field.select) field.select();
+        return true;
+    }
+    // reveal stands in for the scroll that focus() would have done.
+    if (opts.reveal && field.scrollIntoView) field.scrollIntoView({ block: 'nearest' });
+    // A non-text control CarinoUI already focused inside the box (the ✕,
+    // Cancel) is left where it is.
+    const a = document.activeElement;
+    if (box && (!a || !box.contains(a) || raisesKeyboard(a))) {
+        if (!box.hasAttribute('tabindex')) box.setAttribute('tabindex', '-1');
+        box.focus({ preventScroll: true });
+    }
+    return false;
+}
+// Where a closing dialog should send the focus back: the field, unless that
+// would raise a touch screen's keyboard, and then fallback.
+const typingTarget = (field, fallback) => (holdKeyboard() && raisesKeyboard(field) ? fallback : field);
+
 // Published for the suites, which reach the app as bare globals anyway.
-window.TopoDialog = { ask, tell, askConfirm, askPrompt, askPromptPick, askPromptDate, askChoice, askTicks, setDialogResponder };
+window.TopoDialog = { ask, tell, askConfirm, askPrompt, askPromptPick, askPromptDate, askChoice, askTicks, setDialogResponder,
+    holdKeyboard, raisesKeyboard, focusForTyping, typingTarget };

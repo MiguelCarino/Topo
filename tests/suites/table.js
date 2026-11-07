@@ -293,6 +293,15 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 6: selecting ----
     select(null, null);
     showTableTab('cables'); showTableTab('devices');
+    // A mouse keeps its own hint: the touch line (index.html #tvTouchHint)
+    // stays hidden and the click, Enter and double click sentence shows. The
+    // touch side is held in touchtablehint.
+    ok('this runner has a fine pointer', !matchMedia('(pointer: coarse)').matches);
+    ok('the touch hint is in the table, translated', !!el('tvTouchHint') && el('tvTouchHint').hasAttribute('data-i18n')
+       && !!el('tvTouchHint').closest('#tableView'));
+    ok('a mouse never sees the touch hint', getComputedStyle(el('tvTouchHint')).display === 'none');
+    ok('and still sees the keyboard hint on Devices', innerWidth <= 640 || getComputedStyle(el('tvHint')).display !== 'none',
+       `${innerWidth}px, ${getComputedStyle(el('tvHint')).display}`);
     const first = grid().querySelector('tbody td[data-col]');
     const firstRow = rowByKey(first.parentElement.dataset.row);
     ok('a fresh table parks the cursor on its first cell, unchosen', _tv.cursor.row === firstRow.key && !_tv.cursorChosen);
@@ -445,6 +454,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     editCell('n:a', 'os');
     ok('but no cell opens', !_tv.editor && /read-only/.test(el('topoToast').textContent));
     ok('and Paste a column is off', el('tvPasteBtn').disabled);
+    ok('and the touch hint, which promises an editor, is hidden', el('tvTouchHint').classList.contains('hidden'));
     ok('nor does a plan apply', applyPastePlan(planPaste('os', 'x', { rows: [rowByKey('n:a')], mode: 'selected' })) === 0 && (getNode('a').os || '') === '');
 
     // ---- 9: language ----

@@ -567,6 +567,215 @@
     if (MQ.addEventListener) MQ.addEventListener('change', syncBars);
     else if (MQ.addListener) MQ.addListener(syncBars);
 
+    // ---- The on-screen keyboard (Mobile batch 3) ----
+    // While a field a finger types into has the focus on a touch phone, the
+    // keyboard takes the bottom half of the screen. index.html's viewport meta
+    // asks for no interactive-widget, so Chrome on Android (108 and up) and iOS
+    // Safari both lay the keyboard over the visual viewport and leave the
+    // layout viewport, where position: fixed attaches, as it was. Asking Chrome
+    // for resizes-content was weighed and left out: iOS ignores it, so this
+    // visualViewport path is needed anyway, and on Android it would reflow the
+    // 100vh body, the map and the report card and fire every window resize
+    // handler (syncBars, the table's sticky heights, the report's preview fit)
+    // on each show and hide of the keyboard.
+    // So, while such a field has the focus, <html> carries `topo-kb`, and
+    // css/app.css then:
+    //   - hides the floating bars (handy bar, selection bar, connect banner,
+    //     docbar, read-only and storage banners). Under the overlay model they
+    //     sit behind the keyboard anyway; in a browser that does shrink the
+    //     layout (Firefox for Android, older Chrome) they would ride up over
+    //     the very field being typed in;
+    //   - fits every dialog's scrim to the visual viewport (--kb-top, --kb-h),
+    //     so the dialog's field and its buttons are above the keyboard.
+    // After the keyboard settles, the focused field is scrolled into the part
+    // of its own scroller that is still in sight, and only when it is not.
+    // The class lives on <html>, not <body>, so body's class observer (above)
+    // does not run syncBars on every focus.
+    // To confirm on a real iPhone (Safari) and a real Android phone (Chrome):
+    //   1. getBoundingClientRect and visualViewport.offsetTop are both measured
+    //      against the layout viewport (old iOS measured client rects against
+    //      the visual one, which would count offsetTop twice in the reveal and
+    //      in the scrim's top);
+    //   2. the keyboard's opening and closing fire a visualViewport resize, and
+    //      KB_FALLBACK_MS covers the keyboard's slide;
+    //   3. Android's back gesture and the keyboard's hide key keep the focus,
+    //      the bars come back (kb.seen), and a tap on the field hides them again;
+    //   4. iOS may scroll the window on focus despite body's overflow: hidden;
+    //      the scrim's top must still land at the top of what is in sight;
+    //   5. iOS's shortcut strip over a hardware keyboard stays under KB_MIN;
+    //   6. a focus that raises no keyboard (iOS ignores a focus() outside a
+    //      user's gesture) leaves the bars hidden until the blur. That is
+    //      accepted: the cost is bars out of sight, never bars over a field;
+    //   7. the browser's own scroll to the focused field and the reveal here do
+    //      not fight (the reveal does nothing to a field already in sight).
+    // A touch screen this narrow: a phone, or a tablet upright; or this low: a
+    // phone held sideways, which is wider than 900px (a Pixel 7 is 915, an
+    // iPhone Pro Max 932) and where the keyboard takes more than half of a
+    // screen about 410px tall. A window of any size with a mouse has no
+    // on-screen keyboard. The bars this hides only exist at 900px or less
+    // (NAV_MQ below, in the navbar's section); the scrim's fit is the part a
+    // phone sideways needs (css/app.css, "The on-screen keyboard on a phone").
+    var KB_MQ = window.matchMedia('(max-width: 900px) and (pointer: coarse), (max-height: 600px) and (pointer: coarse)');
+    // A shrink smaller than KB_MIN is the URL bar or iOS's strip over a
+    // hardware keyboard (about 44-56px), not a keyboard (200px and more).
+    // KB_SETTLE_MS waits out the last resize events of the slide; the
+    // fallback covers a focus that brings no resize at all (a hardware
+    // keyboard, or field to field with the keyboard already up), and is a
+    // little longer than the keyboard's slide (about 250-300ms on both).
+    var KB_MIN = 120, KB_SETTLE_MS = 120, KB_FALLBACK_MS = 400, KB_PAD = 8;
+    // el: the field with the focus; base: the tallest visual viewport seen
+    // since it got it (the height with no keyboard); w: the width then, so a
+    // rotation starts over; seen: whether the keyboard has been up since.
+    var kb = { el: null, base: 0, w: 0, seen: false, timer: 0 };
+    var KB_TYPES = /^(text|search|email|number|tel|url|password)$/;
+
+    // Does focusing el bring up the keyboard? A date, a time, a tick, a select
+    // or a slider brings a picker or nothing; a read-only or disabled field
+    // and inputmode=none bring nothing.
+    function typesText(el) {
+        if (!el || el.nodeType !== 1) return false;
+        if (el.disabled || el.readOnly) return false;
+        if ((el.getAttribute('inputmode') || '').toLowerCase() === 'none') return false;
+        if (el.isContentEditable) return true;
+        if (el.tagName === 'TEXTAREA') return true;
+        return el.tagName === 'INPUT' && KB_TYPES.test(el.type);
+    }
+    // Is a keyboard up, for a visual viewport h tall that was base tall
+    // without one? Pure, and published for the suites.
+    function keyboardUp(base, h) { return base > 0 && h < base - KB_MIN; }
+    window.keyboardUp = keyboardUp;
+
+    function kbStart(el) {
+        // Field to field keeps the height measured before the keyboard came:
+        // measured now it would already be the keyboard-short one.
+        if (!kb.el) {
+            var v = window.visualViewport;
+            kb.base = v ? v.height : window.innerHeight;
+            kb.w = v ? v.width : window.innerWidth;
+            kb.seen = false;
+        }
+        kb.el = el;
+        kbPaint();
+        kbReveal(KB_FALLBACK_MS);
+    }
+    function kbPaint() {
+        var root = document.documentElement, v = window.visualViewport;
+        // A field no longer drawn (its dialog closed under it) has no keyboard,
+        // even where a browser leaves it the active element.
+        if (!kb.el || kb.el !== document.activeElement || !kb.el.getClientRects().length || !KB_MQ.matches) { kbEnd(); return; }
+        var on = true;
+        if (v) {
+            // A new width is a rotation: the keyboard-free height is not the
+            // one measured before it.
+            if (Math.abs(v.width - kb.w) > 1) { kb.w = v.width; kb.base = v.height; kb.seen = false; }
+            kb.base = Math.max(kb.base, v.height);
+            var up = keyboardUp(kb.base, v.height);
+            kb.seen = kb.seen || up;
+            // The keyboard was up and has gone while the field keeps the
+            // focus: Android's back gesture and the keyboard's own hide key do
+            // not blur. The bars come back; a tap on the field raises the
+            // keyboard again, the next resize sees it, and they go again.
+            on = !(kb.seen && !up);
+            // A pinch-zoomed page leaves the dialogs where they are: a scrim
+            // fitted to a zoomed viewport would be narrower than the screen.
+            if (on && v.scale <= 1.01) {
+                root.style.setProperty('--kb-top', v.offsetTop + 'px');
+                root.style.setProperty('--kb-h', v.height + 'px');
+            } else {
+                root.style.removeProperty('--kb-top');
+                root.style.removeProperty('--kb-h');
+            }
+        }
+        // An engine with no visualViewport gets the bars hidden and nothing
+        // else: there is nothing to fit the dialogs to.
+        root.classList.toggle('topo-kb', on);
+    }
+    function kbEnd() {
+        clearTimeout(kb.timer);
+        kb.el = null; kb.base = 0; kb.w = 0; kb.seen = false;
+        var root = document.documentElement;
+        root.classList.remove('topo-kb');
+        root.style.removeProperty('--kb-top');
+        root.style.removeProperty('--kb-h');
+    }
+    function kbReveal(ms) {
+        clearTimeout(kb.timer);
+        kb.timer = setTimeout(function () {
+            if (kb.el && kb.el === document.activeElement && document.documentElement.classList.contains('topo-kb')) revealTyping(kb.el);
+        }, ms);
+    }
+    // The tallest sticky thing in box stuck over its top (the drawer's header
+    // and panel tabs, the table's header row), or over its bottom (the
+    // report's actions), so the reveal clears it.
+    function stickyEdge(box, sel, useTop) {
+        var h = 0;
+        box.querySelectorAll(sel).forEach(function (s) {
+            var cs = getComputedStyle(s);
+            if (cs.position !== 'sticky' || !s.offsetHeight) return;
+            var r = s.getBoundingClientRect().height;
+            h = Math.max(h, useTop ? (parseFloat(cs.top) || 0) + r : r);
+        });
+        return h;
+    }
+    // Scrolls el into the part of each scroller above it that is in sight
+    // (inside the scroller's box and above the keyboard), vertically only,
+    // like revealInRail: scrollIntoView would also slide the drawer's sideways
+    // transform box, and on iOS it can scroll the layout viewport itself. A
+    // field already in sight is left alone, so neither the browser's own scroll
+    // to it nor the visitor's own scrolling is fought. The note editor sits in
+    // #canvasContainer, which does not scroll, so nothing moves for it.
+    function revealTyping(el) {
+        var v = window.visualViewport;
+        var vt = v ? v.offsetTop : 0, vb = v ? v.offsetTop + v.height : window.innerHeight;
+        for (var guard = 0, cur = el; guard < 4; guard++) {
+            var box = nearScroller(cur);
+            if (!box) break;
+            var bb = box.getBoundingClientRect();
+            var top = Math.max(bb.top, vt) + stickyEdge(box, '.rail-head, .cfg-tabs, .tv-grid thead th:first-child, .rk-stable thead', true) + KB_PAD;
+            var bottom = Math.min(bb.bottom, vb) - stickyEdge(box, '.rp-actions', false) - KB_PAD;
+            var r = el.getBoundingClientRect(), d = 0;
+            if (r.bottom > bottom) d = r.bottom - bottom;
+            // A field taller than the band shows its top.
+            if (r.top - d < top) d = r.top - top;
+            if (Math.abs(d) >= 1) box.scrollTop += d;
+            cur = box;
+        }
+    }
+    // A visualViewport resize is the keyboard coming, going or still sliding:
+    // the scrim is fitted again and the reveal waits for the last one. A
+    // scroll (the visual viewport panning) only moves the scrim.
+    function onViewport(e) {
+        if (!kb.el) return;
+        kbPaint();
+        if (e && e.type === 'resize') kbReveal(KB_SETTLE_MS);
+    }
+    // tests/suites/touchkeyboard.js and keyboarddesk.js call this after putting
+    // a stand-in in place of window.visualViewport: Chromium cannot raise an
+    // on-screen keyboard, so its geometry is only testable that way.
+    window.syncKeyboard = onViewport;
+
+    document.addEventListener('focusin', function (e) {
+        if (KB_MQ.matches && typesText(e.target)) kbStart(e.target);
+    });
+    // Looked at a tick later, once the focus has landed: focus moving field to
+    // field (the table's Enter, the next cell) never shows the bars for a
+    // frame in between.
+    document.addEventListener('focusout', function () {
+        if (!kb.el && !KB_MQ.matches) return;
+        setTimeout(function () {
+            var a = document.activeElement;
+            if (KB_MQ.matches && typesText(a)) { if (a !== kb.el) kbStart(a); return; }
+            kbEnd();
+        }, 0);
+    });
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', onViewport);
+        window.visualViewport.addEventListener('scroll', onViewport);
+    }
+    function kbMedia() { if (!KB_MQ.matches) kbEnd(); }
+    if (KB_MQ.addEventListener) KB_MQ.addEventListener('change', kbMedia);
+    else if (KB_MQ.addListener) KB_MQ.addListener(kbMedia);
+
     // carino-navbar.js is deferred and injects the bar during its own run. This
     // file is deferred right after it, so the bar is normally present already;
     // the retry is insurance for any load-order surprise.
