@@ -354,26 +354,26 @@ phpIPAM. Every import goes through the merge.
 
 ## Status
 
-- [x] 1. Data safety: A, B, restore points (built 2026-11-09, not yet committed).
+- [x] 1. Data safety: A, B, restore points (2026-11-09, 4c17d69, 749ecce).
   Follow-up done 2026-11-09: "Changes since the last back-up" (js/changes.js
   docChanges) now has rows for providers, custom columns, saved searches,
   expected lives and the table layout, names a field outside a kind's list as
   "changed: <field>", and says any part docChangeCount counts that no kind
   describes; tests/suites/changecount.js cross-checks every top-level key.
-- [x] 2. Merge (built 2026-11-09, not yet committed). Format v17 (rev, base,
+- [x] 2. Merge (2026-11-09, d465707). Format v17 (rev, base,
   prior, log) and the revision store (js/revisions.js); the merge engine
   (js/merge.js); apply, the network log and its report tick (js/mergeapply.js);
   the review (js/mergeui.js); every door (js/mergedoors.js, js/library.js,
   js/app.js). Decisions D1–D33 above.
-- [x] 3. Mobile B4, B5 (built 2026-11-10, not yet committed). Touch targets
+- [x] 3. Mobile B4, B5 (2026-11-10, 370dabc). Touch targets
   M21-M29 on any touch screen and held by the touchsizes suites (M60); screen
   space M30-M38 (the docbar chip, landscape phones, the rack's pane switch, the
   search ⋯ menu); M50; leftovers from steps 1, 2 and 4 (singular counts,
   Japanese sentence joining, file names as typed in titles, My networks in the
   drawer header, provider mode on the Map, share links without `?lang=`).
   docs/MOBILE.md "How batches 4 and 5 landed" and its decisions for the owner
-  (M37's 0.4 default first).
-- [x] 4. Client-provider loop (built 2026-11-09, not yet committed). Format
+  (M37 decided: whole map when it fits at 0.33).
+- [x] 4. Client-provider loop (2026-11-10, 370dabc). Format
   v18 (several providers per item, `incidents`, the log's `incident` and
   `visit` kinds; schema/topo-v18.json); routing (js/routing.js); Report a
   problem and Send (js/incidents.js); provider mode, Record visit and the copy
