@@ -124,7 +124,7 @@
                  group, or a group's devices, are selected (tidyLayout, js/app.js). -->
             <div class="cs-menu cs-split">
                 <button id="tidyBtn" class="cs-btn" data-i18n-title title="Arrange the map by switch, 12 to a row. With two or more devices selected, only those.">⤢ Tidy</button>
-                <button id="tidyMenuBtn" class="cs-btn cs-split-caret" aria-haspopup="true" aria-expanded="false" data-i18n-title title="More ways to tidy" aria-label="More ways to tidy"><span class="cs-caret">▾</span></button>
+                <button id="tidyMenuBtn" class="cs-btn cs-split-caret" aria-haspopup="true" aria-expanded="false" data-i18n-title title="More ways to tidy" data-i18n-aria-label aria-label="More ways to tidy"><span class="cs-caret">▾</span></button>
                 <div id="tidyMenu" class="cs-menu-panel" role="menu" aria-labelledby="tidyMenuBtn" hidden>
                     <button id="tidyAllBtn" class="cs-menu-item" role="menuitem"><span data-i18n>Tidy all</span> <span class="cs-menu-note" data-i18n>whole map</span></button>
                     <button id="tidyGroupBtn" class="cs-menu-item" role="menuitem" hidden><span data-i18n>Tidy group</span> <span class="cs-menu-note" id="tidyGroupName"></span></button>
@@ -150,6 +150,8 @@
                     <button id="saveNetworkBtn" class="cs-menu-item" role="menuitem">💾 Keep this network</button>
                     <div class="cs-menu-div" data-adv></div>
                     <button id="reportBtn" class="cs-menu-item" role="menuitem">📋 Site report <span class="cs-menu-note">printable</span></button>
+                    <!-- A problem to report to the network's providers (js/incidents.js). Every view. -->
+                    <button id="reportProblemMenuBtn" class="cs-menu-item" role="menuitem" data-i18n>⚠ Report a problem…</button>
                     <div class="cs-menu-div" data-adv></div>
                     <button id="copyUrlBtn" class="cs-menu-item" role="menuitem">🔗 Copy link <span class="cs-menu-note">short URL</span></button>
                     <div class="cs-menu-div" data-adv></div>
@@ -206,6 +208,9 @@
                     <!-- Many at once (js/add.js): kinds × counts, a name pattern,
                          onto the selected switch or AP's next free ports. -->
                     <button id="addDevicesBtn" type="button" class="btn add-devices-btn" data-i18n>＋ Add devices…</button>
+                    <!-- The Simple and imagenology views' Report a problem
+                         (js/incidents.js); the full editor has it in Export. -->
+                    <button id="reportProblemBtn" type="button" class="btn report-problem-btn" data-i18n>⚠ Report a problem</button>
                     <button id="modeSwitchBtn" data-i18n class="mode-switch">Something missing? Try another mode</button>
                 </div>
 
@@ -272,10 +277,23 @@
                          the canvas. A plain word, so translated; the count is
                          the open findings, accepted ones left out. -->
                     <button id="findTabBtn" data-adv class="cfg-tab" data-cfgtab="findings" role="tab" aria-selected="false"><span data-i18n>Findings</span> <span id="findTabCount" class="cfg-count hidden"></span></button>
+                    <!-- The problem reports and their visits (js/incidents.js,
+                         docs/SCOPE.md step 4): Send again, Mark fixed, Reopen.
+                         Shown once the network has a report; the count is the
+                         ones not closed. Translated: the client reads it. -->
+                    <button id="incTabBtn" data-adv class="cfg-tab hidden" data-cfgtab="incidents" role="tab" aria-selected="false"><span data-i18n>Problems</span> <span id="incTabCount" class="cfg-count hidden"></span></button>
+                    <!-- Provider mode only (js/providermode.js): the problem
+                         report in hand. Translated: the provider reads it. -->
+                    <button id="visitTabBtn" class="cfg-tab" data-cfgtab="visit" role="tab" aria-selected="false" data-i18n>Problem report</button>
                 </div>
 
                 <div id="cfgPanel-config" class="cfg-panel">
                 <div id="noSelectionPane" data-i18n class="rail-empty">Select a node or link to configure.</div>
+                <button id="reportProblemBtn2" type="button" class="btn report-problem-btn report-problem-mirror" data-i18n>⚠ Report a problem</button>
+                <!-- The Simple views with nothing selected: every problem
+                     not closed, with Send again and Mark fixed
+                     (renderProblemsSimpleAll, js/incidents.js). -->
+                <div id="problemsSimpleAll" class="inc-simple hidden" aria-live="polite"></div>
 
                 <!-- Several devices and/or cables selected (renderSelection,
                      js/ui.js): their counts and what applies to all of them.
@@ -451,7 +469,8 @@
                     <!-- Who is responsible for the run (link.provider,
                          js/providers.js): the carrier of a circuit. -->
                     <div id="linkProviderProps" data-adv class="hidden prop-sec">
-                        <label class="prop-lbl" for="propLinkProvider" data-i18n>Provider</label>
+                        <label class="prop-lbl" for="propLinkProvider" data-i18n>Providers</label>
+                        <div id="propLinkProviderChips" class="pv-chips"></div>
                         <select id="propLinkProvider" class="select"></select>
                     </div>
 
@@ -657,7 +676,8 @@
                                      js/providers.js); unset, the note says
                                      whose it is through its group or host. -->
                                 <div class="span2">
-                                    <label class="prop-lbl" for="propProvider" data-i18n>Provider</label>
+                                    <label class="prop-lbl" for="propProvider" data-i18n>Providers</label>
+                                    <div id="propProviderChips" class="pv-chips"></div>
                                     <select id="propProvider" class="select"></select>
                                     <p id="providerNote" class="rail-note grp-path hidden"></p>
                                 </div>
@@ -724,6 +744,12 @@
                             <summary class="asset-sum"><span data-i18n>Locate</span><span id="locateSummary" class="asset-sum-note"></span></summary>
                             <div id="locateBody" class="locate-body"></div>
                         </details>
+                        <!-- Whose it is, in plain words (docs/SCOPE.md step 4), before
+                             the Locate sentence (History follows that one): the
+                             reduced views' read-only line naming who looks after
+                             the device, per service (whoseSentence, js/locate.js).
+                             Never in Full, which has the Providers picker. -->
+                        <p id="whoseSentence" class="locate-sentence whose-sentence"></p>
                         <!-- Locate in plain words (feature 1, stage 4): the reduced
                              views' read-only answer, one short sentence per step
                              (locatePlainSentence, js/model.js). Never in Full,
@@ -745,6 +771,10 @@
                              in Simple view is ticked. Never in Full, which has the
                              section above; empty, and so hidden, by default. -->
                         <div id="historySimple" class="hist-simple" aria-live="polite"></div>
+                        <!-- The Simple views: this device's problems not closed
+                             (renderProblemsSimple, js/incidents.js). Never in
+                             Full, which has the Problems tab. -->
+                        <div id="problemsSimple" class="inc-simple hidden" aria-live="polite"></div>
                     </div>
 
                     <!-- A cable's own facts (link.cable, js/assets.js): the label
@@ -881,6 +911,22 @@
                     <div id="providerList" class="net-list"></div>
                 </div>
 
+                <!-- Provider mode's report: what, where, the client's words and
+                     how to reach them, which provider you are, what you look
+                     after here, the visits, Record visit. js/providermode.js. -->
+                <div id="cfgPanel-visit" class="cfg-panel pm-panel hidden"></div>
+
+                <!-- The problem reports, newest first: status, what, where (a
+                     click shows it), the client's words, whom it went to, each
+                     visit (who, when, how it went, notes, what changed), and
+                     Send again / Mark fixed / Reopen. js/incidents.js. -->
+                <div id="cfgPanel-incidents" data-adv class="cfg-panel inc-panel hidden">
+                    <p class="rail-note grp-intro" data-i18n>The problems reported on this network and the visits recorded for them.</p>
+                    <p id="incidentsSummary" class="dlg-dim"></p>
+                    <p id="incidentsEmpty" class="rail-empty hidden" data-i18n>No problem has been reported on this network.</p>
+                    <ul id="incidentList" class="inc-list"></ul>
+                </div>
+
                 <!-- Grouped by check; a line selects and centres what it is
                      about (click again for the next one). Accept… keeps a
                      finding as known, with a reason, stored in the document:
@@ -922,6 +968,22 @@
             <div id="readOnlyBanner" class="alert warn topo-readonly hidden" role="status">
                 <b data-i18n>Read-only</b> <span data-i18n>This network was made by a newer version of Topo. You can look at it, report on it and export it as it is, but changes are not kept.</span>
             </div>
+            <!-- A copy that arrived with a problem report (js/providermode.js):
+                 the provider says so and works on it in provider mode; the
+                 client, with a visit sent back, merges it. -->
+            <div id="incidentBanner" class="alert warn topo-incbanner hidden" role="status">
+                <span id="incidentBannerText" class="incbanner-text"></span>
+                <span class="incbanner-acts">
+                    <button id="incidentBannerGo" type="button" class="cs-btn primary">I am the provider</button>
+                    <button id="incidentBannerLater" type="button" class="cs-btn">Not now</button>
+                </span>
+            </div>
+            <!-- Provider mode: the problem in hand, always on screen. -->
+            <div id="providerStrip" class="topo-pvstrip hidden" role="region" aria-label="Problem report" data-i18n-aria-label>
+                <span id="providerStripText" class="pvstrip-text"></span>
+                <button id="providerStripVisit" type="button" class="cs-btn primary">Record visit</button>
+                <button id="providerStripDetails" type="button" class="cs-btn">Details</button>
+            </div>
             <!-- Where this network stands: kept (and saving itself) or not.
                  A demo, a template or a link someone sent is not kept until
                  the visitor says so — autosaving those would fill the library
@@ -930,7 +992,7 @@
             <div id="docBar" class="topo-docbar hidden" role="status" aria-live="polite">
                 <button id="docBarName" type="button" class="docbar-name" data-i18n-title title="Rename"></button>
                 <span id="docBarStatus" class="docbar-status"></span>
-                <button id="docBarKeep" type="button" class="cs-btn primary docbar-keep" data-i18n>Keep this network</button>
+                <button id="docBarKeep" type="button" class="cs-btn primary docbar-keep" aria-label="Keep this network" data-i18n-aria-label><span class="docbar-keep-long" data-i18n>Keep this network</span><span class="docbar-keep-short" data-i18n>Keep</span></button>
             </div>
             <!-- A kept network that could not be written (storage full, or
                  blocked): stays up until a write succeeds, because the toast
@@ -1018,6 +1080,19 @@
                      understands, ★ "Update saved search" when the box holds a
                      saved one. Its text is set by updateSavedSearchBar. -->
                 <button id="querySaveBtn" type="button" class="cs-btn q-btn q-save">☆ Save search</button>
+                <!-- A phone's ⋯ (M36, js/query.js wireQueryMore): the four
+                     buttons above, as menu items that press them, so the card
+                     is one row under the box. The saved searches' ★ stays in
+                     the box, reachable with no search on. Hidden wider. -->
+                <div id="queryMoreMenu" class="cs-menu q-more">
+                    <button id="queryMoreBtn" type="button" class="cs-btn q-more-btn" aria-haspopup="true" aria-expanded="false" data-i18n-title title="More search tools" data-i18n-aria-label aria-label="More search tools">⋯</button>
+                    <div id="queryMorePanel" class="cs-menu-panel q-more-panel" role="menu" aria-labelledby="queryMoreBtn" hidden>
+                        <button type="button" class="cs-menu-item" role="menuitem" data-q-proxy="queryZoomBtn" data-i18n>Zoom to matches</button>
+                        <button type="button" class="cs-menu-item" role="menuitem" data-q-proxy="querySelectBtn" data-i18n>Select matches</button>
+                        <button type="button" class="cs-menu-item" role="menuitem" data-q-proxy="queryLocateBtn" data-i18n>Locate</button>
+                        <button type="button" class="cs-menu-item" role="menuitem" data-q-proxy="querySaveBtn">☆ Save search</button>
+                    </div>
+                </div>
             </div>
             <p id="queryError" class="q-error hidden" role="status" data-adv></p>
             <!-- was: and has:history (js/query.js queryTrailNote): a removed
@@ -1070,9 +1145,20 @@
                     <label class="rk-pick-lbl" for="rackPicker" data-i18n>Rack</label>
                     <select id="rackPicker" class="select rk-picker"></select>
                     <span id="rackCount" class="tv-count"></span>
+                    <!-- A phone shows one pane at a time, each the full height
+                         (M35): the units (with the lists to drag in from) or
+                         the patch schedule. Hidden wider, where both show. -->
+                    <div id="rackPaneSwitch" class="view-switch rk-paneswitch" role="group" data-i18n-aria-label aria-label="Elevation or patch schedule">
+                        <button type="button" class="toggle-btn active" data-pane="elev" aria-pressed="true" data-i18n>Elevation</button>
+                        <button type="button" class="toggle-btn" data-pane="sched" aria-pressed="false" data-i18n>Patch schedule</button>
+                    </div>
                     <!-- The rack's size (height, width, depth, numbering): the
                          Groups tab's fields, opened here (js/rackview.js). -->
                     <button type="button" id="rackSizeBtn" class="cs-btn rk-sizebtn" aria-expanded="false" aria-controls="rackSize" data-i18n>Size</button>
+                    <!-- The view's controls: face, zoom, cables. One row that
+                         scrolls sideways on a narrow phone (css/app.css
+                         .rk-viewctl); no box of their own elsewhere. -->
+                    <div class="rk-viewctl">
                     <!-- A phone has room for one face: this picks it. -->
                     <div id="rackFaceSwitch" class="view-switch rk-faceswitch" role="group" data-i18n-aria-label aria-label="Face">
                         <button type="button" class="toggle-btn active" data-face="front" aria-pressed="true" data-i18n>Front</button>
@@ -1095,6 +1181,7 @@
                             <button type="button" class="toggle-btn active" data-cables="sel" aria-pressed="true" data-i18n>Selected</button>
                             <button type="button" class="toggle-btn" data-cables="one" aria-pressed="false" data-i18n>One cable</button>
                         </div>
+                    </div>
                     </div>
                 </div>
                 <div id="rackSize" class="rk-size prop-grid" role="group" data-i18n-aria-label aria-label="Rack size" hidden></div>
@@ -1185,7 +1272,7 @@
                             <rect x="30" y="26" width="16" height="11" rx="2" />
                         </svg>
                         <h2 data-i18n>Start a new network</h2>
-                        <p><span data-i18n>A blank canvas that saves itself in this browser from the first device.</span><br><span data-i18n>Or drop a</span> <code>.json</code> <span data-i18n>build file, or a whole binder, here.</span></p>
+                        <p><span data-i18n>A blank canvas that saves itself in this browser from the first device.</span><br><span class="hint-drop"><span data-i18n>Or drop a</span> <code>.json</code> <span data-i18n>build file, or a whole binder, here.</span></span><span class="hint-open" data-i18n>Or open a .json build, or a whole binder, with Open a file.</span></p>
                         <div class="landing-drop-actions">
                             <button class="landing-drop-btn primary" id="landingNewBtn" data-i18n>✚ New network</button>
                             <button class="landing-drop-btn" id="landingOpenFileBtn" data-i18n>📂 Open a file</button>
@@ -1325,6 +1412,24 @@
                                 <input type="checkbox" id="setTrailSimple">
                                 <span><span data-i18n>Show address history in Simple view</span><br><span class="dlg-dim" data-i18n>A few plain lines under the selected device: the addresses, names and sockets it had at earlier back-ups and reports. Read only. Off by default.</span></span>
                             </label>
+                        </section>
+                        <!-- Who reports a problem from this browser (js/incidents.js):
+                             filled in on Report a problem, kept here only. -->
+                        <section class="set-sec" aria-labelledby="setReporterHead">
+                            <h3 id="setReporterHead" class="set-head" data-i18n>Problem reports</h3>
+                            <p class="dlg-dim set-note" data-i18n>Filled in when you report a problem. Kept in this browser; a report you send carries them.</p>
+                            <div class="set-field">
+                                <label class="prop-lbl" for="setReporterName" data-i18n>Your name</label>
+                                <input type="text" id="setReporterName" data-keys="name" class="input" maxlength="120" autocomplete="name">
+                            </div>
+                            <div class="set-field">
+                                <label class="prop-lbl" for="setReporterPhone" data-i18n>Your phone</label>
+                                <input type="tel" id="setReporterPhone" data-keys="tel" class="input" maxlength="200" autocomplete="tel">
+                            </div>
+                            <div class="set-field">
+                                <label class="prop-lbl" for="setReporterEmail" data-i18n>Your email</label>
+                                <input type="email" id="setReporterEmail" data-keys="email" class="input" maxlength="200" autocomplete="email">
+                            </div>
                         </section>
                     </div>
                     <div class="modal-foot">
@@ -1518,6 +1623,13 @@
                         <button id="shareNewPass" data-i18n data-i18n-title class="cs-btn" title="Make a new random passphrase">New</button>
                     </div>
                     <p id="shareHint" class="dlg-blurb"></p>
+                    <!-- Shown only when the network holds problem reports or
+                         visits (js/share.js): off each time, since they carry
+                         the reporters' names and phone numbers. -->
+                    <label id="shareIncidentsRow" class="dlg-check hidden">
+                        <input type="checkbox" id="shareIncidents">
+                        <span data-i18n>Include problem reports and visits (names, phone numbers)</span>
+                    </label>
                     <!-- Notes that look like they hold a password (js/assets.js). -->
                     <div id="shareLint" class="alert warn hidden" role="status"></div>
                     <div id="shareResult" class="hidden dlg-result">
@@ -1656,6 +1768,162 @@
             <!-- How long each type lasts in this network (doc.expectedLife,
                  js/assets.js "Expected life by type"): blank is Topo's usual,
                  shown as the hint; a device's own Expected life wins. -->
+            <!-- Report a problem (js/incidents.js, docs/SCOPE.md step 4): one
+                 sheet, top to bottom, phone first. What is wrong, where, what
+                 happened, who you are, whom to contact; then Send: a locked
+                 link (or the file) and the ways to pass it on. Translated. -->
+            <div id="problemDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-problem" role="dialog" aria-modal="true" aria-labelledby="problemTitle">
+                    <div class="modal-head">
+                        <h2 id="problemTitle" class="modal-title" data-i18n>Report a problem</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="problemForm">
+                            <fieldset class="pb-sec">
+                                <legend class="pb-head" data-i18n>What is wrong?</legend>
+                                <div id="problemSymptoms" class="pb-tiles"></div>
+                            </fieldset>
+                            <section class="pb-sec" aria-labelledby="problemWhereHead">
+                                <h3 id="problemWhereHead" class="pb-head" data-i18n>Where?</h3>
+                                <div id="problemWhere" class="pv-chips"></div>
+                                <div class="pb-row">
+                                    <button type="button" id="problemTapBtn" class="btn" data-i18n>Tap it on the map</button>
+                                    <select id="problemDevicePick" class="select" aria-label="Choose from a list" data-i18n-aria-label></select>
+                                </div>
+                                <div class="pb-row">
+                                    <label class="prop-lbl" for="problemGroup" data-i18n>Area</label>
+                                    <select id="problemGroup" class="select"></select>
+                                </div>
+                            </section>
+                            <section class="pb-sec">
+                                <label class="pb-head" for="problemText" data-i18n>What happened?</label>
+                                <textarea id="problemText" class="textarea" rows="3" maxlength="2000" data-keys="prose" aria-describedby="problemCount"></textarea>
+                                <p id="problemCount" class="pb-count dlg-dim"></p>
+                            </section>
+                            <section class="pb-sec" aria-labelledby="problemWhoHead">
+                                <h3 id="problemWhoHead" class="pb-head" data-i18n>Your name and phone or email</h3>
+                                <div class="pb-who">
+                                    <input type="text" id="problemName" class="input" maxlength="120" autocomplete="name" data-keys="name" aria-label="Your name" data-i18n-aria-label placeholder="Your name" data-i18n-placeholder>
+                                    <input type="tel" id="problemPhone" class="input" maxlength="200" autocomplete="tel" data-keys="tel" aria-label="Your phone" data-i18n-aria-label placeholder="Your phone" data-i18n-placeholder>
+                                    <input type="email" id="problemEmail" class="input" maxlength="200" autocomplete="email" data-keys="email" aria-label="Your email" data-i18n-aria-label placeholder="Your email" data-i18n-placeholder>
+                                </div>
+                                <label class="dlg-check pb-remember">
+                                    <input type="checkbox" id="problemRemember" checked>
+                                    <span data-i18n>Remember in this browser</span>
+                                </label>
+                            </section>
+                            <section class="pb-sec" aria-labelledby="problemWhomHead">
+                                <h3 id="problemWhomHead" class="pb-head" data-i18n>Whom to contact</h3>
+                                <p id="problemNoProvider" class="dlg-dim hidden"></p>
+                                <ul id="problemContacts" class="pb-contacts"></ul>
+                            </section>
+                        </div>
+                        <div id="problemSend" hidden>
+                            <p id="problemSendHead" class="restore-name"></p>
+                            <p id="problemSendTo" class="dlg-blurb"></p>
+                            <!-- Notes that look like they hold a password (js/assets.js), the client's words included. -->
+                            <div id="problemLint" class="alert warn hidden" role="status"></div>
+                            <div id="problemPassRow" class="pb-row hidden">
+                                <label class="prop-lbl" for="problemPass" data-i18n>Passphrase</label>
+                                <input id="problemPass" type="password" readonly autocomplete="off" data-1p-ignore data-lpignore="true" spellcheck="false" class="input mono">
+                                <button type="button" id="problemPassShow" class="btn" aria-pressed="false" aria-controls="problemPass"></button>
+                                <button type="button" id="problemPassCopy" class="btn"></button>
+                            </div>
+                            <p id="problemSendStatus" class="dlg-blurb strong" role="status" aria-live="polite"></p>
+                            <textarea id="problemLink" readonly rows="3" class="textarea share-link hidden" aria-label="Link to share" data-i18n-aria-label></textarea>
+                            <div class="pb-acts">
+                                <button type="button" id="problemMakeBtn" class="btn btn-primary hidden"></button>
+                                <button type="button" id="problemEmailBtn" class="btn btn-primary hidden"></button>
+                                <button type="button" id="problemShareBtn" class="btn hidden"></button>
+                                <button type="button" id="problemCopyMsgBtn" class="btn hidden"></button>
+                                <button type="button" id="problemFileBtn" class="btn hidden"></button>
+                            </div>
+                            <ul id="problemCalls" class="pb-contacts"></ul>
+                        </div>
+                        <p id="problemError" class="dlg-error" role="alert"></p>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" id="problemCancelBtn" class="btn" data-close data-i18n>Cancel</button>
+                        <button type="button" id="problemSaveBtn" class="btn" data-i18n>Save</button>
+                        <button type="button" id="problemSaveSendBtn" class="btn btn-primary" data-i18n>Save and send</button>
+                        <button type="button" id="problemDoneBtn" class="btn btn-primary hidden" data-close data-i18n>Done</button>
+                    </div>
+                </div>
+            </div>
+            <!-- Record visit (js/providermode.js): when, how it went, notes,
+                 who, the client's sign-off, and what changed in the network
+                 since the copy arrived; then the copy goes back to the
+                 client. Translated. -->
+            <div id="visitDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-problem topo-visit" role="dialog" aria-modal="true" aria-labelledby="visitTitle">
+                    <div class="modal-head">
+                        <h2 id="visitTitle" class="modal-title" data-i18n>Record visit</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="visitForm">
+                            <p id="visitHead" class="restore-name"></p>
+                            <div class="pb-row">
+                                <label class="prop-lbl" for="visitProvider" data-i18n>Which provider are you?</label>
+                                <select id="visitProvider" class="select"></select>
+                            </div>
+                            <div class="pb-row vs-times">
+                                <label class="vs-time"><span class="prop-lbl" data-i18n>Arrived</span><input type="datetime-local" id="visitArrived" class="input"></label>
+                                <label class="vs-time"><span class="prop-lbl" data-i18n>Left</span><input type="datetime-local" id="visitLeft" class="input"></label>
+                            </div>
+                            <fieldset class="pb-sec">
+                                <legend class="pb-head" data-i18n>How did it go?</legend>
+                                <div id="visitOutcomes" class="pb-tiles"></div>
+                            </fieldset>
+                            <section class="pb-sec">
+                                <label class="pb-head" for="visitNotes" data-i18n>Notes</label>
+                                <textarea id="visitNotes" class="textarea" rows="4" maxlength="4000" data-keys="prose" aria-describedby="visitCount"></textarea>
+                                <p id="visitCount" class="pb-count dlg-dim"></p>
+                            </section>
+                            <section class="pb-sec pb-who">
+                                <label class="vs-field"><span class="prop-lbl" data-i18n>Technician's name</span>
+                                    <input type="text" id="visitBy" class="input" maxlength="120" autocomplete="name" data-keys="name"></label>
+                                <label class="vs-field"><span class="prop-lbl" data-i18n>Client's name (typed on this device)</span>
+                                    <input type="text" id="visitSignoff" class="input" maxlength="120" autocomplete="off" data-keys="name"></label>
+                            </section>
+                            <section class="pb-sec" aria-labelledby="visitChangesHead">
+                                <h3 id="visitChangesHead" class="pb-head" data-i18n>What changed since the copy arrived</h3>
+                                <p id="visitChangesSummary" class="dlg-dim"></p>
+                                <ul id="visitChanges" class="vs-changes"></ul>
+                            </section>
+                        </div>
+                        <div id="visitReturn" hidden>
+                            <p id="visitReturnHead" class="restore-name"></p>
+                            <div id="visitLint" class="alert warn hidden" role="status"></div>
+                            <div id="visitPassRow" class="pb-row hidden">
+                                <label class="prop-lbl" for="visitPass" data-i18n>Passphrase</label>
+                                <input id="visitPass" type="password" readonly autocomplete="off" data-1p-ignore data-lpignore="true" spellcheck="false" class="input mono">
+                                <button type="button" id="visitPassShow" class="btn" aria-pressed="false" aria-controls="visitPass"></button>
+                                <button type="button" id="visitPassCopy" class="btn"></button>
+                            </div>
+                            <p id="visitPassNote" class="dlg-dim"></p>
+                            <p id="visitReturnStatus" class="dlg-blurb strong" role="status" aria-live="polite"></p>
+                            <textarea id="visitLink" readonly rows="3" class="textarea share-link hidden" aria-label="Link to share" data-i18n-aria-label></textarea>
+                            <div class="pb-acts">
+                                <button type="button" id="visitMakeBtn" class="btn btn-primary hidden"></button>
+                                <button type="button" id="visitEmailBtn" class="btn btn-primary hidden"></button>
+                                <a id="visitCallBtn" class="btn hidden" href="#"></a>
+                                <button type="button" id="visitShareBtn" class="btn hidden"></button>
+                                <button type="button" id="visitCopyMsgBtn" class="btn hidden"></button>
+                                <button type="button" id="visitCopyLinkBtn" class="btn hidden"></button>
+                                <button type="button" id="visitFileBtn" class="btn hidden"></button>
+                            </div>
+                        </div>
+                        <p id="visitError" class="dlg-error" role="alert"></p>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" id="visitCancelBtn" class="btn" data-close data-i18n>Cancel</button>
+                        <button type="button" id="visitSaveBtn" class="btn btn-primary">Save visit</button>
+                        <button type="button" id="visitDoneBtn" class="btn btn-primary hidden" data-close data-i18n>Done</button>
+                    </div>
+                </div>
+            </div>
             <!-- A network's restore points (js/restore.js): the copies kept
                  before a file, binder, link or sheet changed it, newest first. -->
             <div id="restoreDialog" class="modal-scrim" hidden>
@@ -1965,6 +2233,7 @@
     <script src="js/hosts.js"></script>
     <script src="js/wifi.js"></script>
     <script src="js/providers.js"></script>
+    <script src="js/routing.js"></script>
     <script src="js/motion.js"></script>
     <script src="js/groupmap.js"></script>
     <script src="js/table.js"></script>
@@ -1980,6 +2249,8 @@
     <script src="js/mergeui.js"></script>
     <script src="js/mergedoors.js"></script>
     <script src="js/assets.js"></script>
+    <script src="js/incidents.js"></script>
+    <script src="js/providermode.js"></script>
     <script src="js/app.js"></script>
     <script src="js/settings.js"></script>
 <script src="carino-navbar.js" data-app="Topo" data-repo="Topo" data-license="AGPL-3.0" defer></script>

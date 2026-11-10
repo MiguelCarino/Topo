@@ -99,6 +99,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('which opens the rack view on that rack', rackShown() && el('rackPicker').value === 'rk2' && rackBtn().getAttribute('aria-pressed') === 'true'
        && document.body.classList.contains('rack-view'));
     ok('kept as the visitor\'s view', state.settings.view === 'rack' && effectiveView() === 'rack');
+    // A phone's Elevation / Patch schedule switch (M35): wider, both show.
+    ok('no pane switch wider than a phone, the schedule beside the units', getComputedStyle(el('rackPaneSwitch')).display === 'none'
+       && getComputedStyle(document.querySelector('.rk-main')).display !== 'none' && getComputedStyle(document.querySelector('.rk-sched')).display !== 'none');
     ok('the picker lists every rack by its path', [...el('rackPicker').options].map((o) => o.textContent).join('|') === 'Server room / Rack 3|Server room / Rack 4');
     el('rackPicker').value = 'rk';
     el('rackPicker').dispatchEvent(new Event('change', { bubbles: true }));

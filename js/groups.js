@@ -152,9 +152,10 @@ function groupCardHtml({ group: g, depth }, counts, tree = groupTree()) {
                 </select>
             </div>
             <div class="span2">
-                <label class="prop-lbl" for="grp-${id}-provider">${escapeHtml(t('Provider'))}</label>
-                <select id="grp-${id}-provider" class="select" data-field="provider" data-grp="${id}">
-                    ${providerOptionsHtml(g.provider)}
+                <label class="prop-lbl" for="grp-${id}-provider">${escapeHtml(t('Providers'))}</label>
+                <div class="pv-chips" data-grp="${id}">${providerChipsHtml(providerRefsOf(g))}</div>
+                <select id="grp-${id}-provider" class="select" data-field="providers" data-grp="${id}">
+                    ${providerAddOptionsHtml(providerRefsOf(g))}
                 </select>
             </div>
             ${rack ? rackSizeFieldsHtml(g, 'grp') : ''}
@@ -185,7 +186,7 @@ function onGroupField(e) {
     }
     if (e.type !== 'change') return;
     if (key === 'kind') { changeGroupKind(g, el.value); return; }
-    if (key === 'provider') { pickProvider(g, el.value).then(() => refreshGroupViews(true)); return; }
+    if (key === 'providers') { addProviderTo(g, el.value).then(() => refreshGroupViews(true)); return; }
     if (key === 'parent') {
         const parent = el.value || null;
         if (!groupParentOk(g.id, parent)) { renderGroupsPanel(true); return; }
@@ -352,6 +353,14 @@ function refreshGroupViews(force) {
 }
 
 async function onGroupAction(e) {
+    // A provider chip's ✕ (js/providers.js): one undo step.
+    const x = e.target.closest('[data-pv-remove]');
+    if (x) {
+        const box = x.closest('.pv-chips');
+        const g = box && groupById(box.dataset.grp);
+        if (g && removeProviderFrom(g, x.dataset.pvRemove)) refreshGroupViews(true);
+        return;
+    }
     const btn = e.target.closest('[data-act]');
     if (!btn) return;
     const act = btn.dataset.act, id = btn.dataset.grp;

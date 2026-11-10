@@ -39,6 +39,9 @@ function openShareDialog(mode) {
     _shareEl('sharePass').value = canSeal() ? generatePassphrase() : '';
     setPassphraseShown(false);   // masked each time; the visitor reveals or copies it
     _shareLintHits = secretHitsFor(_shareMode);
+    // Off each time: names and phone numbers go only when asked for.
+    _shareEl('shareIncidents').checked = false;
+    _shareEl('shareIncidentsRow').classList.toggle('hidden', !shareHasIncidents(_shareMode));
     resetShareResult();
     renderShareDialog();
     _shareEl('shareDialog').classList.remove('hidden');
@@ -71,6 +74,7 @@ function renderShareDialog() {
     else if (!sealed) hint.textContent = `⚠ ${t('Anyone who gets this link can read the whole network. Chats, mail and browser history keep links.')}`;
     else if (pass.length < SEAL_MIN_PASSPHRASE) hint.textContent = t('At least {n} characters. The suggested one is far stronger than anything memorable.', { n: SEAL_MIN_PASSPHRASE });
     else hint.textContent = t('Send the passphrase a different way from the link: a call, a text, another app. The link alone cannot be opened.');
+    if (!sealed && shareIncludesIncidents()) hint.textContent += ` ${t('The problem reports carry names and phone numbers: lock the link.')}`;
     const copy = _shareEl('shareCopyBtn');
     copy.disabled = _shareBusy || (sealed && pass.length < SEAL_MIN_PASSPHRASE);
     copy.textContent = _shareBusy ? `⏳ ${t('Locking…')}` : sealed ? `🔒 ${t('Copy locked link')}` : `🔗 ${t('Copy plain link')}`;
@@ -104,16 +108,31 @@ function resetShareResult() {
 // (identifiedDoc in js/app.js, so whoever keeps it keeps the same network and
 // a later link of it updates their card), each binder site via
 // binderLinkFile(), which also leaves out sites from a newer Topo.
-async function buildShareLink(mode, sealed, passphrase) {
+// opts.incidents: the problem reports and visits go too (withoutIncidents,
+// js/model.js); left out unless asked. opts.max: a network link longer than
+// this is null as well (a report sent to its providers goes as a file then,
+// js/incidents.js); the share dialog's own network links have no cap.
+async function buildShareLink(mode, sealed, passphrase, opts = {}) {
     const binder = mode === 'binder';
     if (!binder && state.readOnly) throw new Error('A read-only document is not shared as a link.');
     // Each copy that leaves is stamped with its revision (js/revisions.js),
     // and carries only the newest LOG_LINK_MAX entries of its log.
-    const json = JSON.stringify(binder ? stampedBinderLinkFile() : withLinkLog(identifiedDoc(serializeDoc(), 'link')));
+    // Only a copy that lost entries is chained again (relinkLog); the rest
+    // go exactly as they are.
+    const relinked = new Set();
+    const strip = (doc) => { if (opts.incidents) return doc; const d = withoutIncidents(doc); if (d !== doc) relinked.add(d); return d; };
+    const relink = async (doc) => (relinked.has(doc) ? relinkLog(doc) : doc);
+    let payload;
+    if (binder) {
+        payload = stampedBinderLinkFile(strip);
+        payload.sites = await Promise.all(payload.sites.map(async (site) => (site && site.doc ? Object.assign({}, site, { doc: await relink(site.doc) }) : site)));
+    } else payload = withLinkLog(await relink(strip(identifiedDoc(serializeDoc(), 'link'))));
+    const json = JSON.stringify(payload);
     const frag = sealed
         ? await sealFragment(json, binder ? SEAL_KIND.binder : SEAL_KIND.doc, passphrase)
         : binder ? await encodeBinderFragment(json) : await encodeShareFragment(json);
     if (binder && frag.length > BINDER_URL_MAX) return null;
+    if (!binder && opts.max && frag.length + publicBase().length + publicQuery().length + 1 > opts.max) return null;
     // A network link keeps the query ('?profile=' composes with it), while a
     // binder link never did, because the shelf is not a view of the editor.
     // publicBase()/publicQuery() (js/state.js) are this page's address on the
@@ -121,11 +140,27 @@ async function buildShareLink(mode, sealed, passphrase) {
     return `${publicBase()}${binder ? '' : publicQuery()}#${frag}`;
 }
 
-function stampedBinderLinkFile() {
+// A copy whose log lost entries (withoutIncidents) has the later entries'
+// prev taken away; chain them again so the copy verifies (verifyLog -1).
+async function relinkLog(doc) {
+    if (!doc || !Array.isArray(doc.log) || doc.log.length < 2) return doc;
+    if (!window.TopoMerge || !TopoMerge.chainLog) return doc;
+    return Object.assign({}, doc, { log: await TopoMerge.chainLog(doc.log) });
+}
+
+function stampedBinderLinkFile(strip) {
     const file = binderLinkFile().file;
     file.sites = stampSites(file.sites, 'link');
+    if (strip) file.sites = file.sites.map((site) => (site && site.doc ? Object.assign({}, site, { doc: strip(site.doc) }) : site));
     return file;
 }
+// Whether the network (or, for a binder, any of its networks) holds problem
+// reports or visits: only then is "Include problem reports and visits" shown.
+function shareHasIncidents(mode) {
+    if (mode === 'binder') return binderLinkFile().file.sites.some((site) => docHasIncidentData(site && site.doc));
+    return docHasIncidentData(serializeDoc());
+}
+const shareIncludesIncidents = () => { const box = _shareEl('shareIncidents'); return !!box && box.checked && !_shareEl('shareIncidentsRow').classList.contains('hidden'); };
 
 async function copyShareLink() {
     if (_shareBusy) return;
@@ -150,7 +185,7 @@ async function copyShareLink() {
     const gen = _shareGen;
     _shareBusy = true; renderShareDialog();
     let url;
-    try { url = await buildShareLink(_shareMode, sealed, pass); }
+    try { url = await buildShareLink(_shareMode, sealed, pass, { incidents: shareIncludesIncidents() }); }
     catch (e) { console.warn('Share: could not build the link', e); url = undefined; }
     finally { _shareBusy = false; renderShareDialog(); }
     if (gen !== _shareGen) return;   // the choices changed while it was locking: that link matches nothing on screen
@@ -184,6 +219,7 @@ async function copySharePassphrase() {
 }
 
 _shareEl('shareSeal').addEventListener('change', () => { resetShareResult(); renderShareDialog(); });
+_shareEl('shareIncidents').addEventListener('change', () => { resetShareResult(); renderShareDialog(); });
 _shareEl('sharePass').addEventListener('input', () => { resetShareResult(); renderShareDialog(); });
 _shareEl('shareNewPass').onclick = () => { _shareEl('sharePass').value = generatePassphrase(); resetShareResult(); renderShareDialog(); };
 _shareEl('sharePassShow').onclick = () => { setPassphraseShown(_shareEl('sharePass').type !== 'text'); renderShareDialog(); };
@@ -237,6 +273,11 @@ _shareEl('unlockForm').addEventListener('submit', (e) => {
 _shareEl('unlockCancelBtn').onclick = () => _answerUnlock(null);
 _shareEl('unlockDialog').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); _answerUnlock(null); } });
 
+// The passphrase that opened the document arriving now, handed over once
+// (replaceDocument -> providerDocLoaded takes it), never stored.
+let _arrivalPass = null;
+function takeArrivalPassphrase() { const p = _arrivalPass; _arrivalPass = null; return p; }
+
 async function openSealedLink(frag) {
     // A stale run returns without closing the dialog or saying why: a newer
     // run may have opened it again already, for the entry now current.
@@ -255,7 +296,11 @@ async function openSealedLink(frag) {
                 openBinderPayload(json);
                 window.history.replaceState(null, '', cleanUrl());
             } else {
-                if (!openArrivedDocument(json)) arrivedUnreadable('');    // writes the document into the entry and clears the URL, or says the link is damaged
+                // The passphrase goes to provider mode for the copy sent back
+                // (js/providermode.js), in memory only, for this one arrival.
+                _arrivalPass = pass;
+                try { if (!openArrivedDocument(json)) arrivedUnreadable(''); }    // writes the document into the entry and clears the URL, or says the link is damaged
+                finally { _arrivalPass = null; }
             }
             return;
         } catch (e) {

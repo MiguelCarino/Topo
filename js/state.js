@@ -72,7 +72,7 @@ const state = {
     // query: what the search box over the map and the table holds (plan 3.3,
     // js/query.js). A view, like the trace: never serialized, never an undo
     // step, not kept between visits, and kept when another network is opened.
-    nodes: [], links: [], networks: [], groups: [], wifi: [], providers: [], accepted: [], pinned: [], expectedLife: {}, columns: [], tableView: {}, searches: [], annotations: [], report: null, log: [], libraryId: null, docId: null, docUpdated: 0, docRev: null, docRevHash: null, docBase: null, docPrior: [], readOnly: null, linkSourceId: null,
+    nodes: [], links: [], networks: [], groups: [], wifi: [], providers: [], accepted: [], pinned: [], expectedLife: {}, columns: [], tableView: {}, searches: [], annotations: [], report: null, log: [], incidents: [], libraryId: null, docId: null, docUpdated: 0, docRev: null, docRevHash: null, docBase: null, docPrior: [], readOnly: null, linkSourceId: null,
     query: '',
     selection: new Set(),
     get selectedId() { const one = soleSelected(this.selection); return one ? one.id : null; },
@@ -185,23 +185,45 @@ function redrawCoalescer(draw) {
     };
 }
 
+// ---- The phone's layouts, as media queries (Mobile batch 5, M31) ----
+// The same strings as css/app.css's blocks, which cannot share a variable.
+// DRAWER_MQ: the rail is a drawer, the handy bar and the bars over the map
+// show: a window 900px wide or less, or a phone held sideways (a touch
+// screen 500px tall or less and 932px wide or less, the widest phone on its
+// side: wider is a tablet whose browser shrank the page for its keyboard,
+// which keeps its docked rail).
+// PHONE_LAYOUT_MQ: the phone's own layout (the rack's switches, the map's
+// framing under the bars, the document bar's chip): 640px wide or less, or
+// the same phone held sideways. phoneView() (js/table.js) stays width-only:
+// it opens a phone on the Table and floors the first zoom, which a phone
+// held sideways does better without.
+const DRAWER_MQ = '(max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse)';
+const PHONE_LAYOUT_MQ = '(max-width: 640px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse)';
+// NAV_AWAY_MQ: a touch screen in the drawer's layout, where the fleet navbar
+// waits above the top edge (js/mobile.js navReveal); a mouse keeps it pinned.
+const NAV_AWAY_MQ = '(max-width: 900px) and (pointer: coarse), (max-height: 500px) and (max-width: 932px) and (pointer: coarse)';
+function mqMatches(q) { try { return !!(window.matchMedia && window.matchMedia(q).matches); } catch (e) { return false; } }
+
 // ---- Where this page lives, for links that leave it ----
 // A share link or a label's QR code points at this page when it is served
 // over http(s) (topo.carino.systems, or an intranet copy such as Offline's
 // topo.carino.internal), so a link made on the intranet opens the intranet.
 // Opened as a file (the offline zip) or inside the desktop app (tauri://, or
 // http://tauri.localhost on Windows), the page has no address anyone else can
-// open, so the link points at the public site instead, keeping only the
-// query that says which view it is.
+// open, so the link points at the public site instead. Either way a link
+// keeps only the query that says which view it is (LINK_PARAMS): ?lang= and
+// ?theme= are how this visitor reads the page, and a link that carried them
+// would force the sender's language on whoever opens it (a client on
+// ?lang=es sending a provider a Spanish page). The recipient's own applies.
 const PUBLIC_BASE = 'https://topo.carino.systems/';
+const LINK_PARAMS = ['profile', 'simple'];
 const servedOverWeb = (loc) => (loc.protocol === 'http:' || loc.protocol === 'https:') && loc.hostname !== 'tauri.localhost';
 function publicBaseFor(loc) {
     return servedOverWeb(loc) ? loc.origin + loc.pathname : PUBLIC_BASE;
 }
 function publicQueryFor(loc) {
-    if (servedOverWeb(loc)) return loc.search;
     const from = new URLSearchParams(loc.search), keep = new URLSearchParams();
-    ['profile', 'simple'].forEach((k) => { if (from.has(k)) keep.set(k, from.get(k)); });
+    LINK_PARAMS.forEach((k) => { if (from.has(k)) keep.set(k, from.get(k)); });
     const q = keep.toString();
     return q ? '?' + q : '';
 }

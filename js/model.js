@@ -1707,11 +1707,12 @@ const NODE_FIELDS = [
       write: (v, src) => (src && isVirtualType(src.type) ? asGroupRef(v) : undefined),
       toText: (v) => hostRefText(v) },
     // ---- Who is responsible for it (document v15, "Providers" below) ----
-    // A provider in doc.providers, by id: the ISP for the modem, the alarm
-    // company for the NVR. Unset, the device's host's or its group's answers
-    // (nodeProvider). In a spreadsheet it is the provider's name.
-    { key: 'provider', kind: 'raw', label: 'Provider', read: asGroupRef, write: asGroupRef, csv: 'provider', bulk: true,
-      toText: (v) => providerRefText(v) }
+    // Providers in doc.providers, by id (a list since v18): the ISP for the
+    // modem, the alarm company for the NVR, the IT firm too. A service it
+    // names none for comes from its host or its group (nodeProviders). In a
+    // spreadsheet it is the providers' names, separated by "; ".
+    { key: 'providers', kind: 'raw', label: 'Providers', read: asProviderRefs, write: asProviderRefs, csv: 'provider', bulk: true,
+      toText: (v) => providerRefsText(v) }
 ];
 
 // A cable's own facts (link.cable, plan section 4): the label on both ends of
@@ -1821,10 +1822,10 @@ const LINK_FIELDS = [
     // below; document v12). readLinkWifi both ways, so only those three
     // keys ever leave.
     { key: 'wifi', kind: 'raw', label: 'Wi-Fi', read: readLinkWifi, write: readLinkWifi },
-    // The provider responsible for the run (document v15): the carrier of a
-    // fibre circuit, the ISP of the line into the modem.
-    { key: 'provider', kind: 'raw', label: 'Provider', read: asGroupRef, write: asGroupRef, csv: 'provider', bulk: true,
-      toText: (v) => providerRefText(v) }
+    // The providers responsible for the run (document v15, a list since
+    // v18): the carrier of a fibre circuit, the ISP of the line into the modem.
+    { key: 'providers', kind: 'raw', label: 'Providers', read: asProviderRefs, write: asProviderRefs, csv: 'provider', bulk: true,
+      toText: (v) => providerRefsText(v) }
 ];
 
 const fieldRead = (f) => f.read || FIELD_KINDS[f.kind].read;
@@ -3692,10 +3693,11 @@ const GROUP_FIELDS = [
     { key: 'width', kind: 'raw', read: rackOnly(asRackWidth), write: rackOnly(asRackWidth), label: 'Width', csv: 'width' },
     { key: 'depthMm', kind: 'count', read: rackOnly(asRackDepthMm), write: rackOnly(asRackDepthMm), label: 'Depth (mm)', keys: 'int', csv: 'depth_mm' },
     { key: 'numbering', kind: 'raw', read: rackOnly(asRackNumbering), write: rackOnly(asRackNumbering), label: 'Numbering', csv: 'numbering' },
-    // The provider responsible for what is in it (document v15): every
-    // device inside, at any depth, that names none of its own.
-    { key: 'provider', kind: 'raw', label: 'Provider', read: asGroupRef, write: asGroupRef, csv: 'provider',
-      toText: (v) => providerRefText(v) }
+    // The providers responsible for what is in it (document v15, a list
+    // since v18): every device inside, at any depth, for each service it
+    // names no provider of its own for.
+    { key: 'providers', kind: 'raw', label: 'Providers', read: asProviderRefs, write: asProviderRefs, csv: 'provider',
+      toText: (v) => providerRefsText(v) }
 ];
 
 // Load: coerced through the table, one record per id (a repeated id is
@@ -4887,11 +4889,14 @@ function rackShrinkQuestion(rack, height, nodes = state.nodes, groups = state.gr
 // the ISP, the phone company, the IT support firm, the alarm company, the
 // vendor under contract. doc.providers is a list of its own, like the Wi-Fi
 // networks, and three records name one by id where the responsibility lies:
-//   node.provider   a device (the modem, the PBX, the NVR);
-//   link.provider   a cable or circuit (the fibre into the building);
-//   group.provider  a site, room or rack: every device inside that names
-//                   none of its own, at any depth.
-// A VM or container with none of its own is its host's responsibility.
+//   node.providers   a device (the modem, the PBX, the NVR);
+//   link.providers   a cable or circuit (the fibre into the building);
+//   group.providers  a site, room or rack: every device inside, at any depth.
+// Several per item since v18 (the ISP and the IT firm on one router). There
+// is no "main" one: a provider's role is its service. Inheritance is per
+// service: what a device names covers the services it names, and for each
+// service it names nobody for, its hosts (a container's VM, then the
+// server), then its groups innermost first, answer (nodeProviders).
 // Contact details are the provider's, never a person's private data the
 // network needs: the visitor types what they want printed.
 const PROVIDER_SERVICES = ['internet', 'phone', 'it', 'security', 'power', 'vendor', 'cloud', 'other'];
@@ -4956,25 +4961,54 @@ function normalizeProviders(list) {
 // provider serializes as it did before they existed.
 const serializeProviders = (list) => (list && list.length ? list.map((p) => writeFields(PROVIDER_FIELDS, p)) : undefined);
 const makeProvider = (fields) => readFields(PROVIDER_FIELDS, Object.assign({ id: nextId('pv') }, fields));
+// A record's providers as stored (v18): a list of ids, unique, or undefined
+// when it names none, so an item that names nobody writes no key. Tolerant:
+// a single id (a hand-made file, a v17 field set straight onto a record) is a
+// list of one, and a record with no `providers` that still says `provider`
+// (a fixture or a block written before v18) is read as that one. The order
+// is doc.providers' (normalizeProviderRefs, which knows the list). A
+// declaration, not a const: the field tables above name it while they load.
+function asProviderRefs(v, src) {
+    let list = v;
+    if (list === undefined && src && typeof src === 'object' && !Array.isArray(src) && src.provider !== undefined) list = src.provider;
+    if (typeof list === 'string') list = [list];
+    if (!Array.isArray(list)) return undefined;
+    const out = [];
+    list.forEach((x) => { const s = asGroupRef(x); if (s && !out.includes(s)) out.push(s); });
+    return out.length ? out : undefined;
+}
+// A record's provider ids, [] when none.
+const providerRefsOf = (rec) => (rec && Array.isArray(rec.providers) ? rec.providers : []);
 // Every reference names a provider the document holds; one that does not is
-// dropped. In place; on every load, and after a provider is deleted.
+// dropped, the rest put in doc.providers' order, and an empty list is no key
+// (nor is the pre-v18 single `provider`). In place; on every load, and after
+// a provider is deleted.
 function normalizeProviderRefs(nodes = state.nodes, links = state.links, groups = state.groups, providers = state.providers) {
-    const ids = new Set((providers || []).map((p) => p.id));
+    const rank = new Map((providers || []).map((p, i) => [p.id, i]));
     [nodes, links, groups].forEach((list) => (list || []).forEach((x) => {
-        if (x && x.provider !== undefined && !ids.has(x.provider)) delete x.provider;
+        if (!x || typeof x !== 'object') return;
+        const refs = asProviderRefs(x.providers, x);
+        delete x.provider;
+        const kept = (refs || []).filter((id) => rank.has(id)).sort((a, b) => rank.get(a) - rank.get(b));
+        if (kept.length) x.providers = kept; else delete x.providers;
     }));
 }
 const providerById = (id, providers = state.providers) => (id ? (providers || []).find((p) => p.id === id) || null : null);
 // What a provider is called where it is listed: its name, else its service,
 // else a plain word.
 const providerLabel = (p) => (p ? (p.name || providerServiceLabel(p.service) || t('Provider')) : '');
-// A reference as a sheet writes it: the name, or the id when two share it.
+// A reference as a sheet writes it: the name, or the id when two share it or
+// when the name holds a ";" (the separator of a cell naming several).
 function providerRefText(id, providers = state.providers) {
     const p = providerById(id, providers);
     if (!p) return '';
     const name = providerLabel(p);
+    if (name.includes(';')) return p.id;
     return (providers || []).filter((x) => providerLabel(x).toLowerCase() === name.toLowerCase()).length > 1 ? p.id : name;
 }
+// A list of references as one cell: "Fibra Norte; Andes IT".
+const providerRefsText = (ids, providers = state.providers) => (Array.isArray(ids) ? ids : asProviderRefs(ids) || [])
+    .map((id) => providerRefText(id, providers)).filter(Boolean).join('; ');
 // A sheet's or a typed reference back to an id: an id, else a name (case
 // does not matter), else null.
 function findProviderRef(text, providers = state.providers) {
@@ -4985,39 +5019,75 @@ function findProviderRef(text, providers = state.providers) {
     const low = s.toLowerCase();
     return (providers || []).find((p) => providerLabel(p).toLowerCase() === low) || null;
 }
+// A cell naming several, "A; B": the records in the cell's order (repeats
+// once), or null when any piece names no provider. The whole cell is tried
+// first, so a name typed with a ";" in it still reads.
+function findProviderRefs(text, providers = state.providers) {
+    const whole = findProviderRef(text, providers);
+    if (whole) return [whole];
+    const out = [];
+    for (const piece of String(text == null ? '' : text).split(';').map((x) => x.trim()).filter(Boolean)) {
+        const p = findProviderRef(piece, providers);
+        if (!p) return null;
+        if (!out.includes(p)) out.push(p);
+    }
+    return out.length ? out : null;
+}
 
-// Who answers for a device: { provider, via, from } or null. via is 'own',
-// 'host' (a VM's or container's host names one) or 'group' (the innermost
-// group round it that names one; from is that group).
-function nodeProvider(node, ctx = {}) {
-    const providers = ctx.providers || state.providers, groups = ctx.groups || state.groups, nodes = ctx.nodes || state.nodes;
-    if (!node) return null;
-    const own = providerById(node.provider, providers);
-    if (own) return { provider: own, via: 'own', from: node };
+// The service a provider covers, as inheritance counts it: one named with no
+// service is 'other', which blocks only 'other' (an unnamed own provider
+// never hides the group's ISP).
+const providerServiceOf = (p) => (p && p.service) || 'other';
+// Who answers for a device: [{ provider, via, from }], nearest first. via is
+// 'own' (the device names it), 'host' (a VM's or container's host does,
+// innermost first: a container's VM, then the server) or 'group' (a group
+// round it, or round its outermost host, innermost first); from is that
+// record. Per service: the device's own list, then for each service nothing
+// nearer covers, what the next one names. [] when nobody does.
+function nodeProviders(node, ctx = {}) {
+    if (!node) return [];
+    const providers = ctx.providers || state.providers, groups = ctx.groups || state.groups;
     // The host through the lookup index when it is the live document's (a
     // scan per VM would make the table's every render quadratic).
-    const host = node.host && isVirtualType(node.type)
-        ? (ctx.nodes ? nodes.find((n) => n.id === node.host) : getNode(node.host)) || null : null;
-    const hp = host && providerById(host.provider, providers);
-    if (hp) return { provider: hp, via: 'host', from: host };
-    const g = groupById((host || node).group, groups);
-    const chain = g ? groupChain(g, groups) : [];
-    for (let i = chain.length - 1; i >= 0; i--) {
-        const gp = providerById(chain[i].provider, providers);
-        if (gp) return { provider: gp, via: 'group', from: chain[i] };
+    const nodeOf = ctx.nodes ? (id) => ctx.nodes.find((n) => n && n.id === id) || null : (id) => getNode(id) || null;
+    const out = [], covered = new Set(), seen = new Set();
+    const take = (rec, via) => {
+        const add = [];
+        providerRefsOf(rec).forEach((id) => {
+            const p = providerById(id, providers);
+            if (!p || seen.has(p.id) || (via !== 'own' && covered.has(providerServiceOf(p)))) return;
+            add.push(p);
+        });
+        add.forEach((p) => { seen.add(p.id); out.push({ provider: p, via, from: rec }); });
+        add.forEach((p) => covered.add(providerServiceOf(p)));
+    };
+    take(node, 'own');
+    let root = node;
+    if (isVirtualType(node.type)) {
+        const hostSeen = new Set([node.id]);
+        for (let h = node.host ? nodeOf(node.host) : null; h && !hostSeen.has(h.id) && hostSeen.size <= HOST_DEPTH_MAX; h = h.host && isVirtualType(h.type) ? nodeOf(h.host) : null) {
+            hostSeen.add(h.id);
+            take(h, 'host');
+            root = h;
+        }
     }
-    return null;
+    const g = groupById(root.group, groups);
+    const chain = g ? groupChain(g, groups) : [];
+    for (let i = chain.length - 1; i >= 0; i--) take(chain[i], 'group');
+    return out;
 }
-const linkProvider = (link, providers = state.providers) => (link ? providerById(link.provider, providers) : null);
+// A cable's own providers (a cable inherits nothing), as records.
+const linkProviders = (link, providers = state.providers) => providerRefsOf(link).map((id) => providerById(id, providers)).filter(Boolean);
 // What a provider answers for: the devices (named or through a host or a
 // group), the cables and the groups that name it, in the document's order.
+// own: the devices naming it themselves.
 function providerCovers(id, ctx = {}) {
     const nodes = ctx.nodes || state.nodes, links = ctx.links || state.links, groups = ctx.groups || state.groups;
     return {
-        nodes: nodes.filter((n) => { const r = nodeProvider(n, ctx); return r && r.provider.id === id; }),
-        own: nodes.filter((n) => n.provider === id),
-        links: links.filter((l) => l.provider === id),
-        groups: groups.filter((g) => g.provider === id)
+        nodes: nodes.filter((n) => nodeProviders(n, ctx).some((r) => r.provider.id === id)),
+        own: nodes.filter((n) => providerRefsOf(n).includes(id)),
+        links: links.filter((l) => providerRefsOf(l).includes(id)),
+        groups: groups.filter((g) => providerRefsOf(g).includes(id))
     };
 }
 
@@ -5260,6 +5330,17 @@ function normalizeSearchRefs(searches = state.searches, columns = state.columns)
 //                   Nothing to convert: a document from before has no log,
 //                   and writes no key. A v16 build would drop the log on its
 //                   next save, so it opens a v17 document read-only.
+//   v 18            several providers per item (docs/SCOPE.md step 4): a
+//                   device's, a cable's and a group's provider id becomes a
+//                   list (node.providers, link.providers, group.providers),
+//                   and inheritance is per service ("Providers" above). The
+//                   step lifts provider: x into providers: [x]. The problem
+//                   reports (doc.incidents, "Problem reports" below) are a
+//                   new list, and the network log gains two kinds, 'incident'
+//                   and 'visit', in the same hash chain. Nothing else to
+//                   convert: a document with no report writes no key. A v17
+//                   build would read no provider at all and drop the reports,
+//                   so it opens a v18 document read-only.
 //
 // A document with a higher `v` was written by a newer Topo. Its unknown fields
 // cannot be kept — the serializer is an allowlist, and that is a privacy rule,
@@ -5638,6 +5719,26 @@ const LOG_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const LOG_HASH_RE = /^[0-9a-f]{64}$/;
 const LOG_COUNT_KEYS = ['added', 'changed', 'removed', 'conflicts'];
 const logText = (max) => (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+// Text with its line breaks kept (a visit's notes, a report's words).
+const logProse = (v, max) => {
+    if (typeof v !== 'string') return undefined;
+    const x = v.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/g, ' ').trim().slice(0, max);
+    return x || undefined;
+};
+const logRef = (v) => (typeof v === 'string' && LOG_ID_RE.test(v) ? v : undefined);
+// A reference to a device, group or provider: their ids are free text (a CSV
+// may name a device 'PC 3' or a provider 'isp.mx'), so only a loose check
+// here; LOG_ID_RE stays for the ids Topo mints itself (log entries, reports).
+const DOC_REF_MAX = 200;
+const docRefOk = (v) => typeof v === 'string' && v.length > 0 && v.length <= DOC_REF_MAX && v.trim() === v && !/[\u0000-\u001f\u007f]/.test(v);
+const logDocRef = (v) => (docRefOk(v) ? v : undefined);
+const logRefs = (v, max) => {
+    if (!Array.isArray(v)) return undefined;
+    const out = [];
+    v.forEach((x) => { if (logDocRef(x) && !out.includes(x) && out.length < max) out.push(x); });
+    return out.length ? out : undefined;
+};
+const logTime = (v) => (Number.isFinite(v) && v > 0 ? Math.round(v) : undefined);
 const LOG_FIELDS = {
     merge: {
         source: logText(200),
@@ -5650,6 +5751,32 @@ const LOG_FIELDS = {
         summary: logText(LOG_SUMMARY_MAX),
         mode: (v) => (v === 'two-way' || v === 'three-way' ? v : undefined),
         rev: (v) => (typeof v === 'string' && LOG_ID_RE.test(v) ? v : undefined)
+    },
+    // A problem report's events (v18, "Problem reports" below): opened,
+    // sent (to whom), closed, reopened. One entry per event.
+    incident: {
+        incidentId: (v) => logRef(v),
+        event: (v) => (INCIDENT_EVENTS.includes(v) ? v : undefined),
+        symptom: (v) => (INCIDENT_SYMPTOMS.includes(v) ? v : undefined),
+        routedTo: (v) => logRefs(v, 20),
+        summary: logText(LOG_SUMMARY_MAX)
+    },
+    // A provider's visit (v18): who came for whom, when, how it went, what
+    // they wrote and what changed in the network since the copy they
+    // received. provider is the provider's name as it was then: log entries
+    // are never remapped by a merge, so the id alone may name nobody later.
+    visit: {
+        incidentId: (v) => logRef(v),
+        providerId: (v) => logDocRef(v),
+        provider: logText(PROVIDER_NAME_MAX),
+        by: logText(120),
+        arrived: (v) => logTime(v),
+        left: (v) => logTime(v),
+        outcome: (v) => (VISIT_OUTCOMES.includes(v) ? v : undefined),
+        notes: (v) => logProse(v, VISIT_NOTES_MAX),
+        changes: (v) => visitChanges(v),
+        signoff: logText(120),
+        summary: logText(LOG_SUMMARY_MAX)
     }
 };
 const LOG_KINDS = Object.keys(LOG_FIELDS);
@@ -5686,8 +5813,176 @@ function withLinkLog(doc) {
     if (!doc || typeof doc !== 'object' || !Array.isArray(doc.log) || doc.log.length <= LOG_LINK_MAX) return doc;
     return Object.assign({}, doc, { log: doc.log.slice(doc.log.length - LOG_LINK_MAX) });
 }
+// Problem reports and visits name people and their phone numbers, so a copy
+// that leaves for anyone else carries them only when asked (the share
+// dialog's "Include problem reports and visits"; a report sent to its
+// providers always does). This drops `incidents` and the 'incident' and
+// 'visit' log entries. Safe both ways: a merge never removes an incident
+// (D39) and logs are unioned by id. From the first dropped entry on, every
+// kept entry loses its `prev` (a dropped entry changes the digest each later
+// link was made from); relinkLog (js/share.js) chains them again before the
+// copy leaves, so the recipient's verifyLog reads it as whole. A copy; the
+// document given is left as it is.
+const LOG_INCIDENT_KINDS = ['incident', 'visit'];
+const docHasIncidentData = (doc) => !!doc && ((Array.isArray(doc.incidents) && doc.incidents.length > 0)
+    || (Array.isArray(doc.log) && doc.log.some((e) => e && LOG_INCIDENT_KINDS.includes(e.kind))));
+function withoutIncidents(doc) {
+    if (!docHasIncidentData(doc)) return doc;
+    const out = Object.assign({}, doc);
+    delete out.incidents;
+    if (Array.isArray(doc.log)) {
+        const kept = [];
+        let dropped = false;
+        doc.log.forEach((e) => {
+            if (e && LOG_INCIDENT_KINDS.includes(e.kind)) { dropped = true; return; }
+            if (dropped && e && e.prev) { const c = Object.assign({}, e); delete c.prev; kept.push(c); }
+            else kept.push(e);
+        });
+        if (kept.length) out.log = kept; else delete out.log;
+    }
+    return out;
+}
 
-const DOC_VERSION = 17;
+// ============================================================================
+// Problem reports (document v18, docs/SCOPE.md step 4)
+// ============================================================================
+// A client who is not technical says what is wrong, where; Topo says whom to
+// call and sends the report with the network to them; a provider comes,
+// works and records a visit (a 'visit' log entry); the visit comes back
+// through the merge. doc.incidents is the list of reports, oldest first:
+//   id        'in' + 10 base36, minted once; a merge matches by it alone
+//   at        when it was reported (epoch ms)
+//   status    open < sent < visited < closed: it only moves forward, so a
+//             merge takes the later one (incidentRank) and never asks
+//   reopened  how many times it was reopened: a reopen starts the order
+//             again one round up, so a merge with an older closed copy
+//             cannot undo it
+//   symptom   one of INCIDENT_SYMPTOMS
+//   nodeIds   the devices with the problem ([] for the whole place or a group)
+//   groupId   the group, when the place is one
+//   text      the client's words (INCIDENT_TEXT_MAX)
+//   reporter  { name, phone?, email? }
+//   routedTo  the providers it was sent (or is to be sent) to, by id
+//   sentAt    when it was first sent
+//   visits    the 'visit' log entries recorded for it, by id; a copy may
+//             hold fewer of them than this lists (a link carries the newest
+//             LOG_LINK_MAX entries), so it is never checked against the log
+//   closedAt, closedNote   when the client marked it fixed, and why
+// Not a spreadsheet sheet, like the log. At most INCIDENT_MAX: the oldest
+// closed go first, then the oldest of any status.
+const INCIDENT_STATUSES = ['open', 'sent', 'visited', 'closed'];
+const INCIDENT_SYMPTOMS = ['internet', 'wifi', 'phone', 'camera', 'printer', 'power', 'other'];
+const INCIDENT_EVENTS = ['opened', 'sent', 'closed', 'reopened'];
+const VISIT_OUTCOMES = ['fixed', 'partly', 'not-fixed', 'follow-up'];
+const INCIDENT_MAX = 200;
+const INCIDENT_TEXT_MAX = 2000;
+const VISIT_NOTES_MAX = 4000;
+const VISIT_CHANGE_ITEMS_MAX = 200;
+const VISIT_CHANGE_STATUSES = ['added', 'changed', 'removed', 'moved'];
+// A visit's list of what changed: counts, and up to VISIT_CHANGE_ITEMS_MAX
+// items in no language ({ kind, id, name, status }), translated when shown.
+function visitChanges(v) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+    const counts = {};
+    ['added', 'changed', 'removed'].forEach((k) => { counts[k] = v.counts && Number.isInteger(v.counts[k]) && v.counts[k] >= 0 ? v.counts[k] : 0; });
+    const items = (Array.isArray(v.items) ? v.items : []).filter((x) => x && typeof x === 'object' && typeof x.kind === 'string' && VISIT_CHANGE_STATUSES.includes(x.status))
+        .slice(0, VISIT_CHANGE_ITEMS_MAX).map((x) => {
+            const o = { kind: x.kind.slice(0, 32) };
+            if (typeof x.id === 'string' && x.id) o.id = x.id.slice(0, 64);
+            if (typeof x.name === 'string' && x.name.trim()) o.name = x.name.trim().slice(0, 120);
+            o.status = x.status;
+            return o;
+        });
+    const out = { counts };
+    if (items.length) out.items = items;
+    return out;
+}
+const incidentStatusIndex = (s) => Math.max(0, INCIDENT_STATUSES.indexOf(s));
+// Where an incident stands: a reopen is a round up, then its status.
+const incidentRank = (inc) => (inc ? (Number.isInteger(inc.reopened) && inc.reopened > 0 ? inc.reopened : 0) * INCIDENT_STATUSES.length + incidentStatusIndex(inc.status) : -1);
+function newIncidentId() {
+    const n = 10;
+    let out = '';
+    const bytes = (typeof crypto !== 'undefined' && crypto.getRandomValues) ? crypto.getRandomValues(new Uint8Array(n)) : null;
+    for (let i = 0; i < n; i++) out += (bytes ? bytes[i] % 36 : Math.floor(Math.random() * 36)).toString(36);
+    return 'in' + out;
+}
+const incidentLine = (max) => (v) => { const x = typeof v === 'string' ? portText(v).trim().slice(0, max) : ''; return x || undefined; };
+// One report as this build keeps it, or null. ctx { nodes, groups,
+// providers }: a list given filters the references to ids it holds (a
+// dangling one is dropped, the report kept); a list not given is not checked.
+function normalizeIncident(x, ctx = {}) {
+    if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+    if (typeof x.id !== 'string' || !LOG_ID_RE.test(x.id) || !INCIDENT_SYMPTOMS.includes(x.symptom)) return null;
+    const has = (list) => (Array.isArray(list) ? new Set(list.map((r) => r && r.id)) : null);
+    const nodeIds = has(ctx.nodes), groupIds = has(ctx.groups), providerIds = has(ctx.providers);
+    const ids = (v, held, ok = docRefOk) => {
+        const out = [];
+        (Array.isArray(v) ? v : []).forEach((id) => { if (ok(id) && !out.includes(id) && (!held || held.has(id))) out.push(id); });
+        return out;
+    };
+    const out = { id: x.id, at: logTime(x.at) || 0, status: INCIDENT_STATUSES.includes(x.status) ? x.status : 'open', symptom: x.symptom };
+    out.nodeIds = ids(x.nodeIds, nodeIds);
+    if (docRefOk(x.groupId) && (!groupIds || groupIds.has(x.groupId))) out.groupId = x.groupId;
+    const text = logProse(x.text, INCIDENT_TEXT_MAX);
+    if (text) out.text = text;
+    const r = x.reporter && typeof x.reporter === 'object' && !Array.isArray(x.reporter) ? x.reporter : {};
+    out.reporter = {};
+    const rName = incidentLine(PROVIDER_NAME_MAX)(r.name), rPhone = incidentLine(PROVIDER_TEXT_MAX)(r.phone), rEmail = incidentLine(PROVIDER_TEXT_MAX)(r.email);
+    if (rName) out.reporter.name = rName;
+    if (rPhone) out.reporter.phone = rPhone;
+    if (rEmail) out.reporter.email = rEmail;
+    out.routedTo = ids(x.routedTo, providerIds);
+    if (logTime(x.sentAt)) out.sentAt = logTime(x.sentAt);
+    out.visits = ids(x.visits, null, (id) => typeof id === 'string' && LOG_ID_RE.test(id));
+    if (logTime(x.closedAt)) out.closedAt = logTime(x.closedAt);
+    const note = logProse(x.closedNote, INCIDENT_TEXT_MAX);
+    if (note) out.closedNote = note;
+    if (Number.isInteger(x.reopened) && x.reopened > 0) out.reopened = Math.min(x.reopened, 9999);
+    return out;
+}
+// At most INCIDENT_MAX, in their order: over it, the oldest closed go first,
+// then the oldest of any status. Mutates nothing it is given.
+function capIncidents(list, max = INCIDENT_MAX) {
+    if (list.length <= max) return list;
+    const drop = new Set();
+    const byAge = list.slice().sort((a, b) => (a.at - b.at));
+    for (const inc of byAge) { if (list.length - drop.size <= max) break; if (inc.status === 'closed') drop.add(inc); }
+    for (const inc of byAge) { if (list.length - drop.size <= max) break; drop.add(inc); }
+    return list.filter((inc) => !drop.has(inc));
+}
+// The list as this build keeps it: one record per id (the first kept),
+// coerced, capped.
+function normalizeIncidents(list, ctx = {}) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const out = [];
+    list.forEach((x) => {
+        const n = normalizeIncident(x, ctx);
+        if (n && !seen.has(n.id)) { seen.add(n.id); out.push(n); }
+    });
+    return capIncidents(out);
+}
+// Save: no key when there are none, so a network with no report saves as it
+// did before they existed.
+const serializeIncidents = (list) => {
+    const n = normalizeIncidents(list);
+    return n.length ? n : undefined;
+};
+// An 'incident' log entry: { id, at } from the caller, as a merge's are.
+function incidentLogEntry({ id, at, incident, event, routedTo }) {
+    const inc = incident || {};
+    const summary = `Problem ${event || 'opened'}: ${inc.symptom || 'other'}${routedTo && routedTo.length ? ` (to ${routedTo.length})` : ''}.`;
+    return normalizeLogEntry({ id, at, kind: 'incident', incidentId: inc.id, event, symptom: inc.symptom, routedTo: routedTo || inc.routedTo, summary });
+}
+// A 'visit' log entry.
+function visitLogEntry({ id, at, incidentId, providerId, provider, by, arrived, left, outcome, notes, changes, signoff }) {
+    const c = changes && changes.counts ? changes.counts : null;
+    const summary = `Visit by ${by || 'a technician'}${provider ? ` (${provider})` : ''}: ${outcome || 'recorded'}${c ? `, ${(c.added || 0) + (c.changed || 0) + (c.removed || 0)} changes` : ''}.`;
+    return normalizeLogEntry({ id, at, kind: 'visit', incidentId, providerId, provider, by, arrived, left, outcome, notes, changes, signoff, summary });
+}
+
+const DOC_VERSION = 18;
 
 // ---- What a Topo file says it is ----
 // Every .json Topo writes (a network's back-up, a binder) opens with a
@@ -5722,7 +6017,7 @@ function withTopoSchema(payload) {
 const DOC_VERSION_RE = /^\s*[1-9]\d*\s*$/;
 const isDocShape = (doc) => !!doc && typeof doc === 'object' && !Array.isArray(doc)
     && (doc.v === undefined || (Number.isInteger(doc.v) && doc.v >= 1) || (typeof doc.v === 'string' && DOC_VERSION_RE.test(doc.v)))
-    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations', 'columns', 'pinned', 'accepted', 'searches', 'log', 'prior'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
+    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations', 'columns', 'pinned', 'accepted', 'searches', 'log', 'prior', 'incidents'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
 
 // A version written as text ("14", a hand-edited file) is that version.
 const docVersionOf = (doc) => {
@@ -5863,7 +6158,26 @@ const MIGRATIONS = [
     { from: 15, to: 16, run: (doc) => ({ ...doc, v: 16 }) },
     // The network log is a new list, and rev, base and prior are identity
     // keys beside id and updated: not a new shape.
-    { from: 16, to: 17, run: (doc) => ({ ...doc, v: 17 }) }
+    { from: 16, to: 17, run: (doc) => ({ ...doc, v: 17 }) },
+    // A device's, a cable's and a group's provider becomes a list of them
+    // (several per item): provider: 'pv_1' is providers: ['pv_1']. The
+    // problem reports (doc.incidents) are a new list: nothing to convert.
+    {
+        from: 17, to: 18,
+        run(doc) {
+            const lift = (x) => {
+                if (!x || typeof x !== 'object' || Array.isArray(x) || !('provider' in x)) return x;
+                const out = { ...x };
+                const was = out.provider;
+                delete out.provider;
+                if (out.providers === undefined && typeof was === 'string' && was.trim()) out.providers = [was.trim()];
+                return out;
+            };
+            const out = { ...doc, v: 18 };
+            ['nodes', 'links', 'groups'].forEach((k) => { if (Array.isArray(doc[k])) out[k] = doc[k].map(lift); });
+            return out;
+        }
+    }
 ];
 
 // The v2 interface zone flags of `src`, put back on the same node as written.

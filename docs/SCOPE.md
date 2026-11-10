@@ -227,8 +227,98 @@ Decisions made in the build:
 - **`#provider` mode**: the incident and what this provider covers. They edit;
   **Record visit** captures the diff, notes and a sign-off, and returns a file
   that goes back in through the merge (section 3).
-- Format v17 adds `incidents` and `log`, with the base revision from section 3.
-- Mobile batches B4 and B5 (docs/MOBILE.md) come first: providers work on phones.
+- Format v17 added the `log` and the base revision (section 3); format v18
+  adds `incidents` and the log's `incident` and `visit` kinds, and makes an
+  item's provider a list (several providers per item).
+- Mobile batches B4 and B5 (docs/MOBILE.md) were to come first: step 4 was
+  built before them, every new surface phone-first (D34).
+
+### Decisions made building step 4 (2026-11-09), for the owner
+
+- **D34** (owner to confirm). Step 4 was built before Mobile B4 and B5, against
+  the Order below: every new sheet, banner, strip and list is phone-first
+  (targets of 44px or more on touch screens, no horizontal scroll at 360 and
+  390, checked in a browser), and the map overlays are registered with the
+  map's overlay list.
+- **D35.** Several providers per item (`providers: [id]` on devices, cables
+  and groups; no "main" one: the role is the service). Inheritance is per
+  service: an item's own, then for each service it names nobody for the host
+  chain (container, VM, server), then the group chain innermost first, of the
+  outermost host. A provider with no service counts as Other, so it never hides
+  the group's ISP. A cable inherits nothing.
+- **D36.** The list is stored in `doc.providers` order, no key when empty; the
+  field is `providers` everywhere (bulk, CSV target keys), the CSV headers stay
+  `provider` and `cable_provider`, the cell joins names with "; ", a name with
+  a ";" or shared by two providers is written as its id, and a single-name
+  sheet from before v18 still reads. Bulk Set fields offers Add one, Remove
+  one, Only one and None (no multi-pick "set exactly").
+- **D37.** Provider lists and a report's devices, providers and visits merge as
+  sets: two-way their union, three-way each side's additions and removals; a
+  row that combines both says "Both: …". Never a question: removing a provider
+  record the other side still uses stays the J4 conflict.
+- **D38.** A report's state is ordered by (reopened, status): Reported < Sent <
+  Visited < Fixed within a round, and Reopen starts a round up (`reopened` + 1,
+  status open, the close date and note cleared). A merge takes the higher
+  state without asking, so an older closed copy cannot undo a reopen; the
+  earliest first send wins.
+- **D39.** A merge never removes a report; only the cap of 200 does (oldest
+  closed first), and a report the cap dropped does not come back with an older
+  copy. There is no Delete for reports: closing is the end, history only grows.
+- **D40.** A visit's log entry carries the provider's name as it was, because
+  log entries are never remapped; what changed is stored in no language
+  (`{kind, id, name, status}`, at most 200, with counts), translated when shown,
+  and leaves the reports and the log out. A second visit in one session
+  compares with the copy the first sent back.
+- **D41.** Routing walks the cables breadth-first from each device to the
+  network's edges (internet clouds not standing for another site; with none,
+  the routers and firewalls), the shortest path to each edge, so both lines of
+  a multi-WAN site show; it does not chain locatePath, which walks down from a
+  router (amendment 1). VPN links and host-guest ties are not walked; a VM
+  starts at its host. Then the power providers for a power cut (no UPS device
+  kind exists: a device naming a Power / UPS provider stands for it), the
+  place's groups, and every other provider of the network ("listed for this
+  network"). Nothing is hidden: another service ranks after, unknown hours
+  never drop a provider. Hours are read in this browser's local time.
+- **D42.** A report always leaves locked (AES-GCM link with a new passphrase)
+  or as a file: a network link over 16,000 characters (`DOC_URL_MAX`; the
+  samples' locked links measure about 980 to 4,400) or a page that cannot lock
+  one sends `…_incident.json` to attach. The share dialog gets an **Include
+  problem reports and visits** tick, off each time (it drops the reports and
+  their log entries, and an entry whose predecessor is dropped loses its
+  `prev`); a back-up file keeps them.
+- **D43.** A `mailto:` over 1900 characters leaves the link out ("The link is
+  in your clipboard: paste it here") and Email copies the link; if still too
+  long the client's words are shortened in the email only. With a real locked
+  link this is the usual path.
+- **D44.** The copy back is locked with the passphrase that opened the
+  incoming link, held in memory only; with none held (a reload, a file), a new
+  one is shown to send another way.
+- **D45.** The copy back names as its base the revision the provider received:
+  set when a link arrival enters provider mode and is not kept here; a kept
+  card already names it.
+- **D46.** The v18 bump changes each network's content hash once (it includes
+  the version), so the first copy of a kept network that leaves gets a new
+  `rev` with no edit. Harmless: the old one goes to `prior`.
+- **D47.** The arrival banner shows for link and file arrivals only (and for a
+  merge that brings a report not open here before). A copy of a network kept
+  here whose report is further on, or carries a visit the card has not got (a
+  second provider's), gets the visited banner with **Merge into my network**.
+- **D48.** Saving a report keeps the network in this browser first, so a visit
+  sent back has a card to merge into; a link's copy of a network already kept
+  is not claimed (Keep this network asks about the merge).
+- **D49.** Provider mode borrows the full editor for the tab and never saves
+  it as the view; it comes back on a reload from the tab's session; `#provider`
+  typed is consumed and does nothing else (a fresh load would open the
+  example). The technician's name is the report's Prepared by name.
+- **D50.** The client's side: a **Problems** tab in the full editor (shown once
+  a report exists, counting the ones not closed), lists in the Simple views
+  (every open one with nothing selected, the device's own when one is), an
+  amber ! at a device's bottom-left on the map (not exported), the landing
+  card's Open problems line with a ⚠ tool, and the report's **Problems and
+  visits** tick, off by default because it prints the reporter's contact. Mark
+  fixed asks for an optional note. The network log tells report and visit
+  entries in the reader's language; their stored `summary` stays English.
+
 
 ## 5. Server (step 5)
 
@@ -275,7 +365,20 @@ phpIPAM. Every import goes through the merge.
   (js/merge.js); apply, the network log and its report tick (js/mergeapply.js);
   the review (js/mergeui.js); every door (js/mergedoors.js, js/library.js,
   js/app.js). Decisions D1–D33 above.
-- [ ] 3. Mobile B4, B5.
-- [ ] 4. Client-provider loop.
+- [x] 3. Mobile B4, B5 (built 2026-11-10, not yet committed). Touch targets
+  M21-M29 on any touch screen and held by the touchsizes suites (M60); screen
+  space M30-M38 (the docbar chip, landscape phones, the rack's pane switch, the
+  search ⋯ menu); M50; leftovers from steps 1, 2 and 4 (singular counts,
+  Japanese sentence joining, file names as typed in titles, My networks in the
+  drawer header, provider mode on the Map, share links without `?lang=`).
+  docs/MOBILE.md "How batches 4 and 5 landed" and its decisions for the owner
+  (M37's 0.4 default first).
+- [x] 4. Client-provider loop (built 2026-11-09, not yet committed). Format
+  v18 (several providers per item, `incidents`, the log's `incident` and
+  `visit` kinds; schema/topo-v18.json); routing (js/routing.js); Report a
+  problem and Send (js/incidents.js); provider mode, Record visit and the copy
+  back (js/providermode.js); the client's side: the merge review's rows, the
+  Problems tab, the Simple lists and marker, the landing line, the report's
+  tick. Built before step 3 (D34, owner to confirm). Decisions D34–D50 above.
 - [ ] 5. Server.
 - [ ] 6. Importers and spec.

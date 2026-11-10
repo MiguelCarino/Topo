@@ -380,7 +380,7 @@ function csvCablesSheet() {
         l.id, l.source, name(l.source), port(l.source, l.sourceIface), l.target, name(l.target), port(l.target, l.targetIface),
         l.medium || '', l.attachment || ''].concat(
         CSV_LINK_WIFI.map((w) => { const v = linkWifiOf(l, w.key); return v === undefined ? '' : w.key === 'ssid' ? csvWifiRef(v) : String(v); }),
-        CABLE_FIELDS.map((f) => cableOf(l, f.key)), [providerRefText(l.provider)]));
+        CABLE_FIELDS.map((f) => cableOf(l, f.key)), [providerRefsText(l.providers)]));
     return { name: 'cables', headers, rows };
 }
 // The three facts of link.wifi, under the names cables.csv gives them.
@@ -789,15 +789,22 @@ function csvFromText(key, text) {
     return fromTextResult(NODE_FIELDS.find((f) => f.key === key).fromText, text);
 }
 // Per field, where the schema row's own validator is not the whole story.
-// A provider named in a sheet (devices.csv, cables.csv, groups.csv): its
-// name or its id, one the map has. Like an SSID, it must be on the map when
-// the sheet is read, so providers.csv comes first.
-const csvProviderRefParse = (text) => { const p = findProviderRef(text); return p ? { value: p.id } : { error: true }; };
+// The providers named in a sheet (devices.csv, cables.csv, groups.csv):
+// their names or ids, separated by "; " (v18: several per item), each one
+// the map has, or the whole cell is refused. Like an SSID, they must be on
+// the map when the sheet is read, so providers.csv comes first. A sheet
+// from before v18 names one, and reads as a list of one.
+const csvProviderRefsParse = (text) => {
+    const list = findProviderRefs(text);
+    if (!list) return { error: true };
+    const rank = new Map((state.providers || []).map((p, i) => [p.id, i]));
+    return { value: list.map((p) => p.id).sort((a, b) => rank.get(a) - rank.get(b)) };
+};
 const CSV_PARSERS = {
     type: csvTypeParse,
-    provider: csvProviderRefParse,
-    'lk:provider': csvProviderRefParse,
-    'grp:provider': csvProviderRefParse,
+    providers: csvProviderRefsParse,
+    'lk:providers': csvProviderRefsParse,
+    'grp:providers': csvProviderRefsParse,
     'pv:service': (text) => { const k = providerServiceKey(text); return k ? { value: k } : { error: true }; },
     'pv:email': (text) => (providerEmailOk(text) ? { value: String(text).trim() } : { error: true }),
     'pv:notes': (text) => ({ value: String(text) }),
@@ -994,7 +1001,7 @@ function csvBuildTargets() {
         names: new Set([field && field.csv, field && field.label, label, ...(CSV_ALIASES[key] || [])].filter(Boolean).map(csvNorm)
             .filter((n) => !(CSV_NOT_NAMES[key] || []).includes(n)))
     });
-    const PLAIN = new Set(['name', 'type', 'notes', 'vendor', 'model', 'serial', 'assetTag', 'location', 'status', 'inService', 'serviced', 'serviceEvery', 'lifeYears', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'portsFace', 'host', 'provider']);
+    const PLAIN = new Set(['name', 'type', 'notes', 'vendor', 'model', 'serial', 'assetTag', 'location', 'status', 'inService', 'serviced', 'serviceEvery', 'lifeYears', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'portsFace', 'host', 'providers']);
     csvNodeFields().forEach((f) => add(f.key, 'device', f, null, PLAIN.has(f.key)));
     ['id', 'name', 'ip', 'mac', 'wireless', 'bond', 'vlan', 'tagged'].forEach((k) => add(`if:${k}`, 'iface', csvIfaceField(k)));
     // A radio's parts (iface.radio, js/model.js "Wi-Fi").
@@ -1005,7 +1012,7 @@ function csvBuildTargets() {
     ['id', 'source', 'target', 'sourceIface', 'targetIface', 'medium', 'attachment'].forEach((k) => add(`lk:${k}`, 'cable', LINK_FIELDS.find((f) => f.key === k), null, k === 'source' || k === 'target'));
     // The cable's provider under a name of its own (cable_provider): a bare
     // "provider" heading is a device's, and would make a cable sheet mixed.
-    add('lk:provider', 'cable', Object.assign({}, LINK_FIELDS.find((f) => f.key === 'provider'), { csv: 'cable_provider', label: 'Cable provider' }), null, true);
+    add('lk:providers', 'cable', Object.assign({}, LINK_FIELDS.find((f) => f.key === 'providers'), { csv: 'cable_provider', label: 'Cable provider' }), null, true);
     // A cable's own facts, kept in link.cable (CABLE_FIELDS, js/model.js).
     CABLE_FIELDS.forEach((f) => add(`lk:cable.${f.key}`, 'cable', f, null, true));
     // An association's facts, kept in link.wifi (js/model.js "Wi-Fi").
@@ -1333,7 +1340,7 @@ function csvShow(key, v) {
     if (key === 'lk:medium') return MEDIUM_NAMES[v] || String(v);
     // A network by its SSID, a band's list by theirs, a radio by its names.
     if (key === 'lk:wifi.ssid') return wifiLabel(wifiById(v)) || String(v);
-    if (key === 'provider' || key === 'lk:provider' || key === 'grp:provider') return providerLabel(providerById(v)) || String(v);
+    if (key === 'providers' || key === 'lk:providers' || key === 'grp:providers') return (Array.isArray(v) ? v : [v]).map((id) => providerLabel(providerById(id)) || String(id)).join(', ');
     if (/^if:radio\.ssids_/.test(key)) return v.length ? v.map((id) => wifiLabel(wifiById(id)) || id).join(', ') : 'none';
     if (key === 'if:radio.standard') return wifiStandardName(v);
     if (key === 'lk:wifi.band') return wifiBandName(v);
@@ -1352,6 +1359,11 @@ function csvSame(key, a, b) {
     if (key === 'nat' || key === 'if:wireless') return !!a === !!b;
     if (/^x:/.test(key)) { const tg = csvTarget(key); return tg ? customText(tg.def, a) === customText(tg.def, b) : a === b; }
     if (key === 'notes') return String(a || '') === String(b || '');
+    // A providers list (v18): the same ids, in any order; none is [].
+    if (key === 'providers' || key === 'lk:providers' || key === 'grp:providers') {
+        const ids = (v) => (Array.isArray(v) ? v : v ? [v] : []).slice().sort().join('\n');
+        return ids(a) === ids(b);
+    }
     // A band's SSID list: none ([]) is not the default (no list).
     if (/^if:radio\.ssids_/.test(key)) return JSON.stringify(a == null ? null : a) === JSON.stringify(b == null ? null : b);
     return String(a == null ? '' : a).trim() === String(b == null ? '' : b).trim();
@@ -2429,12 +2441,12 @@ function csvPlanCables(rows, plan) {
                         draft.attachment = values['lk:attachment'];
                     }
                 }
-                if (values['lk:provider'] !== undefined) {
-                    const field = t('Provider');
-                    if (prev.provider !== undefined && prev.provider !== values['lk:provider']) return conflict(t('Another row sets {field} to {value}.', { field, value: csvShow('lk:provider', prev.provider) }));
-                    if ((link.provider || '') !== values['lk:provider']) {
-                        out.changes.push({ field, before: csvShow('lk:provider', link.provider), after: csvShow('lk:provider', values['lk:provider']) });
-                        draft.provider = values['lk:provider'];
+                if (values['lk:providers'] !== undefined) {
+                    const field = t('Providers');
+                    if (prev.providers !== undefined && !csvSame('lk:providers', prev.providers, values['lk:providers'])) return conflict(t('Another row sets {field} to {value}.', { field, value: csvShow('lk:providers', prev.providers) }));
+                    if (!csvSame('lk:providers', link.providers, values['lk:providers'])) {
+                        out.changes.push({ field, before: csvShow('lk:providers', link.providers || []), after: csvShow('lk:providers', values['lk:providers']) });
+                        draft.providers = values['lk:providers'];
                     }
                 }
                 // The cable's own facts, field by field: a blank cell leaves one
@@ -2517,7 +2529,7 @@ function csvPlanCables(rows, plan) {
             const l = { id, source: a.id, target: b.id, attachment: values['lk:attachment'] || (isVirtualType(a.type) || isVirtualType(b.type) ? 'bridged' : null),
                 sourceIface: sp.id, targetIface: tp.id };
             if (values['lk:medium'] !== undefined) l.medium = values['lk:medium'];
-            if (values['lk:provider'] !== undefined) l.provider = values['lk:provider'];
+            if (values['lk:providers'] !== undefined) l.providers = values['lk:providers'];
             const facts = {};
             CABLE_FIELDS.forEach((f) => { if (values[`lk:cable.${f.key}`] !== undefined) facts[f.key] = values[`lk:cable.${f.key}`]; });
             if (readCable(facts)) l.cable = readCable(facts);
@@ -2767,7 +2779,7 @@ function csvPlanGroups(rows, plan) {
     const results = [];
     const show = (key, v) => (key === 'kind' ? groupKindName(v) : key === 'parent' ? (v ? (work.get(v) ? workPath(v) : v) : '')
         : key === 'numbering' ? t(v === 'top' ? 'Top down' : 'Bottom up') : key === 'width' ? rackWidthLabel(v)
-        : key === 'provider' ? (providerLabel(providerById(v)) || (v ? String(v) : ''))
+        : key === 'providers' ? csvShow('providers', v || [])
         : (v === undefined || v === null ? '' : String(v)));
     const workPath = (id) => {
         const names = [], seen = new Set();
@@ -2809,7 +2821,7 @@ function csvPlanGroups(rows, plan) {
             if (parent && (parent === id || loops(id, parent))) { conflict(t('{name} cannot be inside itself.', { name: v.name || id })); return; }
             const kind = v.kind || guessGroupKind(v.name);
             if (kind !== 'rack' && ['uHeight', 'width', 'depthMm', 'numbering'].some((k) => v[k] !== undefined)) out.notes.push(t('Only a rack has a height.'));
-            const rec = makeGroup({ id, name: v.name, kind, parent: parent || null, uHeight: v.uHeight, width: v.width, depthMm: v.depthMm, numbering: v.numbering, provider: v.provider });
+            const rec = makeGroup({ id, name: v.name, kind, parent: parent || null, uHeight: v.uHeight, width: v.width, depthMm: v.depthMm, numbering: v.numbering, providers: v.providers });
             work.set(id, { id, name: rec.name, kind: rec.kind, parent: rec.parent });
             claimed.add(id);
             plan.ops.push({ grp: { create: rec } });
@@ -2817,7 +2829,7 @@ function csvPlanGroups(rows, plan) {
             out.changes.push({ field: label('kind'), before: '', after: groupKindName(rec.kind) });
             if (rec.parent) out.changes.push({ field: label('parent'), before: '', after: workPath(rec.parent) });
             if (isRackGroup(rec)) out.changes.push({ field: label('uHeight'), before: '', after: String(rec.uHeight) });
-            if (rec.provider) out.changes.push({ field: label('provider'), before: '', after: show('provider', rec.provider) });
+            if (rec.providers) out.changes.push({ field: label('providers'), before: '', after: show('providers', rec.providers) });
             Object.assign(out, { status: 'add', grpId: id, name: workPath(id) });
             results.push(out);
             return;
@@ -2844,7 +2856,7 @@ function csvPlanGroups(rows, plan) {
         if (v.depthMm !== undefined && kind === 'rack' && v.depthMm !== liveG.depthMm) set.depthMm = v.depthMm;
         if (v.numbering !== undefined && kind === 'rack' && v.numbering !== (rackTopDown(liveG) ? 'top' : 'bottom')) set.numbering = v.numbering;
         // Who is responsible for what is in it: a blank cell changes nothing.
-        if (v.provider !== undefined && v.provider !== (liveG.provider || '')) set.provider = v.provider;
+        if (v.providers !== undefined && !csvSame('grp:providers', liveG.providers, v.providers)) set.providers = v.providers;
         // A rack made shorter: the devices in the units it loses lose their
         // places (applyRackHeight, when it is written), and the review says
         // how many, as the rail and the table ask first.

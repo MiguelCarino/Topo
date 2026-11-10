@@ -26,7 +26,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
   try {
     // ---- 1: the public address ----
     const site = loc('https://topo.carino.systems/?lang=es&profile=simple');
-    ok('the public site keeps its own address and every query', publicBaseFor(site) === 'https://topo.carino.systems/' && publicQueryFor(site) === '?lang=es&profile=simple');
+    ok('the public site keeps its own address and the view, never the language', publicBaseFor(site) === 'https://topo.carino.systems/' && publicQueryFor(site) === '?profile=simple', publicQueryFor(site));
+    ok('nor the theme', publicQueryFor(loc('https://topo.carino.systems/?theme=colourful&lang=ja')) === '' && publicQueryFor(loc('https://topo.carino.systems/?simple=1&theme=gold')) === '?simple=1');
     const intra = loc('http://topo.carino.internal/topo/index.html?profile=simple');
     ok('an intranet copy keeps its own origin and path', publicBaseFor(intra) === 'http://topo.carino.internal/topo/index.html' && publicQueryFor(intra) === '?profile=simple');
     const file = loc('file:///x/index.html?lang=en&profile=simple');
@@ -40,7 +41,16 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 2: under run.sh, the page's own address ----
     ok('this run is served over http', location.protocol === 'http:', location.protocol);
     ok("a label's QR address starts with this page's origin", assetLinkFor('SW-1').startsWith(location.origin + location.pathname + '#asset/SW-1'), assetLinkFor('SW-1'));
-    ok('and publicBase() is that address', publicBase() === location.origin + location.pathname && publicQuery() === location.search);
+    ok('and publicBase() is that address, without run.sh\'s ?lang=en', publicBase() === location.origin + location.pathname && publicQuery() === '', publicQuery());
+    // A share link carries what opens the network the same way (the view),
+    // never how the sender reads it: a client on ?lang=es must not hand the
+    // provider a Spanish page, nor a theme.
+    const wasHref = location.href;
+    try {
+      history.replaceState(history.state, '', '?lang=es&theme=colourful&profile=imagenology' + location.hash);
+      const link = await buildShareLink('doc', false);
+      ok('a share link drops lang= and theme=, keeps profile=', !!link && !/[?&](lang|theme)=/.test(link) && /\?profile=imagenology#/.test(link), String(link).slice(0, 90));
+    } finally { history.replaceState(history.state, '', wasHref); }
 
     // ---- 3: saveBlob, dataUrlToBlob ----
     const made = [], revoked = [], clicked = [];

@@ -109,6 +109,10 @@ const PHONE_MQ = '(max-width: 640px)';
 // The phone's layout, read live: the map's framing on a phone (js/app.js
 // mapViewport, frameCamera) asks it at the moment it frames.
 function phoneView() { return !!(window.matchMedia && window.matchMedia(PHONE_MQ).matches); }
+// The phone's chrome, which a phone held sideways has too (PHONE_LAYOUT_MQ,
+// js/state.js): the bars over the map's bottom that framing aims above, the
+// document bar's chip. Not the Table as the first view, nor the 0.7 floor.
+function phoneChrome() { return phoneView() || mqMatches(PHONE_LAYOUT_MQ); }
 function effectiveView() {
     if (isReduced()) return 'map';
     if (state.settings.view === 'rack' && rackViewOffered()) return 'rack';
@@ -156,6 +160,47 @@ function setInventoryBy(by) {
     cancelEdit();
     if (_tv.invBy !== by) { _tv.invBy = by; _tv.cursor = { row: null, col: null }; _tv.cursorChosen = false; _tv.anchor = null; _tv.checked.inventory.clear(); }
     renderTableView(true);
+}
+
+// ---- The sub-tabs' row on a phone (Mobile review M32) ----
+// At 360 the seven tabs are wider than the pane and the row scrolls sideways
+// with nothing to say so. Its ends fade where more tabs lie past them
+// (data-more, css/app.css), and the tab chosen is scrolled fully into the row
+// (scrollLeft, not scrollIntoView, which would scroll the page as well).
+function tvTabsRow() { return document.querySelector('#tableView .tv-tabs'); }
+function tvTabsMore(row) {
+    const max = row.scrollWidth - row.clientWidth;
+    const more = max <= 1 ? '' : [row.scrollLeft > 1 ? 'start' : '', row.scrollLeft < max - 1 ? 'end' : ''].filter(Boolean).join(' ');
+    if (row.getAttribute('data-more') !== more) row.setAttribute('data-more', more);
+}
+function tvTabsEdges() {
+    const row = tvTabsRow();
+    if (!row) return;
+    if (!row.dataset.edges) {
+        row.dataset.edges = '1';
+        row.addEventListener('scroll', () => tvTabsMore(row), { passive: true });
+        if (window.ResizeObserver) new ResizeObserver(() => tvTabsMore(row)).observe(row);
+    }
+    // Once per tab chosen: a redraw after an edit leaves a row the thumb
+    // has scrolled where it is.
+    const btn = row.querySelector('[data-tvtab].active');
+    const key = btn ? btn.dataset.tvtab : '';
+    const fresh = row.dataset.revealed !== key;
+    if (btn && fresh && row.clientWidth) row.dataset.revealed = key;
+    if (btn && fresh && row.scrollWidth > row.clientWidth + 1) {
+        const CLEAR = 24;
+        const r = row.getBoundingClientRect(), b = btn.getBoundingClientRect();
+        let to = row.scrollLeft;
+        if (b.left < r.left + (row.scrollLeft > 0 ? CLEAR : 0)) to += b.left - r.left - CLEAR;
+        else if (b.right > r.right - CLEAR) to += b.right - r.right + CLEAR;
+        to = Math.max(0, Math.min(row.scrollWidth - row.clientWidth, to));
+        if (Math.abs(to - row.scrollLeft) > 0.5) {
+            let smooth = false;
+            try { smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches && typeof row.scrollTo === 'function'; } catch (e) { smooth = false; }
+            if (smooth) row.scrollTo({ left: to, behavior: 'smooth' }); else row.scrollLeft = to;
+        }
+    }
+    tvTabsMore(row);
 }
 
 function showTableTab(key) {
@@ -1221,8 +1266,8 @@ function tvBuildView(tab, query) {
     const ticked = top.filter(rowChecked).length;
     const sort = _tv.sort[tab];
     const head = `<thead><tr>
-        <th class="tv-chk"><input type="checkbox" data-check-all tabindex="-1"${top.length && ticked === top.length ? ' checked' : ''}
-            aria-label="${escapeHtml(t('Select every row'))}" title="${escapeHtml(t('Select every row'))}"></th>
+        <th class="tv-chk" data-hitbox><label class="tv-tick"><input type="checkbox" data-check-all tabindex="-1"${top.length && ticked === top.length ? ' checked' : ''}
+            aria-label="${escapeHtml(t('Select every row'))}" title="${escapeHtml(t('Select every row'))}"></label></th>
         ${tab === 'devices' ? '<th class="tv-exp" aria-hidden="true"></th>' : ''}
         ${cols.map((c) => {
             const dir = sort && sort.col === c.key ? sort.dir : 0;
@@ -1254,7 +1299,7 @@ function tvBuildView(tab, query) {
         const n = row.rec === 'node' ? row.data.interfaces.length : 0;
         const open = row.rec === 'node' && _tv.expanded.has(row.ref.nodeId);
         return `<tr data-row="${escapeHtml(row.key)}" class="${on ? 'tv-sel' : ''}${rowOn(row) ? ' tv-on' : ''}" aria-selected="${on}">
-            <td class="tv-chk"><input type="checkbox" data-check tabindex="-1"${on ? ' checked' : ''} aria-label="${escapeHtml(rowName(row))}"></td>
+            <td class="tv-chk" data-hitbox><label class="tv-tick"><input type="checkbox" data-check tabindex="-1"${on ? ' checked' : ''} aria-label="${escapeHtml(rowName(row))}"></label></td>
             ${tab === 'devices' ? `<td class="tv-exp">${n ? `<button type="button" class="tv-twist" data-expand tabindex="-1" aria-expanded="${open}"
                 title="${escapeHtml(t(open ? 'Hide interfaces' : 'Show interfaces'))}">${open ? '▾' : '▸'}</button>` : ''}</td>` : ''}
             ${cols.map((c) => cell(row, c)).join('')}</tr>`;
@@ -1284,6 +1329,7 @@ function renderTableView(force, diag) {
         b.classList.toggle('active', on);
         b.setAttribute('aria-selected', String(on));
     });
+    tvTabsEdges();
 
     const tab = _tv.tab;
     // The search box (js/query.js) narrows the rows: a device's interfaces
@@ -2108,6 +2154,34 @@ function onTableKey(e) {
 
 function onTableClick(e) {
     const t0 = e.target;
+    // A tap on the tick's cell, beside the box (44px wide on a touch screen,
+    // css/app.css): the box's own click, which comes back here once.
+    // A finger near the edge between two ticks' cells: a touch screen's
+    // browser steers the tap to the element it judges nearest, which for
+    // the 46px rows was the row above or below (a tap 4px inside the head's
+    // cell ticked the first row). The tick is the one under the finger's
+    // real point, taken at pointerdown.
+    const tick = t0.closest('.tv-chk[data-hitbox]');
+    const down = _tv.downAt;
+    _tv.downAt = null;
+    if (tick && down && Date.now() - down.at < 1500) {
+        const under = document.elementFromPoint(down.x, down.y);
+        const real = under && under.closest('.tv-chk[data-hitbox]');
+        if (real && real !== tick && document.getElementById('tvGrid').contains(real)) {
+            e.preventDefault();
+            const box = real.querySelector('input[type="checkbox"]');
+            if (box) box.click();
+            return;
+        }
+    }
+    // The label round the box fills the cell: its click is followed by the
+    // box's own, which does the work.
+    if (t0.matches('label.tv-tick')) return;
+    if (t0.matches('.tv-chk[data-hitbox]')) {
+        const box = t0.querySelector('input[type="checkbox"]');
+        if (box) box.click();
+        return;
+    }
     const tabBtn = t0.closest('[data-tvtab]');
     if (tabBtn) { showTableTab(tabBtn.dataset.tvtab); return; }
     const byBtn = t0.closest('[data-invby]');
@@ -2367,6 +2441,9 @@ function closeColumnsDialog() {
     // Held while a pointer is down on the table, so the row under it is still
     // there when the click lands; caught up the moment it is let go.
     view.addEventListener('pointerdown', (e) => {
+        // Where a finger really landed (the event's point is the touch's;
+        // its target may be the browser's guess, see onTableClick).
+        _tv.downAt = e.pointerType === 'touch' ? { x: e.clientX, y: e.clientY, at: Date.now() } : null;
         const td = e.target.closest && e.target.closest('td[data-col]');
         _tv.downOnCursor = !!td && _tv.cursorChosen && td.parentElement.dataset.row === _tv.cursor.row && td.dataset.col === _tv.cursor.col;
         _tv.pointerDown = true;

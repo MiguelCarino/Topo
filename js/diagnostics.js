@@ -2496,9 +2496,9 @@ function providerFindings() {
     const out = [];
     state.nodes.forEach((node) => {
         if (node.type !== 'cloud' || node.siteRef || isRetired(node)) return;
-        if (nodeProvider(node)) return;
+        if (nodeProviders(node).length) return;
         const links = linksAtNode(node.id);
-        if (links.some((l) => linkProvider(l))) return;
+        if (links.some((l) => linkProviders(l).length)) return;
         const name = node.name || node.id;
         out.push({ key: 'provider', level: 'info', check: t('Provider'), subject: name,
             detail: t('Nobody is named for {name}: when the line is down, whoever reads this will not know whom to call. Set its provider.', { name }),
@@ -3059,7 +3059,7 @@ function openFindingsTab() {
     if (isReduced()) return;
     showConfigTab('findings');
     const ws = document.querySelector('.topo-ws');
-    if (ws && window.matchMedia('(max-width: 900px)').matches && !ws.classList.contains('drawer-open')) {
+    if (ws && mqMatches(DRAWER_MQ) && !ws.classList.contains('drawer-open')) {
         const toggle = document.querySelector('[data-ws-toggle]');
         if (toggle) toggle.click();
     }
@@ -3149,7 +3149,7 @@ const findingsTabShown = () => document.getElementById('findTabBtn')?.getAttribu
 // the device it centres on is in sight.
 function showFindingOnMap(target) {
     const ws = document.querySelector('.topo-ws');
-    if (ws && ws.classList.contains('drawer-open') && window.matchMedia('(max-width: 900px)').matches) {
+    if (ws && ws.classList.contains('drawer-open') && mqMatches(DRAWER_MQ)) {
         const toggle = document.querySelector('[data-ws-toggle]');
         if (toggle) toggle.click();
     }

@@ -122,7 +122,9 @@ const _rv = {
     badLinks: null,    // the cables an open finding names, as of the last rebuild: rvBadLinks
     sort: { key: 'dev', dir: 1 }, // the patch schedule's sort (a view, this visit): setRackSort
     trace: '',         // a cable a schedule row just traced, for the rebuild to bring into sight: rvTraceCable
-    schedSel: ''       // the cable selected at the last rebuild, so its row is scrolled to once: rvRevealSchedule
+    schedSel: '',      // the cable selected at the last rebuild, so its row is scrolled to once: rvRevealSchedule
+    phonePane: 'elev', // a phone's pane, the units ('elev') or the patch schedule ('sched'): M35
+    paneRack: null     // the rack that pane was picked on: another rack starts on the units
 };
 const RV_FACES = ['front', 'rear'];
 const RV_FACE_NAMES = { front: 'Front', rear: 'Rear' };
@@ -141,7 +143,9 @@ function currentRack() {
     _rv.rackId = first ? first.id : null;
     return first;
 }
-const rvPhone = () => !!(window.matchMedia && window.matchMedia(PHONE_MQ).matches);
+// A phone, or one held sideways (PHONE_LAYOUT_MQ, js/state.js): one face
+// and one pane at a time (css/app.css, the phone rack block).
+const rvPhone = () => mqMatches(PHONE_LAYOUT_MQ);
 const rvName = (n) => (n.name && String(n.name).trim()) || n.id;
 const rvTypeName = (type) => { const p = paletteDefs.find((d) => d.type === type); return p ? p.name : type; };
 const rvIcon = (type, size) => `<svg class="rk-ico" viewBox="0 0 24 24" width="${size}" height="${size}" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[type] || iconPaths.custom}</svg>`;
@@ -160,6 +164,9 @@ function showRackView(on) {
     view.classList.toggle('hidden', !on);
     document.body.classList.toggle('rack-view', on);
     if (on) renderRackView(true);
+    // On a phone the rack needs the height its units take: the network's
+    // full first-show banner folds into its chip (js/library.js, M30).
+    if (on && mqMatches(PHONE_LAYOUT_MQ) && typeof window.foldDocBar === 'function') window.foldDocBar();
 }
 
 // The Groups tab's Open rack, the collapsed rack's control, a test.
@@ -169,7 +176,7 @@ function openRackView(id) {
     _rv.rackId = rack.id;
     // On a phone the rail is a drawer over the pane: shut, so the rack shows.
     const ws = document.querySelector('.topo-ws');
-    if (ws && ws.classList.contains('drawer-open') && window.matchMedia('(max-width: 900px)').matches) {
+    if (ws && ws.classList.contains('drawer-open') && mqMatches(DRAWER_MQ)) {
         const toggle = document.querySelector('[data-ws-toggle]');
         if (toggle) toggle.click();
     }
@@ -216,6 +223,14 @@ function renderRackView(force, diag) {
         b.setAttribute('aria-pressed', String(on));
     });
     view.dataset.face = _rv.face;
+    // A phone's pane (M35): back on the units for another rack.
+    if (rack && _rv.paneRack !== rack.id) { _rv.paneRack = rack.id; _rv.phonePane = 'elev'; }
+    view.dataset.pane = _rv.phonePane;
+    document.querySelectorAll('#rackPaneSwitch [data-pane]').forEach((b) => {
+        const on = b.dataset.pane === _rv.phonePane;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', String(on));
+    });
     // The zoom: the units' height (--rk-z, css/app.css), and its switch.
     view.style.setProperty('--rk-z', String(_rv.zoom));
     document.querySelectorAll('#rackZoom [data-zoom]').forEach((b) => {
@@ -378,6 +393,7 @@ function rvFocusKey(el) {
     if (el.dataset.zoom && el.closest('#rackZoom')) return `#rackZoom [data-zoom="${CSS.escape(el.dataset.zoom)}"]`;
     if (el.dataset.cables && el.closest('#rackCables')) return `#rackCables [data-cables="${CSS.escape(el.dataset.cables)}"]`;
     if (el.dataset.face && el.closest('#rackFaceSwitch')) return `#rackFaceSwitch [data-face="${CSS.escape(el.dataset.face)}"]`;
+    if (el.dataset.pane && el.closest('#rackPaneSwitch')) return `#rackPaneSwitch [data-pane="${CSS.escape(el.dataset.pane)}"]`;
     return null;
 }
 
@@ -1916,7 +1932,7 @@ function openCablePorts(link) {
     selectEntries([{ type: 'link', id: link.id }]);
     renderRackView(true);
     const ws = document.querySelector('.topo-ws');
-    if (ws && !ws.classList.contains('drawer-open') && window.matchMedia('(max-width: 900px)').matches) {
+    if (ws && !ws.classList.contains('drawer-open') && mqMatches(DRAWER_MQ)) {
         const toggle = document.querySelector('[data-ws-toggle]');
         if (toggle) toggle.click();
     }
@@ -2784,6 +2800,15 @@ function onRackClick(e) {
             return;
         }
         rackStep(node, act.dataset.rk);
+        return;
+    }
+    // A phone's pane (M35): the other one, from its top.
+    const pane = e.target.closest('#rackPaneSwitch [data-pane]');
+    if (pane) {
+        _rv.phonePane = pane.dataset.pane === 'sched' ? 'sched' : 'elev';
+        renderRackView(true);
+        const body = rvEl('rackBody');
+        if (body) body.scrollTop = 0;
         return;
     }
     const face = e.target.closest('#rackFaceSwitch [data-face]');

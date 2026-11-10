@@ -43,7 +43,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       if (named !== parts || state.networks.length > parts + 1) bad.push(`${k}: ${named} named subnets for ${parts} parts`);
       if (state.nodes.filter((n) => n.type === 'switch').length !== parts) bad.push(`${k}: a switch per part`);
       const pv = (state.providers || []).length;
-      if (pv < 1 || pv > 2 || !getNode('s_net').provider) bad.push(`${k}: ${pv} providers`);
+      if (pv < 1 || pv > 2 || !(getNode('s_net').providers || []).length) bad.push(`${k}: ${pv} providers`);
       if (parts > 1) multi++;
       if (pv === 2) two++;
       const fs = topologyFindings();

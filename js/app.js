@@ -744,14 +744,47 @@ function loadSettings() {
         if (saved.trailRecording === false) state.settings.trailRecording = false; else delete state.settings.trailRecording;
         // Its plain lines in the Simple views are off unless turned on.
         if (saved.trailSimple === true) state.settings.trailSimple = true; else delete state.settings.trailSimple;
+        // Who reports a problem from this browser (js/incidents.js): typed
+        // once, filled in next time. Never in a URL.
+        const rep = normalizeReporterSetting(saved.reporter);
+        if (rep) state.settings.reporter = rep; else delete state.settings.reporter;
+        // Which provider you are, per network (js/providermode.js).
+        const self = normalizeProviderSelfSetting(saved.providerSelf);
+        if (self) state.settings.providerSelf = self; else delete state.settings.providerSelf;
     } catch (e) { /* first run or blocked storage */ }
 }
 
+// { name, phone, email } trimmed to one line each (120, 200, 200), or null
+// when all three are blank.
+function normalizeReporterSetting(v) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    const line = (x, max) => (typeof x === 'string' ? x.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, max) : '');
+    const out = {};
+    const name = line(v.name, 120), phone = line(v.phone, 200), email = line(v.email, 200);
+    if (name) out.name = name;
+    if (phone) out.phone = phone;
+    if (email) out.email = email;
+    return Object.keys(out).length ? out : null;
+}
+
+// { networkId: providerId } of at most 50 short ids, or null when empty.
+function normalizeProviderSelfSetting(v) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    const out = {};
+    Object.keys(v).slice(-50).forEach((k) => { if (k.length <= 64 && typeof v[k] === 'string' && v[k] && v[k].length <= 64) out[k] = v[k]; });
+    return Object.keys(out).length ? out : null;
+}
+
 function saveSettings() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ profile: state.settings.profile, advanced: !!state.settings.advanced, lang: state.settings.lang, libraryTab: state.settings.libraryTab, subnetZones: state.settings.subnetZones !== false, view: state.settings.view, mapInk: state.settings.mapInk || '',
+    // Provider mode borrows the full editor for its session (js/providermode.js):
+    // the view saved is the one the visitor had.
+    const borrowed = typeof providerBorrowedAdvanced === 'function' && state.settings.advanced ? providerBorrowedAdvanced() : null;
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ profile: state.settings.profile, advanced: borrowed !== null ? borrowed : !!state.settings.advanced, lang: state.settings.lang, libraryTab: state.settings.libraryTab, subnetZones: state.settings.subnetZones !== false, view: state.settings.view, mapInk: state.settings.mapInk || '',
         providerHover: state.settings.providerHover === true || undefined, reportEngineer: state.settings.reportEngineer || undefined,
         reportSummaryOn: state.settings.reportSummaryOn === false ? false : undefined, reportTechnicalOn: state.settings.reportTechnicalOn === false ? false : undefined,
-        trailRecording: state.settings.trailRecording === false ? false : undefined, trailSimple: state.settings.trailSimple === true || undefined })); } catch (e) { /* private mode */ }
+        trailRecording: state.settings.trailRecording === false ? false : undefined, trailSimple: state.settings.trailSimple === true || undefined,
+        reporter: normalizeReporterSetting(state.settings.reporter) || undefined,
+        providerSelf: normalizeProviderSelfSetting(state.settings.providerSelf) || undefined })); } catch (e) { /* private mode */ }
 }
 
 // Saved templates used to have a store of their own here (USER_TPL_KEY,
@@ -800,6 +833,30 @@ function applyCamera() {
     canvasContainer.style.setProperty('--grid', `${grid.minor}px`);
     canvasContainer.style.setProperty('--grid-major', `${grid.major}px`);
     canvasContainer.style.backgroundPosition = `${state.camera.x}px ${state.camera.y}px`;
+    applyMapDetail(canvasContainer);
+}
+
+// ---- Address lines at a phone's zoom (Mobile review M38) ----
+// Under each device its first two addresses are 8 map units: at a phone's
+// Fit (about 0.5) they are 4px of grey nobody reads, crowding the names. On
+// a touch phone (PHONE_LAYOUT_MQ and a coarse pointer) they go below the
+// readable zoom, the selected device's excepted (css/app.css, .lod-far and
+// .node-sel). The class sits on #canvasContainer, outside the <svg> the
+// exports copy, so a PNG or SVG holds every address whatever the zoom. The
+// queries are kept, since this runs on every frame of a pan.
+const IP_MIN_ZOOM = 0.7;   // PHONE_READABLE_ZOOM (below): an address is 5.6px there
+let _lodMq = null;
+function applyMapDetail(canvasContainer) {
+    if (!_lodMq) {
+        try {
+            _lodMq = { phone: matchMedia(PHONE_LAYOUT_MQ), coarse: matchMedia('(pointer: coarse)') };
+            const again = () => applyMapDetail(document.getElementById('canvasContainer'));
+            [_lodMq.phone, _lodMq.coarse].forEach((m) => { if (m.addEventListener) m.addEventListener('change', again); });
+        } catch (e) { _lodMq = { phone: { matches: false }, coarse: { matches: false } }; }
+    }
+    if (!canvasContainer) return;
+    const far = _lodMq.phone.matches && _lodMq.coarse.matches && state.camera.zoom < IP_MIN_ZOOM - 1e-6;
+    if (canvasContainer.classList.contains('lod-far') !== far) canvasContainer.classList.toggle('lod-far', far);
 }
 
 // ---- Framing the map (Mobile batch 1) ----
@@ -811,13 +868,17 @@ function applyCamera() {
 // zoom buttons' narrow column at the side is not counted.
 const PHONE_READABLE_ZOOM = 0.7;   // names are 10 map units: about 7px and up
 const PHONE_MIN_ZOOM = 0.1;        // a phone may zoom out this far, so any map fits
+// The reduced views (#simple, #imagenology) open on the whole map when it
+// fits at this zoom or more (M37, docs/MOBILE.md: owner decision 2026-11-10); a bigger map keeps the
+// readable floor. The full editor keeps it.
+const SIMPLE_OVERVIEW_ZOOM = 0.33;
 const PHONE_FIT_PAD = 16;
 const MAP_TOP_OVERLAYS = '#canvasContainer > .topo-topbar';
-const MAP_BOTTOM_OVERLAYS = '#docBar, #handyBar, #readOnlyBanner, #storageBanner, #selBar, #linkBanner';
+const MAP_BOTTOM_OVERLAYS = '#docBar, #handyBar, #readOnlyBanner, #storageBanner, #selBar, #linkBanner, #problemPickBanner';
 function mapViewport() {
     const r = document.getElementById('networkCanvas').getBoundingClientRect();
     const full = { left: 0, top: 0, width: r.width, height: r.height };
-    if (!phoneView() || !r.width || !r.height) return full;
+    if (!phoneChrome() || !r.width || !r.height) return full;
     // While boot is still deciding (body.chrome-pending, css/app.css) the
     // bars are hidden, and boot's first fit would frame under them. They are
     // measured as they will be: the class comes off for the measuring and
@@ -860,7 +921,7 @@ function measureMapViewport() {
     if (bottom - top < 80) return full;
     return { left: 0, top, width: r.width, height: bottom - top };
 }
-const mapZoomLimits = () => ({ min: phoneView() ? PHONE_MIN_ZOOM : 0.2, max: 5 });
+const mapZoomLimits = () => ({ min: phoneChrome() ? PHONE_MIN_ZOOM : 0.2, max: 5 });
 
 // The camera that frames bounds ({ minX, minY, maxX, maxY }, map units) in
 // view ({ left, top, width, height }, canvas pixels). Pure, so it is tested
@@ -871,6 +932,8 @@ const mapZoomLimits = () => ({ min: phoneView() ? PHONE_MIN_ZOOM : 0.2, max: 5 }
 //   initial (the first view of a document) never goes below the readable
 //   zoom: a map too big for it is centred across, with its top (the uplink
 //   or the router) at the top of the view, and the rest is a pan away.
+//   overview (a reduced view's first view): the whole map instead, when it
+//   fits at SIMPLE_OVERVIEW_ZOOM or more.
 function frameCamera(b, view, opts) {
     const o = opts || {};
     const w = (b.maxX - b.minX) || 1, h = (b.maxY - b.minY) || 1;
@@ -883,7 +946,8 @@ function frameCamera(b, view, opts) {
     const PAD = PHONE_FIT_PAD;
     const vw = Math.max(1, view.width - PAD * 2), vh = Math.max(1, view.height - PAD * 2);
     const fit = Math.min(vw / w, vh / h);
-    const zoom = Math.min(1.4, Math.max(o.initial ? PHONE_READABLE_ZOOM : PHONE_MIN_ZOOM, fit));
+    const floor = o.initial && !(o.overview && fit >= SIMPLE_OVERVIEW_ZOOM) ? PHONE_READABLE_ZOOM : PHONE_MIN_ZOOM;
+    const zoom = Math.min(1.4, Math.max(floor, fit));
     const x = view.left + view.width / 2 - cx * zoom;
     const y = h * zoom <= vh ? view.top + view.height / 2 - cy * zoom : view.top + PAD - b.minY * zoom;
     return { zoom, x, y };
@@ -912,7 +976,10 @@ function fitToView(nodes, opts) {
         minX = Math.min(minX, frames.minX); minY = Math.min(minY, frames.minY);
         maxX = Math.max(maxX, frames.maxX); maxY = Math.max(maxY, frames.maxY);
     }
-    const c = frameCamera({ minX, minY, maxX, maxY }, mapViewport(), { phone: phoneView(), initial: !!(opts && opts.initial) });
+    // A phone held sideways (phoneChrome) frames as a phone does, a 16px
+    // margin in the strip the bars leave, but without the first view's floor:
+    // 0.7 on a 360px-tall screen would show a corner of most maps.
+    const c = frameCamera({ minX, minY, maxX, maxY }, mapViewport(), { phone: phoneChrome(), initial: !!(opts && opts.initial) && phoneView(), overview: isReduced() });
     state.camera.zoom = c.zoom;
     state.camera.x = c.x;
     state.camera.y = c.y;
@@ -996,7 +1063,7 @@ function serializeDoc() {
     // (v16): the saved searches, through SEARCH_FIELDS, no key when none.
     // And `log` (v17): the network log, through LOG_FIELDS, last, no key
     // when it is empty (js/model.js "Network log").
-    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), providers: serializeProviders(state.providers), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView), searches: serializeSearches(state.searches), log: serializeLog(state.log) };
+    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), providers: serializeProviders(state.providers), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView), searches: serializeSearches(state.searches), incidents: serializeIncidents(state.incidents), log: serializeLog(state.log) };
 }
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
@@ -1026,6 +1093,12 @@ const BINDER_FRAG_SCHEME = 'b~';
 // and nineteen to ~10.8k, so this is a ceiling on the pathological case rather
 // than a limit anyone meets. Past it the file is the honest answer.
 const BINDER_URL_MAX = 12000;
+// A network link that carries a problem report to its providers
+// (js/incidents.js): past this, the report goes as a file to attach. Sealed
+// sample networks measure 980 to 4378 characters (2026-11-09), so this is a
+// ceiling for real large sites, not a limit a small office meets. The share
+// dialog's own links have no cap, as before.
+const DOC_URL_MAX = 16000;
 const isBinderFragment = (frag) => typeof frag === 'string' && frag.startsWith(BINDER_FRAG_SCHEME);
 const _canCompress = typeof CompressionStream !== 'undefined';
 const _canDecompress = typeof DecompressionStream !== 'undefined';
@@ -1731,6 +1804,9 @@ function loadDocState(doc) {
     // The network log, as every other list: assigned always, so a document
     // without one never keeps the previous document's.
     state.log = normalizeLog(d.log);
+    // The problem reports (v18), after the devices, groups and providers
+    // they name: a reference to one the document lacks is dropped.
+    state.incidents = normalizeIncidents(d.incidents, { nodes: state.nodes, groups: state.groups, providers: state.providers });
     return { newer };
 }
 
@@ -1741,7 +1817,7 @@ function loadDocState(doc) {
 // list: a key one of them forgot (the log was the risk) would leave the
 // borrowed document's in the open one, and the next save would write it
 // into the open card.
-const DOC_STATE_KEYS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'accepted', 'pinned', 'expectedLife', 'columns', 'tableView', 'searches', 'annotations', 'report', 'log'];
+const DOC_STATE_KEYS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'accepted', 'pinned', 'expectedLife', 'columns', 'tableView', 'searches', 'annotations', 'report', 'log', 'incidents'];
 function holdDocState() {
     const held = {};
     DOC_STATE_KEYS.forEach((k) => { held[k] = state[k]; });
@@ -1799,9 +1875,9 @@ function replaceDocument(doc, opts = {}) {
     state.selection = new Set(); state.linkSourceId = null;
     const { newer } = loadDocState(raw);
     // A template is a starting point, never the network it was saved from, so
-    // it brings no identity with it, and no log: a network started from it
-    // has not had its merges.
-    if (origin === 'template') state.log = [];
+    // it brings no identity with it, no log and no problem reports: a network
+    // started from it has not had its merges, nor its problems.
+    if (origin === 'template') { state.log = []; state.incidents = []; }
     const ident = origin === 'template' ? { id: null, updated: 0, rev: null, base: null, prior: [] } : docIdentity(raw);
     let lib = opts.libraryId || null;
     if (!lib && opts.claim && !newer) lib = ident.id || mintLibraryId();
@@ -1832,6 +1908,9 @@ function replaceDocument(doc, opts = {}) {
     renderCanvasOnly();
     if (opts.fit !== false) fitToView(null, { initial: true });
     if (window.TOPO_CHECKS && JSON.stringify(serializeDoc()) !== now) throw new Error('replaceDocument: the document changed while it was opened');
+    // A copy with a problem report arriving, or the page's own network back
+    // while this tab was in provider mode for it (js/providermode.js).
+    if (typeof providerDocLoaded === 'function') providerDocLoaded(origin);
 }
 
 // The blank canvas a dismissed landing leaves is a network started here, so it
@@ -1963,6 +2042,10 @@ async function load() {
     // ('#setup-<profile>' also sets that home profile first). On a fresh boot
     // fall through to the profile's default template; mid-session (typed over
     // an open diagram) keep the canvas and let save() put it back in the entry.
+    // '#provider' names a mode, not a way in: provider mode comes back on
+    // its own with the page's network (js/providermode.js). Typed, it is
+    // consumed and the visit goes on as if it were not there.
+    if (hash === 'provider') { window.history.replaceState(window.history.state, '', cleanUrl()); return load(); }
     let wizard = false, trigger = hash;
     if (hash === 'setup') { wizard = true; trigger = state.settings.profile; }
     else if (hash.startsWith('setup-') && PROFILES[hash.slice(6)]) { wizard = true; trigger = hash.slice(6); }
@@ -2550,7 +2633,7 @@ function mapTouchEnd(e) {
 // on them, css/app.css). A tap on their buttons is still a tap.
 // js/mobile.js hands its selection bar and connect banner to mapOverlay
 // itself, since it builds them after this runs.
-const MAP_OVERLAYS = '.zoom-ctl, #docBar, #readOnlyBanner, #storageBanner';
+const MAP_OVERLAYS = '.zoom-ctl, #docBar, #readOnlyBanner, #storageBanner, #problemPickBanner, #incidentBanner, #providerStrip';
 // Safari's own pinch (GestureEvent): on a Mac's trackpad it is how a pinch
 // arrives (no Ctrl-wheel), so it zooms the map about the pointer as the wheel
 // does; on an iPhone the fingers' touch events are already pinching
@@ -2829,7 +2912,7 @@ function renderShortcutHelp() {
     // A touch screen 900px wide or less: the fleet navbar waits above the top
     // edge (js/mobile.js navReveal).
     let navAway = false;
-    try { navAway = matchMedia('(max-width: 900px) and (pointer: coarse)').matches; } catch (e) { /* no media queries */ }
+    navAway = mqMatches(NAV_AWAY_MQ);
     const touch = coarse ? subhead('Touch') + `
         <div class="sc-hint" id="touchHint">
             <span>👆</span>
@@ -2864,6 +2947,8 @@ function showConfigTab(name) {
     if (name === 'groups') renderGroupsPanel(true);   // and the Groups tab (js/groups.js)
     if (name === 'wifi') renderWifiPanel(true);       // and the Wi-Fi tab (js/wifi.js)
     if (name === 'providers') renderProvidersPanel(true);   // and the Providers tab (js/providers.js)
+    if (name === 'visit' && typeof renderProviderPanel === 'function') renderProviderPanel();   // provider mode's report (js/providermode.js)
+    if (name === 'incidents' && typeof renderIncidentsPanel === 'function') renderIncidentsPanel();   // the problem reports (js/incidents.js)
 }
 document.querySelectorAll('.cfg-tab').forEach((t) => { t.onclick = () => showConfigTab(t.dataset.cfgtab); });
 
@@ -2968,6 +3053,8 @@ function applyLocale(lang) {
     // Only matters while the dialog is open — its fields are built at open time.
     if (!document.getElementById('reportDialog').classList.contains('hidden')) renderReportDialog();
     if (shareDialogOpen()) renderShareDialog();
+    if (typeof problemDialogLocale === 'function') problemDialogLocale();   // js/incidents.js
+    if (typeof providerModeLocale === 'function') providerModeLocale();   // js/providermode.js
     document.getElementById('binderReportBtn').innerHTML = `📋 ${t('Binder report')}`;
     document.getElementById('binderLinkBtn').innerHTML = `🔗 ${t('Copy binder link')}`;
     setMapInk(state.settings.mapInk);   // its title
@@ -3230,7 +3317,7 @@ document.getElementById('zoomFitBtn').onclick = () => fitToView();
 // there; anywhere wider it is still the reset to the world's corner, which
 // the 0 key (it clicks this) has always done.
 document.getElementById('zoomResetBtn').onclick = () => {
-    if (phoneView()) { const v = mapViewport(); zoomCameraAt(1, v.left + v.width / 2, v.top + v.height / 2); return; }
+    if (phoneChrome()) { const v = mapViewport(); zoomCameraAt(1, v.left + v.width / 2, v.top + v.height / 2); return; }
     state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera();
 };
 // The map's background (css/app.css .map-ink): '' light, 'dark' (white
@@ -3401,6 +3488,7 @@ async function applyImportedDoc(parsed, opts = {}) {
     // Read after okToReplace, which writes the open card's last edit: the
     // card compared and kept as a restore point is the card as it is now.
     const known = ident.id ? libraryEntry(ident.id) : null;
+    const knownDocBefore = known ? known.doc : null;
     if (newer) {
         // From a newer Topo: opened read-only and not stored, as everywhere
         // else (outgoingDoc). The file is still the copy to keep.
@@ -3438,6 +3526,9 @@ async function applyImportedDoc(parsed, opts = {}) {
         }
         if (choice === 'copy') openImportedAsNewCard(doc, t('{name} (copy)', { name: known.name }), null);
         else replaceDocument(libraryEntry(known.id).doc, { libraryId: known.id, origin: 'library' });
+        // Updated from a file holding a report this network had not open: the
+        // provider's banner (js/providermode.js).
+        if (choice === 'update' && typeof providerMergeArrival === 'function') providerMergeArrival(knownDocBefore);
     } else {
         // A network not here: its own network (the main answer), or merged
         // into one of yours (js/mergedoors.js), the technician's file of
@@ -3601,7 +3692,10 @@ function canvasSvgMarkup(scale = 1) {
     // A group's ▾ and a collapsed rack's Open rack (js/groupmap.js) are
     // controls too; its frame and tab are drawing. So is a host badge's
     // chevron and tap target; its count of guests is drawing.
-    svg.querySelectorAll('.node-delete, .grp-toggle, .grp-rack-open, .host-fold-chev, .host-badge > .grp-toggle-hit, .pv-tip').forEach((el) => el.remove());
+    svg.querySelectorAll('.node-delete, .grp-toggle, .grp-rack-open, .host-fold-chev, .host-badge > .grp-toggle-hit, .pv-tip, .node-problem').forEach((el) => el.remove());
+    // Provider mode's ring round the report's devices is the view's, not the drawing's.
+    svg.querySelectorAll('.inc-hit').forEach((el) => el.classList.remove('inc-hit'));
+    svg.querySelectorAll('.node-sel').forEach((el) => el.classList.remove('node-sel'));
     // A selection is the editor's, not the network's: the copy is drawn as if
     // nothing were picked (restLook, js/ui.js), and what only a selection shows goes.
     svg.querySelectorAll('[data-sel-only]').forEach((el) => el.remove());

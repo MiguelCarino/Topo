@@ -57,7 +57,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 1: the schema ----
     const f = NODE_FIELDS.find((x) => x.key === 'host');
     // Last of the fields before the provider (document v15), which came after it.
-    ok('the host is a node field, after the rack and ports fields, under runs_on', !!f && NODE_FIELDS[NODE_FIELDS.indexOf(f) + 1].key === 'provider' && NODE_FIELDS.indexOf(f) > NODE_FIELDS.findIndex((x) => x.key === 'portsFace') && f.csv === 'runs_on');
+    ok('the host is a node field, after the rack and ports fields, under runs_on', !!f && NODE_FIELDS[NODE_FIELDS.indexOf(f) + 1].key === 'providers' && NODE_FIELDS.indexOf(f) > NODE_FIELDS.findIndex((x) => x.key === 'portsFace') && f.csv === 'runs_on');
     ok('read on a VM and a container, as a trimmed id', readFields(NODE_FIELDS, N('a', 'vm', { host: ' hv ' })).host === 'hv'
        && readFields(NODE_FIELDS, N('a', 'container', { host: 'x' })).host === 'x');
     ok('not on anything else', readFields(NODE_FIELDS, N('a', 'server', { host: 'hv' })).host === undefined

@@ -64,9 +64,13 @@ function logEntryText(e) {
     if (!e) return '';
     if (e.kind === 'merge') {
         const c = e.counts || {};
-        return t('Merged {source}: {added} added, {changed} changed, {removed} removed, {conflicts} conflicts.',
+        return t((c.conflicts || 0) === 1 ? 'Merged {source}: {added} added, {changed} changed, {removed} removed, {conflicts} conflict.' : 'Merged {source}: {added} added, {changed} changed, {removed} removed, {conflicts} conflicts.',
             { source: logSourceText(e.source), added: c.added || 0, changed: c.changed || 0, removed: c.removed || 0, conflicts: c.conflicts || 0 });
     }
+    // A problem report's events and a provider's visits (js/incidents.js,
+    // js/providermode.js), in the reader's language.
+    if (e.kind === 'incident' && typeof incidentLogText === 'function') return incidentLogText(e);
+    if (e.kind === 'visit' && typeof visitLineText === 'function') return visitLineText(e);
     return e.summary || e.kind;
 }
 const logModeText = (e) => (e && e.mode === 'three-way' ? t('Three-way merge') : e && e.mode === 'two-way' ? t('Two-way merge') : '');
@@ -182,8 +186,12 @@ async function commitMerge(opts = {}) {
             else recordRevision(targetId, theirsRev, theirs, 'merge-theirs');
         }
         if (typeof landingIsOpen === 'function' && landingIsOpen() && typeof renderLanding === 'function') renderLanding();
+        // A report brought in open or sent: the provider's banner (an IT firm
+        // that holds the client's network opened what the client sent;
+        // js/providermode.js).
+        if (live && typeof providerMergeArrival === 'function') providerMergeArrival(mine);
         // All four counts: a merge that removed devices says so.
-        if (!opts.quiet) showToast(t('Merged {source}: {added} added, {changed} changed, {removed} removed, {conflicts} conflicts.', Object.assign({ source: logSourceText(source) }, counts)), 'ok');
+        if (!opts.quiet) showToast(t(counts.conflicts === 1 ? 'Merged {source}: {added} added, {changed} changed, {removed} removed, {conflicts} conflict.' : 'Merged {source}: {added} added, {changed} changed, {removed} removed, {conflicts} conflicts.', Object.assign({ source: logSourceText(source) }, counts)), 'ok');
         return { ok: true, counts, entry: (merged.log || [])[merged.log.length - 1] || entry, notes, mode: plan.mode };
     } finally {
         _mergeApply.applying = false;
@@ -322,7 +330,7 @@ function logReportSection(log) {
         <td>${escapeHtml(logEntryText(e))}${e.mode ? ` <span class="muted">${escapeHtml(logModeText(e))}</span>` : ''}</td>
         <td>${e.by ? escapeHtml(e.by) : '<span class="muted">—</span>'}</td>
     </tr>`).join('');
-    const more = list.length > shown.length ? `<p class="muted">${escapeHtml(t('…and {n} earlier entries.', { n: list.length - shown.length }))}</p>` : '';
+    const more = list.length > shown.length ? `<p class="muted">${escapeHtml(tn(list.length - shown.length, '…and {n} earlier entry.', '…and {n} earlier entries.'))}</p>` : '';
     return `${lead}<table class="changes">
         <thead><tr><th>${escapeHtml(t('Date'))}</th><th>${escapeHtml(t('Merge'))}</th><th>${escapeHtml(t('Prepared by'))}</th></tr></thead>
         <tbody>${rows}</tbody></table>${more}`;

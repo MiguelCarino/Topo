@@ -576,8 +576,8 @@ function libraryEntryFor(key, name, prev, opts) {
     if (opts.block || (prev && prev.block)) entry.block = true;
     if (nameAuto) entry.nameAuto = true;
     // A template or a block is a starting point: it carries no network's
-    // log, so nothing started from it inherits one.
-    if ((entry.template || entry.block) && entry.doc && entry.doc.log) { entry.doc = Object.assign({}, entry.doc); delete entry.doc.log; }
+    // log or problem reports, so nothing started from it inherits them.
+    if ((entry.template || entry.block) && entry.doc && (entry.doc.log || entry.doc.incidents)) { entry.doc = Object.assign({}, entry.doc); delete entry.doc.log; delete entry.doc.incidents; }
     // The card's revision (js/revisions.js) is the card's, not the save's:
     // rebuilt from scratch here, it would be lost at the next autosave. A
     // new card for the open document takes the document's.
@@ -1220,7 +1220,12 @@ function openLanding(fromBoot) {
     refreshBinderBinding().then(() => { if (landingIsOpen()) renderLanding(); });
     document.getElementById('landing').classList.remove('hidden');
     document.body.classList.add('landing-open');
-    const first = document.querySelector('#landing .landing-drop-btn.primary');
+    // My networks is in the phone's drawer (js/mobile.js), which stays above
+    // the landing: it closes, as its ✕ does.
+    const ws = document.querySelector('.topo-ws');
+    const menu = document.getElementById('handyMenu');
+    if (ws && menu && ws.classList.contains('drawer-open')) menu.click();
+    const first =document.querySelector('#landing .landing-drop-btn.primary');
     if (first) first.focus();
 }
 
@@ -1606,8 +1611,8 @@ async function applyImportedBinder(parsed, opts = {}) {
     if (result.cancelled && !result.storedIds.length) return false;
     if (landingIsOpen()) renderLanding();
     renderUserTemplates();
-    showToast(binderMergeText(result)
-        + (binder.dropped ? ' ' + t('{n} entry in the file could not be read and was skipped.', { n: binder.dropped }) : ''), 'ok');
+    showToast(joinSentences([binderMergeText(result),
+        binder.dropped ? tn(binder.dropped, '{n} entry in the file could not be read and was skipped.', '{n} entries in the file could not be read and were skipped.') : '']), 'ok');
     // The older copies left as they were (skipped, or already up to date):
     // not one replaced, copied or merged just now.
     const left = older.filter((o) => !result.storedIds.includes(o.id));
@@ -1650,6 +1655,8 @@ function landingCard(entry, opts = {}) {
     // What changed since this card's last back-up or report (js/changes.js).
     // A shared card has no baseline here: it was never backed up from here.
     const changed = opts.guest ? '' : cardChangesText(cardChanges(entry));
+    // Its problem reports not closed (js/incidents.js): how many, the newest.
+    const problems = !opts.guest && !entry.template && !entry.block && typeof landingProblemsText === 'function' ? landingProblemsText(entry.doc) : '';
     const card = document.createElement('div');
     card.className = `landing-card${opts.guest ? ' guest' : ''}${entry.template ? ' template' : ''}${changed ? ' has-changes' : ''}`;
     card.dataset.id = entry.id;
@@ -1669,7 +1676,8 @@ function landingCard(entry, opts = {}) {
         <span class="landing-card-name">${escapeHtml(entry.name)}</span>
         <span class="landing-card-stats">${escapeHtml(t(s.devices === 1 ? '{n} device' : '{n} devices', { n: s.devices }))} · ${escapeHtml(t(s.subnets === 1 ? '{n} subnet' : '{n} subnets', { n: s.subnets }))}</span>
         <span class="landing-card-badges">${badges}</span>${changed ? `
-        <span class="landing-card-changes">± ${escapeHtml(changed)}</span>` : ''}
+        <span class="landing-card-changes">± ${escapeHtml(changed)}</span>` : ''}${problems ? `
+        <span class="landing-card-problems">⚠ ${escapeHtml(problems)}</span>` : ''}
         <span class="landing-card-when">${escapeHtml(libraryWhen(entry.updated))}</span>`;
     open.onclick = () => (opts.guest ? openGuestSite(entry.id) : openFromLibrary(entry.id));
     card.appendChild(open);
@@ -1703,6 +1711,12 @@ function landingCard(entry, opts = {}) {
     // The list behind the card's "± n changes" line. A tool rather than a
     // tooltip on the line: a tooltip never opens on a phone.
     if (changed) tool('±', t('What changed'), () => showCardChanges(entry));
+    // Its problems: the network opened on its Problems tab (the Simple
+    // views: their list).
+    if (problems && typeof openIncidentsView === 'function') tool('⚠', t('Problems'), async () => {
+        await openFromLibrary(entry.id);
+        if (state.libraryId === entry.id) openIncidentsView();
+    });
     // The copies kept before a file, binder, link or sheet changed it (js/restore.js).
     if (typeof hasRestorePoints === 'function' && hasRestorePoints(entry.id)) tool('↺', t('Restore points'), () => openRestoreDialog(entry.id));
     // The network's log of merges (js/mergeapply.js), once it has one.
@@ -2053,6 +2067,7 @@ const AUTOSAVE_MAX_MS = 5000;
 let _autosaveTimer = 0, _autosaveDueSince = 0, _lastDocJson = null;
 // Where the open document came from, for the bar's wording (replaceDocument).
 let _docOrigin = 'default';
+let _docLoads = 0;   // documents opened in this page: the document bar's chip counts one without an id as new (M30)
 const isKept = () => !!state.libraryId && !state.readOnly;
 const docHasContent = () => state.nodes.length > 0 || state.annotations.length > 0;
 const autosavePending = () => _autosaveDueSince > 0;
@@ -2061,6 +2076,7 @@ const autosavePending = () => _autosaveDueSince > 0;
 function noteDocLoaded(json, origin) {
     _lastDocJson = json;
     _docOrigin = origin || 'file';
+    _docLoads++;
     cancelAutosave();
 }
 
@@ -2110,6 +2126,52 @@ function flushAutosave() {
 }
 
 // ---- The bar on the canvas ----
+// On a phone (PHONE_LAYOUT_MQ, js/state.js; Mobile review M30) the bar shows
+// in full the first time a network is on screen, then folds into a 44px chip
+// (css/app.css, .docbar-chip): after DOCBAR_FOLD_MS, at the first touch on the
+// map, or when a selection starts (js/mobile.js calls foldDocBar), whichever
+// comes first. The networks already shown are remembered for the tab
+// (sessionStorage when it can, memory when it cannot), so a reload or a
+// return keeps the chip. A failed save never folds: it is an error.
+const DOCBAR_FOLD_MS = 6000;
+const DOCBAR_SHOWN_KEY = 'topo_docbar_shown';
+const _docBarFold = { key: null, folded: false, timer: 0, shown: null };
+function docBarShown() {
+    if (!_docBarFold.shown) {
+        let list = [];
+        try { list = JSON.parse(sessionStorage.getItem(DOCBAR_SHOWN_KEY) || '[]'); } catch (e) { list = []; }
+        _docBarFold.shown = new Set(Array.isArray(list) ? list.slice(-50) : []);
+    }
+    return _docBarFold.shown;
+}
+function docBarKey(kept) {
+    return kept ? 'lib:' + state.libraryId : 'doc:' + (state.docId || _docOrigin + ':' + _docLoads);
+}
+function foldDocBar() {
+    if (!_docBarFold.key || _docBarFold.folded) return;
+    clearTimeout(_docBarFold.timer);
+    _docBarFold.folded = true;
+    const shown = docBarShown();
+    shown.add(_docBarFold.key);
+    try { sessionStorage.setItem(DOCBAR_SHOWN_KEY, JSON.stringify([...shown].slice(-50))); } catch (e) { /* memory only */ }
+    renderDocBar();
+}
+window.foldDocBar = foldDocBar;
+document.addEventListener('pointerdown', (e) => {
+    if (e.target && e.target.closest && e.target.closest('#networkCanvas') && mqMatches(PHONE_LAYOUT_MQ)) foldDocBar();
+}, true);
+// The chip's state for this render: a new network starts its full showing.
+function docBarChip(bar, kept) {
+    const phone = mqMatches(PHONE_LAYOUT_MQ);
+    const key = docBarKey(kept);
+    if (key !== _docBarFold.key) {
+        clearTimeout(_docBarFold.timer);
+        _docBarFold.key = key;
+        _docBarFold.folded = docBarShown().has(key);
+        if (!_docBarFold.folded && phone) _docBarFold.timer = setTimeout(() => { if (_docBarFold.key === key) foldDocBar(); }, DOCBAR_FOLD_MS);
+    }
+    bar.classList.toggle('docbar-chip', phone && _docBarFold.folded && !(kept && _storageFailed));
+}
 // Kept: the network's name (click to rename) and "Saved · just now". Not
 // kept: what it is and why it is not saved, with Keep this network. Hidden
 // for a read-only document, whose banner sits in the same place, and for an
@@ -2135,6 +2197,7 @@ function renderDocBar() {
     if (state.readOnly || (!kept && !docHasContent())) { bar.classList.add('hidden'); return; }
     bar.classList.remove('hidden');
     bar.classList.toggle('unkept', !kept);
+    docBarChip(bar, kept);
     const nameEl = document.getElementById('docBarName');
     const status = document.getElementById('docBarStatus');
     const keep = document.getElementById('docBarKeep');

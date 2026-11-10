@@ -205,8 +205,8 @@ function reportDevices() {
         hostId: hostOf(node) ? node.host : '',
         host: hostOf(node) ? (hostOf(node).name || node.host) : '',
         // Who is responsible for it (js/model.js "Providers"): its own, its
-        // host's or its group's.
-        provider: (() => { const r = nodeProvider(node); return r ? providerLabel(r.provider) : ''; })(),
+        // hosts' or its groups', per service, joined.
+        provider: nodeProviders(node).map((r) => providerLabel(r.provider)).join(', '),
         // The network's own columns (js/model.js "Custom columns") that the
         // Devices table shows, in its order, with what this device holds.
         custom: reportCustomOf(node),
@@ -433,7 +433,7 @@ function reportConnections() {
             length: cableOf(link, 'length').trim(),
             color: cableOf(link, 'color').trim(),
             via: cableOf(link, 'via').trim(),
-            provider: linkProvider(link) ? providerLabel(linkProvider(link)) : ''
+            provider: linkProviders(link).map(providerLabel).join(', ')
         };
     }).filter((c) => c.from !== '—' && c.to !== '—');
 }
@@ -447,8 +447,9 @@ const REPORT_PROVIDER_NAMES_MAX = 12;
 function reportProviders() {
     return (state.providers || []).map((p) => {
         const c = providerCovers(p.id);
-        const named = c.nodes.filter((n) => { const r = nodeProvider(n); return r && r.via !== 'group'; });
-        const groupCount = (g) => c.nodes.filter((n) => { const r = nodeProvider(n); return r && r.via === 'group' && r.from.id === g.id; }).length;
+        const how = (n) => nodeProviders(n).find((r) => r.provider.id === p.id);
+        const named = c.nodes.filter((n) => { const r = how(n); return r && r.via !== 'group'; });
+        const groupCount = (g) => c.nodes.filter((n) => { const r = how(n); return r && r.via === 'group' && r.from.id === g.id; }).length;
         const cable = (l) => { const a = getNode(l.source), b = getNode(l.target); return `${a ? a.name || a.id : '—'} ↔ ${b ? b.name || b.id : '—'}`; };
         return {
             id: p.id,
@@ -1250,6 +1251,8 @@ function reportModelNow(searchIds) {
         providers: reportProviders(),
         // The network log (doc.log), printed only when its tick is on.
         log: Array.isArray(state.log) ? state.log.slice() : [],
+        // The problem reports (doc.incidents), printed only when ticked.
+        incidents: Array.isArray(state.incidents) ? state.incidents.slice() : [],
         counts: {
             devices: devices.length,
             connections: connections.length,
@@ -2622,6 +2625,9 @@ ${capacity ? `
 ` : ''}${sec.changes && model.changes ? `
     <h2>${escapeHtml(t(model.changes.kind === 'report' ? 'Changes since the last report' : 'Changes since the last back-up'))}</h2>
     ${changesSection(model.changes)}
+` : ''}${sec.incidents && model.incidents && model.incidents.length && typeof incidentsReportSection === 'function' ? `
+    <h2>${escapeHtml(t('Problems and visits'))}</h2>
+    ${incidentsReportSection(model.incidents, model.log)}
 ` : ''}${sec.log && model.log && model.log.length && typeof logReportSection === 'function' ? `
     <h2>${escapeHtml(t('Network log'))}</h2>
     ${logReportSection(model.log)}
@@ -2669,6 +2675,10 @@ const REPORT_SECTIONS = [
     { key: 'changes', label: 'Changes since the last back-up or report', on: true },
     // The network log (docs/SCOPE.md step 2; js/mergeapply.js logReportSection):
     // the merges into the network, off unless ticked.
+    // The problem reports and their visits (docs/SCOPE.md step 4,
+    // js/incidents.js incidentsReportSection): off unless ticked, because
+    // they carry the reporter's name and phone.
+    { key: 'incidents', label: 'Problems and visits', on: false },
     { key: 'log', label: 'Network log', on: false },
     { key: 'history', label: 'Address history', on: false },
 ];
@@ -3184,7 +3194,8 @@ function renderReportSections(keep) {
         text.textContent = t(label);
         const dim = key === 'capPorts' ? 'The nearly full switches only; Switch ports lists every port.'
             : key === 'history' ? 'What each device held at earlier back-ups and reports, from this browser. Networks kept here only.'
-                : key === 'log' ? 'Each merge into this network from another copy, newest first.' : '';
+                : key === 'log' ? 'Each merge into this network from another copy, newest first.'
+                    : key === 'incidents' ? 'Each problem reported and each visit recorded, with who reported it and how to reach them.' : '';
         if (dim) {
             const why = document.createElement('span');
             why.className = 'dlg-dim';

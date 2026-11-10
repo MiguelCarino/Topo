@@ -1082,6 +1082,8 @@ function drawGroupFolds(view, ctx) {
     const lNodes = document.getElementById('layer-nodes');
     const { reach, qm, diag } = ctx;
     const sel = new Set(selectedOf('node'));   // once per call: a drag redraws this per mouse move
+    const incIds = typeof incidentMapIds === 'function' ? incidentMapIds() : null;
+    const problemIds = typeof openIncidentNodeIds === 'function' ? openIncidentNodeIds() : null;
     view.folds.forEach((fold) => {
         const { group, members, x, y } = fold;
         const roll = diag ? groupRollup(members, diag) : (_gmLast.rollup.get(group.id) || { worst: null, count: 0 });
@@ -1097,8 +1099,10 @@ function drawGroupFolds(view, ctx) {
         // The search matches devices folded in here: the node lights for them
         // rather than dimming with the rest, and says how many.
         const hits = qm ? members.filter((n) => qm.nodes.has(n.id)).length : 0;
+        // Provider mode's report has a device folded in here (js/providermode.js).
+        const incHit = !!incIds && members.some((n) => incIds.has(n.id));
         const g = gmEl('g', { id: `ui-group-${group.id}`, transform: `translate(${x}, ${y})`, 'data-grp': group.id,
-            class: `grp-drawn grp-node cursor-grab${reach && !lit ? ' fade-inactive' : ''}${qm && !hits ? ' q-dim' : ''}${hits ? ' q-hit' : ''}${source ? ' grp-trace-src' : ''}` });
+            class: `grp-drawn grp-node cursor-grab${reach && !lit ? ' fade-inactive' : ''}${qm && !hits ? ' q-dim' : ''}${hits ? ' q-hit' : ''}${source ? ' grp-trace-src' : ''}${incHit ? ' inc-hit' : ''}` });
         if (hits) {
             // A ring round the card in the search's colour: the node is a
             // match, though what matched is not drawn.
@@ -1146,6 +1150,8 @@ function drawGroupFolds(view, ctx) {
             badge.appendChild(mark);
             g.appendChild(badge);
         }
+        // A problem reported on a device folded in here (js/incidents.js).
+        if (problemIds && problemIds.size && members.some((n) => problemIds.has(n.id))) g.appendChild(problemMarkEl(-23, 19));
         const tip = gmEl('title');
         const tipLines = (withPicked) => [groupPath(group), devicesText(members.length),
             roll.count ? t(roll.count === 1 ? '{n} finding' : '{n} findings', { n: roll.count }) : '',

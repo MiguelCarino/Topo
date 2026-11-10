@@ -40,12 +40,12 @@ const MERGE_DELTA_MS = 250;
 const MERGE_VALUE_MAX = 160;
 // The kinds as the review names them: one, and the filter's many.
 const MERGE_KIND_ONE = {
-    nodes: 'Device', links: 'Cable', networks: 'Subnet', groups: 'Group', wifi: 'Wi-Fi network', providers: 'Provider',
+    nodes: 'Device', links: 'Cable', networks: 'Subnet', groups: 'Group', wifi: 'Wi-Fi network', providers: 'Provider', incidents: 'Problem report',
     annotations: 'Note', searches: 'Saved search', columns: 'Custom column', accepted: 'Accepted finding', pinned: 'Pinned finding',
     report: 'Report header', expectedLife: 'Expected life by type', tableView: 'Table view', ifaces: 'Interface'
 };
 const MERGE_KIND_MANY = {
-    nodes: 'Devices', links: 'Cables', networks: 'Subnets', groups: 'Groups', wifi: 'Wi-Fi networks', providers: 'Providers',
+    nodes: 'Devices', links: 'Cables', networks: 'Subnets', groups: 'Groups', wifi: 'Wi-Fi networks', providers: 'Providers', incidents: 'Problem reports',
     annotations: 'Notes', searches: 'Saved searches', columns: 'Custom columns', accepted: 'Accepted findings', pinned: 'Pinned findings',
     report: 'Report header', expectedLife: 'Expected life by type', tableView: 'Table view'
 };
@@ -65,13 +65,20 @@ const MERGE_MATCHED_BY = {
 };
 // Fields that hold another record's id: shown by that record's name.
 const MERGE_REF_FIELDS = {
-    nodes: { group: 'groups', provider: 'providers', host: 'nodes' },
-    links: { source: 'nodes', target: 'nodes', provider: 'providers' },
-    groups: { parent: 'groups', provider: 'providers' },
-    wifi: { network: 'networks' }
+    nodes: { group: 'groups', providers: 'providers', host: 'nodes' },
+    links: { source: 'nodes', target: 'nodes', providers: 'providers' },
+    groups: { parent: 'groups', providers: 'providers' },
+    wifi: { network: 'networks' },
+    incidents: { nodeIds: 'nodes', groupId: 'groups', routedTo: 'providers' }
 };
 // Labels for fields no descriptor list names.
-const MERGE_FIELD_WORDS = { columns: { name: 'Name', kind: 'Kind' }, annotations: { text: 'Text' } };
+const MERGE_FIELD_WORDS = {
+    columns: { name: 'Name', kind: 'Kind' }, annotations: { text: 'Text' },
+    incidents: { state: 'Status', symptom: 'Problem', nodeIds: 'Devices', groupId: 'Group', text: 'What happened', reporter: 'Reported by',
+        routedTo: 'Sent to', sentAt: 'Sent', visits: 'Visits', at: 'Reported on' }
+};
+// A problem report's status as the review says it.
+const MERGE_INCIDENT_STATUS = { open: 'Reported', sent: 'Sent', visited: 'Visited', closed: 'Closed' };
 
 let _mergeResponder = null;
 // -> the previous responder, so a suite can put it back.
@@ -128,6 +135,13 @@ function mergeValueText(kind, field, v, ctx) {
     if (mgEmpty(v)) return t('(empty)');
     const ref = (MERGE_REF_FIELDS[kind] || {})[field];
     if (ref && typeof v === 'string') return (ctx && ctx.labels.get(`${ref}:${v}`)) || v;
+    // A list of references (an item's providers, v18): each by its name.
+    if (ref && Array.isArray(v)) return v.map((x) => (ctx && ctx.labels.get(`${ref}:${x}`)) || x).join(', ');
+    if (kind === 'incidents' && field === 'state' && v && typeof v === 'object') return t(MERGE_INCIDENT_STATUS[v.status] || 'Reported');
+    // Visits are log entries: a count here, each one in words in the notes
+    // below the rows (mergeVisitNotes), never their ids.
+    if (kind === 'incidents' && field === 'visits' && Array.isArray(v)) return v.length === 1 ? t('One visit') : t('Visits: {n}', { n: v.length });
+    if (kind === 'incidents' && (field === 'sentAt' || field === 'at') && Number.isFinite(v)) return new Date(v).toISOString().slice(0, 16).replace('T', ' ');
     if (typeof v === 'boolean') return v ? t('Yes') : t('No');
     if (typeof v === 'string' || typeof v === 'number') return String(v);
     if (Array.isArray(v) && v.every((x) => x === null || typeof x !== 'object')) return v.join(', ');
@@ -244,8 +258,10 @@ function mergeFieldRow(ctx, item, f) {
     } else {
         const line = document.createElement('span');
         line.className = 'merge-change';
-        const before = f.take === 'theirs' ? mineText : theirsText;
-        const after = f.take === 'theirs' ? theirsText : mineText;
+        // A set merged (v18): yours, then both sides' together.
+        const both = f.take === 'merged' ? t('Both: {a}', { a: mergeValueText(item.kind, f.field, f.value, ctx) }) : '';
+        const before = f.take === 'theirs' || both ? mineText : theirsText;
+        const after = both || (f.take === 'theirs' ? theirsText : mineText);
         line.textContent = `${mergeCut(before)} → ${mergeCut(after)}`;
         line.title = `${before} → ${after}`;
         wrap.appendChild(line);
@@ -323,7 +339,7 @@ function mergeRow(ctx, item, child) {
     const label = document.createElement('span');
     label.className = 'merge-label';
     const objectKind = ['report', 'expectedLife', 'tableView'].includes(item.kind);
-    label.textContent = objectKind ? '' : (item.label || item.mineId || item.theirsId || '');
+    label.textContent = objectKind ? '' : item.kind === 'incidents' ? mergeIncidentLabel(ctx, item) : (item.label || item.mineId || item.theirsId || '');
     head.append(mark, kind, label);
     if (item.matchedBy && item.matchedBy !== 'id' && item.matchedBy !== 'key' && MERGE_MATCHED_BY[item.matchedBy]) {
         const by = document.createElement('span');
@@ -341,6 +357,32 @@ function mergeRow(ctx, item, child) {
     (item.fields || []).forEach((f) => row.appendChild(mergeFieldRow(ctx, item, f)));
     (item.children || []).filter((c) => c.status !== 'unchanged').forEach((c) => row.appendChild(mergeRow(ctx, c, true)));
     return row;
+}
+
+// A problem report's row in plain words (docs/SCOPE.md step 4): what, where,
+// and where it stands after this merge (the later state wins, D38): "No
+// internet at Reception PC. Now: Visited".
+function mergeIncidentRecords(ctx, item) {
+    const find = (doc, id) => (id && doc && Array.isArray(doc.incidents) ? doc.incidents.find((x) => x && x.id === id) : null) || null;
+    return { mine: find(ctx.mine, item.mineId), theirs: find(ctx.plan.inputs.theirs, item.theirsId), theirsDoc: ctx.plan.inputs.theirs };
+}
+function mergeIncidentLabel(ctx, item) {
+    const { mine, theirs, theirsDoc } = mergeIncidentRecords(ctx, item);
+    const rec = mine || theirs;
+    if (!rec) return item.label || item.mineId || item.theirsId || '';
+    const doc = mine ? ctx.mine : theirsDoc;
+    const where = typeof incidentWhereText === 'function' ? incidentWhereText(rec, { nodes: (doc && doc.nodes) || [], groups: (doc && doc.groups) || [] }) : '';
+    const now = !theirs || (mine && incidentRank(mine) >= incidentRank(theirs)) ? mine : theirs;
+    return t('{symptom} at {where}. Now: {status}', { symptom: symptomLabel(rec.symptom), where, status: t(MERGE_INCIDENT_STATUS[now.status] || 'Reported') });
+}
+// The visits the copy brings that this network has not got: one line each
+// under the rows ("Visit by Juan Pérez (Andes IT), 9 Nov 14:10: Fixed. 3
+// changes."). The log itself joins by id (unionLogs, js/merge.js).
+function mergeVisitNotes(ctx) {
+    const held = new Set(((ctx.mine && ctx.mine.log) || []).map((e) => e && e.id));
+    return ((ctx.plan && ctx.plan.theirsLog) || []).filter((e) => e && e.kind === 'visit' && !held.has(e.id))
+        .sort((a, b) => (a.at || 0) - (b.at || 0))
+        .map((e) => (typeof visitLineText === 'function' ? visitLineText(e) : e.summary || ''));
 }
 
 function renderMergeCounts() {
@@ -420,6 +462,12 @@ function renderMergeList() {
         li.textContent = `${mergeKindText(n.args && n.args.kind)} ${(n.args && n.args.label) || ''}: ${t(n.key)}`;
         notes.appendChild(li);
     });
+    mergeVisitNotes(ctx).forEach((line) => {
+        const li = document.createElement('li');
+        li.className = 'merge-visit';
+        li.textContent = line;
+        notes.appendChild(li);
+    });
     notes.hidden = !notes.children.length;
 }
 
@@ -488,7 +536,10 @@ function showMergeReview(req) {
             opts: req, mine: req.mine, plan: req.plan, shown: req.plan, choices: Object.assign({}, req.choices || {}),
             statuses: new Set(['added', 'changed', 'removed', 'conflict']), kind: '', before: [], timer: 0, resolve, items: []
         };
-        mrEl('mergeTitle').textContent = t('Merge {source} into {name}', { source: req.sourceText, name: req.name });
+        // "a link", "a binder", "a copy" are words of this language and take
+        // the title's capitals; only a file's name keeps its own.
+        const src = mergeSourceName(req.source);
+        mergeTitleInto(mrEl('mergeTitle'), req.sourceText, req.name, !!src && src !== 'link' && src !== 'binder');
         mrEl('mergeMode').textContent = req.plan.mode === 'three-way'
             ? t('Three-way: compared with the copy both started from. An edit made on one side only is taken; an edit made on both sides to the same thing asks.')
             : t('Two-way: no copy both started from was found, so nothing is removed. Where the two differ, yours is kept unless you choose theirs; a blank of yours is filled from theirs.');
@@ -499,6 +550,20 @@ function showMergeReview(req) {
         else scrim.hidden = false;
         refreshMergeDelta();
     });
+}
+
+// "Merge {source} into {name}", the source (a file's name, as a rule) in a
+// span of its own that the title's capitals leave as it is
+// (topo_clinica-sol_reception_2026-11-10.json, never TOPO_CLINICA-…):
+// css/app.css .modal-title .fname. The translation decides where it goes.
+function mergeTitleInto(el, source, name, asTyped = true) {
+    const text = t('Merge {source} into {name}', { source: '\u0000', name });
+    const [before, after = ''] = text.split('\u0000');
+    const span = document.createElement('span');
+    if (asTyped) span.className = 'fname';
+    span.textContent = source;
+    el.replaceChildren(document.createTextNode(before), span, document.createTextNode(after));
+    el.title = t('Merge {source} into {name}', { source, name });
 }
 
 // The network to merge into, as it is now: the open one with its last edit
@@ -560,6 +625,9 @@ async function openMergeReview(opts = {}) {
     mrEl('mergeAllMine').addEventListener('click', () => mergeUseAll('mine'));
     mrEl('mergeAllTheirs').addEventListener('click', () => mergeUseAll('theirs'));
     mrEl('mergeKind').addEventListener('change', (e) => { if (!_mr) return; _mr.kind = e.target.value; renderMergeList(); });
+    // On a phone the mode's sentence shows two lines (css/app.css): a tap
+    // on it shows the rest, another folds it again.
+    mrEl('mergeMode').addEventListener('click', (e) => e.currentTarget.classList.toggle('open'));
     mrEl('mergeCounts').addEventListener('click', (e) => {
         const b = e.target.closest('[data-status]');
         if (!b || !_mr) return;
@@ -593,5 +661,5 @@ async function openMergeReview(opts = {}) {
 window.TopoMergeUI = {
     openMergeReview, showMergeReview, closeMergeDialog, setMergeResponder, mergeDialogOpen, refreshMergeDelta, mergeReviewDelta,
     mergeUseAll, mergeFieldKey, mergeFieldText, mergeValueText, mergeKindText, MERGE_KIND_ONE, MERGE_KIND_MANY, MERGE_CHIPS,
-    MERGE_MATCHED_BY, MERGE_ROWS_MAX, review: () => _mr
+    MERGE_MATCHED_BY, MERGE_ROWS_MAX, mergeIncidentLabel, mergeVisitNotes, review: () => _mr
 };

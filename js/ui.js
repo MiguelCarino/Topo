@@ -691,6 +691,7 @@ function renderCanvasOnly() {
         renderGroupsPanel();     // js/groups.js: so do the Groups tab's
         renderWifiPanel();       // js/wifi.js: and the Wi-Fi tab's, and whether it is offered
         renderProvidersPanel();  // js/providers.js: and the Providers tab's
+        if (typeof renderIncidentsUi === 'function') renderIncidentsUi();   // js/incidents.js: the Problems tab, the Simple lists
         renderTableView(false, live());   // js/table.js: so does the table view, while it shows
         renderRackView(false, live());    // js/rackview.js: and the rack view, and the switch's Rack
         if (typeof updateQueryBar === 'function') updateQueryBar();   // js/query.js: the match count
@@ -1006,6 +1007,11 @@ function drawCanvas() {
     const diag = currentDiagnosis();
     // The devices pinned for the next visit: a pin under the badge.
     const pinnedIds = pinnedNodeIds();
+    // The devices with a problem not closed (js/incidents.js): a small !.
+    const problemIds = typeof openIncidentNodeIds === 'function' ? openIncidentNodeIds() : null;
+    // Provider mode's report (js/providermode.js): its devices ringed. A
+    // class, so no export carries it.
+    const incHit = typeof incidentMapIds === 'function' ? incidentMapIds() : null;
     // The search box (js/query.js): what does not match is dimmed, asked
     // afresh on every redraw so an edit or a click never undoes it. A class,
     // not an inline opacity, so the PNG export and the report's diagram
@@ -1085,10 +1091,10 @@ function drawCanvas() {
         });
         if (qm && !qm.links.has(link.id)) line.classList.add('q-dim');
         // Who is responsible for the run, on hover, when Settings says so.
-        if (state.settings.providerHover === true && linkProvider(link)) {
+        if (state.settings.providerHover === true && linkProviders(link).length) {
             const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
             tip.setAttribute('class', 'pv-tip');
-            tip.textContent = providerTipText(`${src.name || src.id} ↔ ${tgt.name || tgt.id}`, { provider: linkProvider(link), via: 'own' });
+            tip.textContent = providerTipText(`${src.name || src.id} ↔ ${tgt.name || tgt.id}`, linkProviders(link));
             line.appendChild(tip);
         }
         lLinks.appendChild(line);
@@ -1293,7 +1299,7 @@ function drawCanvas() {
         // Who is responsible for it, on hover, when Settings says so
         // (js/settings.js). Left out of every export (canvasSvgFile).
         if (state.settings.providerHover === true) {
-            const tipText = providerTipText(node.name || node.id, nodeProvider(node));
+            const tipText = providerTipText(node.name || node.id, nodeProviders(node));
             if (tipText) {
                 const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
                 tip.setAttribute('class', 'pv-tip');
@@ -1312,6 +1318,9 @@ function drawCanvas() {
         let classes = state.linkSourceId ? (isLinkSource ? 'linking-glow cursor-crosshair' : 'cursor-crosshair') : 'cursor-grab active:cursor-grabbing';
         if (isInactiveTraceNode) classes += ' fade-inactive';
         if (qm && !qm.nodes.has(node.id) && !foldHit) classes += ' q-dim';
+        if (incHit && incHit.size && (incHit.has(node.id) || (!!inFold && inFold.some((x) => incHit.has(x.id))))) classes += ' inc-hit';
+        // The selected device keeps its addresses at a phone's far zoom (M38, js/app.js applyMapDetail).
+        if (isSelected) classes += ' node-sel';
         g.setAttribute('class', classes);
         // Retired (js/assets.js): still in the register, no longer on the
         // network. An attribute, not a class, because it is a fact about the
@@ -1426,6 +1435,11 @@ function drawCanvas() {
             tip.textContent = t('Pinned: to check on the next visit');
             pin.appendChild(tip);
             g.appendChild(pin);
+        }
+        // A problem reported on it (or on a guest folded into it) and not
+        // closed yet: an amber ! at the bottom-left (js/incidents.js).
+        if (problemIds && problemIds.size && (problemIds.has(node.id) || (!!inFold && inFold.some((x) => problemIds.has(x.id))))) {
+            g.appendChild(problemMarkEl(-19, 15));
         }
 
         // Little ✕ on the selected node — the touch twin of the Delete key and
@@ -2968,7 +2982,10 @@ function updateRailWrap() {
     // On a phone, js/mobile.js holds it open while the drawer stays open after
     // a palette add, so the next tap still finds the palette.
     const held = typeof window.phoneLibraryHeld === 'function' && window.phoneLibraryHeld();
-    const wrapped = state.selection.size > 0 && !_libPinned && !held;
+    // A provider's drawer (js/providermode.js) opens on the report's tab:
+    // the library folded there too, its row a tap away.
+    const provider = document.body.classList.contains('provider-mode') && mqMatches(DRAWER_MQ);
+    const wrapped = (state.selection.size > 0 || provider) && !_libPinned && !held;
     rail.classList.toggle('lib-wrapped', wrapped);
     row.classList.toggle('hidden', !wrapped && !_libPinned);
     row.setAttribute('aria-expanded', wrapped ? 'false' : 'true');
@@ -3050,7 +3067,7 @@ function pruneSelection() {
 function centreOnNodes(nodes) {
     if (!nodes.length) return;
     nodes = mapPointsOf(nodes);   // folded ones: their collapsed group's node (js/groupmap.js)
-    const v = mapViewport(), phone = phoneView();
+    const v = mapViewport(), phone = phoneChrome();
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     nodes.forEach((n) => { minX = Math.min(minX, n.x); minY = Math.min(minY, n.y); maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y); });
     const PAD = 120;

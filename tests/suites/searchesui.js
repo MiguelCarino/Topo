@@ -90,7 +90,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     setQuery('');
     ok('no search, no card, so no ☆', !shown('querySaveBtn'));
     setQuery('type:camera');
-    ok('☆ is the card\'s last button, right after Locate', saveBtn().parentElement === el('queryTools') && el('queryLocateBtn').nextElementSibling === saveBtn() && !saveBtn().nextElementSibling);
+    // After it only the phone's ⋯ (M36), which is not shown wider.
+    ok('☆ is the card\'s last button, right after Locate', saveBtn().parentElement === el('queryTools') && el('queryLocateBtn').nextElementSibling === saveBtn()
+       && saveBtn().nextElementSibling === el('queryMoreMenu') && !el('queryMoreMenu').nextElementSibling && getComputedStyle(el('queryMoreMenu')).display === 'none');
     ok('enabled on a search Topo understands, reading Save search', shown('querySaveBtn') && !saveBtn().disabled && saveBtn().textContent === '☆ Save search', saveBtn().textContent);
     setQuery('lco:lobby');
     ok('disabled on a search that is not understood', saveBtn().disabled);

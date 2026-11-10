@@ -151,6 +151,10 @@ window.addEventListener('load', () => { setTimeout(async () => {
   ok('with nothing saved the landing says so',
      !document.getElementById('landingEmpty').classList.contains('hidden')
      && document.getElementById('landingSaved').classList.contains('hidden'));
+  // M50: with a mouse the line says drop; the touch line stays hidden.
+  const hintDrop = document.querySelector('#landing .hint-drop'), hintOpen = document.querySelector('#landing .hint-open');
+  ok('with a mouse the landing offers the drop, not the touch line',
+     !!hintDrop && !!hintOpen && getComputedStyle(hintDrop).display !== 'none' && getComputedStyle(hintOpen).display === 'none');
 
   loadDocState(templatesData.errors); autoBindLinks();
   const idBad = librarySave('Bodega Sur');
@@ -381,7 +385,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const cloud = state.nodes.find((n) => n.type === 'cloud') || spawnNode('cloud');
   // Nobody named for it (the sample names its ISP since v15), so the provider
   // note below is about the site claim alone.
-  delete cloud.provider; state.links.forEach((l) => { if (l.source === cloud.id || l.target === cloud.id) delete l.provider; });
+  delete cloud.providers; state.links.forEach((l) => { if (l.source === cloud.id || l.target === cloud.id) delete l.providers; });
   cloud.siteRef = { id: torreA, name: 'Torre A' };
   save();
   await load();

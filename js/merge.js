@@ -32,6 +32,7 @@
 //   subnets        id, range (never relocated, as a block's are)
 //   groups         id, path (Building / Floor / Room / Rack)
 //   Wi-Fi          id, SSID;  providers  id, name
+//   problem reports id only (a random token: the same id is the same report)
 //   notes          id, the same text on the same things
 //   saved searches id, name;  custom columns  id, name
 //   accepted findings and pins: by check, scope and what they name
@@ -64,6 +65,17 @@
 // name that must stay unique never takes theirs where it would be there twice
 // (D28).
 //
+// Sets (v18, docs/SCOPE.md D37): an item's providers, and a problem report's
+// devices, providers sent to and visits, merge as sets and never ask:
+// two-way their union, three-way per element (added on either side is in,
+// removed on one side and not added on the other is out). The field row
+// takes 'merged' with the result in `value`. Removing a provider the other
+// side relies on stays a conflict (refsEdited). A problem report's status
+// only moves forward (open < sent < visited < closed, a reopen one round
+// up: incidentRank), so the later one is taken without asking, its close
+// date and note with it; its first send is the earliest. A report is never
+// removed by a merge: only the cap drops them (D39).
+//
 // Ids: matched items keep mine's; theirs' that are free keep theirs; one
 // taken by an unrelated item of mine gets mintMergeId (theirs id + 'm' + k),
 // a custom column the next c<N>; every reference in theirs follows.
@@ -77,8 +89,8 @@ class MergeRefused extends Error {
 
 // The order the plan lists items in (the review's), and the order kinds are
 // matched in (a kind after every kind its records name).
-const MERGE_KINDS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'annotations', 'searches', 'columns', 'accepted', 'pinned', 'report', 'expectedLife', 'tableView'];
-const MERGE_LIST_KINDS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'annotations', 'searches', 'columns'];
+const MERGE_KINDS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'incidents', 'annotations', 'searches', 'columns', 'accepted', 'pinned', 'report', 'expectedLife', 'tableView'];
+const MERGE_LIST_KINDS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'incidents', 'annotations', 'searches', 'columns'];
 const MERGE_NOTE_KINDS = ['accepted', 'pinned'];
 const MERGE_STATUSES = ['added', 'changed', 'unchanged', 'removed', 'conflict'];
 // What a record of each kind holds that is not compared field by field: its
@@ -86,7 +98,7 @@ const MERGE_STATUSES = ['added', 'changed', 'unchanged', 'removed', 'conflict'];
 // items) and the bags split into one field each (portAttrs, extra, cable).
 const MERGE_SKIP = {
     nodes: ['id', 'x', 'y', 'interfaces', 'portAttrs', 'extra'], links: ['id', 'cable'], ifaces: ['id'],
-    networks: ['id'], groups: ['id'], wifi: ['id'], providers: ['id'], annotations: ['id', 'x', 'y'],
+    networks: ['id'], groups: ['id'], wifi: ['id'], providers: ['id'], incidents: ['id', 'status', 'reopened', 'closedAt', 'closedNote'], annotations: ['id', 'x', 'y'],
     searches: ['id'], columns: ['id'], accepted: ['check', 'scope', 'nodeIds', 'linkIds'], pinned: ['check', 'scope', 'nodeIds', 'linkIds'],
     report: [], expectedLife: []
 };
@@ -164,7 +176,27 @@ function mergeFlat(kind, rec) {
         Object.keys(rec.extra || {}).forEach((c) => { out[`x:${c}`] = rec.extra[c]; });
     }
     if (kind === 'links') Object.keys(rec.cable || {}).forEach((k) => { out[`cable.${k}`] = rec.cable[k]; });
+    // A problem report's state is one field: its status, the reopen count
+    // and the closure, which follow the status that wins.
+    if (kind === 'incidents') {
+        const st = {};
+        MERGE_INCIDENT_STATE.forEach((k) => { if (rec[k] !== undefined) st[k] = rec[k]; });
+        out.state = st;
+    }
     return out;
+}
+const MERGE_INCIDENT_STATE = ['status', 'reopened', 'closedAt', 'closedNote'];
+// The fields merged as sets, per kind (D37).
+const MERGE_SET_FIELDS = { nodes: ['providers'], links: ['providers'], groups: ['providers'], incidents: ['nodeIds', 'routedTo', 'visits'] };
+const mgArr = (v) => (Array.isArray(v) ? v : []);
+// A set field merged: two-way the union, three-way per element. In mine's
+// order, then what theirs adds.
+function mergeSetValue(mine, theirs, base) {
+    const M = mgArr(mine), T = mgArr(theirs);
+    if (base === null) return M.concat(T.filter((x) => !M.includes(x)));
+    const B = mgArr(base);
+    const gone = B.filter((x) => !T.includes(x));
+    return M.concat(T.filter((x) => !B.includes(x) && !M.includes(x))).filter((x) => !gone.includes(x));
 }
 // Sets one of those fields on a record (undefined: takes it away).
 function mergeSetFlat(kind, rec, field, value) {
@@ -176,18 +208,45 @@ function mergeSetFlat(kind, rec, field, value) {
     if (kind === 'nodes' && field.startsWith('port ')) return bag('portAttrs', field.slice(5));
     if (kind === 'nodes' && field.startsWith('x:')) return bag('extra', field.slice(2));
     if (kind === 'links' && field.startsWith('cable.')) return bag('cable', field.slice(6));
+    if (kind === 'incidents' && field === 'state') {
+        MERGE_INCIDENT_STATE.forEach((k) => { if (value && value[k] !== undefined) rec[k] = mgClone(value[k]); else delete rec[k]; });
+        return undefined;
+    }
+    // A set emptied is no key, as the normalizers write it.
+    if (Array.isArray(value) && !value.length && (MERGE_SET_FIELDS[kind] || []).includes(field) && kind !== 'incidents') { delete rec[field]; return undefined; }
     if (value === undefined) delete rec[field]; else rec[field] = mgClone(value);
     return undefined;
 }
 // The fields that differ, each with the side it takes and whether it is a
-// conflict. fb null: two-way rules; an object: three-way.
-function mergeFields(fm, ft, fb) {
+// conflict. fb null: two-way rules; an object: three-way. kind, when given,
+// names the record's kind for the fields with rules of their own: the sets
+// (take 'merged', the result in value) and a problem report's state and
+// first send.
+function mergeFields(fm, ft, fb, kind) {
     const keys = [...new Set([...Object.keys(fm), ...Object.keys(ft), ...Object.keys(fb || {})])];
     const out = [];
+    const sets = MERGE_SET_FIELDS[kind] || [];
     keys.forEach((field) => {
         const mine = fm[field], theirs = ft[field];
         if (mgSame(mine, theirs)) return;
         const row = { field, mine: mgClone(mine), theirs: mgClone(theirs) };
+        if (fb) row.base = mgClone(fb[field]);
+        if (sets.includes(field)) {
+            const value = mergeSetValue(mine, theirs, fb ? fb[field] : null);
+            const same = (a, b) => mgArr(a).length === mgArr(b).length && mgArr(a).every((x) => mgArr(b).includes(x));
+            if (same(value, mine)) return;
+            out.push(Object.assign(row, same(value, theirs) ? { take: 'theirs', conflict: false } : { take: 'merged', value, conflict: false }));
+            return;
+        }
+        if (kind === 'incidents' && field === 'state') {
+            const rm = incidentRank(mine), rt = incidentRank(theirs);
+            if (rm > rt) return;                                 // mine is later: it stays
+            if (rt > rm) { out.push(Object.assign(row, { take: 'theirs', conflict: false })); return; }
+        }
+        if (kind === 'incidents' && field === 'sentAt' && Number.isFinite(mine) && Number.isFinite(theirs)) {
+            if (theirs < mine) out.push(Object.assign(row, { take: 'theirs', conflict: false }));
+            return;
+        }
         if (!fb) {
             if (mgEmpty(mine) && !mgEmpty(theirs)) out.push(Object.assign(row, { take: 'theirs', conflict: false }));
             // Blank in theirs, filled in mine: a partial copy (a technician's
@@ -198,7 +257,6 @@ function mergeFields(fm, ft, fb) {
             return;
         }
         const base = fb[field];
-        row.base = mgClone(base);
         if (mgSame(theirs, base)) return;                      // only mine changed it: mine stays
         if (mgSame(mine, base)) out.push(Object.assign(row, { take: 'theirs', conflict: false }));
         else out.push(Object.assign(row, { take: 'mine', conflict: true }));
@@ -349,7 +407,7 @@ function mergeRemap(ctx, kind, rec) {
     if (MERGE_LIST_KINDS.includes(kind)) r.id = mgRef(ctx, kind, rec.id);
     if (kind === 'nodes') {
         ['group'].forEach((k) => { if (r[k] !== undefined) r[k] = mgRef(ctx, 'groups', r[k]); });
-        if (r.provider !== undefined) r.provider = mgRef(ctx, 'providers', r.provider);
+        if (Array.isArray(r.providers)) r.providers = r.providers.map((x) => mgRef(ctx, 'providers', x));
         if (r.host !== undefined) r.host = mgRef(ctx, 'nodes', r.host);
         if (r.extra) { const e = {}; Object.keys(r.extra).forEach((c) => { e[mgRef(ctx, 'columns', c)] = r.extra[c]; }); r.extra = e; }
         (r.interfaces || []).forEach((i) => {
@@ -363,10 +421,15 @@ function mergeRemap(ctx, kind, rec) {
         if (r.sourceIface) r.sourceIface = mgIfaceRef(ctx, rec.source, rec.sourceIface);
         if (r.targetIface) r.targetIface = mgIfaceRef(ctx, rec.target, rec.targetIface);
         if (r.wifi && r.wifi.ssid !== undefined) r.wifi.ssid = mgRef(ctx, 'wifi', r.wifi.ssid);
-        if (r.provider !== undefined) r.provider = mgRef(ctx, 'providers', r.provider);
+        if (Array.isArray(r.providers)) r.providers = r.providers.map((x) => mgRef(ctx, 'providers', x));
     } else if (kind === 'groups') {
         if (r.parent) r.parent = mgRef(ctx, 'groups', r.parent);
-        if (r.provider !== undefined) r.provider = mgRef(ctx, 'providers', r.provider);
+        if (Array.isArray(r.providers)) r.providers = r.providers.map((x) => mgRef(ctx, 'providers', x));
+    } else if (kind === 'incidents') {
+        // Its visits name log entries, whose ids are global: never remapped.
+        if (Array.isArray(r.nodeIds)) r.nodeIds = r.nodeIds.map((x) => mgRef(ctx, 'nodes', x));
+        if (r.groupId !== undefined) r.groupId = mgRef(ctx, 'groups', r.groupId);
+        if (Array.isArray(r.routedTo)) r.routedTo = r.routedTo.map((x) => mgRef(ctx, 'providers', x));
     } else if (kind === 'wifi') {
         if (r.network !== undefined) r.network = mgRef(ctx, 'networks', r.network);
     } else if (kind === 'annotations') {
@@ -406,6 +469,7 @@ function mergeLabel(kind, rec, names) {
     case 'groups': return rec.name || rec.kind || rec.id;
     case 'wifi': return rec.ssid || rec.id;
     case 'providers': return rec.name || rec.service || rec.id;
+    case 'incidents': return [rec.symptom, String(rec.text || '').slice(0, 60)].filter(Boolean).join(': ') || rec.id;
     case 'annotations': return String(rec.text || '').slice(0, 60) || rec.id;
     case 'searches': case 'columns': return rec.name || rec.id;
     case 'accepted': case 'pinned': return rec.check;
@@ -546,6 +610,14 @@ function planMerge(mine, theirs, base, opts = {}) {
         ctx.maps.searches = mergeAssignIds('searches', mineL, mgList(T.doc, 'searches'), matches.searches);
     }
 
+    // Problem reports: by id alone, never contradicted (a random token, so
+    // the same id is the same report wherever it travelled).
+    {
+        const mineL = mgList(M.doc, 'incidents');
+        matches.incidents = mergeMatchKind('incidents', ctx, (claimed) => [mgIdFinder(ctx, 'incidents', mineL.filter((m) => !claimed.has(m)), M.raw.incidents, T.raw.incidents)]);
+        ctx.maps.incidents = mergeAssignIds('incidents', mineL, mgList(T.doc, 'incidents'), matches.incidents);
+    }
+
     // ---- Items ----
     const names = new Map();
     mgList(M.doc, 'nodes').forEach((n) => names.set(n.id, n.name || n.id));
@@ -562,6 +634,7 @@ function planMerge(mine, theirs, base, opts = {}) {
     mergeUniqueKeys(ctx, items);
 
     // Caps: what would not fit is not added (a note says so).
+    mergeIncidentCap(ctx, items);
     const caps = { providers: PROVIDER_MAX, searches: SEARCH_MAX, columns: CUSTOM_MAX };
     Object.keys(caps).forEach((kind) => {
         let room = caps[kind] - mgList(M.doc, kind).length;
@@ -596,6 +669,16 @@ function planMerge(mine, theirs, base, opts = {}) {
     };
 }
 
+// Problem reports over the cap (INCIDENT_MAX): one of theirs that the cap
+// would drop again from the result (an old closed one mine had already let
+// go) is not added, quietly: it would come back and go in the same breath.
+function mergeIncidentCap(ctx, items) {
+    const mine = mgList(ctx.M.doc, 'incidents');
+    const adds = items.filter((it) => it.kind === 'incidents' && it.status === 'added');
+    if (!adds.length || mine.length + adds.length <= INCIDENT_MAX) return;
+    const kept = new Set(capIncidents(mine.concat(adds.map((it) => it.theirs))));
+    adds.forEach((it) => { if (!kept.has(it.theirs)) items.splice(items.indexOf(it), 1); });
+}
 // A cable one side removed only along with its device follows that device
 // when the device is a conflict: kept, its cables stay (or come back with
 // it); removed, they go with it (applyMergePlan's cascade).
@@ -749,7 +832,7 @@ function mergeRefSigs(doc) {
     const colRef = (k) => (typeof k === 'string' && k.startsWith('x:') ? k.slice(2) : null);
     mgList(doc, 'nodes').forEach((n) => {
         if (n.group) put('groups', n.group, `n:${n.id}`);
-        if (n.provider) put('providers', n.provider, `n:${n.id}`);
+        mgArr(n.providers).forEach((p) => put('providers', p, `n:${n.id}`));
         Object.keys(n.extra || {}).forEach((c) => put('columns', c, `n:${n.id}=${mgKey(n.extra[c])}`));
         (n.interfaces || []).forEach((i) => {
             const r = i.radio;
@@ -757,12 +840,17 @@ function mergeRefSigs(doc) {
         });
     });
     mgList(doc, 'links').forEach((l) => {
-        if (l.provider) put('providers', l.provider, `l:${l.id}`);
+        mgArr(l.providers).forEach((p) => put('providers', p, `l:${l.id}`));
         if (l.wifi && l.wifi.ssid) put('wifi', l.wifi.ssid, `l:${l.id}`);
     });
     mgList(doc, 'groups').forEach((g) => {
         if (g.parent) put('groups', g.parent, `g:${g.id}`);
-        if (g.provider) put('providers', g.provider, `g:${g.id}`);
+        mgArr(g.providers).forEach((p) => put('providers', p, `g:${g.id}`));
+    });
+    // A problem report relies on the providers it was sent to and its group.
+    mgList(doc, 'incidents').forEach((x) => {
+        mgArr(x.routedTo).forEach((p) => put('providers', p, `in:${x.id}`));
+        if (x.groupId) put('groups', x.groupId, `in:${x.id}`);
     });
     mgList(doc, 'wifi').forEach((w) => { if (w.network) put('networks', w.network, `w:${w.id}`); });
     mgList(doc, 'searches').forEach((s) => {
@@ -789,7 +877,10 @@ function mergeListItems(ctx, kind, match, names, sigs) {
         if (p) { items.push(mergePairItem(ctx, kind, m, p.theirs, p.base || null, p.by, names, p.ifaceMatch)); return; }
         const b = match.baseOf.get(m);
         const item = { key: `${kind}:${m.id}`, kind, mineId: m.id, theirsId: null, label: mergeLabel(kind, m, names), matchedBy: null, fields: [], conflict: null };
-        if (b && match.removedTheirs.has(m)) {
+        // A problem report missing from theirs was trimmed (the cap, a
+        // link), never deleted: it stays (D39).
+        if (kind === 'incidents') item.status = 'unchanged';
+        else if (b && match.removedTheirs.has(m)) {
             if (eq('mine', m, b)) item.status = 'removed';
             else { item.status = 'conflict'; item.conflict = { type: 'removed-theirs-edited-mine' }; }
         } else item.status = 'unchanged';
@@ -805,6 +896,9 @@ function mergeListItems(ctx, kind, match, names, sigs) {
             item.status = 'conflict';
             item.conflict = { type: 'ambiguous', candidates: amb.candidates, by: amb.by };
             if (amb.taken) item.conflict.taken = true;
+        } else if (b && kind === 'incidents') {
+            // One mine let go (the cap): not brought back.
+            item.status = 'unchanged'; item.gone = true;
         } else if (b) {
             if (eq('theirs', t, b)) { item.status = 'unchanged'; item.gone = true; } else { item.status = 'conflict'; item.conflict = { type: 'removed-mine-edited-theirs' }; }
         } else item.status = 'added';
@@ -816,12 +910,12 @@ function mergePairItem(ctx, kind, m, t, b, by, names, ifaceMatch) {
     let r = mergeRemap(ctx, kind, t);
     if (kind === 'links') r = mergeOrient(r, m);
     const bb = kind === 'links' && b ? mergeOrient(b, m) : b;
-    const fields = mergeFields(mergeFlat(kind, m), mergeFlat(kind, r), bb ? mergeFlat(kind, bb) : null);
+    const fields = mergeFields(mergeFlat(kind, m), mergeFlat(kind, r), bb ? mergeFlat(kind, bb) : null, kind);
     const item = { key: `${kind}:${m.id}`, kind, mineId: m.id, theirsId: t.id, label: mergeLabel(kind, m, names), matchedBy: by, fields, conflict: null, theirs: r };
     if (kind === 'nodes') item.children = mergeIfaceItems(ctx, m, t, r, ifaceMatch);
     const kids = item.children || [];
     const open = fields.some((f) => f.conflict) || kids.some((c) => c.status === 'conflict');
-    const taken = fields.some((f) => f.take === 'theirs') || kids.some((c) => c.status !== 'unchanged');
+    const taken = fields.some((f) => f.take === 'theirs' || f.take === 'merged') || kids.some((c) => c.status !== 'unchanged');
     if (open) { item.status = 'conflict'; item.conflict = { type: 'fields' }; } else item.status = taken ? 'changed' : 'unchanged';
     return item;
 }
@@ -959,7 +1053,11 @@ function applyMergePlan(mine, plan, choices = {}) {
 
     const setFields = (kind, rec, item) => {
         let took = false;
-        item.fields.forEach((f) => { if (mergeTake(choices, item.key, f) === 'theirs') { mergeSetFlat(kind, rec, f.field, f.theirs); took = true; } });
+        item.fields.forEach((f) => {
+            const take = mergeTake(choices, item.key, f);
+            if (take === 'theirs') { mergeSetFlat(kind, rec, f.field, f.theirs); took = true; }
+            else if (take === 'merged') { mergeSetFlat(kind, rec, f.field, f.value); took = true; }
+        });
         return took;
     };
     const applyChildren = (node, item) => {
@@ -1216,7 +1314,7 @@ function unionLogs(mineLog, theirsLog) {
 function mergeLogEntry({ id, at, source, by, counts, mode, rev }) {
     const c = counts || {};
     const n = (k) => (Number.isInteger(c[k]) && c[k] >= 0 ? c[k] : 0);
-    const summary = `Merged ${source || 'a copy'}: ${n('added')} added, ${n('changed')} changed, ${n('removed')} removed, ${n('conflicts')} conflicts.`;
+    const summary = `Merged ${source || 'a copy'}: ${n('added')} added, ${n('changed')} changed, ${n('removed')} removed, ${n('conflicts')} ${n('conflicts') === 1 ? 'conflict' : 'conflicts'}.`;
     return normalizeLogEntry({ id, at, kind: 'merge', source, by, counts: c, summary, mode, rev });
 }
 // SHA-256 of the entry before, as 64 hex, or null when there is no Web

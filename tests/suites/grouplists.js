@@ -339,7 +339,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // groups.csv first, then devices.csv: the kinds and heights come back too.
     const gsh = sheet(grpText);
     const gmap = csvAutoMap(gsh);
-    ok('groups.csv is read as a sheet of groups', csvSheetKind(gmap) === 'groups' && gmap.join() === 'grp:id,grp:name,grp:kind,grp:parent,grp:uHeight,grp:width,grp:depthMm,grp:numbering,grp:provider', gmap.join());
+    ok('groups.csv is read as a sheet of groups', csvSheetKind(gmap) === 'groups' && gmap.join() === 'grp:id,grp:name,grp:kind,grp:parent,grp:uHeight,grp:width,grp:depthMm,grp:numbering,grp:providers', gmap.join());
     const gp = csvPlan(gsh, gmap);
     ok('every row a new group', gp.counts.add === 5 && gp.counts.conflict === 0, json(gp.rows.map((r) => r.why)));
     applyCsvPlan(gp);

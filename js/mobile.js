@@ -19,8 +19,9 @@
 (function () {
     'use strict';
 
-    // carino-ui.css's drawer breakpoint.
-    var MQ = window.matchMedia('(max-width: 900px)');
+    // carino-ui.css's drawer breakpoint, and a phone held sideways (DRAWER_MQ,
+    // js/state.js; css/app.css copies the drawer for the part past 900px).
+    var MQ = window.matchMedia(DRAWER_MQ);
     var aside = document.querySelector('.topo-rail');
     if (!aside) return;
     var ws = aside.closest('.ws');
@@ -44,12 +45,39 @@
     railHead.className = 'rail-head';
     railHead.innerHTML =
         '<h3 class="mobile-actions-title" data-i18n>Controls</h3>' +
+        // My networks in sight (step 3): in the Simple views it was only
+        // reachable through Export ▾. It is the Export menu's own item.
+        '<button type="button" id="drawerNetworksBtn" class="rail-close rail-netbtn" title="My networks" aria-label="My networks"' +
+        ' data-i18n-title="My networks" data-i18n-aria-label="My networks"><span aria-hidden="true">🗂️</span></button>' +
+        // The Carino bar's tap (decision D4, docs/MOBILE.md): in the full
+        // editor the handle at the top edge cannot be 44px tall without
+        // covering the search box, so it stays a swipe strip there and this
+        // is its 44x44 button. It closes the drawer and brings the bar.
+        '<button type="button" id="drawerNavBtn" class="rail-close rail-navbtn" title="Show the menu bar" aria-label="Show the menu bar"' +
+        ' data-i18n-title="Show the menu bar" data-i18n-aria-label="Show the menu bar"><span aria-hidden="true">⌃</span></button>' +
         '<button type="button" id="railClose" class="rail-close" title="Close controls" aria-label="Close controls"' +
         ' data-i18n-title="" data-i18n-aria-label=""><span aria-hidden="true">✕</span></button>';
     aside.insertBefore(railHead, aside.firstChild);
     railHead.querySelector('#railClose').addEventListener('click', function () {
         var menu = document.getElementById('handyMenu');
         if (menu && ws && ws.classList.contains('drawer-open')) menu.click();
+    });
+    [['#drawerNavBtn', 'Show the menu bar'], ['#drawerNetworksBtn', 'My networks']].forEach(function (p) {
+        var b = railHead.querySelector(p[0]);
+        var l = typeof t === 'function' ? t(p[1]) : p[1];
+        b.title = l; b.setAttribute('aria-label', l);
+    });
+    railHead.querySelector('#drawerNetworksBtn').addEventListener('click', function () {
+        var menu = document.getElementById('handyMenu');
+        if (menu && ws && ws.classList.contains('drawer-open')) menu.click();
+        var item = document.getElementById('myNetworksBtn');
+        if (item) item.click();
+    });
+    railHead.querySelector('#drawerNavBtn').addEventListener('click', function () {
+        var menu = document.getElementById('handyMenu');
+        if (menu && ws && ws.classList.contains('drawer-open')) menu.click();
+        var handle = document.getElementById('navHandle');
+        if (handle) handle.click();
     });
 
     // Move the navbar's action cluster into the drawer below the breakpoint and
@@ -151,8 +179,20 @@
             var real = document.getElementById('reportBtn');
             if (real) real.click(); // keeps the "nothing to report yet" guard
         });
+        // A problem to report to the network's providers (js/incidents.js):
+        // what a client's phone is most often picked up for.
+        btn('handyProblem', '⚠', 'Report a problem', function () {
+            var real = document.getElementById('reportProblemBtn');
+            if (real) real.click();
+        });
 
         document.body.appendChild(bar);
+        // A phone held sideways puts the bars on one row beside this one
+        // (css/app.css, M31): they leave its width free.
+        if (window.ResizeObserver) new ResizeObserver(function () {
+            var w = bar.offsetWidth;
+            if (w) document.documentElement.style.setProperty('--handy-w', w + 'px');
+        }).observe(bar);
     }
     buildHandyBar();
     // Built after app.js's boot has already translated the page.
@@ -539,6 +579,8 @@
             // A name cut to a letter or two says nothing; the card is lit on the map.
             if (selBar.scrollWidth > selBar.clientWidth + 1 || selName.clientWidth < 40) selBar.classList.add('noname');
         }
+        // A selection folds the document bar into its chip (M30, js/library.js).
+        if (showSel && typeof window.foldDocBar === 'function') window.foldDocBar();
         bodyFlag('selbar-on', showSel || showBanner);
     }
 
@@ -807,7 +849,7 @@
     var NAV_BAND = 28, NAV_SWIPE = 24, NAV_IDLE = 4000;
     // A touch screen this narrow: a phone, or a tablet upright. A narrow desktop
     // window with a mouse keeps the pinned bar (css/app.css, the same query).
-    var NAV_MQ = window.matchMedia('(max-width: 900px) and (pointer: coarse)');
+    var NAV_MQ = window.matchMedia(NAV_AWAY_MQ); // a phone held sideways too (js/state.js)
     var navWired = false;
     function navReveal(nav) {
         if (navWired) return;

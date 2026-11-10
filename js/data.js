@@ -994,9 +994,9 @@ function simpleSample(spec) {
 // and the second provider for the devices marked for it.
 function simpleSampleExtras(spec, doc) {
     const providers = [{ id: 'pv_isp', name: spec.isp, service: 'internet' }];
-    const nodes = { s_net: { provider: 'pv_isp' } };
+    const nodes = { s_net: { providers: ['pv_isp'] } };
     if (spec.pv) providers.push({ id: 'pv_2', name: spec.pv[0], service: spec.pv[1] });
-    spec.parts.forEach(([, , devs], k) => devs.forEach(([, , pv], i) => { if (pv === 'pv') nodes[`s_${k + 1}_${i + 1}`] = { provider: 'pv_2' }; }));
+    spec.parts.forEach(([, , devs], k) => devs.forEach(([, , pv], i) => { if (pv === 'pv') nodes[`s_${k + 1}_${i + 1}`] = { providers: ['pv_2'] }; }));
     return { providers, nodes, links: [['s_net', 's_rtr', 'pv_isp']] };
 }
 Object.keys(SIMPLE_SAMPLES).forEach((key) => {
@@ -1040,12 +1040,12 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_sec', name: 'Casa Segura', service: 'security', contact: 'Rosa Medina', phone: '+52 55 5555 0144', hours: 'Mon–Sat 8–20' }
         ],
         nodes: {
-            h1: { provider: 'pv_isp' },
-            h2: { provider: 'pv_isp', serial: 'FN-RT-88213', inService: '2024-05' },
+            h1: { providers: ['pv_isp'] },
+            h2: { providers: ['pv_isp'], serial: 'FN-RT-88213', inService: '2024-05' },
             h3: { inService: '2023-11' },
             hp1: { inService: '2024' },
             h5: { inService: '2024-12' },
-            h6: { provider: 'pv_sec', inService: '2025-02', serviced: '2026-02', serviceEvery: 36 }
+            h6: { providers: ['pv_sec'], inService: '2025-02', serviced: '2026-02', serviceEvery: 36 }
         },
         links: [['h1', 'h2', 'pv_isp']]
     },
@@ -1056,16 +1056,16 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_atm', name: 'Cajeros del Centro', service: 'vendor', phone: '+52 55 5555 0277', email: 'servicio@cajeros.example', account: 'Maintenance 7731', hours: '24/7 · 4 h on-site', notes: 'Cash and card faults go to them, not to IT.' }
         ],
         nodes: {
-            b1: { provider: 'pv_wan' },
-            b2: { provider: 'pv_msp', serial: 'FG-60F-7X21', assetTag: 'BK-0001', inService: '2024-02', serviced: '2026-02', serviceEvery: 36 },
-            b3: { provider: 'pv_msp', assetTag: 'BK-0002', inService: '2024-02' },
-            b4: { provider: 'pv_msp', inService: '2024-03' },
-            b8: { provider: 'pv_msp', inService: '2024-03' },
+            b1: { providers: ['pv_wan'] },
+            b2: { providers: ['pv_wan', 'pv_msp'], serial: 'FG-60F-7X21', assetTag: 'BK-0001', inService: '2024-02', serviced: '2026-02', serviceEvery: 36 },
+            b3: { providers: ['pv_msp'], assetTag: 'BK-0002', inService: '2024-02' },
+            b4: { providers: ['pv_msp'], inService: '2024-03' },
+            b8: { providers: ['pv_msp'], inService: '2024-03' },
             b5: { inService: '2025-01' },
             b6: { inService: '2025-01' },
-            b9: { provider: 'pv_atm', serial: 'ATM-44-1902', inService: '2023-06', serviced: '2026-04', serviceEvery: 36 },
-            b10: { provider: 'pv_atm', serial: 'ATM-44-1977', inService: '2023-06', serviced: '2026-04', serviceEvery: 36 },
-            b11: { provider: 'pv_msp', inService: '2024-02' }
+            b9: { providers: ['pv_atm'], serial: 'ATM-44-1902', inService: '2023-06', serviced: '2026-04', serviceEvery: 36 },
+            b10: { providers: ['pv_atm'], serial: 'ATM-44-1977', inService: '2023-06', serviced: '2026-04', serviceEvery: 36 },
+            b11: { providers: ['pv_msp'], inService: '2024-02' }
         },
         links: [['b1', 'b2', 'pv_wan']]
     },
@@ -1075,16 +1075,16 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_colo', name: 'ColoSpace Norte', service: 'cloud', contact: 'Remote hands desk', phone: '+1 555 0100 260', email: 'hands@colospace.example', account: 'Cage 14 · contract CS-0912', hours: '24/7 remote hands' },
             { id: 'pv_stor', name: 'Almacena Systems', service: 'vendor', phone: '+1 555 0100 290', email: 'support@almacena.example', account: 'Support SR-55120', hours: 'Next business day parts' }
         ],
-        groups: { g_hall: { provider: 'pv_colo' } },
+        groups: { g_hall: { providers: ['pv_colo'] } },
         nodes: {
-            d1: { provider: 'pv_bb' },
+            d1: { providers: ['pv_bb'] },
             d2: { inService: '2024-09', serviced: '2026-03', serviceEvery: 36 },
             d3: { serial: 'PA-3410-55X1', inService: '2024-09', serviced: '2026-03', serviceEvery: 36 },
             d9: { inService: '2024-06' },
             d10: { inService: '2024-06' },
             d13: { inService: '2024-06', serviced: '2026-05', serviceEvery: 36 },
             d14: { inService: '2024-06', serviced: '2026-05', serviceEvery: 36 },
-            d15: { provider: 'pv_stor', serial: 'ALM-N8-00731', inService: '2025-01', serviced: '2026-07', serviceEvery: 36 }
+            d15: { providers: ['pv_stor'], serial: 'ALM-N8-00731', inService: '2025-01', serviced: '2026-07', serviceEvery: 36 }
         },
         links: [['d1', 'd2', 'pv_bb']]
     },
@@ -1093,7 +1093,7 @@ const SAMPLE_EXTRAS = {
             { on: 'hp4', node: { id: 'hp12', type: 'pc', name: 'Admin PC', x: 250, y: 560, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.10.10.51/24' }], inService: '2025-01' } },
             { on: 'hp8', node: { id: 'hp13', type: 'pc', name: 'Nurse Station 2', x: 450, y: 560, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.100.50/24' }], inService: '2025-01' } },
             { on: 'hp8', node: { id: 'hp14', type: 'iot', name: 'Infusion Pump', x: 550, y: 560, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.100.60/24' }], inService: '2024-11', serviced: '2026-05', serviceEvery: 36 } },
-            { on: 'hp8', node: { id: 'hp15', type: 'dicom', name: 'X-ray', x: 650, y: 560, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.100.12/24' }], provider: 'pv_med', serial: 'DX-500-3391', inService: '2023-07', serviced: '2026-07', serviceEvery: 36 } }
+            { on: 'hp8', node: { id: 'hp15', type: 'dicom', name: 'X-ray', x: 650, y: 560, interfaces: [{ id: 'i1', name: 'eth0', ip: '192.168.100.12/24' }], providers: ['pv_med'], serial: 'DX-500-3391', inService: '2023-07', serviced: '2026-07', serviceEvery: 36 } }
         ],
         providers: [
             { id: 'pv_isp', name: 'Salud Conecta', service: 'internet', phone: '+52 81 5555 0300', email: 'soporte@saludconecta.example', account: 'SC-HOSP-0071', hours: '24/7 · 2 h restore' },
@@ -1101,12 +1101,12 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_med', name: 'MedImagen Service', service: 'vendor', contact: 'Ing. Paula Ríos', phone: '+52 81 5555 0377', email: 'servicio@medimagen.example', account: 'Service contract MI-2024-33', hours: '24/7 · 6 h on-site', notes: 'Only their engineers touch the scanner and the archive.' }
         ],
         nodes: {
-            hp1: { provider: 'pv_isp' },
-            hp2: { provider: 'pv_it', inService: '2024-04', serviced: '2026-04', serviceEvery: 36 },
-            hp3: { provider: 'pv_it', inService: '2024-04' },
-            hp5: { provider: 'pv_it', assetTag: 'HSP-0105', inService: '2024-08', serviced: '2026-08', serviceEvery: 36 },
-            hp9: { provider: 'pv_med', serial: 'PX-7781-A', inService: '2022-03', serviced: '2026-03', serviceEvery: 36 },
-            hp10: { provider: 'pv_med', serial: 'MR-1.5T-20811', inService: '2021-10', serviced: '2026-06', serviceEvery: 36 }
+            hp1: { providers: ['pv_isp'] },
+            hp2: { providers: ['pv_isp', 'pv_it'], inService: '2024-04', serviced: '2026-04', serviceEvery: 36 },
+            hp3: { providers: ['pv_it'], inService: '2024-04' },
+            hp5: { providers: ['pv_it'], assetTag: 'HSP-0105', inService: '2024-08', serviced: '2026-08', serviceEvery: 36 },
+            hp9: { providers: ['pv_med'], serial: 'PX-7781-A', inService: '2022-03', serviced: '2026-03', serviceEvery: 36 },
+            hp10: { providers: ['pv_med'], serial: 'MR-1.5T-20811', inService: '2021-10', serviced: '2026-06', serviceEvery: 36 }
         },
         links: [['hp1', 'hp2', 'pv_isp']]
     },
@@ -1120,9 +1120,9 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_isp', name: 'Metro Fibra', service: 'internet', phone: '+52 33 5555 0400', email: 'empresas@metrofibra.example', account: 'MF-CORP-2290', hours: '24/7' },
             { id: 'pv_it', name: 'Andes IT Services', service: 'it', contact: 'Jorge Salas', phone: '+52 55 5555 0233', email: 'mesa@andesit.example', hours: 'Mon–Fri 8–19' }
         ],
-        groups: { g_main: { provider: 'pv_it' }, g_hr: { provider: 'pv_it' }, g_vis: { provider: 'pv_it' } },
+        groups: { g_main: { providers: ['pv_it'] }, g_hr: { providers: ['pv_it'] }, g_vis: { providers: ['pv_it'] } },
         nodes: {
-            c1: { provider: 'pv_isp' },
+            c1: { providers: ['pv_isp'] },
             c2: { inService: '2024-07', serviced: '2026-07', serviceEvery: 36 },
             c5: { inService: '2024-07', serviced: '2026-07', serviceEvery: 36 }
         },
@@ -1135,14 +1135,14 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_sec', name: 'Vigilancia Total', service: 'security', contact: 'Central de monitoreo', phone: '+52 55 5555 0555', hours: '24/7 monitoring' }
         ],
         nodes: {
-            r1: { provider: 'pv_isp' },
-            r5: { provider: 'pv_pos', assetTag: 'POS-01', inService: '2025-03' },
-            r6: { provider: 'pv_pos', assetTag: 'POS-02', inService: '2025-03' },
-            r7: { provider: 'pv_pos', inService: '2025-03' },
-            r8: { provider: 'pv_sec', inService: '2024-10' },
-            r9: { provider: 'pv_sec', serial: 'NVR-16-4410', inService: '2024-10', serviced: '2026-04', serviceEvery: 36 },
-            r10: { provider: 'pv_sec', inService: '2024-10' },
-            r11: { provider: 'pv_sec', inService: '2024-10' }
+            r1: { providers: ['pv_isp'] },
+            r5: { providers: ['pv_pos'], assetTag: 'POS-01', inService: '2025-03' },
+            r6: { providers: ['pv_pos'], assetTag: 'POS-02', inService: '2025-03' },
+            r7: { providers: ['pv_pos'], inService: '2025-03' },
+            r8: { providers: ['pv_sec'], inService: '2024-10' },
+            r9: { providers: ['pv_sec'], serial: 'NVR-16-4410', inService: '2024-10', serviced: '2026-04', serviceEvery: 36 },
+            r10: { providers: ['pv_sec'], inService: '2024-10' },
+            r11: { providers: ['pv_sec'], inService: '2024-10' }
         },
         links: [['r1', 'r2', 'pv_isp']]
     },
@@ -1153,11 +1153,11 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_it', name: 'Clínica IT', service: 'it', phone: '+52 81 5555 0333', email: 'ayuda@clinicait.example', hours: 'Mon–Sat 7–21' },
             { id: 'pv_tele', name: 'TeleRad Lectura', service: 'other', contact: 'Reading coordinator', phone: '+52 81 5555 0399', email: 'coordinacion@telerad.example', hours: 'Reads 24/7', notes: 'The remote radiologist and the VPN to them.' }
         ],
-        groups: { g_ctmr: { provider: 'pv_mod' }, g_usxr: { provider: 'pv_mod' }, g_srv: { provider: 'pv_it' } },
+        groups: { g_ctmr: { providers: ['pv_mod'] }, g_usxr: { providers: ['pv_mod'] }, g_srv: { providers: ['pv_it'] } },
         nodes: {
-            i_net: { provider: 'pv_isp' },
-            i_vpn: { provider: 'pv_tele' },
-            i_rad: { provider: 'pv_tele' },
+            i_net: { providers: ['pv_isp'] },
+            i_vpn: { providers: ['pv_tele'] },
+            i_rad: { providers: ['pv_tele'] },
             i_ct: { serial: 'CT-128-50731', inService: '2022-05', serviced: '2026-05', serviceEvery: 36 },
             i_mr: { serial: 'MR-3T-11902', inService: '2021-11', serviced: '2026-06', serviceEvery: 36 },
             i_us: { inService: '2024-01', serviced: '2026-01', serviceEvery: 36 },
@@ -1174,10 +1174,10 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_lock', name: 'Cerraduras Pro', service: 'security', phone: '+52 998 555 0677', hours: 'Every day 8–22' }
         ],
         nodes: {
-            h_net: { provider: 'pv_isp' },
-            h_pms: { provider: 'pv_pms', inService: '2024-11', serviced: '2026-05', serviceEvery: 36 },
-            h_lock: { provider: 'pv_lock', inService: '2024-06' },
-            h_cam: { provider: 'pv_lock', inService: '2024-06' }
+            h_net: { providers: ['pv_isp'] },
+            h_pms: { providers: ['pv_pms'], inService: '2024-11', serviced: '2026-05', serviceEvery: 36 },
+            h_lock: { providers: ['pv_lock'], inService: '2024-06' },
+            h_cam: { providers: ['pv_lock'], inService: '2024-06' }
         }
     },
     warehouse: {
@@ -1186,10 +1186,10 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_wms', name: 'Bodega Software', service: 'vendor', phone: '+52 33 5555 0711', email: 'soporte@bodegasoft.example', account: 'Contract BS-221', hours: 'Mon–Sat 6–22', notes: 'The WMS and the handheld scanners.' }
         ],
         nodes: {
-            wh_net: { provider: 'pv_isp' },
-            wh_wms: { provider: 'pv_wms', inService: '2024-08', serviced: '2026-08', serviceEvery: 36 },
-            wh_h1: { provider: 'pv_wms', inService: '2025-04' },
-            wh_h2: { provider: 'pv_wms', inService: '2025-04' }
+            wh_net: { providers: ['pv_isp'] },
+            wh_wms: { providers: ['pv_wms'], inService: '2024-08', serviced: '2026-08', serviceEvery: 36 },
+            wh_h1: { providers: ['pv_wms'], inService: '2025-04' },
+            wh_h2: { providers: ['pv_wms'], inService: '2025-04' }
         }
     },
     callcenter: {
@@ -1198,10 +1198,10 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_voip', name: 'VozClara', service: 'phone', contact: 'Trunk support', phone: '+1 555 0100 330', email: 'support@vozclara.example', account: 'SIP trunk VC-5520', hours: '24/7 · 1 h response', notes: 'Calls not connecting: them first, then the PBX.' },
             { id: 'pv_it', name: 'Andes IT Services', service: 'it', contact: 'Jorge Salas', phone: '+52 55 5555 0233', email: 'mesa@andesit.example', hours: 'Mon–Fri 8–19' }
         ],
-        groups: { g_cc: { provider: 'pv_it' } },
+        groups: { g_cc: { providers: ['pv_it'] } },
         nodes: {
-            c1: { provider: 'pv_isp' },
-            c10: { provider: 'pv_voip', serial: 'PBX-200-7761', inService: '2024-04', serviced: '2026-04', serviceEvery: 36 },
+            c1: { providers: ['pv_isp'] },
+            c10: { providers: ['pv_voip'], serial: 'PBX-200-7761', inService: '2024-04', serviced: '2026-04', serviceEvery: 36 },
             c14: { inService: '2024-04', serviced: '2026-04', serviceEvery: 36 },
             c3: { serial: 'UTM-60-2290', inService: '2024-04' },
             c11: { inService: '2025-02' }, c12: { inService: '2025-02' }, c13: { inService: '2025-02' }
@@ -1210,7 +1210,7 @@ const SAMPLE_EXTRAS = {
     },
     factory: {
         add: [
-            { on: 'f5', node: { id: 'f9', type: 'iot', name: 'PLC Controller 2', x: 450, y: 570, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.20.52/24' }], provider: 'pv_ot', serial: 'PLC-1500-8813', inService: '2023-09' } },
+            { on: 'f5', node: { id: 'f9', type: 'iot', name: 'PLC Controller 2', x: 450, y: 570, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.20.52/24' }], providers: ['pv_ot'], serial: 'PLC-1500-8813', inService: '2023-09' } },
             { on: 'f5', node: { id: 'f10', type: 'pc', name: 'Operator HMI', x: 550, y: 570, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.20.60/24' }], inService: '2024-02' } },
             { on: 'f5', node: { id: 'f11', type: 'pc', name: 'Maintenance Laptop', x: 650, y: 570, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.20.20.61/24' }], inService: '2025-05' } }
         ],
@@ -1219,10 +1219,10 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_ot', name: 'Automata Integradores', service: 'vendor', contact: 'Ing. Luis Pardo', phone: '+52 33 5555 0820', email: 'soporte@automata.example', account: 'Contract AUT-77', hours: 'Every day 6–22 · 8 h on-site', notes: 'PLCs, the robot and SCADA: OT changes go through them.' }
         ],
         nodes: {
-            f1: { provider: 'pv_isp' },
-            f4: { provider: 'pv_ot', inService: '2023-09', serviced: '2026-03', serviceEvery: 36 },
-            f6: { provider: 'pv_ot', serial: 'PLC-1500-8812', inService: '2023-09' },
-            f7: { provider: 'pv_ot', serial: 'ARM-6-0042', inService: '2024-01', serviced: '2026-01', serviceEvery: 36 },
+            f1: { providers: ['pv_isp'] },
+            f4: { providers: ['pv_ot'], inService: '2023-09', serviced: '2026-03', serviceEvery: 36 },
+            f6: { providers: ['pv_ot'], serial: 'PLC-1500-8812', inService: '2023-09' },
+            f7: { providers: ['pv_ot'], serial: 'ARM-6-0042', inService: '2024-01', serviced: '2026-01', serviceEvery: 36 },
             f2: { inService: '2024-05', serviced: '2026-05', serviceEvery: 36 }
         },
         links: [['f1', 'f2', 'pv_isp']]
@@ -1237,8 +1237,8 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_stor', name: 'Almacena Systems', service: 'vendor', phone: '+1 555 0100 290', email: 'support@almacena.example', account: 'Support SR-60881', hours: 'Next business day parts' }
         ],
         nodes: {
-            s1: { provider: 'pv_isp' },
-            s4: { provider: 'pv_stor', serial: 'ALM-N12-01190', inService: '2024-10', serviced: '2026-04', serviceEvery: 36 },
+            s1: { providers: ['pv_isp'] },
+            s4: { providers: ['pv_stor'], serial: 'ALM-N12-01190', inService: '2024-10', serviced: '2026-04', serviceEvery: 36 },
             s6: { inService: '2025-01' }, s7: { inService: '2025-01' }
         },
         links: [['s1', 's2', 'pv_isp']]
@@ -1248,10 +1248,10 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_sat', name: 'Mar Satelital', service: 'internet', contact: 'Network operations', phone: '+1 555 0100 900', email: 'noc@marsatelital.example', account: 'VSAT plan MS-OCEAN-14', hours: '24/7 NOC' },
             { id: 'pv_marine', name: 'Puerto Electrónica Naval', service: 'vendor', phone: '+52 229 555 0950', hours: 'In port: next day', notes: 'Bridge and engine-room electronics.' }
         ],
-        groups: { g_bridge: { provider: 'pv_marine' }, g_engine: { provider: 'pv_marine' } },
+        groups: { g_bridge: { providers: ['pv_marine'] }, g_engine: { providers: ['pv_marine'] } },
         nodes: {
-            v_sat: { provider: 'pv_sat' },
-            v_mdm: { provider: 'pv_sat', serial: 'SAT-MDM-30117', inService: '2024-06' },
+            v_sat: { providers: ['pv_sat'] },
+            v_mdm: { providers: ['pv_sat'], serial: 'SAT-MDM-30117', inService: '2024-06' },
             v_fw: { inService: '2024-06', serviced: '2026-06', serviceEvery: 36 }
         },
         links: [['v_sat', 'v_mdm', 'pv_sat']]
@@ -1262,10 +1262,10 @@ const SAMPLE_EXTRAS = {
             { id: 'pv_voip', name: 'VozClara', service: 'phone', phone: '+1 555 0100 330', email: 'support@vozclara.example', account: 'SIP trunk VC-4471', hours: '24/7' },
             { id: 'pv_it', name: 'Andes IT Services', service: 'it', contact: 'Jorge Salas', phone: '+52 55 5555 0233', email: 'mesa@andesit.example', hours: 'Mon–Fri 8–19' }
         ],
-        groups: { g_branch: { provider: 'pv_it' } },
+        groups: { g_branch: { providers: ['pv_it'] } },
         nodes: {
-            net: { provider: 'pv_isp' },
-            pbx: { provider: 'pv_voip', inService: '2024-09', serviced: '2026-03', serviceEvery: 36 },
+            net: { providers: ['pv_isp'] },
+            pbx: { providers: ['pv_voip'], inService: '2024-09', serviced: '2026-03', serviceEvery: 36 },
             fw: { inService: '2024-09', serviced: '2026-03', serviceEvery: 36 }
         }
     }
@@ -1297,7 +1297,7 @@ function applySampleExtras(doc, extra, key) {
     Object.entries(extra.nodes || {}).forEach(([id, set]) => { const n = doc.nodes.find((x) => x.id === id) || miss('device', id); Object.assign(n, set); });
     (extra.links || []).forEach(([a, b, pv]) => {
         const l = doc.links.find((x) => (x.source === a && x.target === b) || (x.source === b && x.target === a)) || miss('cable', `${a}–${b}`);
-        l.provider = pv;
+        l.providers = [pv];
     });
     return doc;
 }

@@ -142,10 +142,11 @@ const BULK_FIELD_OPTS = {
     serviced: { plain: true, get: (node) => (node.serviced == null ? '' : node.serviced) },
     serviceEvery: { plain: true, get: (node) => (node.serviceEvery == null ? '' : node.serviceEvery) },
     lifeYears: { plain: true, get: (node) => (node.lifeYears == null ? '' : node.lifeYears) },
-    // Who is responsible for them (js/model.js "Providers"): a pick of the
-    // network's providers. Its own, as stored: one that only inherits one
-    // from its group reads as none, and a blank pick asks for nothing.
-    provider: { editor: 'provider', plain: true, get: (node) => node.provider || '' },
+    // Who is responsible for them (js/model.js "Providers", a list since
+    // v18): Add one to every device, Remove one, Only one, or None. Their
+    // own, as stored: one that only inherits from its group names none, and
+    // a blank pick asks for nothing.
+    providers: { editor: 'providers', plain: true, get: (node) => providerRefsOf(node).slice() },
     // PoE (document v16): a budget only on a switch or an AP, a draw on
     // anything a cable can power. Read by the field's fromText ("12,5",
     // "class 4"); a device it cannot be held on is skipped, saying why.
@@ -160,7 +161,7 @@ const BULK_FIELD_OPTS = {
 // "no medium" only means "guess", which the drawing already shows.
 const BULK_LINK_FIELD_OPTS = {
     medium: { editor: 'medium', get: (link) => effectiveMedium(link) },
-    provider: { editor: 'provider', plain: true, get: (link) => link.provider || '' }
+    providers: { editor: 'providers', plain: true, get: (link) => providerRefsOf(link).slice() }
 };
 // A cable's own facts that a run of cables shares (CABLE_FIELDS' bulk rows:
 // length, colour, via; never the label, which names one cable). They live in
@@ -198,7 +199,7 @@ function bulkShow(bf, value) {
     if (bf.editor === 'type') return typeName(value);
     if (bf.editor === 'medium') return MEDIUM_NAMES[value] || String(value || '');
     if (bf.editor === 'status') return statusName(value);
-    if (bf.editor === 'provider') return value ? providerLabel(providerById(value)) || String(value) : '';
+    if (bf.editor === 'providers') return (Array.isArray(value) ? value : []).map((id) => providerLabel(providerById(id)) || id).join(', ');
     return value == null ? '' : String(value);
 }
 
@@ -226,12 +227,50 @@ function bulkParse(bf, text) {
     if (bf.editor === 'type') return paletteDefs.some((p) => p.type === text) ? { value: text } : { error: true };
     if (bf.editor === 'medium') return Object.prototype.hasOwnProperty.call(FLOW_CLASS, text) ? { value: text } : { error: true };
     if (bf.editor === 'status') return asStatus(text) ? { value: asStatus(text) } : { error: true };
-    if (bf.editor === 'provider') { const p = providerById(text) || findProviderRef(text); return p ? { value: p.id } : { error: true }; }
+    if (bf.editor === 'providers') return bulkProvidersParse(text);
     if (bf.custom) { const r = parseCustomValue(bf.custom, text); return r.error ? r : { value: customText(bf.custom, r.value) }; }
     if (bf.field && bf.field.fromText) return fromTextResult(bf.field.fromText, text);
     const v = bf.keepSpace ? String(text) : String(text).trim();
     if (bf.field.validate && !bf.field.validate(v.trim())) return { error: true };
     return { value: v };
+}
+
+// The Providers pick (v18) as a change to each item's list: "add:<id>",
+// "remove:<id>", "only:<id>" or "none"; a bare id or name adds it.
+// -> { value: { op, id } } or { error }.
+function bulkProvidersParse(text) {
+    const s = String(text == null ? '' : text).trim();
+    if (s === 'none') return { value: { op: 'only', id: null } };
+    const m = /^(add|remove|only):(.+)$/.exec(s);
+    const p = m ? providerById(m[2]) : (providerById(s) || findProviderRef(s));
+    return p ? { value: { op: m ? m[1] : 'add', id: p.id } } : { error: true };
+}
+// An item's list after that change, in doc.providers' order.
+function bulkProvidersAfter(ids, change) {
+    const rank = new Map((state.providers || []).map((p, i) => [p.id, i]));
+    let out = (ids || []).slice();
+    if (change.op === 'add' && !out.includes(change.id)) out.push(change.id);
+    else if (change.op === 'remove') out = out.filter((x) => x !== change.id);
+    else if (change.op === 'only') out = change.id ? [change.id] : [];
+    return out.filter((x) => rank.has(x)).sort((a, b) => rank.get(a) - rank.get(b));
+}
+// The value a field's edit leaves on one item, and whether that is what it
+// holds already.
+const bulkTarget = (bf, now, value) => (bf.editor === 'providers' ? bulkProvidersAfter(now, value) : value);
+const bulkSameValue = (bf, a, b) => (bf.editor === 'providers' ? JSON.stringify(a) === JSON.stringify(b) : a === b);
+
+// The Providers pick's options: "—" (what they hold, or mixed), then Add
+// each provider, Remove each one any of them names, Only each one, None.
+function bulkProvidersOptions(recs, bf) {
+    const common = bulkCommon(bf, recs);
+    const held = common && !common.mixed ? bulkShow(bf, common.value) : '';
+    const named = new Set(recs.flatMap((r) => providerRefsOf(r)));
+    const all = state.providers || [];
+    return [{ value: '', label: common && common.mixed ? t('mixed') : (held ? `— ${held}` : '—') }]
+        .concat(all.map((p) => ({ value: `add:${p.id}`, label: t('Add {name}', { name: providerLabel(p) }) })))
+        .concat(all.filter((p) => named.has(p.id)).map((p) => ({ value: `remove:${p.id}`, label: t('Remove {name}', { name: providerLabel(p) }) })))
+        .concat(all.length > 1 ? all.map((p) => ({ value: `only:${p.id}`, label: t('Only {name}', { name: providerLabel(p) }) })) : [])
+        .concat(named.size ? [{ value: 'none', label: t('None') }] : []);
 }
 
 // ---- Plans (pure) ----
@@ -289,10 +328,11 @@ function bulkPlanSet(ids, edits, kind = 'node') {
     if (!errors.length) {
         nodes.forEach((node) => {
             const op = { nodeId: node.id, set: {}, drop: [] };
-            wanted.forEach(({ bf, value }) => {
+            wanted.forEach(({ bf, value: asked }) => {
+                const value = bulkTarget(bf, bulkGet(bf, node), asked);
                 const row = { nodeId: node.id, name: node.name, field: bulkFieldLabel(bf), before: bulkShowOn(bf, node, bulkGet(bf, node)), after: bulkShowOn(bf, node, value) };
                 if (!bulkCan(bf, node)) rows.push(Object.assign(row, { status: 'skip', after: '', why: t(bf.skipWhy || 'Only a routing device does NAT.') }));
-                else if (bulkGet(bf, node) === value) rows.push(Object.assign(row, { status: 'same' }));
+                else if (bulkSameValue(bf, bulkGet(bf, node), value)) rows.push(Object.assign(row, { status: 'same' }));
                 else {
                     rows.push(Object.assign(row, { status: 'change' }));
                     op.set[bf.key] = value;
@@ -311,10 +351,11 @@ function bulkPlanSet(ids, edits, kind = 'node') {
 function bulkPlanSetLinks(links, wanted, rows, ops) {
     links.forEach((link) => {
         const op = { linkId: link.id, set: {} };
-        wanted.forEach(({ bf, value }) => {
+        wanted.forEach(({ bf, value: asked }) => {
             const now = bulkGet(bf, link);
+            const value = bulkTarget(bf, now, asked);
             const row = { linkId: link.id, name: bulkLinkName(link), field: bulkFieldLabel(bf), before: bulkShow(bf, now), after: bulkShow(bf, value) };
-            if (now === value) rows.push(Object.assign(row, { status: 'same' }));
+            if (bulkSameValue(bf, now, value)) rows.push(Object.assign(row, { status: 'same' }));
             else {
                 rows.push(Object.assign(row, { status: 'change' }));
                 // link.cable is one value: this fact laid over the others.
@@ -815,6 +856,7 @@ function bulkWrite(plan, doc) {
             if (link) Object.assign(link, op.set || {});
             if (link && link.cable === null) delete link.cable;   // every fact cleared
             if (link && 'wifi' in link && !link.wifi) delete link.wifi;   // back to automatic
+            if (link && Array.isArray(link.providers) && !link.providers.length) delete link.providers;   // none: no key
             return;
         }
         const node = doc.nodes.find((n) => n.id === op.nodeId);
@@ -822,7 +864,9 @@ function bulkWrite(plan, doc) {
         Object.keys(op.set || {}).forEach((k) => {
             if (!/^x:/.test(k)) {
                 // A cleared PoE figure is no key, as the side panel leaves it.
-                if ((k === 'poeBudget' || k === 'poeDraw') && op.set[k] === '') delete node[k]; else node[k] = op.set[k];
+                if ((k === 'poeBudget' || k === 'poeDraw') && op.set[k] === '') delete node[k];
+                else if (k === 'providers' && !(op.set[k] || []).length) delete node[k];   // none: no key
+                else node[k] = op.set[k];
                 return;
             }
             // A custom column's value, written as the column holds it (the
@@ -1091,12 +1135,14 @@ function renderBulkFields(nodes, draft, force, kind = 'node') {
                     ? Object.keys(FLOW_CLASS).map((k) => ({ value: k, label: bulkShow(bf, k) }))
                     : bf.editor === 'status'
                         ? (common.mixed ? [] : [{ value: '', label: '—' }]).concat(STATUS_VALUES.map((k) => ({ value: k, label: statusName(k) })))
-                        : bf.editor === 'provider'
-                            ? (common.mixed ? [] : [{ value: '', label: '—' }]).concat((state.providers || []).map((p) => ({ value: p.id, label: providerLabel(p) })))
+                        : bf.editor === 'providers'
+                            ? bulkProvidersOptions(nodes, bf)
                             : paletteDefs.map((d) => ({ value: d.type, label: typeName(d.type) }));
-            const initial = common.mixed ? '' : String(common.value);
+            // A Providers pick opens on "—" (no change), whatever they hold.
+            const pv = bf.editor === 'providers';
+            const initial = pv || common.mixed ? '' : String(common.value);
             input.dataset.initial = initial;
-            input.innerHTML = (common.mixed ? `<option value="">${escapeHtml(t('mixed'))}</option>` : '')
+            input.innerHTML = (common.mixed && !pv ? `<option value="">${escapeHtml(t('mixed'))}</option>` : '')
                 + opts.map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
             input.value = touched ? draft.set[bf.key] : initial;
         }

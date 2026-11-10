@@ -103,6 +103,12 @@ function docSecretHits(doc) {
     ((doc && doc.accepted) || []).forEach((a, i) => { if (a && notesSecretHit(a.reason)) out.push({ id: `accepted${i}`, name: t('Accepted finding'), kind: 'accepted' }); });
     // And a pin's note: what to check on the next visit.
     ((doc && doc.pinned) || []).forEach((a, i) => { if (a && notesSecretHit(a.note)) out.push({ id: `pinned${i}`, name: t('Pinned finding'), kind: 'accepted' }); });
+    // A problem report's words and its close note, and a visit's notes
+    // (v18): typed by a client or a technician, and they travel the same way.
+    ((doc && doc.incidents) || []).forEach((inc) => {
+        if (inc && (notesSecretHit(inc.text) || notesSecretHit(inc.closedNote))) out.push({ id: inc.id, name: t('Problem report'), kind: 'incident' });
+    });
+    ((doc && doc.log) || []).forEach((e) => { if (e && e.kind === 'visit' && notesSecretHit(e.notes)) out.push({ id: e.id, name: t('Visit notes'), kind: 'visit' }); });
     return out;
 }
 // The sentence the dialogs show, or '' when there is nothing to say.

@@ -287,7 +287,7 @@ html, body { overscroll-behavior-y: none; }
    (.ws-scrim 1000, .ws-rail 1001): left at 10 there, the open drawer was under
    its own scrim and every tap on it landed on the scrim. */
 .topo-rail { padding: 0; gap: 0; overflow: hidden; z-index: 10; }
-@media (max-width: 900px) { .topo-rail { z-index: 1001; } }
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) { .topo-rail { z-index: 1001; } }
 .lib-tabs { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--border); }
 .rail-lib { flex: 1; min-height: 200px; overflow-y: auto; padding: 16px; border-bottom: 1px solid var(--border); }
 /* A fixed half of the rail, whatever is selected: a panel that grew and
@@ -448,7 +448,7 @@ html, body { overscroll-behavior-y: none; }
 .hist-empty, .hist-note { margin: 0; font-size: var(--fs-micro); line-height: 1.45; color: var(--text-sec); overflow-wrap: anywhere; }
 .hist-note { color: var(--text-muted); }
 .hist-acts { display: flex; flex-wrap: wrap; gap: 6px; }
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .hist-acts .cs-btn { min-height: 44px; }
     .hist-was { min-height: 44px; }
     .locate-step { min-height: 44px; justify-content: center; }
@@ -593,7 +593,7 @@ html, body { overscroll-behavior-y: none; }
 .host-guest-in { padding-left: 14px; }
 .host-guest-in::before { content: '\2514'; color: var(--text-muted); }
 /* A finger needs a taller target than a pointer. */
-@media (max-width: 900px) { .host-guest .link-btn { padding: 10px 0; } }
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) { .host-guest .link-btn { padding: 10px 0; } }
 /* The Wi-Fi tab (js/wifi.js): the Subnets tab's cards. Empty, the usual
    three networks as buttons; editing, the bands as three boxes in a row. */
 .wifi-presets { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -629,7 +629,7 @@ html, body { overscroll-behavior-y: none; }
 .radio-ssids { gap: 6px; }
 .radio-none { margin: 0; }
 /* A finger needs taller targets than a pointer. */
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .radio-sum { padding: 8px 0; }
     .radio-ssids .fchip { padding: 8px 12px; }
     /* The Wi-Fi cards' Select clients / Edit / Delete, Edit radio on a
@@ -640,6 +640,17 @@ html, body { overscroll-behavior-y: none; }
     #wifiList .net-actions .link-btn { min-width: 44px; min-height: 44px; padding: 10px 8px; }
     .wifi-presets-more .fchip { padding: 8px 12px; }
 }
+
+/* A Providers picker (js/providers.js, v18): the item's providers as chips,
+   each with its ✕, above the Add provider… select. */
+.pv-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 0 0 4px; min-width: 0; }
+.pv-chips:empty { display: none; }
+.pv-chip { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 2px 2px 2px 8px; border: 1px solid var(--border); border-radius: 999px;
+    font-size: var(--fs-sm); color: var(--text-sec); overflow-wrap: anywhere; }
+.pv-chip-x { flex: none; border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 2px 6px; border-radius: 999px; font: inherit; line-height: 1; }
+.pv-chip-x:hover, .pv-chip-x:focus-visible { color: var(--text); background: var(--border); }
+.pv-none { font-size: var(--fs-sm); }
+@media (pointer: coarse) { .pv-chip-x { min-width: 44px; min-height: 44px; } }
 
 /* Make groups from locations, offered under the empty tab's note. */
 .grp-from-loc { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -896,6 +907,52 @@ html, body { overscroll-behavior-y: none; }
     .merge-bulk .btn, .merge-acts .btn { flex: 1 1 100%; }
     .merge-chip { flex: 1 1 auto; }
 }
+/* A file's name in a dialog's title, as it is: the fleet's title is in
+   capitals (js/mergeui.js mergeTitleInto). */
+.modal-title .fname { text-transform: none; letter-spacing: normal; overflow-wrap: anywhere; }
+/* The review on a phone, upright or on its side: the head compact, so the
+   first rows show on the first screen. The dialog takes the screen; the
+   mode's sentence two lines (a tap shows the rest); the counts one row that
+   scrolls sideways, faded at the edge that has more; the kind and the two
+   Use … for all buttons on one row. */
+@media (max-width: 640px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
+    #mergeDialog { padding: 8px; }
+    #mergeDialog .modal.topo-merge { max-height: calc(100dvh - 16px); }
+    #mergeDialog .modal-head { padding: 8px 8px 8px 14px; }
+    #mergeDialog .modal-body { padding: 12px 14px; }
+    #mergeDialog .modal-foot { padding: 10px 14px; }
+    #mergeTitle { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+    #mergeMode { margin: 0 0 8px; font-size: var(--fs-label); line-height: 1.4; cursor: pointer;
+        display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+    #mergeMode.open { display: block; }
+    .merge-counts { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; margin: 0 0 8px;
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
+    .merge-counts::-webkit-scrollbar { display: none; }
+    .merge-chip { flex: none; }
+    .merge-tools { flex-wrap: nowrap; }
+    /* 8.5rem: "Все виды" and "すべての種類" at 16px clear the arrow. */
+    .merge-tools .select { flex: 1 1 8.5rem; }
+    .merge-bulk { flex: 2 1 12rem; flex-wrap: nowrap; margin-left: 0; }
+    .merge-bulk .btn { flex: 1 1 0; min-width: 0; white-space: normal; line-height: 1.2; padding: 4px 8px; font-size: var(--fs-micro); }
+    #mergeDelta { margin: 0 0 8px; }
+}
+/* A phone on its side: 360px tall, so the head is one line, the mode's
+   sentence one, and the counts share a row with the kind and the two Use …
+   for all buttons, so the first conflict rows show above the foot. The
+   list scrolls with the body (no box of its own inside it). */
+@media (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
+    #mergeDialog .modal.topo-merge { width: 100%; max-width: none; }
+    #mergeDialog .modal-head { padding-top: 0; padding-bottom: 0; }
+    #mergeTitle { -webkit-line-clamp: 1; line-clamp: 1; font-size: var(--fs-sm); }
+    #mergeMode { -webkit-line-clamp: 1; line-clamp: 1; margin-bottom: 6px; }
+    #mergeDialog .modal-body { display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; column-gap: 8px; padding-top: 8px; }
+    #mergeDialog .modal-body > * { flex: 1 1 100%; min-width: 0; }
+    #mergeDialog .modal-body > .merge-counts { flex: 1 1 0; margin-bottom: 6px; }
+    #mergeDialog .modal-body > .merge-tools { flex: 1.4 1 0; margin-bottom: 6px; }
+    #mergeDelta { margin-bottom: 6px; }
+    #mergeDialog .merge-list { max-height: none; overflow: visible; }
+    #mergeDialog .modal-foot { padding-top: 6px; padding-bottom: 6px; }
+}
 @media (max-width: 640px), (pointer: coarse) {
     .topo-merge .btn, .topo-merge .toggle-btn, .topo-merge .select { min-height: 44px; }
     .topo-merge .modal-x { min-width: 44px; min-height: 44px; }
@@ -939,6 +996,10 @@ body.doc-readonly #tidyBtn { opacity: 0.5; }
 /* A long toast (a merge result, a file error) wraps inside the fleet gutter
    instead of running off the left edge of a phone. */
 #topoToast { max-width: calc(100vw - 40px); }
+/* Topo's notice is words only (js/app.js showToast): it never takes a tap,
+   so on a phone, where it lies over the search row for three seconds, the ⋯
+   and the box under it still answer (the fleet's .toast.show takes them). */
+#topoToast.toast.show { pointer-events: none; }
 
 /* The document bar (renderDocBar, js/library.js): where the read-only banner
    sits, which it never shares the screen with. A kept network shows its name
@@ -1024,7 +1085,7 @@ body.doc-readonly #tidyBtn { opacity: 0.5; }
 /* The card's buttons (Zoom, Select, Locate, then saved searches): on a phone
    44px targets, and the card wraps them onto a second row rather than
    scrolling (flex-wrap above). */
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .cs-btn.q-btn { min-height: 44px; }
     .topo-qtools { max-width: 100%; }
 }
@@ -1067,7 +1128,7 @@ body.doc-readonly #tidyBtn { opacity: 0.5; }
 .sq-col-pick { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 .sq-sort { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; }
 .sq-sort .sq-field { flex: 1 1 12rem; }
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .cs-btn.q-saved-btn { min-height: 44px; min-width: 44px; justify-content: center; }
     .cs-btn.sq-act, .sq-row .sq-run { min-height: 44px; }
     .sq-check, .sq-col-pick { min-height: 44px; }
@@ -1079,6 +1140,28 @@ body.doc-readonly #tidyBtn { opacity: 0.5; }
     /* The ★ and the caret say it; the word would squeeze the box. */
     .q-saved-label { display: none; }
     .q-saved-panel { position: absolute; top: calc(100% + 6px); right: -1px; }
+}
+/* A phone's search tools (M36): the card is the count and a ⋯ that holds
+   Zoom, Select, Locate and Save (js/query.js wireQueryMore), one row under
+   the box instead of two rows of buttons over the map; the ★ stays in the
+   box. The view switch says Map, Table and Rack with a glyph each (the word
+   stays its name for a screen reader), so the box is not squeezed in the
+   rack view. Wider, the card and the switch are as they were. */
+.q-more { display: none; }
+.q-more-panel [hidden] { display: none; }
+@media (max-width: 640px) {
+    .topo-qtools .q-more { display: flex; margin-left: auto; flex: none; }
+    .topo-qtools > .q-btn { display: none; }
+    .topo-qtools { flex-wrap: nowrap; min-width: 0; flex: 1 1 100%; }
+    .topo-qtools .q-count { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .cs-btn.q-more-btn { min-width: 44px; min-height: 44px; justify-content: center; padding: 0 8px; font-size: 18px; line-height: 1; }
+    .q-more-panel { position: absolute; top: calc(100% + 6px); right: -1px; min-width: 14rem; max-width: calc(100vw - 24px); }
+    .q-more-panel .cs-menu-item { min-height: 44px; }
+    #viewSwitch .toggle-btn { font-size: 0; letter-spacing: 0; min-width: 44px; padding: 0; justify-content: center; }
+    #viewSwitch .toggle-btn::before { font-size: 18px; line-height: 1; }
+    #viewSwitch [data-view="map"]::before { content: "🗺️"; content: "🗺️" / ""; }
+    #viewSwitch [data-view="table"]::before { content: "▦"; content: "▦" / ""; }
+    #viewSwitch [data-view="rack"]::before { content: "🗄️"; content: "🗄️" / ""; }
 }
 .q-error { flex: 0 1 100%; max-width: 36rem; margin: 0; padding: 4px 10px; font-size: var(--fs-micro); color: var(--err); overflow-wrap: anywhere; }
 .q-error.hidden { display: none; }
@@ -1102,6 +1185,12 @@ body.table-view #conflictPill { display: none !important; }
 .tv-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
 .tv-tabs { flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .tv-tabs .tabbtn { padding: 8px 12px; white-space: nowrap; }
+/* The row scrolls sideways when its tabs outrun the pane (a phone): its ends
+   fade where more tabs lie past them (data-more, js/table.js tvTabsEdges,
+   Mobile review M32). A mask, so it is the same in both themes. */
+.tv-tabs[data-more="end"] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.tv-tabs[data-more="start"] { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); }
+.tv-tabs[data-more="start end"] { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 /* Five tabs since Ports: at phone width they fit side by side, in every
    language (Spanish "Dispositivos" is the longest row), with less air and no
    tracking, rather than the last one scrolling out of sight. A pane narrower
@@ -1172,6 +1261,10 @@ table.data.tv-grid th, table.data.tv-grid td { padding: 5px 10px; white-space: n
 .tv-sort:hover { color: var(--accent); }
 .tv-arrow { min-width: 0.8em; color: var(--accent); }
 .tv-chk, .tv-exp { text-align: center; }
+.tv-grid .tv-chk[data-hitbox] { cursor: pointer; }
+/* The tick's label: no box of its own with a mouse (the cell looks as it
+   did); on a touch screen it fills the cell (below, D3). */
+.tv-grid .tv-chk .tv-tick { display: contents; }
 .tv-grid .tv-chk { width: var(--tv-chk-w); min-width: var(--tv-chk-w); max-width: var(--tv-chk-w); }
 .tv-grid .tv-exp { width: var(--tv-exp-w); min-width: var(--tv-exp-w); max-width: var(--tv-exp-w); }
 table.data.tv-grid :is(th, td):is(.tv-chk, .tv-exp) { padding-left: 4px; padding-right: 4px; }
@@ -1249,10 +1342,14 @@ textarea.tv-in { min-width: 16rem; resize: vertical; line-height: 1.4; }
 }
 body.rack-view #conflictPill { display: none !important; }
 .rk-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+/* The face, zoom and cable controls' wrapper: no box of its own (its
+   children are the head's flex items), but on a narrow phone, below. */
+.rk-viewctl { display: contents; }
 .rk-pick-lbl { font-family: var(--mono); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); }
 .rk-picker { flex: 0 1 22rem; min-width: 0; }
-/* The face switch is a phone's: anything wider shows both faces. */
-.rk-faceswitch { display: none; box-shadow: none; }
+/* The face switch is a phone's: anything wider shows both faces. So is the
+   pane switch (M35): wider, the schedule is beside the units. */
+.rk-faceswitch, .rk-paneswitch { display: none; box-shadow: none; }
 .rk-hint { margin: 8px 0; }
 .rk-sizebtn.active { border-color: var(--accent); color: var(--accent); }
 /* The rack's size fields (the Size button): four across, two on a phone. */
@@ -1801,7 +1898,7 @@ body.rack-view #conflictPill { display: none !important; }
 /* No room beside the rack: the selected device's buttons go above it and the
    devices not placed yet below it, each kept in sight, the rack scrolling
    between them. */
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     /* The head on one line where it can be: the picker gives way to the zoom
        rather than pushing it onto a second line over the units. */
     .rk-picker { flex: 1 1 9rem; }
@@ -1840,12 +1937,31 @@ body.rack-view #conflictPill { display: none !important; }
     .rk-sscroll { max-height: none; overflow: visible; }
     .rk-stable thead { position: static; }
 }
-/* A phone: one face at a time, as wide as the pane, with bigger units for a
-   finger, and the switch that picks the face. */
-@media (max-width: 640px) {
+/* A phone, or one held sideways (PHONE_LAYOUT_MQ, js/rackview.js rvPhone):
+   one face at a time, as wide as the pane, with bigger units for a finger,
+   and the switch that picks the face. */
+@media (max-width: 640px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .topo-rack { --rk-u0: 28px; padding-left: 12px; padding-right: 12px; }
     .rk-faceswitch { display: flex; }
     .rk-picker { flex: 1 1 10rem; }
+    /* M35: one pane at a time, each the full height: the units, with the
+       devices to drag in under them (Not placed, Other devices), or the
+       patch schedule from its top. The selected device's buttons show over
+       either. The head in rows a finger tall: the rack and Size; the pane
+       switch; the face and the zoom; the cables and the count. The
+       schedule's pane needs only the first two and the count. */
+    .rk-paneswitch { display: flex; flex: 1 1 100%; order: 2; }
+    .rk-paneswitch .toggle-btn { flex: 1 1 0; justify-content: center; }
+    .rk-head > .rk-pick-lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .rk-head > .rk-picker, .rk-head > .rk-sizebtn { order: 1; }
+    .rk-head .rk-viewctl > :is(.rk-faceswitch, .rk-zoom) { order: 3; }
+    .rk-head .rk-viewctl > .rk-cablectl { order: 4; }
+    .rk-head > #rackCount { order: 5; flex: 1 1 6rem; min-width: 0; white-space: normal; line-height: 1.3; }
+    .rk-head { gap: 8px; }
+    .topo-rack[data-pane="sched"] .rk-head .rk-viewctl > :is(.rk-faceswitch, .rk-zoom, .rk-cablectl) { display: none; }
+    .topo-rack[data-pane="sched"] .rk-head .rk-viewctl { display: none; }
+    .topo-rack[data-pane="sched"] .rk-body :is(.rk-main, .rk-unplaced) { display: none; }
+    .topo-rack[data-pane="elev"] .rk-body .rk-sched { display: none; }
     /* The selected device's buttons in one row that scrolls sideways: three
        wrapped rows took a third of the screen from the rack, leaving four
        units between them and the lists, and most of a device's lit cables
@@ -1886,6 +2002,26 @@ body.rack-view #conflictPill { display: none !important; }
        the head above and the network's bar below, it showed two. The pane
        still scrolls, and the rows it lights are kept in its sight. */
     .rk-main { min-height: max(5rem, min(28dvh, 100% - 6rem)); }
+    /* With the schedule in its own pane, the units take the column but a
+       strip, where the lists to drag in from come up under them. */
+    .topo-rack[data-pane="elev"] .rk-main { min-height: max(5rem, 100% - 3rem); }
+}
+/* A narrow phone (320 to 359 wide): the face, the zoom and the cables
+   share one row that scrolls sideways, faded at its right edge, so the head
+   is three rows and the units get the height (Mobile review M35 at 320). */
+@media (max-width: 359px) {
+    .rk-head .rk-viewctl { display: flex; order: 3; flex: 1 1 100%; min-width: 0; gap: 8px; flex-wrap: nowrap; align-items: center;
+        overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none;
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
+    .rk-head .rk-viewctl::-webkit-scrollbar { display: none; }
+    .rk-head .rk-viewctl > * { flex: none; }
+    .rk-head .rk-viewctl .toggle-btn { padding-left: 10px; padding-right: 10px; }
+    .rk-head > #rackCount { line-height: 1.2; }
+    /* The head's switches without their inner padding (the buttons stay
+       44), and the pane down to the folded chip rather than the full
+       banner's height. */
+    .rk-head .view-switch { padding: 0; }
+    body:has(.topo-docbar.docbar-chip) .topo-rack { padding-bottom: 136px; }
 }
 
 /* Paste a column: the fleet's .modal, wide enough for a preview of rows. */
@@ -2016,6 +2152,8 @@ body.rack-view #conflictPill { display: none !important; }
 /* Its answers are what a finger picks (Update or Open as a copy, a restore
    point that could not be stored): 44px on a touch screen. */
 @media (pointer: coarse) { .topo-ask .modal-foot .btn, .topo-ask .modal-x { min-height: 44px; min-width: 44px; } }
+/* A note asked for (Mark fixed, step 4) is typed into its field: 44px too. */
+@media (pointer: coarse) { .topo-ask .input { min-height: 44px; } }
 .ask-msg { margin: 0; white-space: pre-line; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }
 #topoAskInput { width: 100%; margin-top: 12px; }
 #topoAskInput[hidden] { display: none; }
@@ -2100,7 +2238,7 @@ body.rack-view #conflictPill { display: none !important; }
 /* The phone's selection bar and connect banner (js/mobile.js, Mobile batch 2). */
 .sel-bar, .link-banner { display: none; }
 
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     /* The closed drawer's shadow would show along the light canvas's edge. */
     .topo-ws:not(.drawer-open) .topo-rail { box-shadow: none; }
     /* Actions section pinned at the top of the drawer. */
@@ -2135,6 +2273,11 @@ body.rack-view #conflictPill { display: none !important; }
         max-width: calc(100vw - 24px);
     }
     body:has(.ws.drawer-open) .handy-bar { display: none; }
+    /* The zoom column stands on the handy bar, not beside it: with 44px
+       buttons the bar is 308px wide at 360 and reached under the column's
+       last buttons (Fit, the map's ink). A phone held sideways has the
+       room beside it (below). */
+    .zoom-ctl { bottom: 76px; }
     /* The read-only banner rises above the handy bar, clear of the zoom
        control on the right. */
     .alert.topo-readonly { bottom: 80px; right: 72px; max-width: none; }
@@ -2215,10 +2358,100 @@ body.rack-view #conflictPill { display: none !important; }
     /* The drawer's Edit lands the name a little under the top. */
     #propName { scroll-margin-top: 8px; }
 }
+
+/* ---- A phone held sideways (Mobile review M31) ---------------------------
+   The phone's chrome keys on width, and a phone on its side is 640 to 932px
+   wide and 360 to 430px tall. Every drawer-layout block above also says
+   "(max-height: 500px) and (max-width: 932px) and (pointer: coarse)": a touch
+   screen that short and 932 or narrower is a phone on its side (wider is a
+   tablet whose browser shrank the page for its keyboard, which keeps its
+   docked rail; a tablet 901-932 wide doing that still turns its rail into
+   a drawer while typing, a residual docs/MOBILE.md records).
+   carino-ui.css turns the rail into a drawer at 900px only, so from 901 to
+   932 its rules are copied here (copy of carino-ui.css's workspace shell
+   @media (max-width: 900px) block: keep in step). carino-ui.js closes an
+   open drawer when the window grows past 900px, so a turn of the phone from
+   upright to a 932px side closes it: it opens again from ☰. */
+@media (min-width: 901px) and (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
+    .ws-toggle { display: inline-flex; }
+    .ws-rail {
+        position: fixed; top: var(--nav-h); bottom: 0; left: 0; z-index: 1001; width: min(340px, 86vw);
+        transform: translateX(-100%); transition: transform 0.22s ease;
+    }
+    .ws.drawer-open .ws-rail { transform: none; box-shadow: 0 0 40px rgba(0,0,0,0.6); }
+    .ws.drawer-open .ws-scrim { display: block; position: fixed; inset: var(--nav-h) 0 0 0; z-index: 1000; background: rgba(0,0,0,0.55); }
+    .ws-pane { padding: 16px; }
+}
+@media (min-width: 901px) and (max-height: 500px) and (max-width: 932px) and (pointer: coarse) and (prefers-reduced-motion: reduce) { .ws-rail { transition: none; } }
+/* 360px of height holds one row of bars, not three: the handy bar moves to
+   the right (clear of the zoom column), and the document bar, the selection
+   bar and the read-only banner take the row's left part (--handy-w is the
+   handy bar's width, from js/mobile.js). What the selection bar displaces
+   goes above it. The table and the rack keep their bottom clear of that one
+   row only. */
+@media (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
+    .topo-table, .topo-rack { padding-bottom: 76px; }
+    /* The table's head on one row (the tabs scroll and fade, M32, the count
+       and its buttons beside them) and no touch hint: the rows get the
+       height. The count on that row only moves the buttons sideways, never
+       the grid down, so a second tap still lands on its cell. */
+    .tv-head { flex-wrap: nowrap; align-items: center; }
+    .tv-head > .tv-tabs { flex: 1 1 0; }
+    .tv-head > .tv-bar { flex: none; flex-wrap: nowrap; padding-bottom: 0; }
+    .tv-bar > #tvCount { flex-basis: auto; }
+    .tv-touchhint { display: none; }
+    /* The rack: its head and its controls take most of 360px, so the pane
+       scrolls as one and the body (units, schedule) is the height the bars
+       leave: a swipe on the head brings it all on screen. Its hint goes,
+       as the table's does. M35's switch (Elevation / Patch schedule) is the
+       rest. */
+    .rk-hint { display: none; }
+    /* The pane switch (M35) beside the picker: the width is there, the
+       height is not. */
+    .rk-head > .rk-paneswitch { flex: 0 1 auto; order: 1; }
+    .rk-head > .rk-picker { flex: 1 1 14rem; }
+    .rk-paneswitch .toggle-btn { flex: none; }
+    .topo-rack { overflow-y: auto; overscroll-behavior-y: contain; }
+    .topo-rack .rk-body { flex: none; height: calc(100dvh - max(16px, calc(var(--topbar-h, 48px) + 8px)) - 76px); min-height: 150px; }
+    .zoom-ctl { bottom: 16px; }
+    /* The findings pill: the zoom column (220 tall from the foot) reaches
+       up past the top bar's row on a 360px screen, so the pill sits left
+       of it, not over its buttons (a search on, provider mode's strip). */
+    #conflictPill { right: 72px; }
+    .handy-bar { left: auto; right: 72px; transform: none; max-width: calc(100vw - 96px); }
+    .sel-bar, .link-banner { left: 12px; right: calc(80px + var(--handy-w, 320px)); bottom: 16px; }
+    .topo-docbar, .alert.topo-readonly { left: 12px; right: calc(80px + var(--handy-w, 320px)); bottom: 16px; }
+    .alert.topo-storage { left: 12px; right: calc(80px + var(--handy-w, 320px)); bottom: 76px; }
+    body.selbar-on .alert.topo-readonly, body.selbar-on .topo-docbar { bottom: 80px; }
+    body.selbar-on .alert.topo-storage { bottom: 140px; }
+}
+
+/* Address lines under the devices at a phone's far zoom (M38, js/app.js
+   applyMapDetail): gone below the readable zoom, the selected device's kept. */
+#canvasContainer.lod-far :not(.node-sel) > .node-ip { display: none; }
+
+/* ---- The document bar folds into a chip (Mobile review M30) --------------
+   On a phone the banner shows in full the first time a network is on screen
+   and then folds (js/library.js renderDocBar: after a few seconds, the
+   first touch on the map or a selection): one 44px row, the accent edge and
+   Keep for a network not kept, the name for one that is. A failed save never
+   folds. While the selection bar is up the chip steps aside, so the bottom
+   of a 780px screen is the selection and handy bars only. */
+.docbar-keep-short { display: none; }
+@media (max-width: 640px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
+    .topo-docbar.docbar-chip { padding: 0 0 0 6px; flex-wrap: nowrap; right: auto; max-width: calc(100% - 96px); }
+    .topo-docbar.docbar-chip.unkept { padding-left: 0; }
+    .topo-docbar.docbar-chip .docbar-status { display: none; }
+    .topo-docbar.docbar-chip .docbar-name { max-width: 9rem; padding: 0 10px 0 4px; }
+    .topo-docbar.docbar-chip .docbar-keep-long { display: none; }
+    .topo-docbar.docbar-chip .docbar-keep-short { display: inline; }
+    .topo-docbar.docbar-chip .docbar-keep { border: 0; border-radius: 0 7px 7px 0; }
+    body.selbar-on .topo-docbar.docbar-chip { display: none; }
+}
 /* A finger's map draws no little discs: the ✕ and a note's A− / A+ are 10px
    targets inside the card's corner at a phone's zoom. The selection bar holds
    them at 44px (js/mobile.js). */
-@media (max-width: 900px) and (pointer: coarse) {
+@media (max-width: 900px) and (pointer: coarse), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .topo-svg .node-delete { display: none; }
 }
 @media print { .sel-bar, .link-banner { display: none !important; } }
@@ -2227,7 +2460,7 @@ body.rack-view #conflictPill { display: none !important; }
    that bar is: a touch screen wider than 900px (a tablet in landscape) has
    no Select more, so it keeps the Shift-click sentence. */
 .rail-note.hint-coarse { display: none; }
-@media (max-width: 900px) and (pointer: coarse) {
+@media (max-width: 900px) and (pointer: coarse), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .rail-note.hint-fine { display: none; }
     .rail-note.hint-coarse { display: block; }
 }
@@ -2437,6 +2670,13 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 .landing-drop p { margin: 0; color: var(--text-muted); line-height: 1.5;
     font-size: min(1.05rem, calc(0.85rem + var(--tall) * 0.006)); }
 .landing-drop code { font-family: 'IBM Plex Mono', monospace; color: var(--accent); }
+/* M50 (docs/MOBILE.md): a touch screen has nothing to drop, so its line
+   points at Open a file instead. */
+.landing-drop .hint-open { display: none; }
+@media (pointer: coarse) {
+    .landing-drop .hint-drop { display: none; }
+    .landing-drop .hint-open { display: inline; }
+}
 .landing-drop-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
 .landing-drop-btn {
     padding: 8px 16px; border: 1px solid var(--border); background: #101010;
@@ -2605,6 +2845,8 @@ body.chrome-pending :is(.sel-bar, .link-banner) { display: none !important; }
    the work area it lives in is revealed. visibility is inherited but not
    enforced, so a descendant can opt back in. */
 body.chrome-pending #unlockDialog { visibility: visible; }
+/* A provider's first tap on a report's link is here (step 4): a finger's 44px. */
+@media (pointer: coarse) { #unlockDialog .cs-btn, #unlockPass { min-height: 44px; } }
 /* Same argument for the phone: js/mobile.js floats a bar of Undo/Redo/Delete
    over the canvas, and on the landing there is no canvas for it to act on. */
 body.landing-open .handy-bar { display: none !important; }
@@ -2638,6 +2880,20 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
    "What goes in" (label.dlg-blurb) keep .dlg-parts label's 8px between them. */
 .rpv-opts > .dlg-blurb, .rpv-opts > .dlg-fields, .rpv-opts > .dlg-parts { margin: 0; }
 .rpv-opts fieldset.dlg-parts { display: block; }
+/* M34: on a phone, upright or on its side, Print and Download sit on the
+   dialog's own colour (opaque, never the report showing through) at the
+   foot, and the ✕ is a finger's size (the TARGETS block). On its side the
+   column keeps the desktop's place for them (the foot of the left column),
+   side by side so the questions keep more of the 360px. */
+@media (max-width: 700px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
+    .rpv-actions { background: var(--bg-card); }
+}
+@media (min-width: 701px) and (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
+    .rpv-scrim, .modal-scrim.rpv-scrim { padding: 8px; }
+    .rpv-side { padding: 12px; gap: 10px; }
+    .rpv-actions { flex-direction: row; padding-top: 10px; }
+    .rpv-actions > * { flex: 1 1 0; width: auto; min-height: 44px; }
+}
 @media (max-width: 700px) {
     .report-dlg .rpv-opts, .sheet-pv-dlg .rpv-opts { flex: 0 1 auto; max-height: 42dvh; }
     .report-dlg .rpv-opts { padding-right: 12px; }   /* the fold's own gutter, not the desktop scrollbar's 4px */
@@ -2671,7 +2927,7 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
     border: 1.5px dashed var(--accent, #2563eb); background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent); color: inherit; }
 .dlg-parts .dlg-cell[aria-pressed="false"] { border-style: solid; border-color: var(--border, #94a3b8); background: transparent; opacity: 0.5; text-decoration: line-through; }
 .dlg-parts .dlg-cell:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 1px; }
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .dlg-parts .dlg-sheets select { min-height: 44px; }
     .dlg-parts .dlg-cells { grid-template-columns: repeat(var(--cols, 2), 44px); }
     .dlg-parts .dlg-cell { min-height: 44px; }
@@ -2683,7 +2939,7 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
 .dlg-parts .dlg-search-list { display: flex; flex-direction: column; }
 .dlg-parts .dlg-search { margin: 0; padding: 4px 0; min-height: 32px; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-label); color: var(--text-muted); }
 .dlg-parts .dlg-search .mono { font-family: var(--mono); font-size: 11px; }
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .dlg-parts .dlg-search { min-height: 44px; align-items: center; }
 }
 /* The technical sheet's sections, a tick each, under Technical details
@@ -2696,7 +2952,7 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
     font-size: var(--fs-label); color: var(--text-muted); cursor: pointer; }
 .dlg-parts .dlg-section input { margin-top: 2px; flex: none; }
 .dlg-parts .dlg-section .dlg-dim { display: block; font-size: 11px; line-height: 1.4; }
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .dlg-parts .dlg-section-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 7.25rem), 1fr)); }
     .dlg-parts .dlg-section { min-height: 44px; align-items: center; }
     .dlg-parts .dlg-section input { margin-top: 0; }
@@ -2715,7 +2971,7 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
 .topo-settings .set-field .select, .topo-settings .set-field .input { width: 100%; }
 .topo-settings .set-sec p { margin: 0; font-size: 13px; line-height: 1.5; }
 .topo-settings .set-sec .btn { align-self: flex-start; }
-@media (max-width: 900px) {
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .topo-settings .set-row { min-height: 44px; align-items: center; }
     .topo-settings .set-row input[type="checkbox"] { width: 20px; height: 20px; margin-top: 0; }
     .topo-settings .set-field .select, .topo-settings .set-field .input, .topo-settings .set-sec .btn { min-height: 44px; }
@@ -2735,7 +2991,7 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
 .tpl-btn.tpl-full b { color: var(--accent); }
 .tpl-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tpl-last { margin-top: 10px; }
-@media (max-width: 900px) { .tpl-btn { min-height: 44px; } }
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) { .tpl-btn { min-height: 44px; } }
 .tpl-item .tpl-head .lib-item-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tpl-item .tpl-head .lib-item-blurb { display: block; }
 .tpl-item .tpl-head .lib-item-icon { flex: none; }
@@ -2749,7 +3005,10 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
    their own scroll. Above 900px the docked rail is untouched: the library
    takes what is left and the panel a fixed half (css above). */
 .rail-head { display: none; }
-@media (max-width: 900px) {
+/* The Carino bar's button in the drawer's header: only where the bar hides
+   (the navbar block below). */
+.rail-navbtn { display: none !important; }
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .topo-rail { --rail-head-h: 56px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
     /* scrollIntoView and focus scrolls land below the sticky header and tabs
        (--rail-sticky-h is measured by js/mobile.js; the fallback is the
@@ -2774,6 +3033,10 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
         color: var(--text); font-size: 1.1rem; line-height: 1; cursor: pointer;
     }
     .rail-close:hover, .rail-close:focus-visible { border-color: var(--accent); color: var(--accent); background: var(--accent-faint); outline: none; }
+    /* 🗂️ My networks leads the header's buttons, ⌃ (where shown) and ✕
+       follow it. */
+    .rail-head .rail-netbtn { margin-left: auto; }
+    .rail-head .rail-netbtn ~ .rail-navbtn { margin-left: 0 !important; }
     /* The actions scroll away with the rest; the header keeps the title. */
     #mobileActions { flex: none; padding-top: 10px; }
     /* The panel tabs stay in reach under the header while their panel
@@ -2798,7 +3061,7 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
    inside it) to the bar's 60px. html prefix: outranks the bar's own
    '#carinoNav{position:sticky}', injected after this file. */
 .nav-handle { display: none; }
-@media (max-width: 900px) and (pointer: coarse) {
+@media (max-width: 900px) and (pointer: coarse), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     html:root { --nav-h: 0px; }
     html #carinoNav {
         position: fixed; top: -72px; left: 0; right: 0; margin: 0;
@@ -2822,8 +3085,19 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
     }
     .nav-handle:hover > span, .nav-handle:focus-visible > span { background: var(--accent); opacity: 1; }
     .nav-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 0 0 6px 6px; }
+    /* Where nothing sits at the top centre (the Simple views, whose top bar
+       is the full editor's, and the landing) the handle is a 44px target with
+       the same pill at its top. In the full editor it would lie over the
+       search box, so there it stays a strip to swipe and the drawer's header
+       has its button (#drawerNavBtn, decision D4). */
+    body:is(.simple-mode, .landing-open) .nav-handle { height: 44px; }
+    /* An open drawer covers the top centre with its header, whose ⌃ does
+       the handle's job: the handle steps aside so it does not take the
+       header's taps (🗂️ My networks sat under it in Simple). */
+    body:has(.ws.drawer-open) .nav-handle { display: none; }
+    .rail-head .rail-navbtn { display: inline-flex !important; margin-left: auto; }
 }
-@media (max-width: 900px) and (pointer: coarse) and (prefers-reduced-motion: reduce) {
+@media (max-width: 900px) and (pointer: coarse) and (prefers-reduced-motion: reduce), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) and (prefers-reduced-motion: reduce) {
     html #carinoNav, html.topo-nav-shown #carinoNav { transition: none; }
 }
 @media print { .nav-handle { display: none !important; } }
@@ -2845,7 +3119,7 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
    show and hide of the keyboard (js/mobile.js says more). Where a browser
    does resize the layout, --kb-h equals the window's height and the fit
    changes nothing. */
-@media (max-width: 900px) and (pointer: coarse) {
+@media (max-width: 900px) and (pointer: coarse), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     /* The buttons inside carry their own `transition: 0.2s` (all), which
        would keep each one visible, and tappable, for that long after its bar
        went: a finger reaching for the field could still land on Undo. These
@@ -2912,4 +3186,326 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
    focuses it this way and keeps its rings as they were. */
 @media (pointer: coarse) {
     .modal[tabindex="-1"]:focus { outline: none; }
+}
+
+/* ===== Touch targets (Mobile review M21-M29, M57) ========================
+   Every control a finger taps is 44x44 or more on a phone, on a tablet of any
+   width (pointer: coarse) and in a mouse window 900px wide or less, which
+   already has the phone's layout. A desktop with a mouse is untouched. Two
+   ways, both here so the next control is one selector more, not a rule of its
+   own (tests/suites/touchsizes*.js measure every screen):
+   - grow: where the row or the column has room, the control itself is 44
+     tall (and 44 wide when it is a glyph). The fleet's .btn and .cs-btn have
+     a fixed height, so that goes to auto first.
+   - a wider cell or label: the table's tick and twist columns are 46 wide
+     and a tap anywhere in the tick's cell ticks it (js/table.js,
+     data-hitbox), since a checkbox cannot carry a hit area of its own; a
+     tick's <label> reaches 12px before its box.
+   What would change a layout a mouse in a narrow window keeps (the top bar,
+   the table, the rack, the bars over them) is in the (pointer: coarse) block
+   after this one.
+   Fields are 44 tall as well as 16px (the M16 floor above): the drawer, the
+   search box, the counts of Add devices, the table's rows (decisions D2, D3
+   in docs/MOBILE.md). Text links inside a sentence stay text: growing them
+   would break the line they sit in. */
+@media (max-width: 900px), (pointer: coarse) {
+    /* The fleet's buttons, menus and tabs wherever Topo shows them. */
+    /* min-width: a one-character label (Japanese 列…, 表) is under 44 wide. */
+    :is(.topo-ws, .modal-scrim, #landing, .handy-bar, .pb-pick-banner) :is(.btn, .cs-btn):not(.topo-rack *, .topo-docbar *) { height: auto; min-height: 44px; min-width: 44px; }
+    :is(.topo-ws, .modal-scrim, .topo-actions) .cs-split > .cs-split-caret, #mobileActionsSlot .cs-btn { min-width: 44px; justify-content: center; flex-shrink: 0; }
+    /* A tablet keeps the navbar pinned, Topo's actions in it: they and the
+       bar's About are 44 tall there too (the bar is 60). */
+    .topo-actions .cs-btn, #carinoNav #cnLegal { height: auto; min-height: 44px; }
+    /* A min-width replaces a flex item's own floor (its content's width), so
+       each one that has one keeps its width with flex-shrink: 0. */
+    :is(.topo-ws, .modal-scrim, #landing) :is(.toggle-btn, .tabbtn):not(.topo-rack *, .topo-topbar *) { min-height: 44px; min-width: 44px; flex-shrink: 0; }
+    #addRows .cs-btn { min-width: 44px; justify-content: center; flex-shrink: 0; }
+    .add-more > summary { min-height: 44px; box-sizing: border-box; padding: 12px 0; }
+    :is(.topo-ws, .topo-topbar, .topo-rack, .modal-scrim) .cs-menu-item { min-height: 44px; }
+    .modal-x { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+    #reportCancelBtn .rpv-x, .rpv-x { min-width: 44px; min-height: 44px; }
+
+    /* M21: the drawer's panel tabs and its library tabs. */
+    .cfg-tab, .lib-tab { min-height: 44px; min-width: 44px; }
+    /* M27: the drawer's own rows. */
+    .mode-switch, .lib-item-open { min-height: 44px; }
+    .lib-item-open { align-items: center; }
+    .tpl-examples > summary { min-height: 44px; box-sizing: border-box; padding: 12px 0; }
+    .topo-rail summary.asset-sum { min-height: 44px; align-items: center; }
+    /* A tick's label is its target: 12px more before the box, out into the
+       rail's gutter where the label starts its line. */
+    .topo-rail label.prop-check { min-height: 44px; padding-left: 12px; }
+    .topo-rail label.prop-check:is(:first-child, #natRow) { margin-left: -12px; }
+    /* flex-shrink: a long label (Russian "Port filter") squeezed the box under 20px. */
+    .topo-rail label.prop-check input[type="checkbox"] { width: 20px; height: 20px; margin: 0; flex-shrink: 0; }
+    .date-pick-btn { min-width: 44px; }
+    .topo-rail .rail-btn { display: flex; align-items: center; justify-content: center; min-height: 44px; box-sizing: border-box; }
+    .topo-rail .fchip { min-height: 44px; }
+    /* The rail's word buttons (+ Subnet, Edit, Delete, + Add Interface…):
+       a box a finger can find, side by side without overlapping. Not the
+       ones inside a sentence (the inherit note, a model's note, the vendor
+       line, which keeps its own trick at 640px above). */
+    .topo-rail .link-btn:not(.hint .link-btn, #inheritNote .link-btn, .rail-note .link-btn, .model-split-note .link-btn, .vendor-use) {
+        display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; flex-shrink: 0;
+    }
+    /* The bulk panel's Fill vendor from MAC: a button on its own line,
+       not a link in a sentence. */
+    .bulk-vendor-mac .link-btn { min-height: 44px; padding: 0 4px; }
+    /* D2: the drawer's fields. */
+    .topo-rail :is(.input, .select), .if-in { min-height: 44px; }
+
+    /* M29: the findings pill. */
+    #conflictPill { min-height: 44px; min-width: 44px; }
+
+    /* M25: Add devices' counts. */
+    .setup-tile .add-count { min-height: 44px; box-sizing: border-box; }
+    /* The report dialog's picks (M34's dialog, and the label sheets'). */
+    .dlg-parts .dlg-sheets select { min-height: 44px; }
+    .dlg-parts .dlg-cells { grid-template-columns: repeat(var(--cols, 2), 44px); }
+    .dlg-parts .dlg-cell { min-height: 44px; }
+
+    /* The landing's buttons and chips, and the binder bar's. */
+    .landing-drop-btn, .landing-chip, .landing-section-head .landing-chip { min-height: 44px; }
+
+    /* Fields in Topo's dialogs (Columns, Paste a column…). */
+    .modal-scrim :is(.input, .select) { min-height: 44px; }
+    /* A dialog's ticks: the label is the target, 12px more before its box,
+       out into the dialog's gutter. */
+    .topo-settings .set-row { min-height: 48px; padding-left: 12px; margin-left: -12px; align-items: center; }
+    .topo-settings .set-row input[type="checkbox"] { width: 20px; height: 20px; margin-top: 0; }
+    /* The report's What goes in: each tick's label touches the next and the
+       box sits 22px under its top, so a tap just above the box is still its
+       own row's and not the one before. */
+    .dlg-parts > label.dlg-blurb { margin: 0 0 0 -12px; padding: 12px 0 8px 12px; }
+    .dlg-parts > label.dlg-blurb > input[type="checkbox"] { width: 20px; height: 20px; margin-top: 0; }
+    /* The technical sheet's sections and the saved searches, ticks in a grid:
+       rows a little over 44, the cells touching, the box 22px in. */
+    .dlg-parts .dlg-section-list { column-gap: 0; }
+    .dlg-parts :is(.dlg-section, .dlg-search) { min-height: 48px; padding-left: 12px; align-items: center; box-sizing: border-box; }
+    .dlg-parts :is(.dlg-section, .dlg-search) input[type="checkbox"] { width: 20px; height: 20px; margin: 0; }
+    .pb-remember { padding-left: 12px; margin-left: -12px; }
+    .pb-remember input[type="checkbox"] { width: 20px; height: 20px; margin: 0; }
+    /* A contact's Send to tick: 12px of label before its box, as Remember. */
+    .pb-sendto { padding-left: 12px; margin-bottom: 0; }
+    .pb-sendto input[type="checkbox"] { width: 20px; height: 20px; margin: 0; flex-shrink: 0; }
+    .sq-col .cols-mv, .cols-row .cols-mv { min-width: 44px; justify-content: center; flex-shrink: 0; }
+
+    /* The pick pill's Cancel stays in its pill in every language. */
+    .pb-pick-banner { max-width: calc(100vw - 24px); }
+    .pb-pick-text { overflow: hidden; text-overflow: ellipsis; }
+    .pb-pick-cancel { flex: none; text-transform: none; white-space: nowrap; }
+    body:has(#problemPickBanner:not([hidden])) #topoToast { top: 128px; }
+}
+/* The rest of the targets, on a touch screen only: they change a layout
+   (an interface's row, the table's pinned columns, the rack's head and units)
+   that a mouse in a narrow window keeps as it was. On a touch screen the
+   interface's plug and ✕ are on their own line already (the M16 block). */
+@media (pointer: coarse) {
+    /* M26: an interface's plug and ✕, on their own line under the address. */
+    .if-ico, .if-del { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+    /* M22: the view switch and the search box, one 52px row. The ✕ fills the
+       right end of the box, which keeps that much free of text. */
+    .view-switch .toggle-btn { min-height: 44px; min-width: 44px; }
+    #queryInput { min-height: 44px; padding-right: 44px; }
+    .q-clear { right: 0; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+    /* M23: the zoom column. */
+    .zoom-ctl button { min-width: 44px; min-height: 44px; }
+    /* M23, M29: the handy bar, and the document bar over the table and the
+       rack (a mouse's narrow window keeps the rows they would cover). */
+    .handy-btn { width: 44px; height: 44px; }
+    .topo-docbar { align-items: center; }
+    .docbar-name { min-height: 44px; }
+    .topo-docbar .cs-btn { height: auto; min-height: 44px; min-width: 44px; justify-content: center; }
+    /* M28: the rack's head, its schedule and its picker (its rows of
+       buttons too: a mouse's narrow window keeps the units' room). */
+    .topo-rack :is(.btn, .cs-btn) { height: auto; min-height: 44px; }
+    .topo-rack :is(.toggle-btn, .tabbtn) { min-height: 44px; min-width: 44px; flex-shrink: 0; }
+    .rk-picker { min-height: 44px; }
+    .rk-sort { min-height: 44px; min-width: 44px; flex-shrink: 0; }
+    .rk-sched summary.rk-sub, summary.rk-sub { min-height: 44px; display: flex; align-items: center; }
+    .rk-slink { min-height: 44px; display: inline-flex; align-items: center; }
+    /* M24: the table's tabs and toolbar (the fleet buttons above), its sort
+       heads (the whole head cell), its tick and twist columns. */
+    table.data.tv-grid th:has(> .tv-sort) { padding-top: 0; padding-bottom: 0; }
+    .tv-sort { min-height: 44px; min-width: 44px; margin: 0 -10px; padding: 0 10px; box-sizing: content-box; }
+    table.data.tv-grid { --tv-chk-w: 46px; --tv-exp-w: 46px; }
+    table.data.tv-grid :is(th, td):is(.tv-chk, .tv-exp) { padding: 0; text-align: center; vertical-align: middle; }
+    .tv-chk input { width: 20px; height: 20px; margin: 0; }
+    /* The tick's label fills its cell, so the whole cell is the box's
+       target: a touch screen's browser steers a tap near an edge to the
+       nearest element that takes it, the cell's own label, not the twist
+       beside it (js/table.js onTableClick settles the edge between rows). */
+    .tv-grid .tv-chk .tv-tick { display: flex; position: absolute; inset: 0; align-items: center; justify-content: center; cursor: pointer; }
+    .tv-twist { width: 100%; min-height: 44px; padding: 0; }
+    table.data.tv-grid td.tv-cell { min-width: 44px; }
+}
+/* The ticks and twists are 46px wide on a phone's touch screen, so the name
+   pinned beside them gives back the room: the three pinned columns stay under
+   60% of a 360px table (M33, tests/suites/phonespace.js). */
+@media (max-width: 640px) and (pointer: coarse) {
+    .tv-grid .tv-key { max-width: 6rem; }
+}
+/* The fleet navbar's left side on a touch screen (a tablet keeps it pinned,
+   a phone shows it from the handle): its row was 32 tall with its overflow
+   hidden, so the theme switch (32x32), the brand, the product and the clock
+   took a tap over 26px. The row is the bar's 44 and each of them fills it.
+   carino-navbar.js and carino-ui.css are the fleet's: Topo's own rules. */
+@media (pointer: coarse) {
+    #carinoNav .cn-left { min-height: 44px; align-items: stretch; }
+    #carinoNav .cn-left :is(.brand-name, .cn-product) { display: flex; align-items: center; min-height: 44px; }
+    #carinoNav .cn-left .header-clock { min-height: 44px; align-items: center; }
+    #carinoNav .cn-left .cn-brand { display: flex; align-items: center; }
+    #carinoNav #ctSwitch { min-width: 44px; min-height: 44px; justify-content: center; }
+}
+/* D3: a table row is a finger's height on a touch screen, so a cell is one
+   target and the next row another. */
+@media (pointer: coarse) {
+    table.data.tv-grid :is(th, td) { height: 46px; box-sizing: border-box; }
+    /* A rack unit at 1x is 46px on a touch screen (a 1U box 44), and each
+       step of the zoom adds one --rk-u0 on top: 46/68/90 on a tablet, 46/74/102
+       on a phone, so 2x is always taller than 1x and never shorter than the
+       mouse's u0 x zoom (what rvPortsFit, js/rackview.js, counts on). The
+       words keep --rk-u0. */
+    .topo-rack { --rk-u: calc(max(46px, var(--rk-u0)) + (var(--rk-z, 1) - 1) * var(--rk-u0)); }
+}
+
+/* ---- Report a problem (js/incidents.js, step 4) ----------------------------
+   One sheet, phone first: the symptom tiles two to a row at 360, every
+   target 44px on a touch screen, the whole sheet on a phone's screen. The
+   Simple views' button sits in the Nodes tab and beside the empty
+   selection; the full editor's is in Export. */
+.report-problem-btn { width: 100%; margin-top: 10px; justify-content: center; }
+body:not(.simple-mode) #reportProblemBtn, body:not(.simple-mode) .report-problem-mirror { display: none; }
+#noSelectionPane.hidden + .report-problem-mirror { display: none; }
+.report-problem-mirror { margin-top: 0; }
+.modal.topo-problem { max-width: 36rem; }
+.topo-problem .modal-title { overflow-wrap: anywhere; }
+.pb-sec { border: 0; margin: 0 0 14px; padding: 0; min-width: 0; }
+.pb-head { display: block; margin: 0 0 6px; padding: 0; font-size: var(--fs-label); font-weight: 700; color: var(--text); }
+.pb-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 6px; }
+.pb-tile { position: relative; display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+    cursor: pointer; font-size: var(--fs-sm); color: var(--text-sec); overflow-wrap: anywhere; }
+.pb-tile input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.pb-tile:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pb-tile.on { border-color: var(--accent); color: var(--text); background: var(--accent-faint); font-weight: 600; }
+.pb-glyph { flex: none; font-size: 1.15em; line-height: 1; }
+.pb-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 6px 0 0; }
+.pb-row .select, .pb-row .input { flex: 1 1 10rem; min-width: 0; width: auto; }
+.pb-row .prop-lbl { margin: 0; }
+.pb-row.hidden { display: none; }
+.topo-problem .textarea { width: 100%; }
+.pb-count { margin: 2px 0 0; font-size: var(--fs-micro); text-align: right; }
+.pb-who { display: grid; gap: 6px; }
+.pb-who .input { width: 100%; }
+.pb-remember { margin: 6px 0 0; }
+.pb-contacts { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pb-contact { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
+.pb-contact-text { display: grid; gap: 2px; min-width: 0; flex: 1 1 12rem; }
+.pb-contact-name { font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.pb-contact-why { font-size: var(--fs-sm); color: var(--text-sec); overflow-wrap: anywhere; }
+.pb-contact-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pb-contact-acts .btn { text-decoration: none; }
+.pb-sendto { margin: 0; }
+.pb-acts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.pb-acts .hidden, .topo-problem .modal-foot .hidden { display: none; }
+#problemSend .share-link { margin: 4px 0; }
+#problemCalls:empty { display: none; }
+.pb-pick-banner { position: fixed; left: 50%; top: calc(var(--nav-h, 0px) + 64px); transform: translateX(-50%); z-index: 2147480000;
+    display: flex; align-items: center; gap: 8px; max-width: calc(100% - 32px); padding: 4px 4px 4px 12px;
+    background: rgba(13, 13, 13, 0.92); color: #f5f5f4; border: 1px solid var(--accent); border-radius: 12px; box-shadow: 0 14px 38px rgba(0, 0, 0, 0.6); touch-action: none; }
+.pb-pick-banner[hidden] { display: none; }
+.pb-pick-text { font-size: var(--fs-sm); font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+@media (pointer: coarse) {
+    .topo-problem .modal-foot .btn, .topo-problem .modal-x, .pb-row .btn, .pb-row .select, .pb-row .input, .pb-contact-acts .btn, .pb-acts .btn,
+    .pb-who .input, .pb-pick-cancel, .report-problem-btn { min-height: 44px; min-width: 44px; }
+    .pb-sendto, .pb-remember { min-height: 44px; }
+}
+@media (max-width: 640px) {
+    #problemDialog { padding: 8px; align-items: stretch; }
+    .modal.topo-problem { max-height: calc(100dvh - 16px); }
+    .topo-problem .modal-head { padding: 10px 12px; }
+    .topo-problem .modal-body { padding: 12px; }
+    .topo-problem .modal-foot { padding: 10px 12px; flex-wrap: wrap; }
+}
+
+/* ---- Provider mode (js/providermode.js, step 4) -----------------------------
+   The banner a copy with a problem report arrives with, the strip on the map
+   while working on it, the rail tab with the report, Record visit. Top of
+   the map, under the Map | Table row; one at a time (the banner hides once
+   provider mode is on). The ring round the report's devices is a class, so
+   no export carries it (canvasSvgMarkup takes it off). */
+body:not(.provider-mode) #visitTabBtn { display: none; }
+.alert.topo-incbanner, .topo-pvstrip {
+    position: absolute; top: max(12px, calc(var(--topbar-h, 48px) + 8px)); left: 12px; z-index: 23; max-width: min(36rem, calc(100% - 24px)); margin: 0;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; touch-action: none;
+    box-shadow: var(--topo-float-shadow);
+}
+/* What sits under the top row moves down by the banner's or strip's height
+   (--pmbar-h, js/providermode.js), as it does by the row's (--topbar-h). */
+body.pm-bar #conflictPill { top: max(16px, calc(var(--topbar-h, 48px) + 12px + var(--pmbar-h, 0px))); }
+body.pm-bar .topo-table, body.pm-bar .topo-rack { padding-top: calc(max(16px, calc(var(--topbar-h, 48px) + 8px)) + var(--pmbar-h, 0px)); }
+.alert.topo-incbanner { background: color-mix(in srgb, var(--warn) 12%, var(--bg-card)); }
+.alert.topo-incbanner.hidden, .topo-pvstrip.hidden { display: none; }
+.incbanner-text, .pvstrip-text { flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-sm); }
+.pvstrip-text { font-weight: 700; color: var(--text); }
+.incbanner-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.topo-pvstrip { padding: 4px 6px 4px 12px; background: var(--bg-card); border: 1px solid var(--warn); border-left-width: 3px; border-radius: 8px; }
+.topo-pvstrip .cs-btn, .topo-incbanner .cs-btn { flex: none; min-height: 32px; }
+#layer-nodes .inc-hit { filter: drop-shadow(0 0 2px #f59e0b) drop-shadow(0 0 5px #f59e0b); }
+.pm-panel { padding-top: 6px; }
+.pm-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pm-title { margin: 0; font-size: var(--fs-body, 14px); font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.pm-status { flex: none; padding: 1px 8px; border-radius: 999px; font-size: var(--fs-micro); font-weight: 700; background: var(--accent-faint); color: var(--text-sec); }
+.pm-status.pm-visited { background: color-mix(in srgb, var(--ok, #16a34a) 15%, transparent); }
+.pm-where, .pm-when { margin: 6px 0 0; overflow-wrap: anywhere; }
+.pm-where .link-btn { padding: 0; }
+.pm-words { margin: 8px 0; padding: 6px 10px; border-left: 3px solid var(--warn); background: var(--bg-input, transparent); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-sm); }
+.pm-who { display: grid; gap: 6px; margin: 8px 0; }
+.pm-who-name { font-size: var(--fs-sm); color: var(--text-sec); overflow-wrap: anywhere; }
+.pm-who .btn { text-decoration: none; overflow-wrap: anywhere; }
+.pm-self { margin-top: 10px; }
+.pm-covers { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 6px 0; font-size: var(--fs-sm); }
+.pm-visits { margin: 10px 0 0; }
+.pm-visit-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pm-visit { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.pm-visit-notes { display: block; margin-top: 4px; color: var(--text-sec); white-space: pre-wrap; }
+.vs-times { align-items: flex-end; }
+.vs-time, .vs-field { display: grid; gap: 2px; flex: 1 1 11rem; min-width: 0; }
+.vs-time .input, .vs-field .input { width: 100%; }
+.vs-changes { list-style: none; margin: 4px 0 0; padding: 0; max-height: 12rem; overflow: auto; font-size: var(--fs-sm); }
+.vs-change { padding: 2px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.pb-acts a.btn { text-decoration: none; }
+@media (pointer: coarse) {
+    .topo-pvstrip .cs-btn, .topo-incbanner .cs-btn, .pm-panel .btn, .pm-panel .select, .pm-where .link-btn, .pm-covers .link-btn,
+    .vs-time .input, .vs-field .input, #visitProvider { min-height: 44px; min-width: 44px; }
+}
+@media (max-width: 640px) {
+    .alert.topo-incbanner, .topo-pvstrip { left: 8px; max-width: calc(100% - 16px); }
+    #visitDialog { padding: 8px; align-items: stretch; }
+}
+
+/* ---- Problem reports, the client's side (js/incidents.js, step 4 stage 5) ----
+   The Problems tab (full editor) and the Simple views' lists: one card per
+   report, its visits, and Send again / Mark fixed / Reopen. */
+.inc-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 8px; }
+.inc-row { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; overflow-wrap: anywhere; }
+.inc-row.inc-closed { opacity: 0.8; }
+.inc-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.inc-what { font-weight: 700; color: var(--text); }
+.inc-where, .inc-line { margin: 4px 0 0; font-size: var(--fs-sm); }
+.inc-where .link-btn { padding: 0; }
+.inc-visits { margin-top: 6px; }
+.inc-changes summary { cursor: pointer; font-size: var(--fs-sm); margin-top: 4px; }
+.inc-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.inc-acts .btn { flex: 1 1 auto; justify-content: center; }
+.inc-sub { margin: 10px 0 0; }
+.inc-simple { margin-top: 8px; }
+body:not(.simple-mode) .inc-simple { display: none; }
+#noSelectionPane.hidden ~ #problemsSimpleAll { display: none; }
+.pm-status.pm-closed { background: color-mix(in srgb, var(--ok, #16a34a) 15%, transparent); }
+.pm-status.pm-open, .pm-status.pm-sent { background: color-mix(in srgb, var(--warn, #d97706) 18%, transparent); }
+.landing-card-problems { display: block; font-size: var(--fs-micro, 12px); color: var(--warn, #b45309); font-weight: 600; overflow-wrap: anywhere; }
+@media (pointer: coarse) {
+    .inc-acts .btn, .inc-where .link-btn { min-height: 44px; min-width: 44px; }
+    .inc-changes summary { min-height: 44px; display: flex; align-items: center; }
 }

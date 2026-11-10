@@ -274,7 +274,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       const pp = plan(pm, pt);
       const rp = apply(pm, pp);
       ok('E10 providers matched by name; a device\'s provider follows', item(pp, 'providers:pv1').matchedBy === 'name' && rp.doc.providers.length === 1
-         && rp.doc.providers[0].phone === '555' && nodeOf(rp.doc, 'mo').provider === 'pv1');
+         && rp.doc.providers[0].phone === '555' && (nodeOf(rp.doc, 'mo').providers || []).join() === 'pv1');
 
       // Notes.
       const am = D({ nodes: [dev('n1', 'N', { interfaces: [nic('i1', '')] })], annotations: [{ id: 't1', x: 0, y: 0, text: 'Check', targets: ['n1'] }] });
@@ -564,6 +564,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       const entry = TM.mergeLogEntry({ id: 'lg_1', at: 1700000000000, source: 'closet.json', by: 'Ana', counts: { added: 2, changed: 1, removed: 0, conflicts: 3 }, mode: 'three-way', rev: 'R5' });
       ok('I3 the merge\'s entry, normalized, its summary in English', entry.kind === 'merge' && entry.by === 'Ana' && entry.rev === 'R5' && entry.mode === 'three-way'
          && entry.summary === 'Merged closet.json: 2 added, 1 changed, 0 removed, 3 conflicts.');
+      ok('I3b one conflict is singular in the stored summary', TM.mergeLogEntry({ id: 'lg_2', at: 1, source: 'a.json', counts: { added: 0, changed: 0, removed: 0, conflicts: 1 } }).summary.endsWith(' 1 conflict.'));
       const held = TM.setDigest(fakeDigest);
       const d1 = await TM.appendLogEntry({ nodes: [], log: [e('a', 1), e('b', 2)] }, entry);
       ok('I4 appended last and chained: each prev the digest of the entry before', d1.log.map((x) => x.id).join() === 'a,b,lg_1' && !d1.log[0].prev
@@ -621,7 +622,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
           links: [cab('wl', 'b', 'a', { medium: 'wireless', wifi: { ssid: 'w1' } })] });
         const { p, r } = run(mine, theirs, base);
         ok('J4 a provider and a Wi-Fi network theirs removed while mine used them: conflicts, kept', statusOf(p, 'providers:p1') === 'conflict' && statusOf(p, 'wifi:w1') === 'conflict'
-           && nodeOf(r.doc, 'a').provider === 'p1' && r.doc.links[0].wifi && r.doc.links[0].wifi.ssid === 'w1', JSON.stringify(p.items.map((i) => i.key + ' ' + i.status)));
+           && (nodeOf(r.doc, 'a').providers || []).join() === 'p1' && r.doc.links[0].wifi && r.doc.links[0].wifi.ssid === 'w1', JSON.stringify(p.items.map((i) => i.key + ' ' + i.status)));
         const quiet = D({ providers: [{ id: 'p1', name: 'FiberCo' }], wifi: [{ id: 'w1', ssid: 'Office' }], nodes: clone(base.nodes) });
         const q = plan(quiet, theirs, base);
         ok('J4b untouched and unused on mine: still simply removed', statusOf(q, 'providers:p1') === 'removed' && statusOf(q, 'wifi:w1') === 'removed');
@@ -710,7 +711,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
         const r = apply(mine, p);
         const room = r.doc.groups.find((g) => g.name === 'Room');
         ok('J11 two-way: a provider or SSID of another name, a group of another kind, under the same id is another one', r.doc.providers.length === 2 && r.doc.wifi.length === 2
-           && r.doc.groups.length === 3 && nodeOf(r.doc, 'mo').provider !== 'pv_isp' && room && room.parent !== 'g1', JSON.stringify([r.doc.providers, r.doc.groups]));
+           && r.doc.groups.length === 3 && (nodeOf(r.doc, 'mo').providers || []).join() !== 'pv_isp' && room && room.parent !== 'g1', JSON.stringify([r.doc.providers, r.doc.groups]));
         const ren = D({ groups: [{ id: 'g1', name: 'Head office', kind: 'building' }] });
         ok('J11b a group renamed in place (same kind, same parent) is still the same group', item(plan(mine, ren), 'groups:g1').status === 'conflict');
       }

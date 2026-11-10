@@ -31,7 +31,7 @@ Every feature is described in full in **[docs/FEATURES.md](docs/FEATURES.md)**.
 
 ### File format
 
-A back-up is `topo_<organization>_<site>_<date>.json` and a binder `topo_<organization>_<date>.json` (or `topo_networks_<date>.json`). Both are JSON saved as `application/vnd.carino.topo+json`, and both open with `"$schema": "https://topo.carino.systems/schema/topo-v16.json"` before the envelope (`kind`, `version`, then `name` and `doc`, or `exported` and `sites`). The schema is [`schema/topo-v16.json`](schema/topo-v16.json), a draft that covers the envelope and the document's top-level keys; the field-level spec is step 6 of [docs/SCOPE.md](docs/SCOPE.md). Readers ignore `$schema`, and nothing fetches it.
+A back-up is `topo_<organization>_<site>_<date>.json` and a binder `topo_<organization>_<date>.json` (or `topo_networks_<date>.json`). Both are JSON saved as `application/vnd.carino.topo+json`, and both open with `"$schema": "https://topo.carino.systems/schema/topo-v18.json"` before the envelope (`kind`, `version`, then `name` and `doc`, or `exported` and `sites`). The schema is [`schema/topo-v18.json`](schema/topo-v18.json), a draft that covers the envelope and the document's top-level keys; the field-level spec is step 6 of [docs/SCOPE.md](docs/SCOPE.md). Readers ignore `$schema`, and nothing fetches it.
 - **Private by design.** No server, no upload. The network is kept out of the URL, share links are passphrase-locked (AES-GCM), and there is no field for a Wi-Fi key.
 - **Scale.** A 300-device site redraws, checks and previews a bulk change in tens of milliseconds, held to a budget by a test.
 

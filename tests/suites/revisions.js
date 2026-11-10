@@ -60,20 +60,22 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
   try {
     // ---- A. The format ----
-    ok('the document version is 17', DOC_VERSION === 17);
+    ok('the document version is 18', DOC_VERSION === 18);
     const v16 = { v: 16, nodes: [node('a', 'A')], links: [], searches: [{ id: 's1', name: 'S', query: 'x' }] };
     const frozen = JSON.stringify(v16);
     const m1 = migrateDoc(v16), m2 = migrateDoc(clone(v16));
-    ok('a v16 document migrates to 17, the same twice, input untouched', m1.doc.v === 17 && m1.from === 16 && !m1.newer
+    ok('a v16 document migrates to 18, the same twice, input untouched', m1.doc.v === 18 && m1.from === 16 && !m1.newer
        && JSON.stringify(m1.doc) === JSON.stringify(m2.doc) && JSON.stringify(v16) === frozen
        && JSON.stringify(Object.assign({}, m1.doc, { v: 16 })) === frozen);
-    ok('a v18 document is newer (read-only)', migrateDoc({ v: 18, nodes: [] }).newer === true);
+    ok('a v19 document is newer (read-only)', migrateDoc({ v: 19, nodes: [] }).newer === true);
     ok('isDocShape takes a log and a prior list', isDocShape({ nodes: [], log: [], prior: ['a'] }) && isDocShape({ nodes: [], log: [{ id: 'x' }] }));
     ok('and refuses a log or prior that is not a list', !isDocShape({ nodes: [], log: {} }) && !isDocShape({ nodes: [], prior: 'a' }));
-    ok('withTopoSchema names v17', withTopoSchema({ kind: 'nettopology', doc: { nodes: [] } }).$schema === 'https://topo.carino.systems/schema/topo-v17.json');
+    ok('withTopoSchema names v18', withTopoSchema({ kind: 'nettopology', doc: { nodes: [] } }).$schema === 'https://topo.carino.systems/schema/topo-v18.json');
     const fetchJson = async (u) => { try { const r = await fetch(u); return r.ok ? JSON.parse(await r.text()) : null; } catch (e) { return null; } };
-    const s17 = await fetchJson('schema/topo-v17.json'), s16 = await fetchJson('schema/topo-v16.json');
-    ok('schema v17 parses beside the kept v16', !!s17 && !!s16 && s17.$id.endsWith('topo-v17.json') && s16.$id.endsWith('topo-v16.json'));
+    const s18 = await fetchJson('schema/topo-v18.json'), s17 = await fetchJson('schema/topo-v17.json'), s16 = await fetchJson('schema/topo-v16.json');
+    ok('schema v18 parses beside the kept v17 and v16', !!s18 && !!s17 && !!s16 && s18.$id.endsWith('topo-v18.json') && s17.$id.endsWith('topo-v17.json') && s16.$id.endsWith('topo-v16.json'));
+    ok('v18 describes the problem reports, before the log', !!s18 && Object.keys(s18.$defs.document.properties).indexOf('incidents') === Object.keys(s18.$defs.document.properties).indexOf('log') - 1
+       && /18/.test(s18.$defs.document.properties.v.description));
     ok('it describes rev, base, prior and log on the document', !!s17 && ['rev', 'base', 'prior', 'log'].every((k) => k in s17.$defs.document.properties)
        && s17.$defs.document.properties.log.type === 'array' && /17/.test(s17.$defs.document.properties.v.description));
     ok('and rev, base and prior on a binder site, before its doc', !!s17 && (() => {
@@ -84,7 +86,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- B. The network log ----
     const good = mergeEntry('lg_1', 'r1', { by: ' Ana ', summary: 'x'.repeat(400), prev: 'a'.repeat(64) });
     const norm = normalizeLog([good, null, 5, { id: 'bad id', at: 1, kind: 'merge' }, { id: 'lg_2', at: 0, kind: 'merge' },
-      { id: 'lg_3', at: 2, kind: 'incident' }, { id: 'lg_1', at: 9, kind: 'merge' }, { id: 'lg_4', at: 3, kind: 'merge', counts: { added: -1, changed: 2.5 }, prev: 'ABC', mode: 'sideways', secret: 'x' }]);
+      { id: 'lg_3', at: 2, kind: 'gossip' }, { id: 'lg_1', at: 9, kind: 'merge' }, { id: 'lg_4', at: 3, kind: 'merge', counts: { added: -1, changed: 2.5 }, prev: 'ABC', mode: 'sideways', secret: 'x' }]);
     ok('normalizeLog keeps entries in order, drops malformed and unknown kinds, first of an id', norm.length === 2 && norm[0].id === 'lg_1' && norm[1].id === 'lg_4', JSON.stringify(norm.map((e) => e.id)));
     ok('fields trimmed and cut: by, summary at 160', norm[0].by === 'Ana' && norm[0].summary.length === LOG_SUMMARY_MAX && norm[0].prev === 'a'.repeat(64) && norm[0].rev === 'r1');
     ok('counts default to 0, a bad prev, mode and stray keys dropped', JSON.stringify(norm[1].counts) === '{"added":0,"changed":0,"removed":0,"conflicts":0}'
@@ -116,7 +118,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     let rendered = '';
     await withDocRendered(other, async () => { rendered = state.log.map((e) => e.id).join(); });
     ok('withDocRendered too (a binder report must not leave a site\'s log behind)', rendered === 'lg_other' && state.log.length === 1 && state.log[0].id === 'lg_mine');
-    ok('every key loadDocState writes is held', DOC_STATE_KEYS.includes('log') && DOC_STATE_KEYS.length === 15);
+    ok('every key loadDocState writes is held', DOC_STATE_KEYS.includes('log') && DOC_STATE_KEYS.includes('incidents') && DOC_STATE_KEYS.length === 16);
 
     // ---- C. The store ----
     persistLibrary({});

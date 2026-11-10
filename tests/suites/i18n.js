@@ -146,10 +146,18 @@ window.addEventListener('load', () => { setTimeout(() => {
     ok(`${loc}: so is the drop zone`, !text.includes('Start a new network'));
     // The drop line is two keys around the .nettopo code, read as one
     // sentence; each half once said "here" and "file", so it said them twice.
-    const drop = [...document.querySelectorAll('#landingDrop p')].map((p) => p.textContent).join(' ');
-    const words = drop.toLowerCase().match(/[\p{L}]{4,}/gu) || [];
-    const twice = words.filter((w, i) => words.indexOf(w) !== i);
-    ok(`${loc}: the drop line says each word once`, twice.length === 0, twice.join(' '));
+    // A touch screen reads the other line (M50, .hint-open); each is checked
+    // on its own.
+    [['drop', '.hint-drop'], ['touch', '.hint-open']].forEach(([which, sel]) => {
+      const drop = [...document.querySelectorAll('#landingDrop p')].map((p) => {
+        const c = p.cloneNode(true);
+        c.querySelectorAll(which === 'drop' ? '.hint-open' : '.hint-drop').forEach((x) => x.remove());
+        return c.textContent;
+      }).join(' ');
+      const words = drop.toLowerCase().match(/[\p{L}]{4,}/gu) || [];
+      const twice = words.filter((w, i) => words.indexOf(w) !== i);
+      ok(`${loc}: the ${which} line says each word once`, twice.length === 0 && !!document.querySelector(`#landingDrop ${sel}`), twice.join(' '));
+    });
     ok(`${loc}: the storage warning is translated`, !/this is not an account/i.test(text));
     ok(`${loc}: a card's device count is translated`, !/\d+ devices/.test(text), (text.match(/\d+ devices/) || [])[0]);
     ok(`${loc}: no unfilled placeholder reaches a card`, !/\{\w+\}/.test(text), (text.match(/\{\w+\}/) || [])[0]);
@@ -239,7 +247,7 @@ window.addEventListener('load', () => { setTimeout(() => {
   const grpKeys = new Map();
   ['js/groups.js', 'js/groupmap.js', 'js/rackview.js', 'js/ui.js', 'js/add.js', 'js/diagnostics.js', 'js/app.js',
    'js/report.js', 'js/csv.js', 'js/library.js', 'js/share.js', 'js/table.js', 'js/providers.js', 'js/locate.js', 'js/searches.js', 'js/restore.js',
-   'js/mergeapply.js', 'js/mergeui.js', 'js/mergedoors.js'].forEach((file) => {
+   'js/mergeapply.js', 'js/mergeui.js', 'js/mergedoors.js', 'js/routing.js', 'js/incidents.js', 'js/providermode.js'].forEach((file) => {
     const req = new XMLHttpRequest(); req.open('GET', file, false); req.send();
     firstArgKeys(req.responseText).forEach((k) => grpKeys.set(k.replace(/\\n/g, '\n').replace(/\\(['"\\])/g, '$1'), file));
   });

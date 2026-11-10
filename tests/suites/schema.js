@@ -84,7 +84,7 @@ window.addEventListener('load', () => {
   // And since VLAN/PoE stage 2b (docs/BACKLOG.md feature 4) the Showcase's
   // two PoE switches and their powered devices (portAttrs, poeBudget,
   // poeDraw; tests/suites/vlanmodel.js holds the keys themselves).
-  const LATER_KEYS = ['host', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'serial', 'assetTag', 'provider', 'inService', 'serviced', 'serviceEvery', 'portAttrs', 'poeBudget', 'poeDraw'];
+  const LATER_KEYS = ['host', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'serial', 'assetTag', 'providers', 'inService', 'serviced', 'serviceEvery', 'portAttrs', 'poeBudget', 'poeDraw'];
   // The fourth: Wi-Fi (v12). Smart Home, Retail, Hotel, the Showcase and
   // Common Errors ship radios on their wireless interfaces and associations
   // on their wireless links, which the reference drops (a radio) or never
@@ -97,7 +97,7 @@ window.addEventListener('load', () => {
   const legacyMinusLater = (n) => minusRadio(legacyMinusNetcfg(n));
   // So is a cable's tag (link.cable): the Data Centre and the Showcase ship
   // theirs tagged, which the reference never knew.
-  const currentLinkMinusWifi = (l) => { const o = serializeLink(l); delete o.wifi; delete o.cable; delete o.provider; return o; };
+  const currentLinkMinusWifi = (l) => { const o = serializeLink(l); delete o.wifi; delete o.cable; delete o.providers; return o; };
   const both = (doc) => frozen(() => [
     pipe(doc, legacyNormalizeNode, legacyMinusLater, legacyNormalizeLink, legacySerializeLink),
     pipe(doc, normalizeLoadedNode, currentMinusHost, normalizeLoadedLink, currentLinkMinusWifi)

@@ -264,6 +264,15 @@ const setUnlisted = (c, list) => { if (list.length) c.unlisted = list; };
 // The custom columns have no field list of their own in the schema (an id,
 // a name and a kind); this is it, for the diff.
 const CUSTOM_COLUMN_DIFF_FIELDS = [{ key: 'id', label: 'ID' }, { key: 'name', label: 'Name' }, { key: 'kind', label: 'Kind' }];
+// Nor do the problem reports (v18, js/model.js "Problem reports"): their
+// fields, as the merge review names them.
+const INCIDENT_DIFF_FIELDS = [{ key: 'id', label: 'ID' }, { key: 'at', label: 'Reported on' }, { key: 'status', label: 'Status' }, { key: 'reopened', label: 'Status' },
+    { key: 'symptom', label: 'Problem' }, { key: 'nodeIds', label: 'Devices' }, { key: 'groupId', label: 'Group' }, { key: 'text', label: 'What happened' },
+    { key: 'reporter', label: 'Reported by' }, { key: 'routedTo', label: 'Sent to' }, { key: 'sentAt', label: 'Sent' }, { key: 'visits', label: 'Visits' },
+    { key: 'closedAt', label: 'Closed' }, { key: 'closedNote', label: 'Closed' }];
+// A problem report as a row names it: its symptom and the start of its words.
+// The symptom by its label (translated, js/routing.js), never its key.
+const incidentChangeName = (x) => [x.symptom && typeof symptomLabel === 'function' ? symptomLabel(x.symptom) : x.symptom, String(x.text || '').slice(0, 60)].filter(Boolean).join(': ') || x.id;
 
 function customChanges(old, now, cur, base) {
     const a = old.extra || {}, b = now.extra || {};
@@ -367,6 +376,9 @@ function docChanges(baseDoc, curDoc) {
     const providers = simple(pair(base.providers, cur.providers, (p) => ({ id: p.id, name: p.name || p.id })), PROVIDER_FIELDS, (p) => p.name || p.id);
     const columns = simple(pair(base.columns, cur.columns, (c) => ({ id: c.id, name: c.name })), CUSTOM_COLUMN_DIFF_FIELDS, (c) => c.name);
     const searches = simple(pair(base.searches, cur.searches, (s) => ({ id: s.id, name: s.name || s.id })), SEARCH_FIELDS, (s) => s.name || s.id);
+    // The problem reports (v18): reported, sent, visited, closed.
+    const incidents = simple(pair(base.incidents, cur.incidents, (x) => ({ id: x.id, name: incidentChangeName(x) })), INCIDENT_DIFF_FIELDS);
+    incidents.changed.forEach((c) => { c.fields = [...new Set(c.fields)]; });
 
     // The expected lives by type: the types whose years differ (set, changed
     // or cleared back to Topo's usual), said in one row.
@@ -402,12 +414,12 @@ function docChanges(baseDoc, curDoc) {
     const hWas = base.report || {}, hNow = cur.report || {};
     const header = REPORT_FIELDS.filter(({ key }) => key !== 'date' && (hWas[key] || '') !== (hNow[key] || '')).map(({ label }) => label);
 
-    const out = { devices, cables, subnets, wifi, groups, providers, columns, searches, expectedLife, tableView, notes, accepted, pinned, header };
+    const out = { devices, cables, subnets, wifi, groups, providers, columns, searches, incidents, expectedLife, tableView, notes, accepted, pinned, header };
     out.other = unsaidParts(base, cur, out);
 
     const count = (g) => g.added.length + g.removed.length + g.changed.length;
     out.total = count(devices) + devices.moved.length + count(cables) + count(subnets) + count(wifi) + count(groups)
-        + count(providers) + count(columns) + count(searches) + (expectedLife.length ? 1 : 0) + (tableView ? 1 : 0) + count(notes)
+        + count(providers) + count(columns) + count(searches) + count(incidents) + (expectedLife.length ? 1 : 0) + (tableView ? 1 : 0) + count(notes)
         + accepted.added + accepted.reopened + pinned.added + pinned.removed + (header.length ? 1 : 0) + out.other.length;
     return out;
 }
@@ -417,7 +429,7 @@ function docChanges(baseDoc, curDoc) {
 const CHANGE_KINDS = {
     nodes: { kind: 'devices', what: 'Device' }, links: { kind: 'cables', what: 'Cable' }, networks: { kind: 'subnets', what: 'Subnet' },
     groups: { kind: 'groups', what: 'Group' }, wifi: { kind: 'wifi', what: 'Wi-Fi network' }, providers: { kind: 'providers', what: 'Provider' },
-    columns: { kind: 'columns', what: 'Custom column' }, searches: { kind: 'searches', what: 'Saved search' },
+    columns: { kind: 'columns', what: 'Custom column' }, searches: { kind: 'searches', what: 'Saved search' }, incidents: { kind: 'incidents', what: 'Problem report' },
     annotations: { kind: 'notes', what: 'Text notes' }, accepted: { what: 'Accepted findings' }, pinned: { what: 'Pinned findings' },
     expectedLife: { what: 'Expected life by type' }, tableView: { what: 'Table layout' }, report: { what: 'Report header' }
 };
@@ -511,6 +523,7 @@ function changeRows(ch) {
     listed(ch.providers, 'Provider');
     listed(ch.columns, 'Custom column');
     listed(ch.searches, 'Saved search');
+    listed(ch.incidents, 'Problem report');
     if (ch.expectedLife && ch.expectedLife.length) {
         rows.push({ op: t('Changed'), what: t('Expected life by type'), name: '', detail: ch.expectedLife.map((k) => t(typeName(k))).join(', ') });
     }

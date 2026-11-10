@@ -180,6 +180,22 @@ function locatePanelHtml(path) {
     return parts.join('');
 }
 
+// Whose it is, for the reduced views: "Who looks after this: Fibra Norte
+// (Internet), Andes IT (IT support, through Office)." Every provider that
+// answers for it, per service (nodeProviders, js/model.js). In a network
+// that lists no provider at all it says nothing.
+function whoseSentence(node) {
+    if (!node || !(state.providers || []).length) return '';
+    const list = nodeProviders(node);
+    if (!list.length) return t('No provider is named for this.');
+    const item = (r) => {
+        const why = [r.provider.service ? providerServiceLabel(r.provider.service) : '',
+            r.via === 'group' ? t('through {name}', { name: groupLabel(r.from) }) : r.via === 'host' ? t('through {name}', { name: r.from.name || r.from.id }) : ''].filter(Boolean);
+        return why.length ? `${providerLabel(r.provider)} (${why.join(', ')})` : providerLabel(r.provider);
+    };
+    return t('Who looks after this: {list}.', { list: list.map(item).join(', ') });
+}
+
 // The path last drawn, for the buttons.
 let _locatePath = null;
 function renderLocate(node) {
@@ -190,6 +206,11 @@ function renderLocate(node) {
     const sentence = locateEl('locateSentence');
     const plain = node && isReduced() ? locatePlainSentence(locatePath(node)) : '';
     if (sentence && sentence.textContent !== plain) sentence.textContent = plain;
+    const whose = locateEl('whoseSentence');
+    const whoText = node && isReduced() ? whoseSentence(node) : '';
+    if (whose && whose.textContent !== whoText) whose.textContent = whoText;
+    // This device's problems not closed, in the reduced views (js/incidents.js).
+    if (typeof renderProblemsSimple === 'function') renderProblemsSimple(node);
     if (!node || isReduced()) { _locatePath = null; locateEl('locateBody').innerHTML = ''; locateEl('locateSummary').textContent = ''; return; }
     const path = locatePath(node);
     _locatePath = path;
@@ -221,7 +242,7 @@ function locateShowOnMap(path = _locatePath) {
     // On a phone the rail is a drawer over the map: shut, so the fit shows
     // (as openRackView and showFindingOnMap do).
     const ws = document.querySelector('.topo-ws');
-    if (ws && ws.classList.contains('drawer-open') && window.matchMedia('(max-width: 900px)').matches) {
+    if (ws && ws.classList.contains('drawer-open') && mqMatches(DRAWER_MQ)) {
         const toggle = document.querySelector('[data-ws-toggle]');
         if (toggle) toggle.click();
     }
@@ -253,7 +274,7 @@ function openLocate() {
     if (!node) return false;
     if (typeof showConfigTab === 'function') showConfigTab('config');
     const ws = document.querySelector('.topo-ws');
-    if (ws && !ws.classList.contains('drawer-open') && window.matchMedia('(max-width: 900px)').matches) {
+    if (ws && !ws.classList.contains('drawer-open') && mqMatches(DRAWER_MQ)) {
         const toggle = document.querySelector('[data-ws-toggle]');
         if (toggle) toggle.click();
     }

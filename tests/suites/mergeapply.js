@@ -154,7 +154,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('D2 its time moves on', m4.updated > 5000);
     ok('D3 the network on screen is untouched, nothing to undo', state.libraryId === 'm3' && JSON.stringify(serializeDoc()) === openJson && undoOff());
     ok('D4 the restore point and the revision are its', R.restorePointsOf('m4').length === 1 && R.restorePointsOf('m4')[0].reason === 'Before merging a link' && RV.hasRevision('m4', 'revL'));
-    ok('D5 a link reads as such in the log', logEntryText(m4.doc.log[1]) === 'Merged a link: 2 added, 1 changed, 0 removed, 1 conflicts.', logEntryText(m4.doc.log[1]));
+    ok('D5 a link reads as such in the log', logEntryText(m4.doc.log[1]) === 'Merged a link: 2 added, 1 changed, 0 removed, 1 conflict.', logEntryText(m4.doc.log[1]));
     putCards(card('m3', 'Open one', D({ nodes: [dev('x', 'Kept')] })), card('m5', 'Another', MINE));
     await openFromLibrary('m3');
     res = await commitMerge({ targetId: 'm5', theirs: clone(THEIRS), source: 'Torre B', reason: 'Before merging {name}', name: 'Torre B' });
@@ -209,7 +209,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     openLogDialog('m11');
     const rows = [...document.querySelectorAll('#logList .log-row')];
     ok('G2 a row per entry, newest first', rows.length === 2 && rows[0].dataset.id === state.log[1].id && rows[1].dataset.id === 'lg_old1');
-    ok('G3 each in words: what, the mode and who', rows[0].textContent.includes('Merged x.json: 2 added, 1 changed, 0 removed, 1 conflicts.')
+    ok('G3 each in words: what, the mode and who', rows[0].textContent.includes('Merged x.json: 2 added, 1 changed, 0 removed, 1 conflict.')
        && rows[0].textContent.includes('Two-way merge') && rows[0].textContent.includes('by Ana Ruiz'), rows[0].textContent);
     ok('G4 nothing to press: read-only', !document.querySelector('#logList button, #logList input'));
     ok('G5 the name of the network', document.getElementById('logName').textContent === 'Busy');
@@ -254,6 +254,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const many = Array.from({ length: 60 }, (_, i) => ({ id: `lg_m${i}`, at: Date.UTC(2026, 0, 1) + i * 86400000, kind: 'merge', source: `<b>f${i}</b>.json`, counts: { added: i, changed: 0, removed: 0, conflicts: 0 }, mode: 'three-way' }));
     const sec = logReportSection(many);
     ok('H4 at most 50, then how many earlier', (sec.match(/<tr>/g) || []).length === 51 && sec.includes('…and 10 earlier entries.') && sec.includes('f59') && !sec.includes('>f9<') && !sec.includes('f9</b>'));
+    ok('H4b one earlier entry is one', logReportSection(many.slice(0, 51)).includes('…and 1 earlier entry.') && !logReportSection(many.slice(0, 51)).includes('1 earlier entries'));
     ok('H5 a file name with markup is text', !sec.includes('<b>f') && sec.includes('&lt;b&gt;f59'));
     ok('H6 the mode in words', sec.includes('Three-way merge'));
 
@@ -264,6 +265,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       'The network changed since the merge was reviewed: review it again.', 'Merged {source}: {added} added, {changed} changed, {removed} removed, {conflicts} conflicts.', 'Back-up cancelled.', 'Network log', 'Network log…',
       'Nothing has been merged into this network yet.', 'The entry of {date} does not follow from the one before it: this log was edited outside Topo.',
       'What was merged into this network from other copies, newest first. The log travels with the network.', '…and {n} earlier entries.', 'Merge',
+      'Merged {source}: {added} added, {changed} changed, {removed} removed, {conflicts} conflict.', '…and {n} earlier entry.',
       'Each merge into this network from another copy, newest first.',
       'Each merge into this network from another copy, newest first: where it came from, who merged it and what it changed. The log travels with the network in its files and links, and cannot be edited here.'];
     const missing = [];
@@ -272,6 +274,20 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('I2 the merge reasons are restore reasons', MA.MERGE_REASONS.every((r) => R.RESTORE_REASONS.includes(r)));
     setLocale('es');
     ok('I3 a reason reads in the language shown', R.restoreReasonText({ reason: 'Before merging {file}', fileName: 'a.json' }) === 'Antes de fusionar a.json');
+    setLocale('en');
+    // Plurals (step 3): one conflict is one, more are more; Russian and
+    // Japanese read after any numeral.
+    const lg = (k) => logEntryText({ kind: 'merge', source: 'x.json', counts: { added: 0, changed: 0, removed: 0, conflicts: k } });
+    ok('I4 one conflict, two conflicts', lg(1).endsWith(' 1 conflict.') && lg(2).endsWith(' 2 conflicts.') && lg(0).endsWith(' 0 conflicts.'), lg(1) + ' | ' + lg(2));
+    setLocale('ru');
+    ok('I5 Russian: the count after a colon, whatever it is', lg(1).endsWith('конфликтов: 1.') && lg(3).endsWith('конфликтов: 3.'), lg(1));
+    setLocale('es');
+    // Spanish and Portuguese: every count after its label, so one of each
+    // never reads "1 añadidos".
+    const lg1 = () => logEntryText({ kind: 'merge', source: 'x.json', counts: { added: 1, changed: 1, removed: 1, conflicts: 1 } });
+    ok('I6 Spanish: each count after its label, whatever it is', lg1() === 'Se fusionó x.json: añadidos: 1, cambiados: 1, eliminados: 1, conflictos: 1.' && lg(2).endsWith('conflictos: 2.'), lg1());
+    setLocale('pt-BR');
+    ok('I7 Portuguese: the same', lg1() === 'x.json mesclado: adicionados: 1, alterados: 1, removidos: 1, conflitos: 1.', lg1());
     setLocale('en');
   } catch (err) {
     ok('the suite ran without throwing', false, String(err && err.stack || err));

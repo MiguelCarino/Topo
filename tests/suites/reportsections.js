@@ -95,7 +95,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 1. reportParts().sections ----
     const def = reportParts().sections;
     ok('every section key is in the map', show(Object.keys(def)) === show(KEYS), show(def));
-    ok('every one on by default but the Ports table, the Network log and the Address history', KEYS.every((k) => def[k] === !(k === 'capPorts' || k === 'history' || k === 'log')), show(def));
+    ok('every one on by default but the Ports table, the Problems and visits, the Network log and the Address history', KEYS.every((k) => def[k] === !(k === 'capPorts' || k === 'history' || k === 'log' || k === 'incidents')), show(def));
     ok('history is no longer reserved: it has a tick (stage 5)', REPORT_SECTIONS.find((s) => s.key === 'history').on === false
        && REPORT_SECTIONS.filter((s) => s.reserved).length === 0);
     const given = reportParts({ sections: { devices: false, capPorts: true, bogus: false, racks: 'no', history: true } }).sections;
@@ -171,7 +171,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // have not: tests/suites/addresshistory.js holds it.
     // The Network log needs a log, which no shipped template has: it is
     // held just below (and in tests/suites/mergeapply.js).
-    const printable = KEYS.filter((k) => !REPORT_SECTIONS.find((s) => s.key === k).reserved && k !== 'history' && k !== 'log');
+    // The Problems and visits need a report, which no shipped template has
+    // either: held below too.
+    const printable = KEYS.filter((k) => !REPORT_SECTIONS.find((s) => s.key === k).reserved && k !== 'history' && k !== 'log' && k !== 'incidents');
     ok('every section turns up in some document here', printable.every((k) => seen.has(k)), show(printable.filter((k) => !seen.has(k))));
     ok('each tick takes out exactly its own section and leaves every other byte for byte', !wrong.length, show(wrong));
     {
@@ -185,6 +187,24 @@ window.addEventListener('load', () => { setTimeout(async () => {
       ok('a network with a log: its section after Changes', hs.indexOf('Network log') === hs.indexOf('Changes since the last back-up') + 1, show(hs));
       ok('and its tick takes out only it', show(cut(lOn).filter(([h]) => h !== 'Network log')) === show(cut(lOff)));
       ok('off by default', !reportSheet(lm, null, {}).includes('<h2>Network log</h2>'));
+    }
+    {
+      // A network with a problem report and a visit (docs/SCOPE.md step 4):
+      // the Problems and visits tick prints them after Changes, before the
+      // Network log, the visit read from the log by id.
+      const im = modelOf(closet);
+      im.incidents = [{ id: 'inrs1', at: Date.UTC(2026, 10, 9, 9), status: 'visited', symptom: 'internet', nodeIds: [], text: 'Nothing loads.',
+        reporter: { name: 'Ana', phone: '555-1' }, routedTo: [], visits: ['lg_rsv', 'lg_gone'] }];
+      im.log = [{ id: 'lg_rsv', at: Date.UTC(2026, 10, 9, 12), kind: 'visit', incidentId: 'inrs1', providerId: 'pX', provider: 'Fibra', by: 'Juan', outcome: 'fixed', notes: 'New cable.' }];
+      const iOn = reportSheet(im, null, { sections: allOn });
+      const iOff = reportSheet(im, null, { sections: Object.assign({}, allOn, { incidents: false }) });
+      const hs = cut(iOn).map(([h]) => h);
+      ok('a network with a report: Problems and visits after Changes, before the Network log',
+         hs.indexOf('Problems and visits') === hs.indexOf('Changes since the last back-up') + 1 && hs.indexOf('Network log') === hs.indexOf('Problems and visits') + 1, show(hs));
+      ok('it prints the words, the reporter, the visit and its notes, and says a visit it does not hold',
+         iOn.includes('Nothing loads.') && iOn.includes('Ana · 555-1') && iOn.includes('Visit by Juan (Fibra)') && iOn.includes('New cable.') && iOn.includes('A visit recorded elsewhere.'));
+      ok('its tick takes out only it', show(cut(iOn).filter(([h]) => h !== 'Problems and visits')) === show(cut(iOff)));
+      ok('off by default', !reportSheet(im, null, {}).includes('<h2>Problems and visits</h2>'));
     }
     // A diagram too big for the text goes on a landscape page of its own;
     // its tick takes that page as well.
@@ -279,26 +299,31 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // REPORT_SECTIONS (the Ports table then always printed). A change to a
     // template or to what a report says changes these on purpose: take them
     // again then, from the code before that change.
+    // Taken again for document v18 (several providers per item, inherited
+    // per service): bank and hospital name two providers on their edge
+    // firewall, and the devices of callcenter, datacenter and imaging that
+    // name a provider of their own now also list their group's provider of
+    // another service.
     const GOLD = {
-    bank: ['b02b266d:34217', '4df7c99c:31530', 'c36d1624:37324'],
+    bank: ['6db1518a:34269', '9f660fdc:31567', '87be14b6:37361'],
     bank_simple: ['4cbc5acd:30308', '5ad7d3d4:28479', '5d0d6954:34273'],
-    callcenter: ['aa6a730e:46332', '65bcec9:42802', 'f8cae98f:48596'],
+    callcenter: ['349ae468:46351', '79f3f9d2:42821', 'de73cf8c:48615'],
     callcenter_simple: ['10bb7a54:33414', '654ce373:31298', '8e0a2761:37092'],
     campus: ['566b9018:38211', '344e78d1:35649', 'c13cb769:41443'],
     campus_simple: ['eeef9155:33191', '1b9c0f26:31255', '4a19cc0e:37049'],
-    datacenter: ['9cafa1d8:58868', '39b63f18:55090', '6d2c65ee:60884'],
+    datacenter: ['4ec1cadd:58885', '8980fe50:55107', '4825bddc:60901'],
     datacenter_simple: ['6a860c30:31898', 'c8c83dac:30187', '519b18d2:35981'],
     errors: ['54db3a2f:33979', '37b9eded:31026', 'b88a55eb:36820'],
     errors_simple: ['957e7dbc:26359', 'dd7494ce:24586', 'cd97b70c:30380'],
     factory: ['a5d5bce7:33142', '34ccda28:30766', '69212bbe:36560'],
     factory_simple: ['50d279b1:31571', '21287f2f:29536', 'e62954ef:35330'],
-    hospital: ['43306c93:39229', '9322f6c5:36243', 'aa54a49d:42037'],
+    hospital: ['f0bfe455:39274', '80c6cab2:36273', 'bef52c9e:42067'],
     hospital_simple: ['78288263:35582', '5493d4df:33351', '7e38d559:39145'],
     hotel: ['4aa89791:40890', 'f928ca4e:38026', '5c549808:43820'],
     hotel_simple: ['849d5e5:32521', 'e97f3e1b:30410', 'cf59aa07:36204'],
     house: ['a15e7cdf:28956', '1bdfd127:27162', 'af501519:32956'],
     house_simple: ['9a2c600b:25418', 'c0b7319:24048', 'f169ba35:29842'],
-    imaging: ['1cd040f1:53915', 'd9ce29f6:49504', 'd8260a96:55298'],
+    imaging: ['1d4cd6b9:53927', 'd1436e27:49516', '9f6eaa2b:55310'],
     imaging_simple: ['e055bd4f:31514', 'e7457325:29549', '17e36c81:35343'],
     military: ['cd1b629e:46075', 'd6d22480:43367', '87309776:49161'],
     military_simple: ['577e0e8:31427', 'cf592765:29418', 'e1205503:35212'],

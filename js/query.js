@@ -129,7 +129,9 @@ const qPeer = (link, nodeId) => getNode(link.source === nodeId ? link.target : l
 // front face. Where a device sits is searched by its path instead (plain
 // text below, loc: and group:).
 // A host is an id too: "s_lq3" would find its VMs by a string nobody reads.
-const Q_SKIP = new Set(['id', 'x', 'y', 'interfaces', 'source', 'target', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'portsFace', 'host']);
+// So are providers (v18, a list of ids): they are found by name (plain text
+// below, and provider:).
+const Q_SKIP = new Set(['id', 'x', 'y', 'interfaces', 'source', 'target', 'group', 'rackU', 'rackHeight', 'rackFace', 'rackDepth', 'portsFace', 'host', 'providers']);
 const qFieldsHave = (fields, rec, v) => !!rec && fields.some((f) => !Q_SKIP.has(f.key) && qHas(rec[f.key], v));
 
 // A typed fragment that reads as part of a MAC (aa:bb, aa-bb-cc, or six or
@@ -140,8 +142,14 @@ const Q_MAC_FRAGMENT = /^(?:[0-9a-f]{2}[:-]){1,5}[0-9a-f]{0,2}$|^[0-9a-f]{6,12}$
 function qNodeFieldText(node, q) {
     if (qFieldsHave(NODE_FIELDS, node, q.v)) return true;
     const name = typeName(node.type);
-    return qHas(name, q.v) || qHas(t(name), q.v) || qHas(groupPathOf(node), q.v);
+    return qHas(name, q.v) || qHas(t(name), q.v) || qHas(groupPathOf(node), q.v)
+        || providerRefsOf(node).some((id) => { const p = providerById(id); return !!p && qHas(p.name, q.v); });
 }
+// provider: a provider that answers for it (its own, its hosts' or its
+// groups', per service: nodeProviders) by name or by service, in English or
+// in the language on screen: provider:fibra, provider:internet.
+const qProviderHas = (p, v) => !!p && (qHas(p.name, v) || qLower(p.id) === v
+    || (!!p.service && (qLower(p.service) === v || qHas(PROVIDER_SERVICE_LABEL[p.service], v) || qHas(providerServiceLabel(p.service), v))));
 // A device's port labels too: an object of objects, which the schema walk
 // reads as no text. Only while it has a faceplate: a switch retyped to a PC
 // keeps them in memory, but the page no longer shows them, so a search must
@@ -163,6 +171,7 @@ const Q_PLAIN = {
     port: (p, q) => qPortText(p, q) || qNodeFieldText(p.node, q) || qIfaces(p.node).some((i) => qIfaceText(i, q)) || (!!p.peer && Q_PLAIN.node(p.peer, q)),
     iface: (n, i, q) => qIfaceText(i, q) || qNodeOwnText(n, q),
     link: (l, q) => qFieldsHave(LINK_FIELDS, l, q.v) || qFieldsHave(CABLE_FIELDS, l.cable, q.v) || qHas(mediumName(effectiveMedium(l)), q.v)
+        || linkProviders(l).some((p) => qHas(p.name, q.v))
         || (!!l.wifi || effectiveMedium(l) === 'wireless') && qLinkSsid(l, q.v)
         || [l.source, l.target].some((id) => { const n = getNode(id); return !!n && Q_PLAIN.node(n, q); }),
     // A Wi-Fi network (the table's Wi-Fi tab) by its own fields and its
@@ -218,6 +227,8 @@ const Q_HAS = {
     model: (n) => !isBlank(n.model),
     notes: (n) => !isBlank(n.notes),
     tag: (n) => !isBlank(n.assetTag),
+    // Someone answers for it, its own or inherited (v18).
+    provider: (n) => nodeProviders(n).length > 0,
     cable: (n) => linksAtNode(n.id).length > 0,
     group: (n) => !!groupOfNode(n),
     host: (n) => !!hostOf(n),
@@ -237,12 +248,13 @@ const Q_HAS = {
 // has: values that read this browser's trail, never the document.
 const Q_HAS_LOCAL = ['history'];
 const Q_HAS_ALIAS = { findings: 'finding', problem: 'finding', warning: 'advisory', gw: 'gateway', address: 'ip', cables: 'cable', note: 'notes', groups: 'group',
-    fw: 'os', firmware: 'os', guest: 'guests', 'wi-fi': 'wifi', wireless: 'wifi', radio: 'wifi' };
+    fw: 'os', firmware: 'os', guest: 'guests', 'wi-fi': 'wifi', wireless: 'wifi', radio: 'wifi', providers: 'provider' };
 const Q_HAS_LINK = {
     finding: (l) => !!qLinkSeverity(l),
     critical: (l) => qLinkSeverity(l) === 'bad',
     advisory: (l) => qLinkSeverity(l) === 'warn',
-    wifi: (l) => !!wifiLinkEnds(l)
+    wifi: (l) => !!wifiLinkEnds(l),
+    provider: (l) => linkProviders(l).length > 0
 };
 // An interface row asks its own address and MAC, not its device's.
 const Q_HAS_IFACE = { ip: (n, i) => !!qAddrOf(i.ip), mac: (n, i) => hasMac(i), wifi: (n, i) => ifaceIsWireless(i), trunk: (n, i) => qIfaceTrunk(i) };
@@ -478,6 +490,9 @@ const Q_PREFIXES = {
     model: { field: 'model', node: (n, q) => qHas(n.model, q.v) },
     fw: { field: 'os', node: (n, q) => qHas(n.os, q.v) },
     host: { field: 'host', node: (n, q) => hostChainOf(n).some((h) => qHas(h.name, q.v) || qLower(h.id) === q.v) },
+    // Who answers for it (v18): a device by nodeProviders, a cable by its own.
+    provider: { field: 'providers', node: (n, q) => nodeProviders(n).some((r) => qProviderHas(r.provider, q.v)),
+                link: (l, q) => linkProviders(l).some((p) => qProviderHas(p, q.v)) },
     ssid: { node: (n, q) => qNodeSsid(n, q.v),
             iface: (n, i, q) => (ifaceIsWireless(i) && (n.type === 'ap' || isRoutingDevice(n.type)) && apSsids(radioOf(i)).some((id) => qSsidHas(id, q.v)))
                 || linksAtNode(n.id).some((l) => ifaceIdOn(l, n.id) === i.id && !!wifiLinkEnds(l) && qLinkSsid(l, q.v)),
@@ -511,7 +526,7 @@ const Q_PREFIXES = {
                return !!own || [l.source, l.target].some((id) => { const n = getNode(id); return !!n && Q_HAS[q.has](n); });
            } }
 };
-const Q_ALIAS = { location: 'loc', grp: 'group', make: 'vendor', firmware: 'fw', os: 'fw' };
+const Q_ALIAS = { location: 'loc', grp: 'group', make: 'vendor', firmware: 'fw', os: 'fw', providers: 'provider' };
 const qKnown = (key) => {
     const k = Object.prototype.hasOwnProperty.call(Q_ALIAS, key) ? Q_ALIAS[key] : key;
     const def = k && Object.prototype.hasOwnProperty.call(Q_PREFIXES, k) ? Q_PREFIXES[k] : null;
@@ -889,7 +904,33 @@ function flushQuery() {
     qEl('querySelectBtn').addEventListener('click', () => { if (flushQuery()) selectQueryMatches(); });
     qEl('queryZoomBtn').addEventListener('click', () => { if (flushQuery()) zoomToQueryMatches(); });
     qEl('queryLocateBtn').addEventListener('click', () => { if (flushQuery()) locateQueryMatch(); });
+    wireQueryMore();
 })();
+
+// A phone's ⋯ (M36): its items press the card's own buttons, which the
+// phone's CSS hides, so each one is the button it stands for (its handler,
+// its flush). As it opens, each item takes its button's state: gone where
+// the button is (Zoom over the table, Locate on no single device), disabled
+// where it is, and Save's ☆ / ★ words.
+function wireQueryMore() {
+    const btn = qEl('queryMoreBtn'), panel = qEl('queryMorePanel');
+    if (!btn || !panel) return;
+    const sync = () => panel.querySelectorAll('[data-q-proxy]').forEach((item) => {
+        const real = qEl(item.dataset.qProxy);
+        if (!real) { item.hidden = true; return; }
+        item.hidden = real.classList.contains('hidden') || real.hidden;
+        item.disabled = real.disabled;
+        if (item.dataset.qProxy === 'querySaveBtn') item.textContent = real.textContent;
+        if (real.title) item.title = real.title; else item.removeAttribute('title');
+    });
+    btn.addEventListener('click', () => sync());
+    panel.addEventListener('click', (e) => {
+        const item = e.target.closest('[data-q-proxy]');
+        if (!item || item.disabled) return;
+        const real = qEl(item.dataset.qProxy);
+        if (real && !real.disabled) real.click();
+    });
+}
 
 // How far down the pane the top row reaches, as --topbar-h on the body, for
 // the findings panel and the table to start below (css/app.css). Measured,

@@ -26,7 +26,9 @@
 //      shows its own panel from the top; with the library not kept open, two
 //      Switch taps in a row work (the palette is not folded away while the
 //      drawer is open) and it folds again on close; a stale add is not
-//      panned to again on a later open and close.
+//      panned to again on a later open and close;
+//   9. My networks (from the drawer's Export menu) opens the landing and
+//      closes the drawer, which would otherwise stay over it.
 window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
@@ -323,6 +325,26 @@ window.addEventListener('load', () => { setTimeout(async () => {
     await wait(50);
     ok('a device added with the drawer closed is not panned to again on a later open and close', json([state.camera.x, state.camera.y]) === cam0, json([state.camera.x, state.camera.y]) + ' vs ' + cam0);
     ok('no horizontal scroll', document.documentElement.scrollWidth <= window.innerWidth);
+    // ---- 9. My networks from the drawer ----
+    // The landing opened from the drawer's Export menu is not left under
+    // the open drawer: the drawer closes, as its ✕ does.
+    await openDrawer();
+    el('myNetworksBtn').click();
+    await settle();
+    ok('9 My networks opens the landing and closes the drawer', landingIsOpen() && !drawerOpen() && el('handyMenu').getAttribute('aria-expanded') === 'false',
+       json([landingIsOpen(), drawerOpen(), el('handyMenu').getAttribute('aria-expanded')]));
+    closeLanding();
+    await settle();
+    // 9b. The same through the drawer header's 🗂️ (step 3): in sight, 44x44, a tap.
+    await openDrawer();
+    const nb9 = el('drawerNetworksBtn').getBoundingClientRect();
+    ok('9b My networks is in the drawer header, 44x44', nb9.width >= 44 && nb9.height >= 44 && nb9.right <= el('railClose').getBoundingClientRect().left + 1
+       && el('drawerNetworksBtn').getAttribute('aria-label') === 'My networks', json([nb9.width, nb9.height]));
+    await tapEl(el('drawerNetworksBtn'));
+    await settle();
+    ok('9b its tap opens the landing and closes the drawer', landingIsOpen() && !drawerOpen(), json([landingIsOpen(), drawerOpen()]));
+    closeLanding();
+    await settle();
   } catch (e) {
     ok('the suite ran to the end', false, e && (e.stack || e.message));
   } finally {

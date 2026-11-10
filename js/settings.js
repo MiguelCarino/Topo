@@ -20,6 +20,8 @@
 //            And whether the Simple views' device panel shows a short
 //            read-only history (off unless ticked). In every view (the
 //            owner, 2026-11-05).
+//   Problem reports  the name, phone and email Report a problem fills in
+//            (js/incidents.js): kept here only, carried by a report sent.
 //   About    what Topo is, what it keeps and sends (the same words as the
 //            navbar's About), the document version, and the licence,
 //            contact and legal page behind the navbar's About.
@@ -51,6 +53,11 @@ function renderSettings() {
     if (trail) trail.checked = state.settings.trailRecording !== false;
     const simple = setEl('setTrailSimple');
     if (simple) simple.checked = state.settings.trailSimple === true;
+    const rep = state.settings.reporter || {};
+    [['setReporterName', 'name'], ['setReporterPhone', 'phone'], ['setReporterEmail', 'email']].forEach(([id, k]) => {
+        const f = setEl(id);
+        if (f && document.activeElement !== f) f.value = rep[k] || '';
+    });
     fillDocVersion();
 }
 // The document format version, in the navbar's About window (index.html's
@@ -125,7 +132,16 @@ function onSettingsStorage(e) {
 }
 window.addEventListener('storage', onSettingsStorage);
 
+const SETTINGS_REPORTER_FIELDS = { setReporterName: 'name', setReporterPhone: 'phone', setReporterEmail: 'email' };
 function onSettingsInput(e) {
+    if (SETTINGS_REPORTER_FIELDS[e.target.id]) {
+        // Problem reports (js/incidents.js): who reports from this browser.
+        const next = Object.assign({}, state.settings.reporter || {}, { [SETTINGS_REPORTER_FIELDS[e.target.id]]: e.target.value });
+        const rep = normalizeReporterSetting(next);
+        if (rep) state.settings.reporter = rep; else delete state.settings.reporter;
+        saveSettings();
+        return;
+    }
     if (e.target.id !== 'setEngineer') return;
     state.settings.reportEngineer = String(e.target.value || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, SETTINGS_ENGINEER_MAX);
     saveSettings();

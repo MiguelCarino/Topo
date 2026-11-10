@@ -455,7 +455,7 @@ function binderMergeText(result) {
     const more = [];
     if (result.replaced) more.push(t(result.replaced === 1 ? '{n} replaced by its copy.' : '{n} replaced by their copies.', { n: result.replaced }));
     if (result.skipped) more.push(t('{n} skipped.', { n: result.skipped }));
-    return [text, ...more].join(' ');
+    return joinSentences([text, ...more]);
 }
 
 // Published for tests/suites/mergedoors.js.

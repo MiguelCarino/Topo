@@ -783,6 +783,10 @@ function insertBlockNow(block, opts) {
         const nid = nextId('s'); idMap[n.id] = nid; newIds.push(nid);
         const node = normalizeLoadedNode({ ...n, id: nid, x: snap(c.x + (Number(n.x) || 0)), y: snap(c.y + (Number(n.y) || 0)) });
         dropBlockPlace(node);   // a block from a file or card that still carries one
+        // A block is a shape, not a contract: its provider ids name the
+        // providers of the map it came from, and here would bind to whatever
+        // this map calls by the same id.
+        delete node.providers;
         state.nodes.push(node);
     });
     // A VM's host is a device id like a cable's end, so it is renamed the same
@@ -814,6 +818,7 @@ function insertBlockNow(block, opts) {
     (doc.links || []).forEach((l) => {
         if (!l || !idMap[l.source] || !idMap[l.target]) return;
         const link = normalizeLoadedLink({ ...l, id: nextId('sl'), source: idMap[l.source], target: idMap[l.target] });
+        delete link.providers;   // as a device's: not this map's providers
         state.links.push(link); newLinks.push(link);
     });
     const ids = new Set(newIds);

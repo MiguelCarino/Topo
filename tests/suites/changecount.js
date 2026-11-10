@@ -53,7 +53,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     tableView: { devices: { hidden: ['mac'] } },
     searches: [{ id: 'sq_1', name: 'PCs', query: 'type:pc' }, { id: 'sq_2', name: 'Routers', query: 'type:router' }],
     annotations: [{ id: 'a1', x: 0, y: 50, text: 'Note' }],
-    report: { site: 'Casa Roma' }
+    report: { site: 'Casa Roma' },
+    // A problem report (v18).
+    incidents: [{ id: 'in1', at: 1762600000000, status: 'open', symptom: 'internet', nodeIds: ['p'], text: 'No internet', reporter: { name: 'Ana' } }]
   });
   const edit = (fn) => { const d = fx(); fn(d); return d; };
   const both = (a, b) => [docChangeCount(a, b), docChangeCount(b, a)];
@@ -161,7 +163,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
       ['pinned', 'the pins reordered', (d) => { d.pinned.reverse(); }],
       ['expectedLife', 'an expected life', (d) => { d.expectedLife = { pc: 6 }; }],
       ['tableView', 'the table layout', (d) => { d.tableView = { devices: { hidden: ['mac', 'ip'] } }; }],
-      ['report', 'a report header field', (d) => { d.report.client = 'Ana'; }]
+      ['report', 'a report header field', (d) => { d.report.client = 'Ana'; }],
+      ['incidents', 'a problem report sent', (d) => { d.incidents[0].status = 'sent'; d.incidents[0].sentAt = 1762600100000; }],
+      ['incidents', 'a problem report added', (d) => { d.incidents.push({ id: 'in2', at: 1762600200000, status: 'open', symptom: 'printer', text: 'Jammed' }); }]
     ];
     const silent = [], wrongCount = [], generic = [];
     cases.forEach(([key, label, fn]) => {
@@ -201,6 +205,12 @@ window.addEventListener('load', () => { setTimeout(async () => {
     expect('a provider edited: its row names the field', (d) => { d.providers[0].phone = '555 0100'; }, 'Changed|Provider|FiberCo|Phone');
     expect('a provider renamed', (d) => { d.providers[0].name = 'FibraNet'; }, 'Changed|Provider|FibraNet|renamed from FiberCo');
     expect('a provider added', (d) => { d.providers.push({ id: 'pv2', name: 'PowerCo' }); }, 'Added|Provider|PowerCo|');
+    expect('a problem report sent: its row names the fields', (d) => { d.incidents[0].status = 'sent'; d.incidents[0].sentAt = 1762600100000; }, 'Changed|Problem report|No internet: No internet|Status, Sent');
+    expect('a problem report added', (d) => { d.incidents.push({ id: 'in2', at: 1762600200000, status: 'open', symptom: 'printer', text: 'Jammed' }); }, 'Added|Problem report|Printer: Jammed|');
+    setLocale('es');
+    { const got = one((d) => { d.incidents.push({ id: 'in3', at: 1762600300000, status: 'open', symptom: 'printer', text: 'Atasco' }); });
+      ok('a problem report\'s row names the symptom in the reader\'s language, never its key', got.split('|')[2] === t('Printer') + ': Atasco' && t('Printer') !== 'Printer', got); }
+    setLocale('en');
     expect('a custom column renamed', (d) => { d.columns[0].name = 'Inventory no.'; }, 'Changed|Custom column|Inventory no.|renamed from Asset tag');
     expect('a custom column’s kind', (d) => { d.columns[1].kind = 'number'; }, 'Changed|Custom column|Floor|Kind');
     expect('a saved search removed', (d) => { d.searches.pop(); }, 'Removed|Saved search|Routers|');

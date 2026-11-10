@@ -1,7 +1,8 @@
 // ---- Providers in the editor (js/model.js "Providers", document v15) ----
 // Who is responsible for what, so someone new to the site, or from another
-// company, knows whom to call. The data is doc.providers, and node.provider,
-// link.provider and group.provider name one by id. This file is where they
+// company, knows whom to call. The data is doc.providers, and node.providers,
+// link.providers and group.providers name them by id (several per item since
+// v18; inheritance is per service, nodeProviders). This file is where they
 // are edited:
 //
 //   the Providers tab  one card per provider in the rail, next to Groups and
@@ -11,11 +12,12 @@
 //                      offers the usual kinds (Internet, IT support, …) as
 //                      one click each. Always offered in the full editor:
 //                      any network has someone to call.
-//   the pickers        a Provider select on a device (under its Group), on a
-//                      cable (under its material) and on a group's card.
-//                      Unset, a device's says who answers for it anyway (its
-//                      host's provider, or its group's), and the last entry
-//                      makes a new provider on the spot.
+//   the pickers        a Providers list on a device (under its Group), on a
+//                      cable (under its material) and on a group's card:
+//                      chips with ✕ and an Add provider… select. A device's
+//                      says who answers for the services it names nobody for
+//                      (its host's providers, or its groups'), and the last
+//                      entry makes a new provider on the spot.
 //
 // Plain words, so translated, as the Groups tab is: a provider list is for
 // whoever reads the report, technical or not. None of it is in a reduced
@@ -265,46 +267,70 @@ function selectProviderCovers(id) {
 }
 
 // The hover's words (Settings: Show the provider on hover): what it is, who
-// answers for it and how to reach them. r is nodeProvider()'s answer, or
-// null. -> '' when nobody does.
-function providerTipText(name, r) {
-    if (!r || !r.provider) return '';
-    const p = r.provider;
-    const whose = r.via === 'group' ? t('through {name}', { name: groupLabel(r.from) })
-        : r.via === 'host' ? t('through {name}', { name: r.from.name || r.from.id }) : '';
-    return [name,
-        `${t('Provider')}: ${providerLabel(p)}${p.service ? ` · ${providerServiceLabel(p.service)}` : ''}${whose ? ` (${whose})` : ''}`,
-        [p.contact, p.phone, p.email].filter(Boolean).join(' · '),
-        p.hours || ''].filter(Boolean).join('\n');
+// answers for it and how to reach them, one provider a line. list is
+// nodeProviders()'s answer ([{ provider, via, from }]), or a cable's records
+// (linkProviders). -> '' when nobody does.
+function providerTipText(name, list) {
+    const rows = (Array.isArray(list) ? list : []).map((r) => (r && r.provider ? r : { provider: r, via: 'own' })).filter((r) => r.provider);
+    if (!rows.length) return '';
+    const lines = [name];
+    rows.forEach((r) => {
+        const p = r.provider;
+        const whose = r.via === 'group' ? t('through {name}', { name: groupLabel(r.from) })
+            : r.via === 'host' ? t('through {name}', { name: r.from.name || r.from.id }) : '';
+        lines.push(`${t('Provider')}: ${providerLabel(p)}${p.service ? ` · ${providerServiceLabel(p.service)}` : ''}${whose ? ` (${whose})` : ''}`);
+        const reach = [p.contact, p.phone, p.email].filter(Boolean).join(' · ');
+        if (reach) lines.push(reach);
+        if (p.hours) lines.push(p.hours);
+    });
+    return lines.join('\n');
 }
 
 // ============================================================================
 // The pickers: a device, a cable, a group
 // ============================================================================
-// The options of a Provider select: none (saying what answers instead, when
-// something does), every provider, and New provider…
-function providerOptionsHtml(selected, noneText) {
-    const option = (value, label, on) => `<option value="${escapeHtml(value)}"${on ? ' selected' : ''}>${escapeHtml(label)}</option>`;
-    const sorted = (state.providers || []).slice().sort((a, b) => providerLabel(a).localeCompare(providerLabel(b)));
-    return option('', noneText || t('— None'), !selected)
-        + sorted.map((p) => option(p.id, providerLabel(p) + (p.service ? ` · ${providerServiceLabel(p.service)}` : ''), selected === p.id)).join('')
-        + (readOnlyDoc() ? '' : option(PV_NEW, t('+ New provider…'), false));
+// An item names several providers (v18): its list as chips, each with ✕ to
+// remove it, and an "Add provider…" select of the providers it does not name
+// yet, then New provider…. Each add or remove is one undo step.
+const providerOptionText = (p) => providerLabel(p) + (p.service ? ` · ${providerServiceLabel(p.service)}` : '');
+// The Add select's options: a placeholder, the providers not in `ids`, by
+// name, and New provider….
+function providerAddOptionsHtml(ids) {
+    const option = (value, label) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+    const have = new Set(ids || []);
+    const sorted = (state.providers || []).filter((p) => !have.has(p.id)).sort((a, b) => providerLabel(a).localeCompare(providerLabel(b)));
+    return option('', t('Add provider…'))
+        + sorted.map((p) => option(p.id, providerOptionText(p))).join('')
+        + (readOnlyDoc() ? '' : option(PV_NEW, t('+ New provider…')));
+}
+// The chips of a list, or a dim "none" (saying what answers instead, when
+// something does). data-pv-remove on each ✕.
+function providerChipsHtml(ids, noneText) {
+    const list = (ids || []).map((id) => providerById(id)).filter(Boolean);
+    if (!list.length) return noneText ? `<span class="net-muted pv-none">${escapeHtml(noneText)}</span>` : '';
+    return list.map((p) => `<span class="pv-chip">${escapeHtml(providerOptionText(p))}${readOnlyDoc() ? ''
+        : `<button type="button" class="pv-chip-x" data-pv-remove="${escapeHtml(p.id)}" aria-label="${escapeHtml(t('Remove {name}', { name: providerLabel(p) }))}">✕</button>`}</span>`).join('');
 }
 const readOnlyDoc = () => !!state.readOnly;
-// "From its group Server room: Acme IT" for a device that names none itself.
+// "From its group Server room: Acme IT (IT support)" for every provider a
+// device inherits, one line each.
 function inheritedProviderText(node) {
-    const r = node && !node.provider ? nodeProvider(node) : null;
-    if (!r) return '';
-    return r.via === 'host'
-        ? t('From its host {name}: {provider}', { name: r.from.name || r.from.id, provider: providerLabel(r.provider) })
-        : t('From its group {name}: {provider}', { name: groupLabel(r.from), provider: providerLabel(r.provider) });
+    if (!node) return '';
+    return nodeProviders(node).filter((r) => r.via !== 'own').map((r) => {
+        const pv = providerOptionText(r.provider);
+        return r.via === 'host'
+            ? t('From its host {name}: {provider}', { name: r.from.name || r.from.id, provider: pv })
+            : t('From its group {name}: {provider}', { name: groupLabel(r.from), provider: pv });
+    }).join('\n');
 }
 function renderNodeProviderPicker(node) {
     const sel = pvEl('propProvider');
     if (!sel) return;
     const inherited = inheritedProviderText(node);
-    sel.innerHTML = providerOptionsHtml(node && node.provider, inherited ? t('— As its group or host') : t('— None'));
-    sel.value = node && providerById(node.provider) ? node.provider : '';
+    const chips = pvEl('propProviderChips');
+    if (chips) chips.innerHTML = providerChipsHtml(providerRefsOf(node), inherited ? '' : t('— None'));
+    sel.innerHTML = providerAddOptionsHtml(providerRefsOf(node));
+    sel.value = '';
     const note = pvEl('providerNote');
     if (note) { note.textContent = inherited; note.classList.toggle('hidden', !inherited); }
 }
@@ -313,16 +339,35 @@ function renderLinkProviderPicker(link) {
     if (!box || !sel) return;
     box.classList.toggle('hidden', !link || isReduced());
     if (!link) return;
-    sel.innerHTML = providerOptionsHtml(link.provider);
-    sel.value = providerById(link.provider) ? link.provider : '';
+    const chips = pvEl('propLinkProviderChips');
+    if (chips) chips.innerHTML = providerChipsHtml(providerRefsOf(link), t('— None'));
+    sel.innerHTML = providerAddOptionsHtml(providerRefsOf(link));
+    sel.value = '';
 }
-// A picker's value onto `rec` (a device, a cable or a group), New provider…
-// asking its name first. One undo step, with the new provider when one is
-// made. -> true when it changed.
-async function pickProvider(rec, value) {
+// `ids` as `rec`'s list (a device, a cable or a group), in doc.providers'
+// order. One undo step, with `made` (a provider New provider… minted) in it.
+// -> true when it changed.
+function setProviders(rec, ids, made = null) {
     if (!rec || readOnlyRefuses()) return false;
-    let id = value || '';
-    let made = null;
+    const before = providerRefsOf(rec).join();
+    const all = (state.providers || []).concat(made ? [made] : []);
+    const rank = new Map(all.map((p, i) => [p.id, i]));
+    const next = [...new Set(ids || [])].filter((id) => rank.has(id)).sort((a, b) => rank.get(a) - rank.get(b));
+    if (next.join() === before && !made) return false;
+    batch(() => {
+        if (made) state.providers = all;
+        if (next.length) rec.providers = next; else delete rec.providers;
+        delete rec.provider;
+        save(); renderCanvasOnly();
+    });
+    refreshProviderViews(true);
+    return true;
+}
+// The Add select's value onto `rec`: a provider's id adds it, New provider…
+// asks the name first and adds the one it makes, in the same step.
+async function addProviderTo(rec, value) {
+    if (!rec || !value || readOnlyRefuses()) return false;
+    let id = value, made = null;
     if (id === PV_NEW) {
         const text = await askPrompt(t('The provider\'s name, as it should be printed:'), { title: t('Add a provider'), ok: t('Add') });
         const name = text === null ? '' : providerLine(PROVIDER_NAME_MAX)(text);
@@ -330,17 +375,10 @@ async function pickProvider(rec, value) {
         if ((state.providers || []).length >= PROVIDER_MAX) { showToast(t('A network holds at most {n} providers.', { n: PROVIDER_MAX })); return false; }
         made = makeProvider({ name });
         id = made.id;
-    }
-    if (!made && id && !providerById(id)) id = '';
-    if ((rec.provider || '') === id && !made) return false;
-    batch(() => {
-        if (made) state.providers = (state.providers || []).concat(made);
-        if (id) rec.provider = id; else delete rec.provider;
-        save(); renderCanvasOnly();
-    });
-    refreshProviderViews(true);
-    return true;
+    } else if (!providerById(id)) return false;
+    return setProviders(rec, providerRefsOf(rec).concat(id), made);
 }
+const removeProviderFrom = (rec, id) => (rec ? setProviders(rec, providerRefsOf(rec).filter((x) => x !== id)) : false);
 
 (function wireProviders() {
     const panel = pvPanel();
@@ -352,16 +390,34 @@ async function pickProvider(rec, value) {
     }
     const add = pvEl('addProviderBtn');
     if (add) add.addEventListener('click', () => addProvider());
+    const selectedNode = () => (state.selectedType === 'node' ? getNode(state.selectedId) : null);
+    const selectedLink = () => (state.selectedType === 'link' ? getLink(state.selectedId) : null);
     const nodeSel = pvEl('propProvider');
     if (nodeSel) nodeSel.addEventListener('change', async (e) => {
-        const node = state.selectedType === 'node' ? getNode(state.selectedId) : null;
-        await pickProvider(node, e.target.value);
+        const node = selectedNode();
+        await addProviderTo(node, e.target.value);
         if (node) renderNodeProviderPicker(getNode(node.id) || node);
+    });
+    const nodeChips = pvEl('propProviderChips');
+    if (nodeChips) nodeChips.addEventListener('click', (e) => {
+        const x = e.target.closest('[data-pv-remove]');
+        const node = selectedNode();
+        if (!x || !node) return;
+        removeProviderFrom(node, x.dataset.pvRemove);
+        renderNodeProviderPicker(getNode(node.id) || node);
     });
     const linkSel = pvEl('propLinkProvider');
     if (linkSel) linkSel.addEventListener('change', async (e) => {
-        const link = state.selectedType === 'link' ? getLink(state.selectedId) : null;
-        await pickProvider(link, e.target.value);
+        const link = selectedLink();
+        await addProviderTo(link, e.target.value);
         if (link) renderLinkProviderPicker(getLink(link.id) || link);
+    });
+    const linkChips = pvEl('propLinkProviderChips');
+    if (linkChips) linkChips.addEventListener('click', (e) => {
+        const x = e.target.closest('[data-pv-remove]');
+        const link = selectedLink();
+        if (!x || !link) return;
+        removeProviderFrom(link, x.dataset.pvRemove);
+        renderLinkProviderPicker(getLink(link.id) || link);
     });
 })();

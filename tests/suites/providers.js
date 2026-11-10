@@ -1,5 +1,8 @@
 // Providers (js/model.js "Providers", js/providers.js, document v15): who is
 // responsible for what, so someone new to the site knows whom to call.
+//   (Several per item since v18: tests/suites/providersmulti.js holds the
+//   lists, the per-service inheritance and the CSV "A; B" cells; this
+//   suite's fixtures still say provider: 'pT', read as a list of one.)
 //   1. the model: doc.providers through PROVIDER_FIELDS (a service by any of
 //      its words, an email checked, no key at all when there are none), a
 //      v14 document opening as v15, a reference to a provider the document
@@ -74,14 +77,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
     open({ v: DOC_VERSION, nodes: [N('a', 'pc')], links: [] });
     ok('a document that never named a provider has no providers key', !/"providers?"/.test(JSON.stringify(saved())));
     open(site({ nodes: site().nodes.concat(N('ghost', 'pc', { provider: 'nobody' })) }));
-    ok('a reference to a provider the document does not hold is dropped', getNode('ghost').provider === undefined && getNode('gw').provider === 'pT');
+    ok('a reference to a provider the document does not hold is dropped', getNode('ghost').providers === undefined && (getNode('gw').providers || []).join() === 'pT');
     ok('they are written in order, every field', JSON.stringify(saved().providers[0]) === '{"id":"pT","name":"Telmex","service":"internet","phone":"800 123 4567","email":"soporte@telmex.example","account":"ACC-1","hours":"24/7"}', JSON.stringify(saved().providers[0]));
-    const who = (id) => { const r = nodeProvider(getNode(id)); return r ? `${r.provider.id}/${r.via}/${r.from.id}` : ''; };
+    const who = (id) => nodeProviders(getNode(id)).map((r) => `${r.provider.id}/${r.via}/${r.from.id}`).join();
     ok('a device\'s own provider', who('gw') === 'pT/own/gw');
     ok('else its innermost group\'s', who('srv') === 'pA/group/gR' && who('pc') === '');
-    getNode('srv').provider = 'pT';
-    ok('a VM with none of its own is its host\'s', who('vm') === 'pT/host/srv', who('vm'));
-    delete getNode('srv').provider;
+    getNode('srv').providers = ['pT'];
+    ok('a VM with none of its own is its host\'s, and per service its host\'s group\'s', who('vm') === 'pT/host/srv,pA/group/gR', who('vm'));
+    delete getNode('srv').providers;
     ok('else its host\'s group\'s', who('vm') === 'pA/group/gR', who('vm'));
     const cov = providerCovers('pA');
     ok('what a provider covers: through the group too, and the groups naming it', cov.nodes.map((n) => n.id).join() === 'srv,vm' && cov.groups.map((g) => g.id).join() === 'gR' && !cov.own.length);
@@ -128,7 +131,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // the provider the click made stays.
     ok('typing is undone apart from making the provider', state.providers.length === 1 && state.providers[0].phone === undefined && state.providers[0].service === 'internet', JSON.stringify(state.providers[0]));
     state.providers[0].name = 'Totalplay'; save();
-    getNode('isp').provider = pid; save(); renderProvidersPanel(true);
+    getNode('isp').providers = [pid]; save(); renderProvidersPanel(true);
     const card = el('providerList').querySelector(`.pv-card[data-pv="${pid}"]`);
     ok('the card says what it covers', /Responsible for 1 device/.test(card.textContent), card.textContent.replace(/\s+/g, ' ').slice(0, 160));
     el('providerList').querySelector(`[data-act="covers"][data-pv="${pid}"]`).click();
@@ -136,9 +139,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     answers.push(() => true);
     el('providerList').querySelector(`[data-act="delete"][data-pv="${pid}"]`).click();
     await tick(); await tick();
-    ok('Delete: the provider goes, the cloud stays with none', state.providers.length === 0 && !!getNode('isp') && getNode('isp').provider === undefined);
+    ok('Delete: the provider goes, the cloud stays with none', state.providers.length === 0 && !!getNode('isp') && getNode('isp').providers === undefined);
     undo();
-    ok('and that is one undo step', state.providers.length === 1 && getNode('isp').provider === pid);
+    ok('and that is one undo step', state.providers.length === 1 && (getNode('isp').providers || []).join() === pid);
 
     // ---- 3. The pickers ----
     open();
@@ -147,44 +150,45 @@ window.addEventListener('load', () => { setTimeout(async () => {
     select('srv', 'node');
     ok('one in a group that names one says so', !el('providerNote').classList.contains('hidden') && /From its group Server room: Acme IT/.test(el('providerNote').textContent), el('providerNote').textContent);
     change(el('propProvider'), 'pT'); await tick();
-    ok('picked, it is the device\'s own', getNode('srv').provider === 'pT' && el('providerNote').classList.contains('hidden'));
+    ok('picked, it is the device\'s own, a chip; the group\'s IT support still answers for the rest', (getNode('srv').providers || []).join() === 'pT'
+       && /Telmex/.test(el('propProviderChips').textContent) && /Acme IT/.test(el('providerNote').textContent) && el('propProvider').value === '');
     undo();
-    ok('one undo step', getNode('srv').provider === undefined);
+    ok('one undo step', getNode('srv').providers === undefined);
     answers.push(() => 'Hikvision Partner');
     select('pc', 'node');
     change(el('propProvider'), PV_NEW); await tick(); await tick();
     const made = state.providers.find((p) => p.name === 'Hikvision Partner');
-    ok('New provider… makes one and sets it', !!made && getNode('pc').provider === made.id && el('propProvider').value === made.id);
+    ok('New provider… makes one and sets it', !!made && (getNode('pc').providers || []).join() === made.id && /Hikvision Partner/.test(el('propProviderChips').textContent));
     undo();
-    ok('in one undo step', !state.providers.some((p) => p.name === 'Hikvision Partner') && getNode('pc').provider === undefined);
+    ok('in one undo step', !state.providers.some((p) => p.name === 'Hikvision Partner') && getNode('pc').providers === undefined);
     select('l1', 'link');
     ok('a cable has a picker too', !el('linkProviderProps').classList.contains('hidden') && el('propLinkProvider').value === '');
     change(el('propLinkProvider'), 'pA'); await tick();
-    ok('and keeps it', getLink('l1').provider === 'pA');
+    ok('and keeps it', (getLink('l1').providers || []).join() === 'pA');
     select(null);
     showConfigTab('groups');
     el('groupList').querySelector('[data-act="edit"][data-grp="gB"]').click();
-    const gsel = el('groupList').querySelector('[data-field="provider"][data-grp="gB"]');
+    const gsel = el('groupList').querySelector('[data-field="providers"][data-grp="gB"]');
     ok('a group\'s card has a picker', !!gsel && gsel.value === '');
     change(gsel, 'pA'); await tick();
-    ok('set on the building, its desk is Acme IT\'s', groupById('gB').provider === 'pA' && who('pc') === 'pA/group/gB');
+    ok('set on the building, its desk is Acme IT\'s', (groupById('gB').providers || []).join() === 'pA' && who('pc') === 'pA/group/gB');
     showConfigTab('config');
     // The bulk panel sets one on many devices, or many cables: a pick of the
     // network's providers, one undo step.
     open();
-    let bp = bulkPlanSet(['pc', 'srv'], { provider: { text: 'pT' } });
-    ok('bulk Set fields: a provider on two devices', !bp.errors.length && bp.counts.change === 2, JSON.stringify(bp.counts));
+    let bp = bulkPlanSet(['pc', 'srv'], { providers: { text: 'add:pT' } });
+    ok('bulk Set fields: a provider added on two devices', !bp.errors.length && bp.counts.change === 2, JSON.stringify(bp.counts));
     applyBulkPlan(bp);
-    ok('applied to both', getNode('pc').provider === 'pT' && getNode('srv').provider === 'pT');
+    ok('applied to both', (getNode('pc').providers || []).join() === 'pT' && (getNode('srv').providers || []).join() === 'pT');
     undo();
-    ok('in one undo step', getNode('pc').provider === undefined && getNode('srv').provider === undefined);
-    ok('a provider the network lacks is refused', bulkPlanSet(['pc'], { provider: { text: 'nobody' } }).errors.length === 1);
-    bp = bulkPlanSet(['l1', 'l2'], { provider: { text: 'pA' } }, 'link');
+    ok('in one undo step', getNode('pc').providers === undefined && getNode('srv').providers === undefined);
+    ok('a provider the network lacks is refused', bulkPlanSet(['pc'], { providers: { text: 'nobody' } }).errors.length === 1);
+    bp = bulkPlanSet(['l1', 'l2'], { providers: { text: 'pA' } }, 'link');
     applyBulkPlan(bp);
-    ok('and on cables', getLink('l1').provider === 'pA' && getLink('l2').provider === 'pA', JSON.stringify(bp.errors));
+    ok('and on cables (a bare name or id adds it)', (getLink('l1').providers || []).join() === 'pA' && (getLink('l2').providers || []).join() === 'pA', JSON.stringify(bp.errors));
     selectEntries([{ type: 'node', id: 'pc' }, { type: 'node', id: 'srv' }]);
-    const bsel = document.querySelector('#bulkFields select[data-key="provider"]');
-    ok('the panel offers it as a pick of the providers', !!bsel && [...bsel.options].map((o) => o.value).join() === ',pT,pA', bsel && [...bsel.options].map((o) => o.value).join());
+    const bsel = document.querySelector('#bulkFields select[data-key="providers"]');
+    ok('the panel offers Add and Only per provider (Remove and None once one is named)', !!bsel && [...bsel.options].map((o) => o.value).join() === ',add:pT,add:pA,only:pT,only:pA', bsel && [...bsel.options].map((o) => o.value).join());
     select(null);
 
     // ---- 4. The report ----
@@ -208,11 +212,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const f = pvFinding();
     ok('a cloud nobody is named for: an info note', !!f && f.level === 'info' && f.nodeIds.join() === 'isp' && /whom to call/.test(f.detail));
     ok('never counted', !isCountedFinding(f) && !reportModel().findings.some((x) => x.key === 'provider'));
-    getLink('k').provider = 'p'; renderCanvasOnly();
+    getLink('k').providers = ['p']; renderCanvasOnly();
     ok('a provider on the cable into it answers', !pvFinding());
-    delete getLink('k').provider; getNode('isp').provider = 'p'; renderCanvasOnly();
+    delete getLink('k').providers; getNode('isp').providers = ['p']; renderCanvasOnly();
     ok('so does one on the cloud', !pvFinding());
-    delete getNode('isp').provider; getNode('isp').siteRef = { name: 'Torre A' }; renderCanvasOnly();
+    delete getNode('isp').providers; getNode('isp').siteRef = { name: 'Torre A' }; renderCanvasOnly();
     ok('a cloud standing for another site is not the internet', !pvFinding());
 
     // ---- 6. The hover ----
@@ -255,7 +259,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const badRef = planOf('name,provider\r\nGateway,Nobody Inc\r\n');
     ok('a device sheet naming an unknown provider is refused for that row', badRef.counts.conflict === 1, JSON.stringify(badRef.rows.map((r) => r.why)));
     // The whole round trip into a blank map: providers first, as Wi-Fi.
-    const sig = () => JSON.stringify({ p: state.providers, n: state.nodes.map((n) => [n.name, n.provider ? providerById(n.provider).name : '']), l: state.links.map((l) => [l.id, l.provider ? providerById(l.provider).name : '']), g: state.groups.map((g) => [g.name, g.provider ? providerById(g.provider).name : '']) });
+    const pvNames = (x) => providerRefsOf(x).map((id) => providerById(id).name).join('; ');
+    const sig = () => JSON.stringify({ p: state.providers, n: state.nodes.map((n) => [n.name, pvNames(n)]), l: state.links.map((l) => [l.id, pvNames(l)]), g: state.groups.map((g) => [g.name, pvNames(g)]) });
     const want = sig();
     const sheets = { P: csvText(csvProvidersSheet()), G: csvText(csvGroupsSheet()), S: csvText(csvSubnetsSheet()), D: csvText(csvDevicesSheet()), I: csvText(csvInterfacesSheet()), C: csvText(csvCablesSheet()) };
     replaceDocument({ v: DOC_VERSION, nodes: [], links: [] }, { origin: 'file' });

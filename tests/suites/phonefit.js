@@ -85,6 +85,21 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // A huge map on a phone still floors at 0.1 for an explicit fit.
     c = frameCamera({ minX: 0, minY: 0, maxX: 100000, maxY: 100 }, PHONE_VIEW, { phone: true });
     ok('an explicit fit floors at 0.1 on a phone', c.zoom === 0.1, String(c.zoom));
+    // M37 (owner decision 2026-11-10, docs/MOBILE.md): a reduced
+    // view's first view is the whole map when it fits at 0.33 or more; a
+    // bigger one keeps the floor; the full editor keeps it whatever the fit.
+    ok('the reduced views\' overview threshold is 0.33', SIMPLE_OVERVIEW_ZOOM === 0.33);
+    const wide = (fit) => ({ minX: 0, minY: 0, maxX: (390 - 32) / fit, maxY: 100 });
+    c = frameCamera(wide(0.45), PHONE_VIEW, { phone: true, initial: true, overview: true });
+    ok('a reduced view\'s first view of a map that fits at 0.45 is all of it', near(c.zoom, 0.45, 1e-9) && inside(wide(0.45), c, PHONE_VIEW), json(c));
+    c = frameCamera(wide(0.35), PHONE_VIEW, { phone: true, initial: true, overview: true });
+    ok('one that fits at 0.35 is all of it too', near(c.zoom, 0.35, 1e-9) && inside(wide(0.35), c, PHONE_VIEW), json(c));
+    c = frameCamera(wide(0.3), PHONE_VIEW, { phone: true, initial: true, overview: true });
+    ok('one that fits only at 0.3 keeps the 0.7 floor', c.zoom === 0.7, json(c));
+    c = frameCamera(wide(0.45), PHONE_VIEW, { phone: true, initial: true });
+    ok('the full editor keeps the floor at 0.45', c.zoom === 0.7, json(c));
+    c = frameCamera(wide(0.45), PHONE_VIEW, { phone: true, overview: true });
+    ok('an explicit fit is unchanged by it', near(c.zoom, 0.45, 1e-9), json(c));
 
     // ---- 2. Off a phone it is the old framing ----
     let same = true, bad = null;
