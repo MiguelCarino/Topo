@@ -199,10 +199,12 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // Print the NVR's label from the site, as the Print labels button does.
     await openFromLibrary(siteCard);
     let downloaded = null;
-    window.open = () => null;   // no tab: the download fallback hands back the file name
+    window.open = () => null;   // never a tab: the sheet is previewed first (js/sheetpreview.js)
     const realClick = HTMLAnchorElement.prototype.click;
     HTMLAnchorElement.prototype.click = function () { downloaded = this.download; };
     const printed = printAssetLabels([{ type: 'node', id: 'nvr' }]);
+    // The preview's Download hands over the file, under the labels name.
+    if (printed && printed.previewed) { await printed.ready; document.getElementById('sheetPreviewDownload').click(); }
     HTMLAnchorElement.prototype.click = realClick;
     window.open = heldOpen;
     ok('Print labels makes a label for the NVR', !!printed && printed.set.devices.length === 1 && /-labels-/.test(downloaded || ''), downloaded);

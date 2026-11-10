@@ -110,7 +110,18 @@ const ifaceIsWireless = (iface) => !iface ? false
 
 // Date.now() alone collides when a node + link + iface are created in one tick.
 let idSeq = 0;
-const nextId = (prefix) => `${prefix}_${Date.now().toString(36)}${(idSeq++).toString(36)}`;
+let _idClock = null;    // set by withFixedIds: a fixed clock instead of Date.now()
+const nextId = (prefix) => `${prefix}_${(_idClock !== null ? _idClock : Date.now()).toString(36)}${(idSeq++).toString(36)}`;
+// fn() with the ids it mints made the same way every time: a fixed clock and
+// a sequence from 0, the live sequence put back after. For comparing two
+// documents through the serializer (canonicalDoc): a record with no id, or a
+// repeated one, gets an id there, and two passes over the same document must
+// give it the same one or the copy looks changed.
+function withFixedIds(fn) {
+    const seq = idSeq, clock = _idClock;
+    idSeq = 0; _idClock = 0;
+    try { return fn(); } finally { idSeq = seq; _idClock = clock; }
+}
 // For ids that must not collide across machines (a library card, a history
 // entry), where a per-tab counter is not enough: 64 random bits, base 36.
 const randomToken = () => Array.from(crypto.getRandomValues(new Uint32Array(2)), (n) => n.toString(36)).join('');

@@ -2905,6 +2905,7 @@ function applyLocale(lang) {
     document.getElementById('exportPngBtn').textContent = `🖼️ ${t('PNG image')}`;
     document.getElementById('exportSvgBtn').innerHTML = `🖼️ ${t('SVG image')} <span class="cs-menu-note">${t('vector')}</span>`;
     document.getElementById('exportJsonBtn').innerHTML = `📄 ${t('Back up this network')} <span class="cs-menu-note">.json</span>`;
+    document.getElementById('restorePointsBtn').textContent = `↺ ${t('Restore points…')}`;
     document.getElementById('csvMenuBtn').innerHTML = `📊 ${t('Spreadsheet')} <span class="cs-menu-note">CSV · TSV</span>`;
     document.getElementById('reportBtn').innerHTML = `📋 ${t('Site report')} <span class="cs-menu-note">${t('printable')}</span>`;
     document.getElementById('myNetworksBtn').innerHTML = `🗂️ ${t('My networks')} <span class="cs-menu-note">${t('saved here')}</span>`;
@@ -3333,14 +3334,30 @@ async function applyImportedDoc(parsed, opts = {}) {
     // `sites` array full of things that look like documents, and because this
     // is the one door: the drop zone, "Open a file" and the File menu's
     // "Open a file…" all arrive here, and the file itself says which it is.
-    if (applyImportedBinder(parsed)) return true;
+    const binder = binderFromImported(parsed);
+    if (binder) {
+        // The open network's pending edit goes into its card first, so what
+        // is compared (and kept as a restore point) is what is on screen.
+        if (isKept() && !state.readOnly) flushAutosave();
+        // A card with edits the binder's copy has not got is asked about
+        // (binderLossGuard): added as a copy, or updated anyway.
+        const sites = await binderLossGuard(parsed.sites);
+        if (!sites) return false;
+        // The cards it replaces get a restore point first (js/restore.js),
+        // and Cancel, when one cannot be stored, stops here.
+        const over = binderOverwrites(sites);
+        if (over.length && !(await keepRestorePoints(over, binderImportReason(opts.fileName), { fileName: opts.fileName }))) return false;
+        return applyImportedBinder(sites === parsed.sites ? parsed : Object.assign({}, parsed, { sites }), { pointsTaken: true, fileName: opts.fileName });
+    }
     const doc = docFromImported(parsed);
     if (!doc) { showToast(t('That file does not look like a Topo build or binder.'), 'err'); return false; }
     const ident = docIdentity(doc);
-    const known = ident.id ? libraryEntry(ident.id) : null;
     const newer = migrateDoc(doc).newer;
     // Asked first, about the network on screen: everything below replaces it.
     if (!(await okToReplace(t('Replace the current canvas with this build?')))) return false;
+    // Read after okToReplace, which writes the open card's last edit: the
+    // card compared and kept as a restore point is the card as it is now.
+    const known = ident.id ? libraryEntry(ident.id) : null;
     if (newer) {
         // From a newer Topo: opened read-only and not stored, as everywhere
         // else (outgoingDoc). The file is still the copy to keep.
@@ -3357,6 +3374,9 @@ async function applyImportedDoc(parsed, opts = {}) {
             return result === 'added' || result === 'known';
         }
         if (choice === 'update') {
+            // What it held is kept first (js/restore.js); Cancel, when that
+            // cannot be stored, leaves everything as it was.
+            if (!(await keepRestorePoints([known.id], opts.fileName ? 'Before opening {file}' : 'Before opening a file', { fileName: opts.fileName }))) return false;
             // The card stays what it was: a template's file brought back
             // updates the template, it does not turn it into a network.
             const result = importBinderSites([Object.assign({ id: known.id, name: known.name, created: known.created, updated: ident.updated, doc: stripIdentity(doc) },
@@ -3582,6 +3602,7 @@ document.getElementById('exportPngBtn').onclick = () => handleExport('png');
 document.getElementById('exportWebpBtn').onclick = () => handleExport('webp');
 document.getElementById('exportSvgBtn').onclick = exportSvgFile;
 document.getElementById('exportJsonBtn').onclick = exportJsonFile;
+document.getElementById('restorePointsBtn').onclick = () => openRestoreDialog(state.libraryId);
 document.getElementById('importFileBtn').onclick = () => document.getElementById('importFileInput').click();
 
 // ---- Landing ----
@@ -3743,6 +3764,8 @@ showLibraryTab(state.settings.libraryTab || 'nodes');
         openSnapshotStore();
         // The address history kept beside each card (js/trail.js), the same way.
         openTrailStore();
+        // The restore points kept before outside changes (js/restore.js), the same way.
+        openRestoreStore();
         // Saved templates from before they were cards have to be in it.
         migrateUserTemplates();
         renderUserTemplates();

@@ -3742,6 +3742,8 @@ const _csv = {
     mode: null,          // what the user picked to read it as, or null for the guess
     autoMode: 'sheet',   // the guess: 'sheet' (spreadsheet rows) or 'seen'
     createGroups: false, // the review's "make the groups the sheet names" tick
+    fileName: '',        // the file the text came from, or '' for pasted text
+    applying: false,     // waiting on the restore point before Apply
     ansi: false          // the code page a file that was not UTF-8 was read in ('Windows-1252'; csvDecode), or false
 };
 // What the text is read as: the user's pick, else the guess (csvReparse).
@@ -3975,9 +3977,17 @@ function csvApplyDialog() {
     // what is written.
     const plan = csvPlan(sheet, _csv.mapping, { createGroups: _csv.createGroups });
     if (!(plan.counts.add + plan.counts.change) || plan.errors.length) return;
-    closeCsvDialog();
-    applyCsvPlan(plan);
-    _csv.step = 'map';
+    const apply = () => { closeCsvDialog(); applyCsvPlan(plan); _csv.step = 'map'; };
+    // A kept network gets a restore point first (js/restore.js); Cancel,
+    // when it cannot be stored, leaves the dialog open. Not kept: nothing
+    // stored is changed, and it applies at once as it always did.
+    if (!isKept() || !state.libraryId || typeof keepRestorePoints !== 'function') { apply(); return; }
+    if (_csv.applying) return;
+    _csv.applying = true;
+    const id = state.libraryId;
+    return keepRestorePoints([id], _csv.fileName ? 'Before importing {file}' : 'Before importing pasted rows', { fileName: _csv.fileName })
+        .then((go) => { if (go && state.libraryId === id) apply(); })
+        .finally(() => { _csv.applying = false; });
 }
 
 // A file's bytes -> { text, encoding }. UTF-8 when the bytes are UTF-8 (a
@@ -4018,6 +4028,7 @@ function csvLoadFile(file) {
     reader.onload = () => {
         const read = csvDecode(reader.result);
         csvEl('csvText').value = read.text;
+        _csv.fileName = file.name || '';   // the restore point's reason (csvApplyDialog)
         // Said in the review, since a guess about the bytes is still a guess.
         _csv.ansi = CSV_ANSI_NAMES[read.encoding] || false;
         _csv.headings = null; _csv.mode = null; _csv.step = 'map'; _csv.chosen.clear();
@@ -4050,11 +4061,11 @@ function csvLoadFile(file) {
     // (a row added) still leaves the file's.
     csvEl('csvText').addEventListener('paste', () => {
         const box = csvEl('csvText');
-        if (!box.value.trim() || (box.selectionStart === 0 && box.selectionEnd === box.value.length)) _csv.ansi = false;
+        if (!box.value.trim() || (box.selectionStart === 0 && box.selectionEnd === box.value.length)) { _csv.ansi = false; _csv.fileName = ''; }
     });
     csvEl('csvText').addEventListener('input', () => {
         // An emptied box holds no file: what it holds next is pasted.
-        if (!csvEl('csvText').value.trim()) _csv.ansi = false;
+        if (!csvEl('csvText').value.trim()) { _csv.ansi = false; _csv.fileName = ''; }
         clearTimeout(_csv.timer);
         _csv.timer = setTimeout(() => { _csv.headings = null; _csv.mode = null; csvReparse(); renderCsvImport(); renderCsvFoot(); }, 200);
     });

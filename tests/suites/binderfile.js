@@ -19,6 +19,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // The page's questions (js/dialog.js) are answered here: a question with
   // nobody to click it would wait forever under the headless runner.
   let confirmAnswer = true;
+  // Restore points (js/restore.js) on a store that takes every write, so an
+  // Update is not held up by the could-not-be-saved question (tests/suites/restore.js).
+  if (window.CarinoRestore) await CarinoRestore.openRestoreStore({ open: async () => [], readCards: async () => ({}), readDoc: async () => null, write: async () => true });
   const heldResponder = setDialogResponder((req) => (req.kind === 'confirm' ? confirmAnswer : req.kind === 'prompt' ? null : req.kind === 'choice' ? null : undefined));
 
   // IndexedDB's callbacks never fire under run.sh's virtual clock, so the real
@@ -318,6 +321,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   persistLibrary(heldStore);
   if (heldExport !== null) localStorage.setItem(BINDER_EXPORT_KEY, heldExport);
   setHandleStore(realHandleStore);
+  if (window.CarinoRestore) { CarinoRestore.releaseRestoreStore(); CarinoRestore._reset(); }
   setDialogResponder(heldResponder);
   await refreshBinderBinding();
 

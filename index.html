@@ -158,6 +158,8 @@
                     <!-- The same drawing as a vector file (js/app.js, canvasSvgFile). -->
                     <button id="exportSvgBtn" data-adv class="cs-menu-item" role="menuitem">🖼️ SVG image <span class="cs-menu-note">vector</span></button>
                     <button id="exportJsonBtn" data-adv class="cs-menu-item" role="menuitem">📄 Back up this network <span class="cs-menu-note">.json</span></button>
+                    <!-- The open network's restore points (js/restore.js): shown once it has some. -->
+                    <button id="restorePointsBtn" data-adv class="cs-menu-item hidden" role="menuitem">↺ Restore points…</button>
                     <!-- Devices, interfaces, cables and findings as CSV / TSV, and a
                          sheet imported back with a column mapping and a review
                          (js/csv.js). The full editor's: a register's tool. -->
@@ -1651,6 +1653,26 @@
             <!-- How long each type lasts in this network (doc.expectedLife,
                  js/assets.js "Expected life by type"): blank is Topo's usual,
                  shown as the hint; a device's own Expected life wins. -->
+            <!-- A network's restore points (js/restore.js): the copies kept
+                 before a file, binder, link or sheet changed it, newest first. -->
+            <div id="restoreDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-restore" role="dialog" aria-modal="true" aria-labelledby="restoreTitle">
+                    <div class="modal-head">
+                        <h2 id="restoreTitle" class="modal-title" data-i18n>Restore points</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <p id="restoreName" class="restore-name"></p>
+                        <p class="ask-msg paste-blurb" data-i18n>A copy of this network is kept here before a file, a binder, a link or a sheet changes it. Restore puts one back, and keeps how it is now as a restore point first. They stay in this browser.</p>
+                        <p id="restoreEmpty" class="dlg-dim hidden" data-i18n>No restore points.</p>
+                        <p id="restoreStatus" class="restore-status hidden" role="alert"></p>
+                        <ul id="restoreList" class="restore-list"></ul>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" class="btn" data-close data-i18n>Close</button>
+                    </div>
+                </div>
+            </div>
             <div id="lifeDialog" class="modal-scrim" hidden>
                 <div class="modal topo-paste topo-life" role="dialog" aria-modal="true" aria-labelledby="lifeTitle">
                     <div class="modal-head">
@@ -1866,6 +1888,7 @@
     <script src="js/library.js"></script>
     <script src="js/changes.js"></script>
     <script src="js/trail.js"></script>
+    <script src="js/restore.js"></script>
     <script src="js/share.js"></script>
     <script src="js/networks.js"></script>
     <script src="js/groups.js"></script>

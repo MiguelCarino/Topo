@@ -21,6 +21,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // The page's questions, answered: `promptWith` for a name, `choose` for the
   // Update / copy question (and what it offered is kept in `offered`).
   let promptWith = null, choose = null, offered = null, confirms = 0;
+  // Restore points (js/restore.js) on a store that takes every write, so an
+  // Update is not held up by the could-not-be-saved question (tests/suites/restore.js).
+  if (window.CarinoRestore) await CarinoRestore.openRestoreStore({ open: async () => [], readCards: async () => ({}), readDoc: async () => null, write: async () => true });
   const heldResponder = setDialogResponder((req) => {
     if (req.kind === 'prompt') return promptWith;
     if (req.kind === 'choice') { offered = { message: req.message, labels: req.choices.map((c) => c.label), ids: req.choices.map((c) => c.id) }; return choose; }
@@ -342,6 +345,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     allow();
     held.forEach(([k, v]) => { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); });
     CarinoLibrary.persistLibrary(heldLib);
+    if (window.CarinoRestore) { CarinoRestore.releaseRestoreStore(); CarinoRestore._reset(); }
     setDialogResponder(heldResponder);
     const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
     document.body.appendChild(pre);

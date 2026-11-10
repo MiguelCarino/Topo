@@ -831,6 +831,19 @@ html, body { overscroll-behavior-y: none; }
 .visit-box .ca-item.gone .ca-line { color: var(--text-muted); }
 .upkeep-acts:has(> .hidden) { display: none; }
 .life-types-link { margin-top: 3px; font-size: var(--fs-micro); }
+/* Restore points (js/restore.js): when, why and how many devices, then Restore and Download. */
+.restore-name { margin: 0 0 4px; font-weight: 700; overflow-wrap: anywhere; }
+.restore-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.restore-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.restore-text { display: grid; gap: 2px; min-width: 0; flex: 1 1 12rem; }
+.restore-when { font-weight: 600; }
+.restore-why { color: var(--text-sec); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.restore-n { color: var(--text-muted); font-family: var(--mono); font-size: var(--fs-micro); }
+.restore-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+@media (pointer: coarse) {
+    .restore-acts .btn, .topo-restore .modal-foot .btn { min-height: 44px; min-width: 44px; }
+    .topo-restore .modal-x { min-width: 44px; min-height: 44px; }
+}
 /* Expected life by type: one row per type, its count here, the years. */
 .life-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
 .life-row { display: grid; grid-template-columns: 1fr auto 5.5rem auto; align-items: center; gap: 8px; }
@@ -1940,6 +1953,13 @@ body.rack-view #conflictPill { display: none !important; }
 
 /* The question modal (js/dialog.js): the fleet's .modal, sized for a sentence. */
 .modal.topo-ask { max-width: 26rem; }
+/* A question can be asked while another dialog is open (a restore point that
+   could not be stored, asked from Restore points): it is drawn above it. */
+#topoAsk { z-index: 2147483601; }
+.restore-status { margin: 10px 0 0; color: var(--err); font-size: var(--fs-sm); }
+/* Its answers are what a finger picks (Update or Open as a copy, a restore
+   point that could not be stored): 44px on a touch screen. */
+@media (pointer: coarse) { .topo-ask .modal-foot .btn, .topo-ask .modal-x { min-height: 44px; min-width: 44px; } }
 .ask-msg { margin: 0; white-space: pre-line; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }
 #topoAskInput { width: 100%; margin-top: 12px; }
 #topoAskInput[hidden] { display: none; }
@@ -2478,6 +2498,13 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
     color: var(--text-muted); font-size: 0.62rem; line-height: 1; cursor: pointer; transition: 0.15s;
 }
 .landing-tool:hover, .landing-tool:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
+/* A finger has no hover to reveal the tools and needs 44px to hit one: on a
+   touch screen they are a row of their own under the card, always shown. */
+@media (pointer: coarse) {
+    .landing-card-tools { position: static; opacity: 1; flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-top: 4px; }
+    .landing-tool { width: 44px; height: 44px; font-size: 0.9rem; }
+    .landing-tool.wide { min-width: 44px; padding: 0 12px; font-size: 0.7rem; }
+}
 
 /* Not styled as a warning. It is a fact with a date on it, and something that
    turns red every visit is something people stop seeing. */
