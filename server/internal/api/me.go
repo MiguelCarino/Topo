@@ -36,6 +36,9 @@ type Me struct {
 	Device        *MeDevice       `json:"device"`
 	WaitingGrants int             `json:"waitingGrants"`
 	LinkRequests  int             `json:"linkRequests"`
+	// MailRelay: this server can email a problem report for the client
+	// (TOPO_MAIL smtp or file; D87). False with log.
+	MailRelay bool `json:"mailRelay"`
 }
 
 type MeKeys struct {
@@ -57,7 +60,7 @@ func (s *Server) me(ctx context.Context, userID, deviceID string) (*Me, error) {
 		return nil, err
 	}
 	me := &Me{ID: u.ID, Email: u.Email, Lang: u.Lang, ServerRole: u.ServerRole, CanCreate: u.ServerRole == "owner" || u.ServerRole == "staff",
-		HasEscrow: u.HasEscrow, Notify: EffectiveNotify(u.Notify)}
+		HasEscrow: u.HasEscrow, Notify: EffectiveNotify(u.Notify), MailRelay: s.MailRelay()}
 	if u.EncPub != "" {
 		me.Keys = &MeKeys{EncPub: u.EncPub, SigPub: u.SigPub, At: u.KeysAt}
 	}

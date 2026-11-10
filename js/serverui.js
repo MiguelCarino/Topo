@@ -772,6 +772,8 @@ function render() {
 window.serverLocale = () => { if (!on()) return; rerender(); render(); };
 window.renderServerSection = () => { if (on()) renderServerSection(); else { const s = document.getElementById('landingServer'); if (s) s.hidden = true; } };
 window.serverSendRoute = (cardId, providerIds) => (on() && Y() ? Y().provider.sendRoute(cardId, providerIds) : null);
+window.serverMailRoute = (cardId) => (on() && Y() ? Y().provider.mailRoute(cardId) : null);
+window.serverReportMail = (siteId, body) => (on() && Y() ? Y().provider.reportMail(siteId, body) : Promise.reject(new Error('no server')));
 window.serverReturnRoute = (cardId) => (on() && Y() ? Y().provider.returnRoute(cardId) : false);
 window.serverPushNow = (cardId) => { if (on() && Y() && cardId) Y().syncNow(cardId); };
 

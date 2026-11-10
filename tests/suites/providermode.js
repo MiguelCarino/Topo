@@ -15,8 +15,9 @@
 //      undo step, a 'visit' entry chained (verifyLog -1) with the provider's
 //      name, the report visited;
 //   5. the copy back: locked with the passphrase that opened the link, its
-//      base the revision received, Email to the reporter (the link in the
-//      clipboard), the file topo_…_visit.json, the message composed both
+//      base the revision received, Email to the reporter (the hyperlink
+//      "Follow the infrastructure link" in the clipboard, never the raw
+//      link in the mailto:, D86), Copy message rich and plain, the file topo_…_visit.json, the message composed both
 //      ways; a second visit lists only what changed after the first;
 //   6. the copy received no longer held: said, the visit saved without a
 //      list; a reload re-enters provider mode from the session, '#provider'
@@ -65,12 +66,14 @@ window.addEventListener('load', async () => {
   const PM = window.TopoProviderMode;
   const TI = window.TopoIncidents;
   const H = TI.hooks;
-  const held = { open: H.open, copy: H.copy, share: H.share, canShare: H.canShare, saveBlob: window.saveBlob, now: H.now };
+  const held = { open: H.open, copy: H.copy, copyRich: H.copyRich, share: H.share, canShare: H.canShare, saveBlob: window.saveBlob, now: H.now };
   const heldLib = CarinoLibrary.loadLibrary();
   const heldSettings = JSON.parse(JSON.stringify(state.settings));
   const opened = [], copied = [], saved = [];
   H.open = (u) => opened.push(u);
   H.copy = async (s) => { copied.push(s); };
+  const rich = [];
+  H.copyRich = async (html, text) => { rich.push({ html, text }); };
   H.canShare = () => false;
   window.saveBlob = (blob, name) => { saved.push({ blob, name }); };
   const N = (id, type, extra = {}) => Object.assign({ id, type, name: id.toUpperCase(), x: 0, y: 0, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] }, extra);
@@ -230,11 +233,18 @@ window.addEventListener('load', async () => {
     ok('the copy holds the visit and the report visited', (backDoc.incidents || [])[0].status === 'visited' && backDoc.log.some((e) => e.id === entry.id));
     ok('its base is the revision the provider received', backDoc.base === clientRev && backDoc.rev && backDoc.rev !== clientRev, `${backDoc.base} ${backDoc.rev}`);
     ok('Email the client: shown, the reporter\'s address', visible('visitEmailBtn') && r.result.message.to.join() === 'ana@x.example');
-    opened.length = 0; copied.length = 0;
+    opened.length = 0; copied.length = 0; rich.length = 0;
     el('visitEmailBtn').click();
     await until(() => opened.length > 0);
     ok('the mailto: goes to the reporter with the subject', (opened[0] || '').startsWith('mailto:ana@x.example?subject=Visit%20recorded%20at%20Reception%3A%20Fixed'), (opened[0] || '').slice(0, 80));
-    ok('a real link is too long for it: in the clipboard', r.result.message.linkLeftOut && copied.includes(r.result.url) && !opened[0].includes('e~'));
+    ok('the link never goes in the mailto:; the hyperlink goes to the clipboard first', rich.length === 1 && rich[0].text === r.result.url
+       && rich[0].html === '<a href="' + r.result.url.replace(/&/g, '&amp;') + '">Follow the infrastructure link</a>' && !opened[0].includes('e~')
+       && decodeURIComponent(opened[0]).includes('\nInfrastructure link:\n\n'), decodeURIComponent(opened[0] || '').slice(-300));
+    ok('the return step says where to paste it', el('visitReturnStatus').textContent.startsWith('Your mail program is open and the infrastructure link is copied.'), el('visitReturnStatus').textContent);
+    el('visitCopyMsgBtn').click();
+    await until(() => rich.length > 1 && el('visitReturnStatus').textContent === 'Message copied.');
+    ok('Copy message: rich with the hyperlink, plain with the raw link', rich.length === 2 && rich[1].html.includes('>Follow the infrastructure link</a>')
+       && rich[1].text.includes('Follow the infrastructure link: ' + r.result.url) && rich[1].text.startsWith('Visit recorded at Reception: Fixed\n\n'), rich[1] && rich[1].html.slice(0, 120));
     ok('the call button for the reporter', visible('visitCallBtn') && el('visitCallBtn').getAttribute('href') === 'tel:5551');
     saved.length = 0;
     el('visitFileBtn').click();
@@ -246,8 +256,10 @@ window.addEventListener('load', async () => {
     const shortMsg = PM.composeVisitMessage({ incident: inc, entry, site: 'Reception', link: 'https://t.example/#e~abc', sealed: true, samePass: true });
     ok('the message: who, how, the problem, the notes, the changes, the sign-off, the link', shortMsg.body.startsWith('Visit by Juan Pérez (Fibra Norte): Fixed.\nProblem: No internet\nWhere: Reception PC\nArrived: ')
        && shortMsg.body.includes('\n\nReplaced the modem cable.\n') && shortMsg.body.includes('Changes to the network: 2.') && shortMsg.body.includes('Signed off by: Ana')
-       && shortMsg.body.includes('Open it in Topo and keep it to bring the visit into your network: https://t.example/#e~abc')
-       && shortMsg.body.endsWith('The passphrase is the one you sent with the problem.') && !shortMsg.linkLeftOut, shortMsg.body);
+       && shortMsg.body.includes('\nOpen the infrastructure link in Topo and keep it to bring the visit into your network.\nInfrastructure link:\n\nThe passphrase is the one you sent with the problem.')
+       && !shortMsg.body.includes('t.example') && shortMsg.body.endsWith('The passphrase is the one you sent with the problem.'), shortMsg.body);
+    ok('the full message has the raw link, the rich one the hyperlink', shortMsg.fullBody.includes('Follow the infrastructure link: https://t.example/#e~abc')
+       && shortMsg.html.includes('<a href="https://t.example/#e~abc">Follow the infrastructure link</a>'), shortMsg.html);
     const newPass = PM.composeVisitMessage({ incident: inc, entry, site: 'R', link: 'https://t.example/#e~abc', sealed: true, samePass: false });
     ok('a new passphrase: sent separately', newPass.body.endsWith('The passphrase comes separately: I will send it by another way.'));
     const filed = PM.composeVisitMessage({ incident: Object.assign({}, inc, { reporter: { name: 'Ana', phone: '555-1' } }), entry, site: 'R', file: 'topo_a_b_2026-11-09_visit.json' });
@@ -420,7 +432,7 @@ window.addEventListener('load', async () => {
     try { PM.closeVisitDialog(); } catch (e) { /* closed */ }
     try { if (PM.state.on) PM.leaveProviderMode(); } catch (e) { /* off */ }
     clearSessions();
-    Object.assign(H, { open: held.open, copy: held.copy, share: held.share, canShare: held.canShare, now: held.now });
+    Object.assign(H, { open: held.open, copy: held.copy, copyRich: held.copyRich, share: held.share, canShare: held.canShare, now: held.now });
     window.saveBlob = held.saveBlob;
     CarinoLibrary.persistLibrary(heldLib);
     Object.keys(state.settings).forEach((k) => { delete state.settings[k]; });

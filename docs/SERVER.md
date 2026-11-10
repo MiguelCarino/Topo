@@ -15,7 +15,9 @@ are D51 onward there.
   member emails). It cannot read a network, so it cannot merge one either: a
   browser pulls the newer revision, merges it with Topo's own merge and
   pushes again.
-- **Notifications by email only**, with no network content in them.
+- **Notifications by email only**, with no network content in them; and,
+  for a client reporting a problem to providers who are not on the server,
+  the problem report itself (below, "Problem reports by email").
 - **What it does not do (yet):** backups of its data (step 5b/5c; until then,
   see "Data and backups" below), installers and a server inside the desktop
   apps (later), Postgres or blob stores (later; the settings are reserved).
@@ -248,6 +250,50 @@ content.
   machine (127.0.0.1).
 - Set **SPF and DKIM** for the From domain, or the emails will land in spam.
 
+### Problem reports by email
+
+When a client reports a problem to providers who are not members of the
+site, the browser makes the locked link as without a server and then asks
+the server to email it (docs/SCOPE.md D87). Members are told through the
+server instead (D75), with the usual "a problem was reported to you" email,
+whose link reads "Follow the infrastructure link".
+
+`POST /api/sites/{id}/report-mail`, for a signed-in owner or provider of the
+site (a viewer gets 403, anyone else 404), with the usual `X-Topo` header
+and same-origin check:
+
+```json
+{ "to": ["noc@isp.example"], "subject": "Network problem at Office: No internet",
+  "lines": ["Nothing loads since 9.", "", "Problem: No internet", "Where: Reception PC"],
+  "link": "https://topo.example.com/#e~…", "phone": "+52 55 1234 5678",
+  "passphraseNote": true, "lang": "es" }
+```
+
+- **Limits**: 1 to 5 addresses (bare, no display names), a subject of 200
+  characters at most, 60 lines and 6000 characters at most, a phone of 40;
+  the body 64 KiB. 10 sends per person per hour and 30 per site per day (a
+  send is one request); then 429 with `Retry-After` and `limit` (`user` or
+  `site`). The limits live in memory: a restart refills them.
+- **The link rule**: the link must start with this server's public address
+  (`TOPO_PUBLIC_URL` and `/`, the same scheme, host and port, no user info),
+  or the answer is 400 (`field: link`). The server will not mail anyone a
+  link to anywhere else.
+- **The email** is built by the server from a fixed template, in the
+  language asked: the lines (plain text, escaped), the link as a hyperlink
+  "Follow the infrastructure link" ("Follow the infrastructure link: URL" in
+  the plain part), the phone as a `tel:` link, "the passphrase comes
+  separately" when asked, and a footer: "This email was sent by the Topo
+  server at {url} on behalf of {email}." From is `TOPO_SMTP_FROM`; Reply-To
+  is the signed-in person, so a provider's answer goes to the client.
+- **Without a relay**: `GET /api/me` says `"mailRelay": true` with
+  `TOPO_MAIL=smtp` (or `file`, for tests) and false with `log`; then, or when
+  the request is refused or fails, the browser opens the client's mail
+  program instead (the link copied as a hyperlink, pasted under
+  "Infrastructure link:") and says why. The endpoint answers 503 without a
+  relay.
+- It is queued in the outbox and sent by the mail worker like every other
+  email (one message per address, kind `report`), never from the request.
+
 ## First sign-in: the server owner
 
 - **TOPO_OWNER_EMAIL** names the owner. That address can sign in from the start
@@ -346,6 +392,17 @@ It **can**:
   A dishonest host could serve an app that leaks keys. `/api/health` reports
   `appHash`, the SHA-256 of the app it serves, to compare with a release; the
   desktop apps (later) carry their own copy;
+- **send a client-written message under its own name**: a problem report
+  (`report-mail`) is the one email whose words a member wrote. It goes out
+  From the server's address with Reply-To the member, so the recipient sees
+  the server vouching for it. What keeps that from being a spam relay: only
+  a granted owner or provider of a site can send, to 5 addresses at a time,
+  10 times an hour per person and 30 a day per site; the words are plain
+  text in a fixed template (no HTML from the browser, every line escaped);
+  the only link is one to this server's own address; the footer names the
+  member it was sent for. A member can still write anything in those lines
+  to anyone, under the server's From; the owner who invites providers
+  accepts that, as with any shared mail account;
 - **lock someone out of codes**: the per-email limits that stop guessing also
   let someone who floods requests for an address delay that person's codes. A
   browser that already asked has its own allowance, and the emailed link keeps

@@ -119,6 +119,10 @@ type Server struct {
 	ipCodes *auth.Limiter // sign-in code requests
 	ipFails *auth.Limiter // failed verifies and links
 	ipPeeks *auth.Limiter // invite peeks
+	// Report emails sent for a client (reportmail.go, D87): per person per
+	// hour and per site per day. In memory: a restart refills them.
+	reportUser *auth.Limiter
+	reportSite *auth.Limiter
 
 	xffWarned sync.Once // an X-Forwarded-For from an untrusted peer, logged once
 }
@@ -135,6 +139,8 @@ func New(d Deps) *Server {
 	s.ipCodes = auth.NewLimiter(ipCodesPerHour, time.Hour, d.Now)
 	s.ipFails = auth.NewLimiter(ipFailsPerHour, time.Hour, d.Now)
 	s.ipPeeks = auth.NewLimiter(ipPeeksPerHour, time.Hour, d.Now)
+	s.reportUser = auth.NewLimiter(ReportPerUserHour, time.Hour, d.Now)
+	s.reportSite = auth.NewLimiter(ReportPerSiteDay, 24*time.Hour, d.Now)
 	if s.d.Sessions == nil && d.Store != nil {
 		s.d.Sessions = s.resolveSession
 	}
@@ -161,6 +167,8 @@ func (s *Server) PruneLimiters() {
 	s.ipCodes.Prune()
 	s.ipFails.Prune()
 	s.ipPeeks.Prune()
+	s.reportUser.Prune()
+	s.reportSite.Prune()
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.handler.ServeHTTP(w, r) }
@@ -236,6 +244,7 @@ func (s *Server) routesV1() {
 	s.handle("POST /api/sites/{site}/members/{uid}/role", Owner, s.setRole)
 	s.handle("POST /api/sites/{site}/remove", Owner, s.removeMember)
 	s.handle("POST /api/sites/{site}/rotate", Owner, s.rotate)
+	s.handle("POST /api/sites/{site}/report-mail", Writer, s.reportMail)
 	s.handle("POST /api/sites/{site}/invites", Owner, s.invite)
 	s.handle("POST /api/sites/{site}/invites/{iid}/resend", Owner, s.resendInvite)
 	s.handle("DELETE /api/sites/{site}/invites/{iid}", Owner, s.cancelInvite)

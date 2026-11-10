@@ -27,22 +27,42 @@
 // Save and send: the second turns the sheet into the send step. Translated:
 // the client reads all of it.
 //
-// Nothing is sent from here. Email opens the visitor's mail program with a
-// mailto:, Share hands the message to the system's share sheet; the link
-// travels in what they send, the passphrase another way.
+// Without a server nothing is sent from here. Email opens the visitor's mail
+// program with a mailto: and copies the infrastructure link first, as a
+// hyperlink ("Follow the infrastructure link", rich HTML in the clipboard,
+// D86): a mailto: carries plain text only, so the body has an
+// "Infrastructure link:" line to paste under. Share hands the plain message,
+// raw link included, to the system's share sheet; the passphrase goes
+// another way. On a Topo server that can send mail, the server emails the
+// report to providers who are not members (D87, js/serversync.js); members
+// are told through the server itself (D75).
 
 const INCIDENT_MAILTO_MAX = 1900;   // desktop mail programs cut a mailto: near 2000
 const INCIDENT_SYMPTOM_GLYPH = { internet: '🌐', wifi: '📶', phone: '☎', camera: '📷', printer: '🖨', power: '⚡', other: '❓' };
 const incEl = (id) => document.getElementById(id);
 
-// Hooks the suite replaces: the link-length cap, and how a mailto: or tel:
-// is opened (a real one leaves the page for the mail program).
+// Hooks the suite replaces: the link-length cap, how a mailto: or tel: is
+// opened (a real one leaves the page for the mail program), the clipboard
+// (copyRich: HTML for mail programs and documents, plain text for the rest;
+// writeText alone where ClipboardItem is missing or refused), and the
+// server's report email.
 const _incHooks = {
     urlMax: () => (typeof DOC_URL_MAX === 'number' ? DOC_URL_MAX : 16000),
     open: (url) => { window.location.href = url; },
     canShare: () => typeof navigator.share === 'function',
     share: (data) => navigator.share(data),
     copy: (text) => navigator.clipboard.writeText(text),
+    copyRich: async (html, text) => {
+        const cb = navigator.clipboard;
+        if (typeof ClipboardItem === 'function' && cb && typeof cb.write === 'function') {
+            try {
+                await cb.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([text], { type: 'text/plain' }) })]);
+                return;
+            } catch (e) { /* no rich clipboard here: the plain text below */ }
+        }
+        await cb.writeText(text);
+    },
+    reportMail: (siteId, body) => (typeof serverReportMail === 'function' ? serverReportMail(siteId, body) : Promise.reject(new Error('no server'))),
     now: () => Date.now()
 };
 
@@ -72,57 +92,90 @@ function incidentSiteName() {
 // A phone number as a tel: target: digits, +, and the dial characters.
 const telHref = (phone) => { const x = String(phone || '').replace(/[^\d+*#,;]/g, ''); return x ? `tel:${x}` : ''; };
 const mailAddr = (a) => String(a || '').trim().replace(/[%?&#,\s]/g, (c) => encodeURIComponent(c));
+// The infrastructure link as a hyperlink, for the clipboard (D86).
+const infraLinkHtml = (url) => `<a href="${escapeHtml(url)}">${escapeHtml(t('Follow the infrastructure link'))}</a>`;
+// A translated sentence with one placeholder filled by HTML: the sentence is
+// escaped, the HTML is not.
+const tHtml = (key, name, html, params = {}) => {
+    const mark = '\u0000' + name + '\u0000';
+    return escapeHtml(t(key, Object.assign({}, params, { [name]: mark }))).split(escapeHtml(mark)).join(html);
+};
+// "Ana · <a tel:>55 1234</a> · <a mailto:>ana@…</a>": the reporter, linked.
+function incidentReporterHtml(r) {
+    const parts = [];
+    if (r && r.name) parts.push(escapeHtml(r.name));
+    if (r && r.phone) { const tel = telHref(r.phone); parts.push(tel ? `<a href="${escapeHtml(tel)}">${escapeHtml(r.phone)}</a>` : escapeHtml(r.phone)); }
+    if (r && r.email) parts.push(providerEmailOk(r.email) ? `<a href="mailto:${escapeHtml(mailAddr(r.email))}">${escapeHtml(r.email)}</a>` : escapeHtml(r.email));
+    return parts.join(' · ');
+}
+// Plain lines to rich HTML: paragraphs at empty lines, <br> within one.
+// html: { index: html } replaces a line's escaped text.
+function linesToHtml(lines, html = {}) {
+    const out = []; let para = [];
+    const flush = () => { if (para.length) out.push(`<p>${para.join('<br>')}</p>`); para = []; };
+    lines.forEach((l, i) => { if (!String(l).trim() && !(i in html)) flush(); else para.push(i in html ? html[i] : escapeHtml(l)); });
+    flush();
+    return out.join('');
+}
 
 // ---- The message (pure) ----
-// -> { subject, body, fullBody, mailto, to: [emails], noEmail: [names], linkLeftOut }
-// body is what the mailto: carries; fullBody always has the link (Copy
-// message, Share). A mailto: longer than INCIDENT_MAILTO_MAX leaves the link
-// out ("in your clipboard: paste it here", D43); if it is still too long,
-// the client's words are shortened in the email (never in the report).
+// -> { subject, body, fullBody, text, html, mailto, to: [emails], noEmail: [names], server }
+// body is what the mailto: carries: never the raw link (D86), but an
+// "Infrastructure link:" line and an empty one, where the client pastes the
+// hyperlink Email copied. fullBody has the raw link (Share, and the plain
+// half of Copy message); text is the subject and fullBody; html the same
+// message with "Follow the infrastructure link" as a hyperlink and the
+// reporter's phone and email as tel: and mailto: links (Copy message).
+// server: what POST /api/sites/{id}/report-mail takes (D87): the lines
+// without the link (the server's template adds it), the phone apart.
+// A mailto: longer than INCIDENT_MAILTO_MAX has the client's words
+// shortened in the email (never in the report).
 function composeIncidentMessage({ incident, site, providers = [], link = '', file = '', sealed = false, ctx = {} }) {
     const inc = incident || {};
     const symptom = symptomLabel(inc.symptom);
     const subject = t('Network problem at {site}: {symptom}', { site: site || incidentSiteName(), symptom });
     const to = [], noEmail = [];
     providers.forEach((p) => { if (!p) return; if (p.email && providerEmailOk(p.email)) to.push(p.email.trim()); else noEmail.push(p.name || p.id); });
-    const head = (words) => {
+    const rep = inc.reporter || {};
+    // -> { lines, whoAt: the index of the Reported by line, or -1 }
+    const head = (words, withPhone = true) => {
         const lines = [];
         if (words) lines.push(words, '');
         lines.push(t('Problem: {symptom}', { symptom }));
         lines.push(t('Where: {where}', { where: incidentWhereText(inc, ctx) }));
-        const who = incidentReporterText(inc.reporter);
-        if (who) lines.push(t('Reported by: {who}', { who }));
+        const who = withPhone ? incidentReporterText(rep) : [rep.name, rep.email].filter(Boolean).join(' · ');
+        let whoAt = -1;
+        if (who) { whoAt = lines.length; lines.push(t('Reported by: {who}', { who })); }
         const when = incidentWhen(inc.at);
         if (when) lines.push(t('When: {date}', { date: when }));
         lines.push('');
-        return lines;
+        return { lines, whoAt };
     };
-    const tail = (withLink) => {
-        const lines = [];
-        if (link) lines.push(withLink ? t('Open the network in Topo: {link}', { link }) : t('The link is in your clipboard: paste it here.'));
-        else if (file) lines.push(t('The network is in the attached file {file}. Open it with Topo: {url}', { file, url: publicBase() }));
-        if (link && sealed) lines.push(t('The passphrase comes separately: I will send it by another way.'));
-        return lines;
-    };
+    const pass = link && sealed ? [t('The passphrase comes separately: I will send it by another way.')] : [];
+    const fileLine = !link && file ? [t('The network is in the attached file {file}. Open it with Topo: {url}', { file, url: publicBase() })] : [];
+    // The mailto: body: a line to paste the link under, never the link.
+    const mailTail = link ? [t('Infrastructure link:'), '', ...pass] : fileLine;
     const words = inc.text || '';
-    const fullBody = head(words).concat(tail(true)).join('\n');
+    const full = head(words);
+    const fullBody = full.lines.concat(link ? [t('Follow the infrastructure link: {link}', { link }), ...pass] : fileLine).join('\n');
+    const htmlSub = {};
+    if (full.whoAt >= 0) htmlSub[full.whoAt] = tHtml('Reported by: {who}', 'who', incidentReporterHtml(rep));
+    if (link) htmlSub[full.lines.length] = infraLinkHtml(link);
+    const html = `<p><strong>${escapeHtml(subject)}</strong></p>` + linesToHtml(full.lines.concat(link ? [link, ...pass] : fileLine), htmlSub);
     const mk = (b) => `mailto:${to.map(mailAddr).join(',')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(b)}`;
-    let body = fullBody, mailto = mk(body), linkLeftOut = false;
-    if (mailto.length > INCIDENT_MAILTO_MAX && link) {
-        linkLeftOut = true;
-        body = head(words).concat(tail(false)).join('\n');
-        mailto = mk(body);
-    }
+    let body = full.lines.concat(mailTail).join('\n'), mailto = mk(body);
     if (mailto.length > INCIDENT_MAILTO_MAX && words) {
-        // The words are what is left to shorten: by halves, then exactly.
+        // The words are what is left to shorten: by fifths, then exactly.
         let keep = words.length;
         while (keep > 0 && mailto.length > INCIDENT_MAILTO_MAX) {
             keep = Math.floor(keep * 0.8);
-            body = head(words.slice(0, keep).trimEnd() + '…').concat(tail(!linkLeftOut)).join('\n');
+            body = head(words.slice(0, keep).trimEnd() + '…').lines.concat(mailTail).join('\n');
             mailto = mk(body);
         }
     }
-    return { subject, body, fullBody, mailto, to, noEmail, linkLeftOut };
+    const server = { subject, lines: head(words, false).lines, phone: String(rep.phone || '').trim(), passphraseNote: !!(link && sealed) };
+    while (server.lines.length && !server.lines[server.lines.length - 1]) server.lines.pop();
+    return { subject, body, fullBody, text: `${subject}\n\n${fullBody}`, html, mailto, to, noEmail, server };
 }
 
 // ---- Changing an incident on the open network ----
@@ -526,7 +579,10 @@ function enterSendStage() {
         return;
     }
     const hits = secretHitsFor('doc');
-    _pb.send = { pass: canSeal() ? generatePassphrase() : '', shown: false, hits, result: null, busy: false, copied: '' };
+    // A network on a Topo server, providers who are not all members: the
+    // link as below, then the server emails it when it can (D87).
+    const mail = typeof serverMailRoute === 'function' ? serverMailRoute(state.libraryId, _pb.sendTo) : null;
+    _pb.send = { pass: canSeal() ? generatePassphrase() : '', shown: false, hits, result: null, busy: false, copied: '', mail, mailed: false, mailNote: '' };
     renderProblemDialog();
     // Nothing to warn about: the link is made at once. Otherwise the
     // warning is read first, and the link waits for a tap.
@@ -552,6 +608,34 @@ async function makeIncidentLink() {
         return;
     }
     s.result = res;
+    renderProblemDialog();
+    if (s.mail && res.url) await mailThroughServer(s, gen);
+}
+
+// The server emails the report with the locked link (D87): one request, to
+// the chosen providers' addresses. Without a relay, or when it fails, the
+// send step stays the mail-program one and says why in one line.
+async function mailThroughServer(s, gen) {
+    const res = s.result, m = res && res.message;
+    if (!m || !m.to.length) return;
+    if (!s.mail.relay) { s.mailNote = t('This server cannot send email, so Email opens your mail program.'); renderProblemDialog(); return; }
+    if (m.to.length > 5) { s.mailNote = t('The server sends to five addresses at most, so Email opens your mail program.'); renderProblemDialog(); return; }
+    s.mailing = true;
+    renderProblemDialog();
+    let note = '';
+    try {
+        await _incHooks.reportMail(s.mail.siteId, { to: m.to, subject: m.server.subject, lines: m.server.lines, link: res.url,
+            phone: m.server.phone || undefined, passphraseNote: m.server.passphraseNote, lang: typeof LOCALE === 'string' ? LOCALE : 'en' });
+        s.mailed = true;
+    } catch (e) {
+        console.warn('Report: the server did not send the email', e);
+        note = e && e.status === 429 ? t('The server has sent all the reports it may for now, so Email opens your mail program.')
+            : e && e.status === 0 ? t('The server cannot be reached, so Email opens your mail program.')
+                : t('The server could not send the email, so Email opens your mail program.');
+    }
+    s.mailing = false;
+    if (gen !== _pb.gen || _pb.send !== s) return;
+    s.mailNote = note;
     renderProblemDialog();
 }
 
@@ -589,14 +673,17 @@ function renderProblemSend() {
     else if (res.why === 'server') status.textContent = t('Sent through the server. {names} will get an email.', { names: names.join(', ') });
     else if (res.why === 'too-long') status.textContent = t('Marked as sent. This network is too big for a link, so the file {file} was downloaded: attach it to the email.', { file: res.file });
     else status.textContent = t('Marked as sent. This page cannot lock a link (it needs https), so the file {file} was downloaded instead: attach it to the email.', { file: res.file });
-    if (res && s.copied === 'link') status.textContent = t('The link is in your clipboard. Paste it into the email where it says so.');
+    if (res && s.copied === 'link') status.textContent = t('Your mail program is open and the infrastructure link is copied. Paste it under "Infrastructure link:" (Ctrl+V, or on a phone press and hold, then Paste).');
     if (res && s.copied === 'link-failed') status.textContent = t('The link could not be copied. Copy it from the box below, then press the email button again and paste it where the email says so.');
     if (res && s.copied === 'message') status.textContent = t('Message copied.');
+    if (res && s.mailing) status.textContent = t('Sending the email from the server…');
+    if (res && s.mailed) status.textContent = t('Sent by email from the server to {names}. Send the passphrase another way, such as a call or a text.', { names: names.join(', ') });
+    if (res && s.mailNote && !s.mailed && !s.copied) status.textContent = joinSentences([s.mailNote, status.textContent]);
     const link = incEl('problemLink');
     link.value = sealedLink ? res.url : '';
-    link.classList.toggle('hidden', !sealedLink);
+    link.classList.toggle('hidden', !sealedLink || !!s.mailed || !!s.mailing);
     const email = incEl('problemEmailBtn'), share = incEl('problemShareBtn'), copy = incEl('problemCopyMsgBtn'), file = incEl('problemFileBtn');
-    [email, share, copy, file].forEach((b) => b.classList.toggle('hidden', !res));
+    [email, share, copy, file].forEach((b) => b.classList.toggle('hidden', !res || !!s.mailed || !!s.mailing));
     // Through the server: nothing to send by hand.
     if (s.server) {
         [email, share, copy, file].forEach((b) => b.classList.add('hidden'));
@@ -606,8 +693,8 @@ function renderProblemSend() {
         return;
     }
     // Nobody chosen has an email: a mailto: with no one in To helps nobody.
-    if (res) email.classList.toggle('hidden', !(res.message && res.message.to.length));
-    if (res) {
+    if (res && !s.mailed && !s.mailing) email.classList.toggle('hidden', !(res.message && res.message.to.length));
+    if (res && !s.mailed && !s.mailing) {
         email.textContent = `✉ ${t('Email')}`;
         share.textContent = `↗ ${t('Share…')}`;
         share.classList.toggle('hidden', !_incHooks.canShare());
@@ -623,16 +710,20 @@ function renderProblemSend() {
 async function incidentCopy(text) {
     try { await _incHooks.copy(text); return true; } catch (e) { return false; }
 }
+async function incidentCopyRich(html, text) {
+    try { await _incHooks.copyRich(html, text); return true; } catch (e) { return false; }
+}
+// The infrastructure link goes to the clipboard as a hyperlink, then the
+// mail program opens with the words and an "Infrastructure link:" line to
+// paste under (D86). If the copy fails, the email would say to paste with
+// nothing to paste: say so first and show the link; the second press opens
+// the mail program.
 async function problemEmail() {
     const res = _pb.send && _pb.send.result;
     if (!res) return;
     const m = res.message;
-    // The link did not fit the mailto: it goes to the clipboard, and the
-    // email says to paste it.
-    // If the copy fails, the email would say "paste it here" with nothing to
-    // paste: say so first and show the link; the second press opens it.
-    if (m.linkLeftOut && res.url && _pb.send.copied !== 'link-failed') {
-        if (await incidentCopy(res.url)) _pb.send.copied = 'link';
+    if (res.url && _pb.send.copied !== 'link-failed') {
+        if (await incidentCopyRich(infraLinkHtml(res.url), res.url)) _pb.send.copied = 'link';
         else {
             _pb.send.copied = 'link-failed';
             renderProblemDialog();
@@ -649,11 +740,13 @@ async function problemShare() {
     try { await _incHooks.share({ title: res.message.subject, text: res.message.fullBody }); }
     catch (e) { /* cancelled */ }
 }
+// The whole message: rich (the hyperlink, tel: and mailto:) and plain (the
+// raw link) together, so it pastes well anywhere.
 async function problemCopyMessage() {
     const res = _pb.send && _pb.send.result;
     if (!res) return;
-    const text = `${res.message.subject}\n\n${res.message.fullBody}`;
-    if (await incidentCopy(text)) { _pb.send.copied = 'message'; renderProblemDialog(); }
+    const text = res.message.text;
+    if (await incidentCopyRich(res.message.html, text)) { _pb.send.copied = 'message'; renderProblemDialog(); }
     else { const box = incEl('problemLink'); box.value = text; box.classList.remove('hidden'); box.focus(); box.select(); }
 }
 async function problemCopyPass() {
@@ -1102,7 +1195,7 @@ function incidentsReportSection(incidents, log) {
 
 // Published for tests/suites/incident.js (and the later steps' panels).
 window.TopoIncidents = {
-    hooks: _incHooks, draft: _pb, INCIDENT_MAILTO_MAX,
+    hooks: _incHooks, draft: _pb, INCIDENT_MAILTO_MAX, infraLinkHtml, incidentCopyRich, linesToHtml, tHtml,
     commitIncidentChange, createIncident, sendIncident, composeIncidentMessage, incidentDraftProblems, keepForIncident,
     incidentWhereText, incidentSiteName, downloadIncidentFile, openProblemDialog, openIncidentSend, closeProblemDialog,
     startProblemPick, endProblemPick, defaultSendTo, telHref,

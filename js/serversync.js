@@ -895,10 +895,22 @@ function sendRoute(cardId, providerIds) {
     }
     return names.length ? { names } : null;
 }
+// A report from a card on the server to providers who are not all members
+// (D87): the link path, and then the server emails it when it can send
+// mail (/api/me's mailRelay). -> { siteId, relay } or null (not on the
+// server, a viewer, signed out).
+function mailRoute(cardId) {
+    const r = cardId ? rec(cardId) : null;
+    if (!r || !T().ready() || r.role === 'viewer') return null;
+    const me = T().me();
+    return { siteId: r.siteId, relay: !!(me && me.mailRelay) };
+}
+// POST /api/sites/{id}/report-mail; a ServerError when refused.
+const reportMail = (siteId, body) => T().api('POST', '/api/sites/' + encodeURIComponent(siteId) + '/report-mail', body);
 // Members known before the send step asks (the detail is cached for sendRoute).
 function warmMembers(cardId) { const r = cardId && rec(cardId); if (r && T().ready()) siteDetail(r.siteId).catch(() => {}); }
 const returnRoute = (cardId) => { const r = cardId ? rec(cardId) : null; return !!r && T().ready() && r.role !== 'viewer'; };
-const provider = { sendRoute, returnRoute, warmMembers };
+const provider = { sendRoute, returnRoute, warmMembers, mailRoute, reportMail };
 
 // ---- The History on the server (design §9.3) ----
 async function history(siteId) {

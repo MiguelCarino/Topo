@@ -28,7 +28,7 @@ import (
 // Kinds are the messages the server sends. "none" is the decoy outbox row of
 // a sign-in request for an address that may not sign in (amendment B3); it is
 // never rendered or sent.
-var Kinds = []string{"signin", "invite", "welcome", "member-joined", "granted", "incident-sent", "visit-recorded", "incident-closed", "revision", "link-request", "test"}
+var Kinds = []string{"signin", "invite", "welcome", "member-joined", "granted", "incident-sent", "visit-recorded", "incident-closed", "revision", "link-request", "test", "report"}
 
 // notifyKinds end with the "change them under Notifications" footer; the
 // others (the person concerned, not opt-out-able) with the plain one.
@@ -38,10 +38,17 @@ var notifyKinds = map[string]bool{"member-joined": true, "incident-sent": true, 
 // action.open / button.open.
 var buttonKinds = map[string]bool{"signin": true, "invite": true}
 
+// infraKinds name their link "Follow the infrastructure link" (D88): the
+// plain part says "Follow the infrastructure link: URL", the HTML part is a
+// hyperlink with those words.
+var infraKinds = map[string]bool{"incident-sent": true, "report": true}
+
 // Data fills the placeholders. Known keys: code, minutes, link, url,
 // inviter, role (owner|provider|viewer, translated here), email, n, time,
 // name (the site name in clear, only when its owner allowed it), reason
-// ("keys" for member-joined after a key reset).
+// ("keys" for member-joined after a key reset). The "report" kind (D87)
+// also reads subject, lines (newline-joined plain text written by the
+// client), phone, pass ("1": the passphrase comes separately) and replyTo.
 type Data map[string]string
 
 // Message is one rendered email.
@@ -53,6 +60,9 @@ type Message struct {
 	Subject string
 	Text    string
 	HTML    string
+	// ReplyTo is a bare address for the Reply-To header ("report" only: the
+	// person the server sends on behalf of).
+	ReplyTo string
 	// For the file sink only (the e2e reads them); never in headers.
 	Code string
 	Link string
@@ -146,10 +156,13 @@ func Render(kind, lang string, d Data) (*Message, error) {
 			delete(v, "name")
 		}
 	}
-	for _, k := range []string{"inviter", "email", "code", "minutes", "n", "time", "url", "link"} {
+	for _, k := range []string{"inviter", "email", "code", "minutes", "n", "time", "url", "link", "phone", "replyTo", "subject"} {
 		if strings.ContainsAny(v[k], "\r\n\x00") {
 			return nil, ErrHeader
 		}
+	}
+	if kind == "report" {
+		return renderReport(lang, v)
 	}
 	if r, ok := v["role"]; ok {
 		if t, ok := lookup(lang, "role."+r); ok {
@@ -199,10 +212,18 @@ func Render(kind, lang string, d Data) (*Message, error) {
 		footer = ""
 	}
 
+	infra := infraKinds[kind]
+	if infra {
+		button = t("infra.link")
+	}
+
 	// Plain text.
 	var tb strings.Builder
 	tb.WriteString(body)
-	if link != "" {
+	switch {
+	case link != "" && infra:
+		tb.WriteString("\n\n" + fill(t("infra.plain"), Data{"link": link}))
+	case link != "":
 		tb.WriteString("\n\n" + action + "\n" + link)
 	}
 	if after != "" {
@@ -222,8 +243,10 @@ func Render(kind, lang string, d Data) (*Message, error) {
 	hb.WriteString(`<p style="margin:0 0 16px;font-weight:600;color:#8a6a1f">Topo</p>`)
 	hb.WriteString(`<p style="margin:0 0 16px">` + esc(body) + `</p>`)
 	if link != "" {
-		hb.WriteString(`<p style="margin:0 0 8px">` + esc(action) + `</p>`)
-		hb.WriteString(`<p style="margin:0 0 16px"><a href="` + esc(link) + `" style="display:inline-block;padding:12px 20px;background:#8a6a1f;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600">` + esc(button) + `</a></p>`)
+		if !infra {
+			hb.WriteString(`<p style="margin:0 0 8px">` + esc(action) + `</p>`)
+		}
+		hb.WriteString(`<p style="margin:0 0 16px"><a href="` + esc(link) + `" style="` + buttonStyle + `">` + esc(button) + `</a></p>`)
 	}
 	if after != "" {
 		hb.WriteString(`<p style="margin:0 0 16px;color:#5c574b">` + esc(after) + `</p>`)
@@ -234,6 +257,148 @@ func Render(kind, lang string, d Data) (*Message, error) {
 	hb.WriteString(`</div></body></html>`)
 
 	return &Message{Kind: kind, Lang: lang, Subject: subject, Text: tb.String(), HTML: hb.String(), Code: v["code"], Link: v["link"]}, nil
+}
+
+const buttonStyle = "display:inline-block;padding:12px 20px;background:#8a6a1f;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600"
+
+func htmlHead(lang, subject string) string {
+	esc := html.EscapeString
+	return `<!doctype html><html lang="` + esc(lang) + `"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>` + esc(subject) + `</title></head>` +
+		`<body style="margin:0;padding:24px 16px;background:#f6f4ef;color:#1d1b16;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:16px;line-height:1.5">` +
+		`<div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e3ddcf;border-radius:12px;padding:24px">` +
+		`<p style="margin:0 0 16px;font-weight:600;color:#8a6a1f">Topo</p>`
+}
+
+// CleanLine makes one line of client-written text safe for a body: control
+// characters become spaces (a line never breaks), the ends are trimmed.
+func CleanLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r == utf8.RuneError || unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			r = ' '
+		}
+		b.WriteRune(r)
+	}
+	return strings.TrimRight(b.String(), " ")
+}
+
+// TelHref is a phone number as a tel: target (digits and a leading +), or
+// "" when it has no digits.
+func TelHref(phone string) string {
+	var b strings.Builder
+	for i, r := range strings.TrimSpace(phone) {
+		if (r >= '0' && r <= '9') || (r == '+' && i == 0) {
+			b.WriteRune(r)
+		}
+	}
+	if strings.Trim(b.String(), "+") == "" {
+		return ""
+	}
+	return "tel:" + b.String()
+}
+
+// renderReport is the "report" kind (D87): a problem report the client
+// wrote, sent by the server on their behalf. The words are the client's
+// (plain text, escaped here, never HTML); everything around them is this
+// fixed template: the infrastructure link as a hyperlink, the reporter's
+// phone as a tel: link, the passphrase note and the footer naming the
+// sender. Reply-To is the sender.
+func renderReport(lang string, v Data) (*Message, error) {
+	t := func(key string, d Data) string {
+		s, _ := lookup(lang, key)
+		return fill(s, d)
+	}
+	esc := html.EscapeString
+	subject := CleanName200(v["subject"])
+	if subject == "" {
+		subject = t("report.subject", nil)
+	}
+	var lines []string
+	if v["lines"] != "" {
+		for _, l := range strings.Split(v["lines"], "\n") {
+			lines = append(lines, CleanLine(l))
+		}
+	}
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	link, phone, tel := v["link"], CleanLine(v["phone"]), TelHref(v["phone"])
+	pass := v["pass"] == "1"
+	footer := t("report.footer", Data{"url": v["url"], "email": v["email"]})
+
+	var tb strings.Builder
+	tb.WriteString(strings.Join(lines, "\n"))
+	if len(lines) > 0 {
+		tb.WriteString("\n\n")
+	}
+	if phone != "" && tel != "" {
+		tb.WriteString(t("report.phone", Data{"phone": phone}) + "\n")
+	}
+	if link != "" {
+		tb.WriteString(fill(t("infra.plain", nil), Data{"link": link}) + "\n")
+	}
+	if pass && link != "" {
+		tb.WriteString(t("report.pass", nil) + "\n")
+	}
+	tb.WriteString("\n-- \n" + footer + "\n")
+
+	var hb strings.Builder
+	hb.WriteString(htmlHead(lang, subject))
+	// Paragraphs split at empty lines, lines within one joined by <br>.
+	var para []string
+	flush := func() {
+		if len(para) > 0 {
+			hb.WriteString(`<p style="margin:0 0 16px">` + strings.Join(para, "<br>") + `</p>`)
+			para = nil
+		}
+	}
+	for _, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			flush()
+			continue
+		}
+		para = append(para, esc(l))
+	}
+	flush()
+	if phone != "" && tel != "" {
+		label, _ := lookup(lang, "report.phone")
+		before, after, _ := strings.Cut(label, "{phone}")
+		hb.WriteString(`<p style="margin:0 0 16px">` + esc(before) + `<a href="` + esc(tel) + `" style="color:#8a6a1f">` + esc(phone) + `</a>` + esc(after) + `</p>`)
+	}
+	if link != "" {
+		hb.WriteString(`<p style="margin:0 0 16px"><a href="` + esc(link) + `" style="` + buttonStyle + `">` + esc(t("infra.link", nil)) + `</a></p>`)
+	}
+	if pass && link != "" {
+		hb.WriteString(`<p style="margin:0 0 16px;color:#5c574b">` + esc(t("report.pass", nil)) + `</p>`)
+	}
+	hb.WriteString(`<p style="margin:16px 0 0;font-size:13px;color:#6f6a5e">` + esc(footer) + `</p>`)
+	hb.WriteString(`</div></body></html>`)
+	return &Message{Kind: "report", Lang: lang, Subject: subject, Text: tb.String(), HTML: hb.String(), Link: link, ReplyTo: v["replyTo"]}, nil
+}
+
+// CleanName200 is CleanName for a subject the client wrote: at most 200 runes.
+func CleanName200(s string) string {
+	var b strings.Builder
+	space := false
+	for _, r := range s {
+		if r == utf8.RuneError || unicode.IsControl(r) {
+			r = ' '
+		}
+		if unicode.IsSpace(r) {
+			space = true
+			continue
+		}
+		if space && b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		space = false
+		b.WriteRune(r)
+	}
+	out := b.String()
+	if utf8.RuneCountInString(out) > 200 {
+		out = string([]rune(out)[:200])
+	}
+	return out
 }
 
 // ParseAddress accepts one bare address (no display name, no line breaks).
@@ -273,6 +438,12 @@ func (m *Message) Bytes(from, host string, date time.Time) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mail: to: %w", err)
 	}
+	var replyTo string
+	if m.ReplyTo != "" {
+		if replyTo, err = ParseAddress(m.ReplyTo); err != nil {
+			return nil, fmt.Errorf("mail: reply-to: %w", err)
+		}
+	}
 	for _, s := range []string{from, m.Subject, host, m.ID} {
 		if strings.ContainsAny(s, "\r\n\x00") {
 			return nil, ErrHeader
@@ -292,6 +463,9 @@ func (m *Message) Bytes(from, host string, date time.Time) ([]byte, error) {
 	h := func(k, v string) { buf.WriteString(k + ": " + v + "\r\n") }
 	h("From", fa.String())
 	h("To", (&mail.Address{Address: to}).String())
+	if replyTo != "" {
+		h("Reply-To", (&mail.Address{Address: replyTo}).String())
+	}
 	h("Subject", encodeHeader(m.Subject))
 	h("Date", date.UTC().Format(time.RFC1123Z))
 	h("Message-ID", "<"+id+"@"+host+">")

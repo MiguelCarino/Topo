@@ -117,7 +117,7 @@ func TestRenderEveryKindEveryLocale(t *testing.T) {
 				if strings.Count(m.HTML, "<a ") != 1 {
 					t.Errorf("%s %s: want one link button, got %d", kind, lang, strings.Count(m.HTML, "<a "))
 				}
-				if named && kind != "signin" && kind != "welcome" && kind != "test" && kind != "link-request" && !strings.Contains(m.Text, "Clínica Sol") {
+				if named && kind != "signin" && kind != "welcome" && kind != "test" && kind != "link-request" && kind != "report" && !strings.Contains(m.Text, "Clínica Sol") {
 					t.Errorf("%s %s: name allowed in clear but not shown", kind, lang)
 				}
 				if !named && strings.Contains(m.Text+m.Subject, "Clínica") {
@@ -152,6 +152,86 @@ func TestRenderEveryKindEveryLocale(t *testing.T) {
 	}
 	if _, err := Render("nope", "en", sample); err == nil {
 		t.Fatal("unknown kind rendered")
+	}
+}
+
+// The infrastructure link (D88): incident-sent and report name it "Follow
+// the infrastructure link", a hyperlink in HTML and "…: URL" in text.
+func TestInfrastructureLinkWording(t *testing.T) {
+	want := map[string]string{"en": "Follow the infrastructure link", "es": "Siga el enlace de la infraestructura", "pt-BR": "Siga o link da infraestrutura",
+		"ja": "インフラのリンクを開く", "ru": "Перейдите по ссылке на инфраструктуру"}
+	for lang, w := range want {
+		m, err := Render("incident-sent", lang, Data{"url": "https://topo.example.com/"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(m.HTML, `<a href="https://topo.example.com/"`) || !strings.Contains(m.HTML, ">"+w+"</a>") {
+			t.Errorf("%s incident-sent HTML: %s", lang, m.HTML)
+		}
+		if !strings.Contains(m.Text, w+": https://topo.example.com/") {
+			t.Errorf("%s incident-sent text: %s", lang, m.Text)
+		}
+	}
+	// Other kinds keep "Open Topo".
+	if m, _ := Render("visit-recorded", "en", Data{"url": "https://topo.example.com/"}); !strings.Contains(m.HTML, ">Open Topo</a>") || strings.Contains(m.Text, "infrastructure") {
+		t.Errorf("visit-recorded: %s", m.Text)
+	}
+}
+
+// The report kind (D87): the client's lines escaped, the fixed template
+// around them, Reply-To the sender.
+func TestReportRender(t *testing.T) {
+	link := "https://topo.example.com/#e~abc"
+	d := Data{"subject": "Network problem at Office: No internet\r", "lines": "My <b>words</b> & more\n\nProblem: No internet\nWhere: Reception PC",
+		"link": link, "phone": "+52 55 1234 5678", "pass": "1", "email": "ana@example.com", "replyTo": "ana@example.com", "url": "https://topo.example.com/"}
+	d["subject"] = "Network problem at Office: No internet"
+	for _, lang := range Langs {
+		m, err := Render("report", lang, d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		infra, _ := lookup(lang, "infra.link")
+		if !strings.Contains(m.HTML, `<a href="`+link+`"`) || !strings.Contains(m.HTML, ">"+infra+"</a>") {
+			t.Errorf("%s: no infrastructure hyperlink: %s", lang, m.HTML)
+		}
+		if !strings.Contains(m.Text, infra+": "+link) {
+			t.Errorf("%s: plain link line: %s", lang, m.Text)
+		}
+		if !strings.Contains(m.HTML, `<a href="tel:+525512345678"`) || !strings.Contains(m.Text, "+52 55 1234 5678") {
+			t.Errorf("%s: phone: %s", lang, m.HTML)
+		}
+		if strings.Contains(m.HTML, "<b>words</b>") || !strings.Contains(m.HTML, "My &lt;b&gt;words&lt;/b&gt; &amp; more") {
+			t.Errorf("%s: lines not escaped: %s", lang, m.HTML)
+		}
+		if !strings.Contains(m.Text, "My <b>words</b> & more") || !strings.Contains(m.Text, "ana@example.com") || !strings.Contains(m.Text, "https://topo.example.com/") {
+			t.Errorf("%s: text: %s", lang, m.Text)
+		}
+		pass, _ := lookup(lang, "report.pass")
+		if !strings.Contains(m.Text, pass) {
+			t.Errorf("%s: passphrase note missing", lang)
+		}
+		if m.Subject != "Network problem at Office: No internet" || m.ReplyTo != "ana@example.com" || strings.Count(m.HTML, "<a ") != 2 {
+			t.Errorf("%s: %+v", lang, m)
+		}
+	}
+	m, _ := Render("report", "en", d)
+	m.To = "bo@example.com"
+	raw, err := m.Bytes("Topo <topo@example.com>", "topo.example.com", time.Unix(0, 0))
+	if err != nil || !strings.Contains(string(raw), "\r\nReply-To: <ana@example.com>\r\n") || !strings.HasPrefix(string(raw), "From: \"Topo\" <topo@example.com>\r\n") {
+		t.Fatalf("headers: %v %s", err, raw)
+	}
+	// A Reply-To with a line break or a display name is refused.
+	m.ReplyTo = "a@example.com\r\nBcc: x@example.com"
+	if _, err := m.Bytes("Topo <topo@example.com>", "h", time.Unix(0, 0)); err == nil {
+		t.Fatal("reply-to injection accepted")
+	}
+	if _, err := Render("report", "en", Data{"link": link, "replyTo": "a@example.com\nBcc: x"}); err != ErrHeader {
+		t.Fatal("reply-to with a line break rendered")
+	}
+	// No phone digits: no tel: link; no link: no pass note.
+	m, _ = Render("report", "en", Data{"lines": "x", "phone": "call me", "pass": "1"})
+	if strings.Contains(m.HTML, "tel:") || strings.Contains(m.Text, "passphrase") || m.Subject == "" {
+		t.Fatalf("bare report: %+v", m)
 	}
 }
 

@@ -79,6 +79,13 @@ var locales = map[string]map[string]string{
 		"link-request.subject": "A new browser wants your Topo account",
 		"link-request.body":    "A browser asked to open your Topo account. Approve it from a browser where you are signed in, or use your recovery key. If it was not you, ignore this email and remove that browser in your account.",
 
+		"infra.link":     "Follow the infrastructure link",
+		"infra.plain":    "Follow the infrastructure link: {link}",
+		"report.subject": "A network problem was reported",
+		"report.phone":   "Reporter's phone: {phone}",
+		"report.pass":    "The passphrase comes separately: I will send it by another way.",
+		"report.footer":  "This email was sent by the Topo server at {url} on behalf of {email}. Reply to write to them.",
+
 		"test.subject": "Topo test email",
 		"test.body":    "This is a test from your Topo server at {url}. Email works.",
 	},
@@ -137,6 +144,13 @@ var locales = map[string]map[string]string{
 
 		"link-request.subject": "Un navegador nuevo quiere abrir su cuenta de Topo",
 		"link-request.body":    "Un navegador pidió abrir su cuenta de Topo. Apruébelo desde un navegador donde ya haya entrado, o use su clave de recuperación. Si no fue usted, ignore este correo y quite ese navegador en su cuenta.",
+
+		"infra.link":     "Siga el enlace de la infraestructura",
+		"infra.plain":    "Siga el enlace de la infraestructura: {link}",
+		"report.subject": "Se reportó un problema de red",
+		"report.phone":   "Teléfono de quien reporta: {phone}",
+		"report.pass":    "La contraseña va por separado: se la mandaré por otro medio.",
+		"report.footer":  "Este correo lo envió el servidor de Topo en {url} en nombre de {email}. Responda para escribirle.",
 
 		"test.subject": "Correo de prueba de Topo",
 		"test.body":    "Esta es una prueba de su servidor de Topo en {url}. El correo funciona.",
@@ -197,6 +211,13 @@ var locales = map[string]map[string]string{
 		"link-request.subject": "Um navegador novo quer abrir sua conta do Topo",
 		"link-request.body":    "Um navegador pediu para abrir sua conta do Topo. Aprove pelo navegador em que você já entrou ou use sua chave de recuperação. Se não foi você, ignore este e-mail e remova esse navegador na sua conta.",
 
+		"infra.link":     "Siga o link da infraestrutura",
+		"infra.plain":    "Siga o link da infraestrutura: {link}",
+		"report.subject": "Um problema de rede foi informado",
+		"report.phone":   "Telefone de quem informou: {phone}",
+		"report.pass":    "A senha vai separada: vou enviá-la por outro meio.",
+		"report.footer":  "Este e-mail foi enviado pelo servidor do Topo em {url} em nome de {email}. Responda para escrever a essa pessoa.",
+
 		"test.subject": "E-mail de teste do Topo",
 		"test.body":    "Este é um teste do seu servidor do Topo em {url}. O e-mail funciona.",
 	},
@@ -256,6 +277,13 @@ var locales = map[string]map[string]string{
 		"link-request.subject": "新しいブラウザーがTopoアカウントを開こうとしています",
 		"link-request.body":    "あるブラウザーがあなたのTopoアカウントを開くよう求めています。サインイン済みのブラウザーから承認するか、回復キーを使ってください。心当たりがない場合は、このメールを無視し、アカウントからそのブラウザーを削除してください。",
 
+		"infra.link":     "インフラのリンクを開く",
+		"infra.plain":    "インフラのリンクを開く: {link}",
+		"report.subject": "ネットワークの問題が報告されました",
+		"report.phone":   "報告者の電話番号: {phone}",
+		"report.pass":    "パスフレーズは別の方法でお送りします。",
+		"report.footer":  "このメールは {email} さんに代わって {url} のTopoサーバーから送信されました。返信するとその方に届きます。",
+
 		"test.subject": "Topoのテストメール",
 		"test.body":    "これは {url} のTopoサーバーからのテストです。メールは正常に動作しています。",
 	},
@@ -314,6 +342,13 @@ var locales = map[string]map[string]string{
 
 		"link-request.subject": "Новый браузер хочет открыть вашу учётную запись Topo",
 		"link-request.body":    "Браузер запросил доступ к вашей учётной записи Topo. Подтвердите это в браузере, где вы уже вошли, или используйте ключ восстановления. Если это были не вы, проигнорируйте письмо и удалите этот браузер в своей учётной записи.",
+
+		"infra.link":     "Перейдите по ссылке на инфраструктуру",
+		"infra.plain":    "Перейдите по ссылке на инфраструктуру: {link}",
+		"report.subject": "Сообщение о проблеме в сети",
+		"report.phone":   "Телефон автора сообщения: {phone}",
+		"report.pass":    "Пароль придёт отдельно: я пришлю его другим способом.",
+		"report.footer":  "Это письмо отправил сервер Topo по адресу {url} от имени {email}. Ответьте, чтобы написать этому человеку.",
 
 		"test.subject": "Тестовое письмо Topo",
 		"test.body":    "Это тест вашего сервера Topo по адресу {url}. Почта работает.",

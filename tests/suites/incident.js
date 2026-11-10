@@ -1,8 +1,9 @@
 // @realtime — sealing and the log's hash chain await Web Crypto.
 // Problem reports, step 4 stage 3 (js/incidents.js, docs/SCOPE.md section 4):
-//   1. the message, pure: subject, body lines, the mailto: encoded, the link
-//      left out (and said to be in the clipboard) when the mailto: would pass
-//      1900 characters, which with a real locked link is the usual case; a
+//   1. the message, pure: subject, body lines, the mailto: encoded, never the
+//      raw link in it but an "Infrastructure link:" line to paste under
+//      (D86); the full body, the rich copy ("Follow the infrastructure link"
+//      as a hyperlink, tel: and mailto:) and the server's lines (D87); a
 //      file instead of a link; providers with no email named;
 //   2. what a report needs before it saves (a symptom, a name, a phone or an
 //      email that reads as one);
@@ -16,7 +17,9 @@
 //      made undoes the 'sent' it had just saved;
 //   5. the sheet: seven tiles, the symptom's devices first in the list, Tap
 //      it on the map, the contacts ranked with their ticks, Save and send to
-//      the result, Email through the mailto: with the link in the clipboard;
+//      the result, Email through the mailto: with the hyperlink in the
+//      clipboard (a failed copy shows the link first), Copy message rich, the
+//      server's report email (sent, refused, no relay);
 //      the password-in-notes warning holds the link back until Send anyway;
 //   6. the share dialog leaves reports and visits out unless ticked
 //      (withoutIncidents mends the copy's chain);
@@ -58,12 +61,15 @@ window.addEventListener('load', async () => {
   const el = (id) => document.getElementById(id);
   const TI = window.TopoIncidents;
   const H = TI.hooks;
-  const held = { urlMax: H.urlMax, open: H.open, copy: H.copy, share: H.share, canShare: H.canShare, saveBlob: window.saveBlob, build: window.buildShareLink };
+  const held = { urlMax: H.urlMax, open: H.open, copy: H.copy, copyRich: H.copyRich, reportMail: H.reportMail, share: H.share, canShare: H.canShare,
+    saveBlob: window.saveBlob, build: window.buildShareLink, mailRoute: window.serverMailRoute };
   const heldLib = CarinoLibrary.loadLibrary();
   const heldReporter = state.settings.reporter;
   const opened = [], copied = [], saved = [];
   H.open = (u) => opened.push(u);
   H.copy = async (s) => { copied.push(s); };
+  const rich = [];
+  H.copyRich = async (html, text) => { rich.push({ html, text }); };
   window.saveBlob = (blob, name) => { saved.push({ blob, name }); };
   const N = (id, type, extra = {}) => Object.assign({ id, type, name: id.toUpperCase(), x: 0, y: 0, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] }, extra);
   const site = () => ({
@@ -101,24 +107,32 @@ window.addEventListener('load', async () => {
     const pvs = state.providers;
     const short = TI.composeIncidentMessage({ incident: inc0, site: 'Reception', providers: [pvs[0], pvs[2]], link: 'https://t.example/#e~abc', sealed: true });
     ok('the subject names the site and the symptom', short.subject === 'Network problem at Reception: No internet', short.subject);
-    ok('the body: the words, the problem, where, who, the link, the passphrase line',
+    ok('the body: the words, the problem, where, who, a line to paste the link under, the passphrase line',
        short.body.startsWith('Nothing loads since 9.\n\nProblem: No internet\nWhere: Reception PC\nReported by: Ana · 555-1 · ana@x.example\nWhen: ')
-       && short.body.includes('Open the network in Topo: https://t.example/#e~abc') && short.body.endsWith('The passphrase comes separately: I will send it by another way.'), short.body);
+       && short.body.endsWith('\n\nInfrastructure link:\n\nThe passphrase comes separately: I will send it by another way.'), short.body);
+    ok('the mailto: never carries the raw link (D86)', !short.body.includes('t.example') && !short.mailto.includes('t.example'));
     ok('the mailto: goes to the providers with an email, encoded', short.mailto.startsWith('mailto:noc@fibra.example?subject=Network%20problem%20at%20Reception')
-       && short.mailto.includes('&body=Nothing%20loads') && !short.linkLeftOut && short.to.join() === 'noc@fibra.example', short.mailto.slice(0, 90));
+       && short.mailto.includes('&body=Nothing%20loads') && short.to.join() === 'noc@fibra.example', short.mailto.slice(0, 90));
     ok('a provider with no email is named, not lost', show(short.noEmail) === '["Casa Segura"]');
-    ok('the full body is the body when the link fits', short.fullBody === short.body);
+    ok('the full body says "Follow the infrastructure link: URL"', short.fullBody.includes('\nFollow the infrastructure link: https://t.example/#e~abc\nThe passphrase comes separately')
+       && short.text === `${short.subject}\n\n${short.fullBody}`, short.fullBody);
+    ok('the rich copy: the hyperlink, the phone as tel:, the email as mailto:', short.html.includes('<a href="https://t.example/#e~abc">Follow the infrastructure link</a>')
+       && short.html.includes('Reported by: Ana · <a href="tel:5551">555-1</a> · <a href="mailto:ana@x.example">ana@x.example</a>')
+       && short.html.startsWith('<p><strong>Network problem at Reception: No internet</strong></p><p>Nothing loads since 9.</p>') && !/<script|on\w+=/.test(short.html), short.html);
+    const nasty = TI.composeIncidentMessage({ incident: Object.assign({}, inc0, { text: '<img src=x onerror=alert(1)>', reporter: { name: '<b>A</b>', phone: '1', email: 'a@x.example' } }), site: 'R', providers: [], link: 'https://t.example/#e~"><x', sealed: true });
+    ok('the rich copy escapes what was typed', !nasty.html.includes('<img') && !nasty.html.includes('<b>A') && nasty.html.includes('href="https://t.example/#e~&quot;&gt;&lt;x"'), nasty.html);
+    ok('the server\'s lines: no link, the phone apart, the passphrase note asked for', show(short.server.lines.slice(-2)) === show(['Reported by: Ana · ana@x.example', short.body.split('\n')[5]])
+       && short.server.phone === '555-1' && short.server.passphraseNote === true && !short.server.lines.join('\n').includes('t.example') && short.server.subject === short.subject, show(short.server));
     const longLink = 'https://topo.carino.systems/#e~' + 'A'.repeat(2200);
     const long = TI.composeIncidentMessage({ incident: inc0, site: 'Reception', providers: [pvs[0], pvs[1]], link: longLink, sealed: true });
-    ok('a real locked link is too long for a mailto: so the email says it is in the clipboard', long.linkLeftOut && !long.body.includes('e~')
-       && long.body.includes('The link is in your clipboard: paste it here.') && long.mailto.length <= TI.INCIDENT_MAILTO_MAX, `${long.mailto.length}`);
+    ok('a real locked link never goes in the mailto:, however long', !long.body.includes('e~') && long.body.includes('Infrastructure link:') && long.mailto.length <= TI.INCIDENT_MAILTO_MAX, `${long.mailto.length}`);
     ok('Copy message and Share still carry the link', long.fullBody.includes(longLink));
     ok('two providers: both addresses', long.to.join(',') === 'noc@fibra.example,help@andes.example' && long.mailto.startsWith('mailto:noc@fibra.example,help@andes.example?'));
     const huge = TI.composeIncidentMessage({ incident: Object.assign({}, inc0, { text: 'x'.repeat(2000) }), site: 'R', providers: [pvs[0]], link: longLink, sealed: true });
     ok('words too long for a mailto: are shortened in the email only', huge.mailto.length <= TI.INCIDENT_MAILTO_MAX && huge.body.includes('…') && huge.fullBody.includes('x'.repeat(2000)), `${huge.mailto.length}`);
     const filed = TI.composeIncidentMessage({ incident: inc0, site: 'R', providers: [pvs[0]], file: 'topo_a_b_2026-11-09_incident.json' });
     ok('a file instead of a link: attach it, no passphrase line', filed.body.includes('The network is in the attached file topo_a_b_2026-11-09_incident.json. Open it with Topo: ')
-       && !filed.body.includes('passphrase') && !filed.linkLeftOut);
+       && !filed.body.includes('passphrase') && !filed.body.includes('Infrastructure link'));
 
     // ---- 2. What a report needs ----
     ok('nothing typed: a symptom, a name, a way to reach you', TI.incidentDraftProblems({}).length === 3, show(TI.incidentDraftProblems({})));
@@ -158,7 +172,7 @@ window.addEventListener('load', async () => {
     const arrived = JSON.parse(back.json);
     const ai = (arrived.incidents || [])[0] || {};
     ok('the link opens back to the same report, already sent', ai.id === id && ai.status === 'sent' && ai.reporter.phone === '555-1' && arrived.log.length === 2, show(ai));
-    ok('the full message carries the link; the email does when it fits', r1.message.fullBody.includes(r1.url) && r1.message.body.includes(r1.url) === !r1.message.linkLeftOut);
+    ok('the full message carries the link; the email never does', r1.message.fullBody.includes(r1.url) && !r1.message.body.includes(r1.url) && !r1.message.mailto.includes('e~'));
     const firstSent = s1.sentAt;
     await new Promise((r) => setTimeout(r, 5));
     const r2 = await TI.sendIncident(id, { providerIds: ['pT'], passphrase: PASS });
@@ -178,7 +192,7 @@ window.addEventListener('load', async () => {
     const fileDoc = JSON.parse(await saved[0].blob.text());
     ok('the file is a Topo network file with the report and its whole log', fileDoc.kind === 'nettopology' && fileDoc.doc.incidents[0].id === id && fileDoc.doc.log.length === 4
        && String(fileDoc.$schema || '').includes('topo-v18'), String(fileDoc.$schema));
-    ok('its message says to attach it', r3.message.body.includes(r3.file) && !r3.message.linkLeftOut);
+    ok('its message says to attach it', r3.message.body.includes(r3.file) && !r3.message.body.includes('Infrastructure link'));
     H.urlMax = held.urlMax;
     // A visit-heavy network goes as a file: sent for real, with the real cap
     // (the log counts towards the link's length). The notes are varied text,
@@ -264,21 +278,70 @@ window.addEventListener('load', async () => {
        && el('problemLink').value.includes('#e~') && el('problemPass').type === 'password' && el('problemPass').value.length >= 16, el('problemSendStatus').textContent);
     el('problemPassShow').click();
     ok('Show reveals the passphrase', el('problemPass').type === 'text' && el('problemPassShow').getAttribute('aria-pressed') === 'true');
+    // A copy that fails: the link is shown first, the second press opens.
+    H.copyRich = async () => { throw new Error('denied'); };
+    el('problemEmailBtn').click();
+    await until(() => TI.draft.send.copied === 'link-failed');
+    ok('Email when the copy fails: no mail program yet, the link shown and selected', opened.length === 0 && document.activeElement === el('problemLink')
+       && el('problemSendStatus').textContent.startsWith('The link could not be copied.'), el('problemSendStatus').textContent);
     el('problemEmailBtn').click();
     await until(() => opened.length > 0);
-    const leftOut = TI.draft.send.result.message.linkLeftOut;
-    ok('Email: a long link to the clipboard, then the mailto:', opened.length === 1 && opened[0].startsWith('mailto:?subject=') && opened[0].length <= TI.INCIDENT_MAILTO_MAX
-       && (leftOut ? copied[0] === el('problemLink').value && el('problemSendStatus').textContent.startsWith('The link is in your clipboard.') : copied.length === 0 && opened[0].includes('e~')),
-       `${leftOut} ${opened[0] && opened[0].length} ${el('problemSendStatus').textContent}`);
+    ok('the second press opens the mail program', opened.length === 1);
+    H.copyRich = async (html, text) => { rich.push({ html, text }); };
+    opened.length = 0; TI.draft.send.copied = '';
+    el('problemEmailBtn').click();
+    await until(() => opened.length > 0);
+    const link2 = el('problemLink').value;
+    ok('Email: the hyperlink to the clipboard (rich and plain), then the mailto:', opened.length === 1 && opened[0].startsWith('mailto:?subject=') && opened[0].length <= TI.INCIDENT_MAILTO_MAX
+       && !opened[0].includes('e~') && decodeURIComponent(opened[0]).includes('Infrastructure link:\n\n') && rich.length === 1 && rich[0].text === link2
+       && rich[0].html === `<a href="${link2.replace(/&/g, '&amp;')}">Follow the infrastructure link</a>`, `${opened[0] && opened[0].length} ${show(rich[0] && rich[0].html.slice(0, 80))}`);
+    ok('the send step says the mail program is open and where to paste', el('problemSendStatus').textContent
+       === 'Your mail program is open and the infrastructure link is copied. Paste it under "Infrastructure link:" (Ctrl+V, or on a phone press and hold, then Paste).', el('problemSendStatus').textContent);
     ok('Casa Segura has no email: the mailto: has no address, and the call button stays', el('problemCalls').querySelector('a[href="tel:5550199"]') !== null);
     el('problemCopyMsgBtn').click();
-    await until(() => copied.length > (leftOut ? 1 : 0));
-    ok('Copy message: subject, body, and the link', copied[copied.length - 1].startsWith('Network problem at Reception: Cameras\n\nCamera shows nothing') && copied[copied.length - 1].includes(el('problemLink').value));
+    await until(() => rich.length > 1 && el('problemSendStatus').textContent === 'Message copied.');
+    const msgCopy = rich[rich.length - 1];
+    ok('Copy message: plain with the raw link, rich with the hyperlink and the phone', msgCopy.text.startsWith('Network problem at Reception: Cameras\n\nCamera shows nothing')
+       && msgCopy.text.includes('Follow the infrastructure link: ' + link2) && msgCopy.html.includes('>Follow the infrastructure link</a>')
+       && msgCopy.html.includes('<a href="tel:5551">555-1</a>') && el('problemSendStatus').textContent === 'Message copied.', el('problemSendStatus').textContent + ' ' + msgCopy.text.slice(-200));
     H.canShare = () => false; TI.closeProblemDialog(); TI.openIncidentSend(inc2.id);
     await until(() => TI.draft.send && TI.draft.send.result, 600);
     ok('Send again from a saved report; no share sheet here, no Share button', !!TI.draft.send.result && el('problemShareBtn').classList.contains('hidden') && state.incidents[1].routedTo.join() === 'pS');
     H.canShare = held.canShare;
     TI.closeProblemDialog();
+
+    // On a Topo server, providers not all members (D87): the link, then the
+    // server emails it; refused or no relay, the mail program, said why.
+    const mailed = [];
+    let mailAnswer = () => Promise.resolve({ queued: 2 });
+    window.serverMailRoute = () => ({ siteId: 's_test', relay: true });
+    H.reportMail = (siteId, body) => { mailed.push({ siteId, body }); return mailAnswer(); };
+    TI.openIncidentSend(id);
+    await until(() => TI.draft.send && TI.draft.send.result && !TI.draft.send.mailing && (TI.draft.send.mailed || TI.draft.send.mailNote), 600);
+    const sent3 = TI.draft.send.result;
+    ok('the server sends the report email: one request, the providers\' addresses, the link, no HTML', mailed.length === 1 && mailed[0].siteId === 's_test'
+       && mailed[0].body.to.length > 0 && show(mailed[0].body.to) === show(sent3.message.to) && mailed[0].body.to.includes('noc@fibra.example') && mailed[0].body.link === sent3.url && mailed[0].body.lang === 'en'
+       && mailed[0].body.passphraseNote === true && mailed[0].body.phone === '555-1' && !mailed[0].body.lines.join('\n').includes('e~') && !/</.test(mailed[0].body.lines.join('')),
+       show(mailed[0] && [mailed[0].body.to, mailed[0].body.link === sent3.url, mailed[0].body.lang, mailed[0].body.passphraseNote, mailed[0].body.phone, state.incidents[0].routedTo]));
+    ok('the send step: sent by the server, the passphrase still to send', el('problemSendStatus').textContent
+       === 'Sent by email from the server to ' + TI.draft.sendTo.map((p) => providerById(p).name).join(', ') + '. Send the passphrase another way, such as a call or a text.'
+       && !el('problemPassRow').classList.contains('hidden') && el('problemEmailBtn').classList.contains('hidden'), el('problemSendStatus').textContent);
+    TI.closeProblemDialog();
+    mailAnswer = () => Promise.reject(Object.assign(new Error('rate-limited'), { status: 429 }));
+    TI.openIncidentSend(id);
+    await until(() => TI.draft.send && TI.draft.send.result && TI.draft.send.mailNote, 600);
+    ok('refused by the server (429): Email opens the mail program, and the step says why', !TI.draft.send.mailed && !el('problemEmailBtn').classList.contains('hidden')
+       && el('problemSendStatus').textContent.startsWith('The server has sent all the reports it may for now, so Email opens your mail program.'), el('problemSendStatus').textContent);
+    TI.closeProblemDialog();
+    window.serverMailRoute = () => ({ siteId: 's_test', relay: false });
+    const before3 = mailed.length;
+    TI.openIncidentSend(id);
+    await until(() => TI.draft.send && TI.draft.send.result && TI.draft.send.mailNote, 600);
+    ok('a server with no mail relay: no request, the mail program', mailed.length === before3 && !el('problemEmailBtn').classList.contains('hidden')
+       && el('problemSendStatus').textContent.startsWith('This server cannot send email, so Email opens your mail program.'), el('problemSendStatus').textContent);
+    TI.closeProblemDialog();
+    if (held.mailRoute) window.serverMailRoute = held.mailRoute; else delete window.serverMailRoute;
+    H.reportMail = held.reportMail;
 
     // The password warning holds the link back.
     getNode('pc').notes = 'admin password: hunter22';
@@ -347,7 +410,8 @@ window.addEventListener('load', async () => {
   } catch (e) {
     ok('the suite ran to the end', false, e && (e.stack || e.message));
   } finally {
-    Object.assign(H, { urlMax: held.urlMax, open: held.open, copy: held.copy, share: held.share, canShare: held.canShare });
+    Object.assign(H, { urlMax: held.urlMax, open: held.open, copy: held.copy, copyRich: held.copyRich, reportMail: held.reportMail, share: held.share, canShare: held.canShare });
+    if (held.mailRoute) window.serverMailRoute = held.mailRoute; else delete window.serverMailRoute;
     window.saveBlob = held.saveBlob;
     window.buildShareLink = held.build;
     try { TI.closeProblemDialog(); } catch (e) { /* closed */ }

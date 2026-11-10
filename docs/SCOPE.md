@@ -289,7 +289,11 @@ Decisions made in the build:
 - **D43.** A `mailto:` over 1900 characters leaves the link out ("The link is
   in your clipboard: paste it here") and Email copies the link; if still too
   long the client's words are shortened in the email only. With a real locked
-  link this is the usual path.
+  link this is the usual path. *Amended 2026-11-10 by D86:* the `mailto:`
+  never carries the link, long or short (the long/short split is gone); Email
+  always copies it, as a hyperlink, and the body has an "Infrastructure link:"
+  line to paste under. Words over 1900 characters are still shortened in the
+  email only.
 - **D44.** The copy back is locked with the passphrase that opened the
   incoming link, held in memory only; with none held (a reload, a file), a new
   one is shown to send another way.
@@ -589,6 +593,93 @@ Tests: tests/README.md, The Topo server.
   full-height sheet on phones; every string a client sees is in all five
   languages.
 
+**The infrastructure link (owner's decisions, 2026-11-10)**
+
+The owner: "On web, when sending an issue report, should open the mail
+client and paste THE link in the message. The link should be an hyperlink in
+the text 'Follow the infrastructure link'." Then: "On client side, open the
+mail program. On server, send the mail; if no SMTP config is registered,
+open the mail program." And the link, tapped on a phone, opens the network
+in Topo on that phone.
+
+- **D86. Client side: the mail program, the hyperlink by the clipboard.** A
+  `mailto:` carries plain text only, and a page can neither paste into the
+  mail program nor put "text with a hidden URL" in a `mailto:` body. So
+  **Email** (the report's, and the visit's **Email the client**) first copies
+  the link as rich content: `text/html` `<a href="URL">Follow the
+  infrastructure link</a>` (translated) and `text/plain` the URL, one
+  ClipboardItem (`writeText(URL)` where ClipboardItem or `clipboard.write` is
+  missing or refused), then opens the `mailto:` with To, the subject and the
+  plain message. The body never carries the raw link: in its place a line
+  "Infrastructure link:" and an empty line under it, where the client pastes
+  (D43's long/short split is gone). The passphrase line stays ("comes
+  separately"). The send step then says: "Your mail program is open and the
+  infrastructure link is copied. Paste it under "Infrastructure link:"
+  (Ctrl+V, or on a phone press and hold, then Paste)." A copy that fails keeps
+  the old behaviour: the link is shown and selected, and the next press opens
+  the mail program. **Copy message** copies the whole message rich (the
+  subject in bold, the hyperlink, the reporter's phone as `tel:` and email as
+  `mailto:`) and plain (the raw URL, "Follow the infrastructure link: URL").
+  **Share…** stays plain text with the raw URL (share sheets take text). A
+  visit's **Copy link** stays the plain URL. The clipboard is a hook
+  (`TopoIncidents.hooks.copyRich`) the suites stub.
+- **D87. On a Topo server: the server sends the email.** When the chosen
+  providers are not all members (so D75's "Sent through the server" does not
+  apply), **Save and send** makes the locked link as before, then, if the
+  server can send mail, one request `POST /api/sites/{id}/report-mail` emails
+  it to the chosen providers' addresses; the step says "Sent by email from
+  the server to {names}. Send the passphrase another way, such as a call or a
+  text." and keeps **Copy passphrase** (the passphrase never goes by the
+  server). Whether the server can send is `/api/me`'s `mailRelay` (true for
+  `TOPO_MAIL` smtp or file, false for log). No relay, more than five
+  addresses, a refusal (429) or no answer: the step stays the mail-program
+  one (D86) and says why in one line ("This server cannot send email, so
+  Email opens your mail program.", "The server has sent all the reports it
+  may for now, …", "The server cannot be reached, …", "The server could not
+  send the email, …", "The server sends to five addresses at most, …"). A
+  file (a network too big for a link, a page that cannot lock one) is never
+  mailed by the server: the mail-program path, to attach it.
+  The endpoint (Writer: a granted owner or provider; a viewer 403, anyone
+  else 404, D83; the usual CSRF and Origin checks): `{ to: [1–5 bare
+  addresses], subject (≤200 characters, control characters flattened),
+  lines: [plain text, ≤60 lines, ≤6000 characters], link, phone? (≤40,
+  becomes a tel: link), passphraseNote?, lang }`, 202 `{queued}`. The server
+  builds the text and HTML itself from a fixed template (internal/mail
+  `renderReport`): the lines escaped, the link as a hyperlink "Follow the
+  infrastructure link" (plain part "Follow the infrastructure link: URL"),
+  the phone as `tel:`, the passphrase note, and the footer "This email was
+  sent by the Topo server at {url} on behalf of {email}. Reply to write to
+  them." No client HTML is ever sent. **The link must start with the
+  server's own public origin** (`TOPO_PUBLIC_URL` + `/`, same scheme and
+  host:port, no user info) or the request is refused (400 `link`): the
+  server cannot be used to mail anyone an arbitrary link. From is the
+  server's configured From, **Reply-To the signed-in person**. Limits: 10
+  sends per person per hour and 30 per site per day (one request is one send,
+  whatever the number of addresses); 429 with Retry-After and `limit`
+  (`user` or `site`); in memory, so a restart refills them. One outbox row
+  per address (kind `report`), sent by the worker like every other email
+  (never from the request), the data blanked once sent; a log line names the
+  site, the person and the masked addresses. The client's lines leave out
+  the link and the reporter's phone (the template adds both).
+- **D88. Members' notification names the link the same way.** The
+  `incident-sent` email (D67, to providers who are members) reads "Follow
+  the infrastructure link" in all five languages: a hyperlink in HTML,
+  "Follow the infrastructure link: URL" in text. Its link is the server's
+  address (a member signs in and opens the site there); still no network
+  content.
+- **D89. The link is a public web address.** Share links are built on
+  `publicBase()` (js/state.js): the page's own http(s) address, or
+  https://topo.carino.systems/ from a `file:` page or the desktop app
+  (`tauri:`, `http://tauri.localhost`), so the link a client sends opens in
+  a phone's browser. Checked: the link opens on a 390×844 touch phone in
+  provider mode on the Map. A link made on an intranet copy opens only where
+  that intranet is reachable (as before). On a server page the link is the
+  server's own address, which is what D87 requires.
+- **D90.** Server emails say *usted* in Spanish and the client's sheet says
+  *tú*, so the anchor text differs by register ("Siga el enlace de la
+  infraestructura" in the server's email, "Sigue el enlace de la
+  infraestructura" in the client's own clipboard). Japanese: インフラのリンクを開く.
+
 Left for later (not in 5a): a per-session list with revoke in the account
 sheet (only "sign out everywhere else"); "Keep my copy as a separate network"
 for a viewer; the Problems tab line naming a provider who is not on the server
@@ -645,5 +736,6 @@ phpIPAM. Every import goes through the merge.
   end-to-end encryption in the browser (js/servercrypto.js), sync through the
   merge (js/serversync.js), email notifications, the client (js/server.js,
   js/serverui.js), docs/SERVER.md, tests/server-e2e.mjs. Decisions D51–D85
-  above. Next: 5b (backups to a folder and WebDAV), then 5c.
+  above; the infrastructure link and the server's report email D86–D90
+  (2026-11-10). Next: 5b (backups to a folder and WebDAV), then 5c.
 - [ ] 6. Importers and spec.

@@ -603,8 +603,11 @@ async function recordVisit(d) {
     return res.entry;
 }
 
-// The message that goes back to the client (pure, as the report's).
-// -> { subject, body, fullBody, mailto, to, linkLeftOut }
+// The message that goes back to the client (pure, as the report's, D86):
+// the mailto: body has an "Infrastructure link:" line to paste the copied
+// hyperlink under, never the raw link; fullBody (Share, plain copy) has it,
+// html is the rich copy with "Follow the infrastructure link".
+// -> { subject, body, fullBody, text, html, mailto, to }
 function composeVisitMessage({ incident, entry, site, link = '', file = '', sealed = false, samePass = false, ctx = {} }) {
     const e = entry || {};
     const outcome = visitOutcomeLabel(e.outcome) || t('Recorded');
@@ -630,31 +633,26 @@ function composeVisitMessage({ incident, entry, site, link = '', file = '', seal
         lines.push('');
         return lines;
     };
-    const tail = (withLink) => {
-        const lines = [];
-        if (link) lines.push(withLink ? t('Open it in Topo and keep it to bring the visit into your network: {link}', { link }) : t('The link is in your clipboard: paste it here.'));
-        else if (file) lines.push(t('The network is in the attached file {file}. Open it with Topo: {url}', { file, url: publicBase() }));
-        if (link && sealed) lines.push(samePass ? t('The passphrase is the one you sent with the problem.') : t('The passphrase comes separately: I will send it by another way.'));
-        return lines;
-    };
+    const pass = link && sealed ? [samePass ? t('The passphrase is the one you sent with the problem.') : t('The passphrase comes separately: I will send it by another way.')] : [];
+    const fileLine = !link && file ? [t('The network is in the attached file {file}. Open it with Topo: {url}', { file, url: publicBase() })] : [];
+    const keep = t('Open the infrastructure link in Topo and keep it to bring the visit into your network.');
+    const mailTail = link ? [keep, t('Infrastructure link:'), '', ...pass] : fileLine;
     const notes = e.notes || '';
-    const fullBody = head(notes).concat(tail(true)).join('\n');
+    const full = head(notes);
+    const fullBody = full.concat(link ? [keep, t('Follow the infrastructure link: {link}', { link }), ...pass] : fileLine).join('\n');
+    const html = `<p><strong>${escapeHtml(subject)}</strong></p>` + TopoIncidents.linesToHtml(full.concat(link ? [keep, link, ...pass] : fileLine),
+        link ? { [full.length + 1]: TopoIncidents.infraLinkHtml(link) } : {});
     const mk = (b) => `mailto:${to.map(mailAddr).join(',')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(b)}`;
-    let body = fullBody, mailto = mk(body), linkLeftOut = false;
-    if (mailto.length > INCIDENT_MAILTO_MAX && link) {
-        linkLeftOut = true;
-        body = head(notes).concat(tail(false)).join('\n');
-        mailto = mk(body);
-    }
+    let body = full.concat(mailTail).join('\n'), mailto = mk(body);
     if (mailto.length > INCIDENT_MAILTO_MAX && notes) {
-        let keep = notes.length;
-        while (keep > 0 && mailto.length > INCIDENT_MAILTO_MAX) {
-            keep = Math.floor(keep * 0.8);
-            body = head(notes.slice(0, keep).trimEnd() + '…').concat(tail(!linkLeftOut)).join('\n');
+        let left = notes.length;
+        while (left > 0 && mailto.length > INCIDENT_MAILTO_MAX) {
+            left = Math.floor(left * 0.8);
+            body = head(notes.slice(0, left).trimEnd() + '…').concat(mailTail).join('\n');
             mailto = mk(body);
         }
     }
-    return { subject, body, fullBody, mailto, to, linkLeftOut };
+    return { subject, body, fullBody, text: `${subject}\n\n${fullBody}`, html, mailto, to };
 }
 
 // The copy that goes back: a locked link (with the passphrase that opened
@@ -877,7 +875,7 @@ function renderVisitReturn() {
     else if (res.why === 'too-long') status.textContent = t('This network is too big for a link, so the file {file} was downloaded: send it to the client.', { file: res.file });
     else if (res.why === 'no-seal') status.textContent = t('This page cannot lock a link (it needs https), so the file {file} was downloaded: send it to the client.', { file: res.file });
     else status.textContent = '';
-    if (res && r.copied === 'link') status.textContent = t('The link is in your clipboard. Paste it into the email where it says so.');
+    if (res && r.copied === 'link') status.textContent = t('Your mail program is open and the infrastructure link is copied. Paste it under "Infrastructure link:" (Ctrl+V, or on a phone press and hold, then Paste).');
     if (res && r.copied === 'link-failed') status.textContent = t('The link could not be copied. Copy it from the box below, then press the email button again and paste it where the email says so.');
     if (res && r.copied === 'message') status.textContent = t('Message copied.');
     const link = pmEl('visitLink');
@@ -909,8 +907,9 @@ async function visitEmail() {
     const res = r && r.result;
     if (!res) return;
     const m = res.message;
-    if (m.linkLeftOut && res.url && r.copied !== 'link-failed') {
-        if (await incidentCopy(res.url)) r.copied = 'link';
+    // As the report's Email (D86): the hyperlink to the clipboard first.
+    if (res.url && r.copied !== 'link-failed') {
+        if (await TopoIncidents.incidentCopyRich(TopoIncidents.infraLinkHtml(res.url), res.url)) r.copied = 'link';
         else {
             r.copied = 'link-failed';
             renderVisitDialog();
@@ -930,7 +929,7 @@ async function visitCopyMessage() {
     const r = _pm.vd && _pm.vd.ret;
     const res = r && r.result;
     if (!res) return;
-    if (await incidentCopy(`${res.message.subject}\n\n${res.message.fullBody}`)) { r.copied = 'message'; renderVisitDialog(); }
+    if (await TopoIncidents.incidentCopyRich(res.message.html, res.message.text)) { r.copied = 'message'; renderVisitDialog(); }
 }
 async function visitCopyLink() {
     const r = _pm.vd && _pm.vd.ret;

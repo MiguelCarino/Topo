@@ -16,6 +16,12 @@
 // sign-in codes and links are read from there. Event emails are sent at once
 // (TOPO_NOTIFY_EVENT_SECONDS=0, TOPO_NOTIFY_REVISION_MINUTES=0).
 //
+// Step 10b: a report to a provider who is not a member is emailed by the
+// server (report-mail, docs/SCOPE.md D87): the .eml's HTML part has the
+// hyperlink "Follow the infrastructure link" to this server, the plain part
+// the raw link, Reply-To the client, the phone as tel:; a foreign link is
+// refused, the 11th send in an hour is 429, a removed member is 404.
+//
 // Two browser contexts in one Chromium: A, the owner (touch, 1280 wide), and
 // B, the provider (a phone: touch, 390x844). Every step prints PASS :: or
 // FAIL ::, and the last line counts them; the exit code is 1 on any failure.
@@ -62,7 +68,8 @@ const data = mkdtempSync(join(tmpdir(), 'topo-e2e-'));
 const child = spawn(BIN, ['serve'], {
     env: {
         PATH: process.env.PATH, HOME: process.env.HOME, TOPO_DATA: data, TOPO_LISTEN: `127.0.0.1:${PORT}`, TOPO_PUBLIC_URL: ORIGIN,
-        TOPO_MAIL: 'file', TOPO_OWNER_EMAIL: OWNER, TOPO_NOTIFY_REVISION_MINUTES: '0', TOPO_NOTIFY_EVENT_SECONDS: '0', TOPO_LOG_LEVEL: 'warn'
+        TOPO_MAIL: 'file', TOPO_OWNER_EMAIL: OWNER, TOPO_NOTIFY_REVISION_MINUTES: '0', TOPO_NOTIFY_EVENT_SECONDS: '0', TOPO_LOG_LEVEL: 'warn',
+        TOPO_MAIL_PER_MINUTE: '1000'
     },
     stdio: ['ignore', 'inherit', 'inherit'], detached: true
 });
@@ -102,6 +109,20 @@ const emlOf = (m) => {
     const dir = join(data, 'mail');
     const f = readdirSync(dir).find((n) => n.endsWith('-' + m.id + '.eml'));
     return f ? readFileSync(join(dir, f), 'utf8') : '';
+};
+// The parts of a message, quoted-printable decoded: { head, text, html }.
+const partsOf = (eml) => {
+    const head = eml.slice(0, eml.indexOf('\r\n\r\n'));
+    const b = /boundary="([^"]+)"/.exec(head);
+    const out = { head, text: '', html: '' };
+    if (!b) return out;
+    for (const seg of eml.split('--' + b[1]).slice(1, -1)) {
+        const i = seg.indexOf('\r\n\r\n');
+        const h = seg.slice(0, i), body = seg.slice(i + 4).replace(/\r\n$/, '');
+        const dec = Buffer.from(body.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/g, (x, hex) => String.fromCharCode(parseInt(hex, 16))), 'latin1').toString('utf8');
+        if (/text\/html/.test(h)) out.html = dec; else if (/text\/plain/.test(h)) out.text = dec;
+    }
+    return out;
 };
 
 // ---- Browsers ----
@@ -365,6 +386,56 @@ try {
     ok('10. A has the visit', await until(A.p, () => (state.log || []).some((e) => e.kind === 'visit')));
     ok('10. A\'s log verifies', (await A.p.evaluate(async () => verifyLog(normalizeLog(state.log)))) === -1);
 
+    // 10b. A reports a problem to a provider who is not a member: the
+    // locked link as without a server, then the server emails it (D87).
+    ok('10b. /api/me says the server can send mail', (await A.p.evaluate(() => TopoServer.me().mailRelay)) === true);
+    await A.p.evaluate(() => {
+        batch(() => { state.providers.push(makeProvider({ name: 'Outside Co', email: 'outside@example.test', service: 'internet' })); save(); });
+        flushAutosave();
+        selectEntries([{ type: 'node', id: state.nodes[0].id }]);
+        TopoIncidents.openProblemDialog();
+    });
+    ok('10b. the Problems dialog opens', await until(A.p, () => !document.getElementById('problemDialog').hidden && !document.getElementById('problemForm').hidden));
+    await A.p.evaluate(() => {
+        const tile = document.querySelector('#problemSymptoms input[value=internet]');
+        tile.checked = true; tile.dispatchEvent(new Event('change', { bubbles: true }));
+        const set = (id, v) => { const f = document.getElementById(id); f.value = v; f.dispatchEvent(new Event('input', { bubbles: true })); };
+        set('problemText', 'Nothing <b>loads</b>'); set('problemName', 'Owner'); set('problemPhone', '+52 55 1234 5678'); set('problemEmail', 'owner@example.test');
+        const outside = state.providers.find((p) => p.name === 'Outside Co').id;
+        document.querySelectorAll('#problemContacts input[data-sendto]').forEach((box) => { if (box.checked !== (box.dataset.sendto === outside)) box.click(); });
+    });
+    await A.p.click('#problemSaveSendBtn');
+    ok('10b. the send step says the server sent it', await until(A.p, () => document.getElementById('problemSendStatus').textContent
+        === 'Sent by email from the server to Outside Co. Send the passphrase another way, such as a call or a text.'),
+        await A.p.evaluate(() => [document.getElementById('problemSendStatus').textContent, document.getElementById('problemError').textContent]));
+    ok('10b. Copy passphrase stays; nothing to send by hand', await A.p.evaluate(() => !document.getElementById('problemPassRow').classList.contains('hidden')
+        && ['problemEmailBtn', 'problemShareBtn', 'problemCopyMsgBtn', 'problemFileBtn'].every((id) => document.getElementById(id).classList.contains('hidden'))));
+    await audit(A.p, '10b. the send step (server email)');
+    const sentLink = await A.p.evaluate(() => TopoIncidents.draft.send.result.url);
+    await A.p.click('#problemDoneBtn');
+    const rm = await readMail('outside@example.test', 'report');
+    ok('10b. the report email is in the sink', !!rm, mails().map((m) => m.kind + ' ' + m.to));
+    const rp = partsOf(rm ? emlOf(rm) : '');
+    ok('10b. the link is this server\'s locked link', typeof sentLink === 'string' && sentLink.startsWith(ORIGIN + '/') && sentLink.includes('#e~'), String(sentLink).slice(0, 60));
+    ok('10b. HTML: the hyperlink "Follow the infrastructure link" to it', rp.html.includes(`<a href="${sentLink}"`) && /">Follow the infrastructure link<\/a>/.test(rp.html), rp.html.slice(0, 600));
+    ok('10b. plain: "Follow the infrastructure link: URL"', rp.text.includes('Follow the infrastructure link: ' + sentLink), rp.text.slice(0, 600));
+    ok('10b. Reply-To is the client, From the server', /\r\nReply-To: <owner@example\.test>\r\n/.test(rp.head) && /^From: .*topo@/m.test(rp.head), rp.head);
+    ok('10b. the phone is a tel: link, the words escaped', rp.html.includes('href="tel:+525512345678"') && rp.html.includes('Nothing &lt;b&gt;loads&lt;/b&gt;') && !rp.html.includes('<b>loads'), rp.html.slice(0, 900));
+    ok('10b. the footer names the client and the server', rp.text.includes('on behalf of owner@example.test') && rp.text.includes(ORIGIN), rp.text.slice(-300));
+    ok('10b. the passphrase is not in it, only the note', !rp.text.includes(await A.p.evaluate(() => TopoIncidents.draft.send ? TopoIncidents.draft.send.pass : 'x')) && rp.text.includes('The passphrase comes separately'));
+    // The rules, straight at the endpoint from A's page.
+    const post = (body) => A.p.evaluate(async ([s, b]) => {
+        const r = await fetch('/api/sites/' + s + '/report-mail', { method: 'POST', headers: { 'X-Topo': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+        return { status: r.status, body: await r.json().catch(() => null), retry: r.headers.get('Retry-After') };
+    }, [siteId, body]);
+    const okBody = { to: ['outside@example.test'], subject: 'S', lines: ['x'], link: ORIGIN + '/#e~x', lang: 'en' };
+    const foreign = await post(Object.assign({}, okBody, { link: 'https://evil.example/#e~x' }));
+    ok('10b. a link to another origin is refused (400)', foreign.status === 400 && foreign.body.field === 'link', foreign);
+    const statuses = [];
+    for (let i = 0; i < 10; i++) statuses.push((await post(okBody)).status);
+    const last = await post(okBody);
+    ok('10b. 10 sends an hour: the 11th is 429 with Retry-After', statuses.slice(0, 9).every((x) => x === 202) && statuses[9] === 429 && last.status === 429 && !!last.retry && last.body.limit === 'user', [statuses, last]);
+
     // 13 (phone). B's Members sheet at 390, before the removal.
     await B.p.evaluate((s) => TopoServerUI.openMembers(s), siteId);
     ok('13. B\'s Members sheet opens', await until(B.p, () => /Acme|owner@example.test/.test(document.getElementById('serverSheetBody').textContent)));
@@ -398,6 +469,9 @@ try {
         const r = await fetch('/api/sites/' + TopoServerSync.rec(id).siteId + '/keys');
         return [out, r.status];
     }, cardId);
+    const bMail = await B.p.evaluate(async (s) => (await fetch('/api/sites/' + s + '/report-mail', { method: 'POST', headers: { 'X-Topo': '1', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: ['a@example.test'], subject: 'S', lines: [], link: location.origin + '/#x' }) })).status, siteId);
+    ok('11. a removed member cannot send a report email (404)', bMail === 404, bMail);
     ok('11. B can neither push nor fetch keys', bTry[0] !== 'pushed' && bTry[1] === 404 && (await head(siteId)) === before + ' 2', [bTry, before, await head(siteId)]);
     await A.p.evaluate(() => TopoServerUI.closeSheet());
     ok('11. A still pushes under the new key', (await A.p.evaluate(async (id) => {
