@@ -14,7 +14,8 @@
 //   - reachable from the Locate section (one device) and from the rail for a
 //     selection holding devices (hidden for a set of cables, gone in the
 //     reduced views); a set with no device prints nothing and says why;
-//   - delivered like the labels (a tab, else a download named -locate-);
+//   - shown first like the labels (js/sheetpreview.js): no tab, no
+//     download until the preview's Download (named -locate-) or Print;
 //   - no edit and no undo step; Spanish; the strings in es, pt-BR, ja, ru;
 //   - a 300-device selection's rows in one lookup pass.
 window.addEventListener('load', () => { setTimeout(async () => {
@@ -79,7 +80,6 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const blobs = new Map(), heldURL = URL.createObjectURL;
   URL.createObjectURL = function (b) { const u = heldURL.call(URL, b); blobs.set(u, b); return u; };
   const capture = () => { opened = []; window.open = (url) => { opened.push(url); return { addEventListener() {} }; }; };
-  const blobText = async (url) => blobs.get(url).text();
   setLocale('en');
 
   try {
@@ -185,26 +185,30 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('the rail offers Print where they are plugged in for several devices', !gone('printLocateBtn') && el('printLocateBtn').textContent.trim() === 'Print where they are plugged in');
     capture();
     el('printLocateBtn').click();
-    ok('the click opens the sheet (a blob, as the labels are)', opened.length === 1 && /^blob:/.test(opened[0]), opened.join(','));
-    if (opened[0]) {
-      const got = parse(await blobText(opened[0]));
+    ok('the click previews the sheet: no tab opened', opened.length === 0 && !!sheetPreviewBuilt() && !el('sheetPreviewDialog').classList.contains('hidden'), opened.join(','));
+    if (sheetPreviewBuilt()) {
+      const got = parse(sheetPreviewBuilt().html);
       ok('with the three devices in it, under the network\'s name', got.querySelectorAll('.dev-block').length === 3
         && got.querySelector('header').textContent.includes(docDisplayName()) && got.querySelector('header').textContent.includes(todayISO()), got.querySelector('header') && got.querySelector('header').textContent);
     }
+    closeSheetPreview();
     selectEntries([{ type: 'link', id: 'c1' }, { type: 'link', id: 'c3' }]);
     ok('a set of cables: not offered', gone('printLocateBtn'));
     ok('and printLocate prints nothing for it, saying why', printLocate() === null && /Select devices to print where they are plugged in\./.test(document.body.textContent));
     selectEntries([{ type: 'node', id: 'pc' }, { type: 'link', id: 'c3' }]);
     ok('a mixed set: offered, for its devices', !gone('printLocateBtn'));
-    // No tab (a blocked pop-up): a download, named as the locate sheet.
+    // Nothing saved until the preview's Download: then named as the locate sheet.
     {
-      window.open = () => null;
       const realClick = HTMLAnchorElement.prototype.click;
       let downloaded = null;
       HTMLAnchorElement.prototype.click = function () { downloaded = this.download; };
       const r = printLocate([{ type: 'node', id: 'pc' }]);
+      const before = downloaded;
+      if (r && r.ready) await r.ready;
+      el('sheetPreviewDownload').click();
       HTMLAnchorElement.prototype.click = realClick;
-      ok('a blocked tab: downloaded, named -locate-<date>.html', !!r && r.opened === false && /-locate-\d{4}-\d{2}-\d{2}\.html$/.test(downloaded || ''), downloaded);
+      ok('previewed, then the preview\'s Download saves -locate-<date>.html', !!r && r.previewed === true && before === null
+        && /-locate-\d{4}-\d{2}-\d{2}\.html$/.test(downloaded || '') && el('sheetPreviewDialog').classList.contains('hidden'), downloaded);
     }
 
     // ---- The section: one device ----
@@ -215,10 +219,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('the Locate section has Print, beside Show on map', !!pbtn && !!pbtn.previousElementSibling && pbtn.previousElementSibling.hasAttribute('data-loc-show'));
     capture();
     if (pbtn) pbtn.click();
-    if (opened[0]) {
-      const got = parse(await blobText(opened[0]));
+    if (sheetPreviewBuilt()) {
+      const got = parse(sheetPreviewBuilt().html);
       ok('it prints that one device', got.querySelectorAll('.dev-block').length === 1 && got.querySelector('h2').textContent === 'Front desk');
-    } else ok('it prints that one device', false, 'nothing opened');
+    } else ok('it prints that one device', false, 'nothing previewed');
+    closeSheetPreview();
     // A phone: Print is a 44px target like Show on map.
     if (window.matchMedia('(max-width: 900px)').matches) {
       ok('a 44px target on a phone', pbtn.getBoundingClientRect().height >= 44 || !pbtn.offsetParent, pbtn.getBoundingClientRect().height);

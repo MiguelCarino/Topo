@@ -1367,104 +1367,138 @@
             <!-- Site report: who the survey was for, before the document is
                  written. The fields are rendered from REPORT_FIELDS in
                  js/report.js so the form and the document cannot disagree. -->
-            <!-- z-50, above the landing's z-40: the binder report is launched FROM
-                 the landing and the landing stays up behind it. -->
-            <!-- Two columns: the questions on the left, the report as it will
-                 print on the right, redrawn a moment after each edit
-                 (refreshReportPreview, js/report.js). Download or Print hands
-                 it over. On a phone the preview goes under the questions. -->
-            <div id="reportDialog" class="hidden modal-scrim topo-dlg report-dlg">
-                <div class="modal topo-card rp-card" role="dialog" aria-modal="true" aria-labelledby="reportDialogTitle">
-                  <div class="rp-form">
-                    <h4 id="reportDialogTitle" data-i18n class="dlg-title">Site report</h4>
-                    <p id="reportDialogBlurb" data-i18n class="dlg-blurb">The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.</p>
-                    <div id="reportFields" class="dlg-fields"></div>
-                    <!-- What goes in: the summary for the client, the technical
-                         sheet, or both (the default). At least one stays ticked. -->
-                    <fieldset id="reportParts" class="dlg-parts">
-                        <legend class="prop-lbl" data-i18n>What goes in</legend>
-                        <label class="dlg-blurb">
-                            <input type="checkbox" id="reportSummary" checked>
-                            <span><span data-i18n>Simple summary</span><br><span class="dlg-dim" data-i18n>One page in plain words: whether the network is fine, what needs attention and why, and what there is, then the map on a page of its own.</span></span>
-                        </label>
-                        <label class="dlg-blurb">
-                            <input type="checkbox" id="reportTechnical" checked>
-                            <span><span data-i18n>Technical details</span><br><span class="dlg-dim" data-i18n>The findings, the inventory, the diagram, racks, ports, cables and addressing.</span></span>
-                        </label>
-                        <!-- With Technical details only: the diagram again at the
-                             end, tiled large (reportDiagramLayout's large map). -->
-                        <label id="reportLargeMapRow" class="dlg-blurb">
-                            <input type="checkbox" id="reportLargeMap">
-                            <span><span data-i18n>Large map</span><br><span class="dlg-dim" data-i18n>The diagram again at the end, printed large: an overview with each sheet's square marked, then one sheet per square, to read up close or tape together.</span></span>
-                        </label>
-                        <!-- The large map's grid, picked, never guessed
-                             (reportParts.largeCols / largeRows): so many
-                             landscape sheets across, so many down. -->
-                        <div id="reportLargeSheetsRow" class="dlg-sheets hidden">
-                            <label><span class="prop-lbl" data-i18n>Sheets across</span>
-                                <select id="reportLargeCols" class="input"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option></select></label>
-                            <label><span class="prop-lbl" data-i18n>Sheets down</span>
-                                <select id="reportLargeRows" class="input"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option></select></label>
-                            <span id="reportLargeTotal" class="dlg-dim"></span>
-                            <!-- A square per sheet: on, it is printed; off, it is
-                                 left out (faded on the overview). The preview's
-                                 overview squares toggle them too. -->
-                            <div class="dlg-cells-wrap">
-                                <span class="prop-lbl" data-i18n>Sheets to print</span>
-                                <div id="reportLargeCells" class="dlg-cells" role="group"></div>
-                                <span class="dlg-dim" data-i18n>Tap a square here or on the preview's overview to leave its sheet out.</span>
+            <!-- Above the landing: the binder report is launched FROM the
+                 landing and the landing stays up behind it. -->
+            <!-- The fleet's report preview (carino-ui.css 18b .rpv): everything
+                 that is read or set in the left column (the title and its ✕,
+                 the status, the questions, the file name), Print and Download
+                 at its foot, the report as it will print on the right, redrawn
+                 a moment after each edit (refreshReportPreview, js/report.js).
+                 On a phone the column folds: the questions above the report,
+                 the buttons along the bottom edge. Below the pinned navbar. -->
+            <div id="reportDialog" class="hidden modal-scrim rpv-scrim topo-dlg report-dlg">
+                <div class="rpv" role="dialog" aria-modal="true" aria-labelledby="reportDialogTitle">
+                  <aside class="rpv-side">
+                    <div class="rpv-head">
+                        <h2 id="reportDialogTitle" data-i18n class="rpv-title">Site report</h2>
+                        <button id="reportCancelBtn" type="button" class="modal-x rpv-x" data-i18n-aria-label aria-label="Close" data-i18n-title title="Close">✕</button>
+                    </div>
+                    <p id="reportPreviewStatus" class="rpv-status" role="status" aria-live="polite"></p>
+                    <div class="rpv-opts">
+                        <p id="reportDialogBlurb" data-i18n class="dlg-blurb">The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.</p>
+                        <div id="reportFields" class="dlg-fields"></div>
+                        <!-- What goes in: the summary for the client, the technical
+                             sheet, or both (the default). At least one stays ticked. -->
+                        <fieldset id="reportParts" class="dlg-parts">
+                            <legend class="prop-lbl" data-i18n>What goes in</legend>
+                            <label class="dlg-blurb">
+                                <input type="checkbox" id="reportSummary" checked>
+                                <span><span data-i18n>Simple summary</span><br><span class="dlg-dim" data-i18n>One page in plain words: whether the network is fine, what needs attention and why, and what there is, then the map on a page of its own.</span></span>
+                            </label>
+                            <label class="dlg-blurb">
+                                <input type="checkbox" id="reportTechnical" checked>
+                                <span><span data-i18n>Technical details</span><br><span class="dlg-dim" data-i18n>The findings, the inventory, the diagram, racks, ports, cables and addressing.</span></span>
+                            </label>
+                            <!-- With Technical details only: the diagram again at the
+                                 end, tiled large (reportDiagramLayout's large map). -->
+                            <label id="reportLargeMapRow" class="dlg-blurb">
+                                <input type="checkbox" id="reportLargeMap">
+                                <span><span data-i18n>Large map</span><br><span class="dlg-dim" data-i18n>The diagram again at the end, printed large: an overview with each sheet's square marked, then one sheet per square, to read up close or tape together.</span></span>
+                            </label>
+                            <!-- The large map's grid, picked, never guessed
+                                 (reportParts.largeCols / largeRows): so many
+                                 landscape sheets across, so many down. -->
+                            <div id="reportLargeSheetsRow" class="dlg-sheets hidden">
+                                <label><span class="prop-lbl" data-i18n>Sheets across</span>
+                                    <select id="reportLargeCols" class="input"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option></select></label>
+                                <label><span class="prop-lbl" data-i18n>Sheets down</span>
+                                    <select id="reportLargeRows" class="input"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option></select></label>
+                                <span id="reportLargeTotal" class="dlg-dim"></span>
+                                <!-- A square per sheet: on, it is printed; off, it is
+                                     left out (faded on the overview). The preview's
+                                     overview squares toggle them too. -->
+                                <div class="dlg-cells-wrap">
+                                    <span class="prop-lbl" data-i18n>Sheets to print</span>
+                                    <div id="reportLargeCells" class="dlg-cells" role="group"></div>
+                                    <span class="dlg-dim" data-i18n>Tap a square here or on the preview's overview to leave its sheet out.</span>
+                                </div>
                             </div>
-                        </div>
-                        <!-- With Technical details only: a tick per section of
-                             the technical sheet (REPORT_SECTIONS, drawn by
-                             js/report.js), each at its default every time the
-                             dialog opens. Read for this report only
-                             (reportParts.sections), site and binder alike. -->
-                        <div id="reportSectionsRow" class="dlg-sections" role="group" aria-labelledby="reportSectionsLbl">
-                            <span id="reportSectionsLbl" class="prop-lbl" data-i18n>Sections</span>
-                            <span class="dlg-dim" data-i18n>Untick a section to leave it out of the technical details. The summary does not change.</span>
-                            <div id="reportSectionsList" class="dlg-section-list"></div>
-                        </div>
-                        <!-- With Technical details only, and only while the
-                             network has saved searches (a site report, not a
-                             binder): a tick per search, each starting from its
-                             own "print" mark. Read for this report only
-                             (reportParts.searches), never written back, so it
-                             works on a read-only network (js/report.js). -->
-                        <div id="reportSearchesRow" class="dlg-searches hidden" role="group" aria-labelledby="reportSearchesLbl">
-                            <span id="reportSearchesLbl" class="prop-lbl" data-i18n>Saved searches</span>
-                            <span class="dlg-dim" data-i18n>Each one prints as a table of the devices it finds. Ticking here changes this report only.</span>
-                            <div id="reportSearchesList" class="dlg-search-list"></div>
-                        </div>
-                    </fieldset>
-                    <div id="reportLint" class="alert warn hidden" role="status"></div>
-                    <!-- Binder mode only. Two sibling spans rather than markup nested
-                         inside one data-i18n element: applyStaticI18n sets textContent
-                         and would eat any children. -->
-                    <label id="reportImagesRow" class="hidden dlg-blurb">
-                        <input type="checkbox" id="reportImages" checked>
-                        <span><span data-i18n>Include a diagram for each site</span><br><span class="dlg-dim" data-i18n>Renders each network in turn — slower, and the file gets much larger.</span></span>
-                    </label>
-                    <div class="dlg-actions rp-actions">
-                        <button id="reportCancelBtn" data-i18n class="cs-btn">Close</button>
-                        <button id="reportPrintBtn" class="cs-btn" data-i18n>🖨 Print</button>
-                        <button id="reportBuildBtn" class="cs-btn primary" data-i18n>⬇ Download</button>
+                            <!-- With Technical details only: a tick per section of
+                                 the technical sheet (REPORT_SECTIONS, drawn by
+                                 js/report.js), each at its default every time the
+                                 dialog opens. Read for this report only
+                                 (reportParts.sections), site and binder alike. -->
+                            <div id="reportSectionsRow" class="dlg-sections" role="group" aria-labelledby="reportSectionsLbl">
+                                <span id="reportSectionsLbl" class="prop-lbl" data-i18n>Sections</span>
+                                <span class="dlg-dim" data-i18n>Untick a section to leave it out of the technical details. The summary does not change.</span>
+                                <div id="reportSectionsList" class="dlg-section-list"></div>
+                            </div>
+                            <!-- With Technical details only, and only while the
+                                 network has saved searches (a site report, not a
+                                 binder): a tick per search, each starting from its
+                                 own "print" mark. Read for this report only
+                                 (reportParts.searches), never written back, so it
+                                 works on a read-only network (js/report.js). -->
+                            <div id="reportSearchesRow" class="dlg-searches hidden" role="group" aria-labelledby="reportSearchesLbl">
+                                <span id="reportSearchesLbl" class="prop-lbl" data-i18n>Saved searches</span>
+                                <span class="dlg-dim" data-i18n>Each one prints as a table of the devices it finds. Ticking here changes this report only.</span>
+                                <div id="reportSearchesList" class="dlg-search-list"></div>
+                            </div>
+                        </fieldset>
+                        <div id="reportLint" class="alert warn hidden" role="status"></div>
+                        <!-- Binder mode only. Two sibling spans rather than markup nested
+                             inside one data-i18n element: applyStaticI18n sets textContent
+                             and would eat any children. -->
+                        <label id="reportImagesRow" class="hidden dlg-blurb">
+                            <input type="checkbox" id="reportImages" checked>
+                            <span><span data-i18n>Include a diagram for each site</span><br><span class="dlg-dim" data-i18n>Renders each network in turn — slower, and the file gets much larger.</span></span>
+                        </label>
                     </div>
+                    <p id="reportPreviewName" class="rpv-name"></p>
+                    <div class="rpv-actions">
+                        <button id="reportPrintBtn" type="button" class="cs-btn" data-i18n>🖨 Print</button>
+                        <button id="reportBuildBtn" type="button" class="cs-btn primary" data-i18n>⬇ Download</button>
+                    </div>
+                  </aside>
+                  <div class="rpv-stage">
+                    <iframe id="reportPreviewFrame" class="rpv-frame" title="Report preview" data-i18n-title></iframe>
                   </div>
-                  <div class="rp-view">
-                    <div class="rp-head">
-                        <span id="reportPreviewName" class="rp-name mono"></span>
-                        <span id="reportPreviewStatus" class="rp-status" role="status" aria-live="polite"></span>
+                </div>
+            </div>
+
+            <!-- The sheets' print preview (Print labels, Print where they are
+                 plugged in; js/sheetpreview.js), on the fleet's report preview
+                 (carino-ui.css 18b .rpv): the title and its ✕, the count, the
+                 sheet's note and the file name in the left column, Print and
+                 Download at its foot, the page that is printed or saved on the
+                 right. Below the pinned navbar. -->
+            <div id="sheetPreviewDialog" class="hidden modal-scrim rpv-scrim topo-dlg sheet-pv-dlg">
+                <div class="rpv" role="dialog" aria-modal="true" aria-labelledby="sheetPreviewTitle">
+                  <aside class="rpv-side">
+                    <div class="rpv-head">
+                        <h2 id="sheetPreviewTitle" class="rpv-title"></h2>
+                        <button id="sheetPreviewClose" type="button" class="modal-x rpv-x" data-i18n-aria-label aria-label="Close" data-i18n-title title="Close">✕</button>
                     </div>
-                    <iframe id="reportPreviewFrame" class="rp-frame" title="Report preview" data-i18n-title></iframe>
+                    <p id="sheetPreviewStatus" class="rpv-status" role="status" aria-live="polite"></p>
+                    <div id="sheetPreviewOpts" class="rpv-opts" hidden>
+                        <p id="sheetPreviewBlurb" class="dlg-blurb"></p>
+                    </div>
+                    <p id="sheetPreviewName" class="rpv-name"></p>
+                    <div class="rpv-actions">
+                        <button id="sheetPreviewPrint" type="button" class="cs-btn" data-i18n>🖨 Print</button>
+                        <button id="sheetPreviewDownload" type="button" class="cs-btn primary" data-i18n>⬇ Download</button>
+                    </div>
+                  </aside>
+                  <div id="sheetPreviewStage" class="rpv-stage">
+                    <iframe id="sheetPreviewFrame" class="rpv-frame" title="Print preview" data-i18n-title></iframe>
                   </div>
                 </div>
             </div>
 
             <!-- Share (Copy link / Copy binder link). Sealed by default: the
                  link is ciphertext and the passphrase travels another way.
-                 z-50 like the report dialog — the binder link is launched from
-                 the landing. Rendered by js/share.js. -->
+                 Above the landing (.topo-dlg), since the binder link is
+                 launched from there. Rendered by js/share.js. -->
             <div id="shareDialog" class="hidden modal-scrim topo-dlg">
                 <div class="modal topo-card">
                     <h4 id="shareTitle" class="dlg-title">Share this network</h4>
@@ -1828,6 +1862,7 @@
     <script src="js/ui.js"></script>
     <script src="js/dialog.js"></script>
     <script src="js/report.js"></script>
+    <script src="js/sheetpreview.js"></script>
     <script src="js/library.js"></script>
     <script src="js/changes.js"></script>
     <script src="js/trail.js"></script>

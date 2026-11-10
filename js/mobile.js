@@ -732,7 +732,7 @@
             if (!box) break;
             var bb = box.getBoundingClientRect();
             var top = Math.max(bb.top, vt) + stickyEdge(box, '.rail-head, .cfg-tabs, .tv-grid thead th:first-child, .rk-stable thead', true) + KB_PAD;
-            var bottom = Math.min(bb.bottom, vb) - stickyEdge(box, '.rp-actions', false) - KB_PAD;
+            var bottom = Math.min(bb.bottom, vb) - stickyEdge(box, '.rpv-actions', false) - KB_PAD;
             var r = el.getBoundingClientRect(), d = 0;
             if (r.bottom > bottom) d = r.bottom - bottom;
             // A field taller than the band shows its top.

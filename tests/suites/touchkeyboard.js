@@ -243,7 +243,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       focusOn(last); await settle();
       window.syncKeyboard({ type: 'resize' });
       await wait(250); await settle();
-      const acts = rep.querySelector('.rp-actions'), ah = acts ? acts.getBoundingClientRect().height : 0;
+      const acts = rep.querySelector('.rpv-actions'), ah = acts ? acts.getBoundingClientRect().height : 0;
       const lr = last.getBoundingClientRect(), dl = el('reportBuildBtn').getBoundingClientRect();
       ok('the last header field is above the keyboard and the actions', lr.top >= 0 && lr.bottom <= 360 - ah + 1, `${lr.top} ${lr.bottom} / ${360 - ah}`);
       ok('and Download is in sight', dl.bottom <= 361 && dl.top >= 0, `${dl.top} ${dl.bottom}`);

@@ -338,6 +338,7 @@ function locateHtml(rows, meta = {}) {
     const sub = [meta.site, meta.date].filter(Boolean).join(' · ');
     return `<!doctype html><html lang="${esc(document.documentElement.lang || 'en')}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title><style>
+@page { margin: 16mm 14mm; }
 :root { color-scheme: light dark; --bg: #f3f4f6; --card: #fff; --text: #111; --dim: #4b5563; --rule: #d1d5db; }
 @media (prefers-color-scheme: dark) { :root { --bg: #111318; --card: #1b1e25; --text: #f3f4f6; --dim: #a1a7b3; --rule: #3a3f4b; } }
 * { box-sizing: border-box; }
@@ -376,7 +377,9 @@ function printLocate(entries = [...state.selection]) {
     const rows = locateRows(entries);
     if (!rows.length) { showToast(t('Select devices to print where they are plugged in.')); return null; }
     const meta = { site: docDisplayName(), date: todayISO() };
-    return Object.assign({ rows }, deliverReport(locateHtml(rows, meta), meta, 'locate'));
+    // Shown first (openSheetPreview, js/sheetpreview.js): its Print or
+    // Download hands it over.
+    return Object.assign({ rows }, openSheetPreview({ kind: 'locate', meta, build: () => locateHtml(rows, meta) }));
 }
 {
     const btn = locateEl('printLocateBtn');

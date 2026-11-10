@@ -380,16 +380,21 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 8. Print labels ----
     open();
     let opened = null;
-    window.open = (url) => { opened = url; return null; };   // no tab: the download fallback
+    window.open = (url) => { opened = url; return null; };   // never a tab now
     const realClick = HTMLAnchorElement.prototype.click;
     let downloaded = null;
     HTMLAnchorElement.prototype.click = function () { downloaded = this.download; };
     const printed = printAssetLabels([{ type: 'node', id: 'pc1' }, { type: 'node', id: 'pc2' }, { type: 'link', id: 'l1' }, { type: 'link', id: 'l2' }]);
-    HTMLAnchorElement.prototype.click = realClick;
     ok('a tagged device and a cable are printed; the untagged one is left out and counted', printed.set.devices.length === 1 && printed.set.cables.length === 1 && printed.set.untagged === 1);
     ok('and so is a cable with no label (no "—" labels)', printed.set.unlabelled === 1 && !/—/.test(labelsHtml(printed.set).split('<div class="sheet">')[1]));
+    // Shown first (js/sheetpreview.js, held in the sheetpreview suite):
+    // nothing opened or saved until the preview's Download or Print.
+    ok('the labels are previewed first: no tab, no download', printed.previewed === true && opened === null && downloaded === null && !el('sheetPreviewDialog').classList.contains('hidden'));
+    await printed.ready;
+    el('sheetPreviewDownload').click();
+    HTMLAnchorElement.prototype.click = realClick;
+    ok('the preview\'s Download saves it, named as labels', /-labels-\d{4}-\d{2}-\d{2}\.html$/.test(downloaded || '') && downloaded === printed.name && el('sheetPreviewDialog').classList.contains('hidden'), downloaded);
     ok('a cable with no label alone prints nothing, and says why', printAssetLabels([{ type: 'link', id: 'l2' }]) === null);
-    ok('delivered like the report, named as labels', !!opened && /-labels-\d{4}-\d{2}-\d{2}\.html$/.test(downloaded || ''), downloaded);
     const html = labelsHtml(printed.set);
     const sheet = new DOMParser().parseFromString(html, 'text/html');
     ok('each device label carries its QR code, drawn here as SVG', sheet.querySelectorAll('.lbl:not(.cable) .qr svg path').length === 1 && /^M\d/.test(sheet.querySelector('.qr svg path').getAttribute('d')));

@@ -46,7 +46,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok(label + ': nothing past the screen\'s right edge', !past.length, past.join(', '));
   };
   // The dialog open now: the last shown .modal in the page.
-  const openModal = () => [...document.querySelectorAll('.modal')].filter((m) => m.getClientRects().length).pop() || null;
+  const openModal = () => [...document.querySelectorAll('.modal, .rpv')].filter((m) => m.getClientRects().length).pop() || null;
   const dialog = async (label, open, close, min = 1) => {
     try { open(); } catch (e) { ok(label + ': opens', false, String(e)); return; }
     await settle(); await wait(200);

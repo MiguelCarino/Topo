@@ -2603,7 +2603,7 @@ function closeTopoOverlay() {
     if (unlockDialogOpen()) { _answerUnlock(null); return; }
     if (shareDialogOpen()) { closeShareDialog(); return; }
     if (document.querySelector('.topo-dlg:not(.hidden)') || addDevicesOpen()) {
-        closeModePicker(); closeReportDialog(); closeAddDevices();
+        closeModePicker(); closeReportDialog(); closeSheetPreview(); closeAddDevices();
         return;
     }
     if (aboutOpen()) { closeAbout(); return; }

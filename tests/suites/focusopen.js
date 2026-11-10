@@ -107,7 +107,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       ok('the stub reads as a coarse pointer', holdKeyboard() === true);
 
       openReportDialog('site');
-      const rp = el('reportDialog').querySelector('.rp-card');
+      const rp = el('reportDialog').querySelector('.rpv');
       ok('the report focuses its card, not Site', active() === rp && rp.getAttribute('tabindex') === '-1', who(active()));
       ok('so nothing that raises a keyboard has the focus', !raisesKeyboard(active()));
       closeReportDialog();

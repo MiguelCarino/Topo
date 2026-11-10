@@ -2776,12 +2776,13 @@ const pickSet = (meta) => { const out = {}; Object.keys(meta || {}).forEach((k) 
 // a real fallback rather than an error message, and both paths hand over the
 // same bytes. The object URL outlives the call because revoking it immediately
 // leaves the new tab pointed at nothing.
-// `kind` names the download ('report', or 'labels' for Print labels in
-// js/assets.js, which is delivered the same way).
-// A report (kind 'report' or 'summary') has been read in the dialog's
-// preview already (refreshReportPreview below): it is saved as a file, and
-// handed over, so `onKept` runs (a kept network's report baseline,
-// buildSiteReport). Labels still open as before, in a tab.
+// `kind` names the download ('report' or 'summary').
+// A report has been read in the dialog's preview already
+// (refreshReportPreview below): it is saved as a file, and handed over, so
+// `onKept` runs (a kept network's report baseline, buildSiteReport). Any
+// other kind opens in a tab (openReportTab); the labels and Locate sheets
+// no longer come here, they have a preview of their own (js/sheetpreview.js),
+// which falls back to that tab only on a page without its dialog.
 function deliverReport(html, meta, kind = 'report', onKept = null) {
     if (kind !== 'report' && kind !== 'summary') return openReportTab(html, meta, kind);
     const name = reportFileName(meta, kind);
@@ -3078,7 +3079,7 @@ function openReportDialog(mode) {
     // Site is the first thing typed, except on a touch screen, where the
     // keyboard would cover the dialog before it is read (focusForTyping,
     // js/dialog.js): there the card takes the focus.
-    focusForTyping(document.getElementById('report-site'), dialog.querySelector('.modal'));
+    focusForTyping(document.getElementById('report-site'), dialog.querySelector('.rpv'));
     scheduleReportPreview(0);
 }
 
@@ -3366,11 +3367,11 @@ function fitReportPreview(frame) {
     const box = frame && frame.parentElement;
     if (!box) return;
     frame.style.width = ''; frame.style.height = ''; frame.style.transform = ''; frame.style.flex = '';
+    // box is the dialog's stage (.rpv-stage), which holds the frame alone.
     const w = box.clientWidth;
     if (!w || w >= REPORT_PREVIEW_PAGE_PX) return;
     const k = w / REPORT_PREVIEW_PAGE_PX;
-    const head = box.querySelector('.rp-head');
-    const h = Math.max(200, box.clientHeight - (head ? head.offsetHeight + 6 : 0));
+    const h = Math.max(200, box.clientHeight);
     Object.assign(frame.style, { flex: 'none', width: `${REPORT_PREVIEW_PAGE_PX}px`, height: `${Math.round(h / k)}px`,
         transform: `scale(${k})`, transformOrigin: '0 0' });
 }
