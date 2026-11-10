@@ -27,7 +27,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const realSaveBlob = window.saveBlob;
   const realPicker = window.showSaveFilePicker;
   delete window.showSaveFilePicker;
-  const heldResponder = setDialogResponder((req) => (req.kind === 'confirm' ? true : req.kind === 'prompt' ? null : req.kind === 'choice' ? null : undefined));
+  const heldResponder = setDialogResponder((req) => (req.kind === 'confirm' ? true : req.kind === 'prompt' ? null : req.kind === 'choice' ? (req.kind === 'choice' && req.choices.some((c) => c.id === 'open') && req.choices.some((c) => c.id === 'merge') ? 'open' : null) : undefined));
   if (window.CarinoRestore) await CarinoRestore.openRestoreStore({ open: async () => [], readCards: async () => ({}), readDoc: async () => null, write: async () => true });
   const heldStore = loadLibrary();
   const heldExport = localStorage.getItem(BINDER_EXPORT_KEY);
@@ -244,7 +244,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       ok('the validator rejects what is not a Topo file', check(schema, { hello: 1 }).length > 0 && check(schema, { kind: 'nettopology' }).length > 0
          && check(schema, { kind: BINDER_KIND, sites: {} }).length > 0);
       const serialized = canonicalDoc(templatesData.house);
-      ok('the schema lists every top-level key serializeDoc can write', ['v', 'id', 'updated', 'nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'accepted', 'pinned', 'expectedLife', 'annotations', 'report', 'columns', 'tableView', 'searches']
+      ok('the schema lists every top-level key serializeDoc can write', ['v', 'id', 'updated', 'rev', 'base', 'prior', 'nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'accepted', 'pinned', 'expectedLife', 'annotations', 'report', 'columns', 'tableView', 'searches', 'log']
          .every((k) => k in schema.$defs.document.properties) && Object.keys(serialized).every((k) => k in schema.$defs.document.properties), Object.keys(serialized).join());
       ok('a bare { nodes, links } document satisfies it', check(schema, { nodes: [], links: [] }).length === 0);
       const bad = [];

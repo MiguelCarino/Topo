@@ -1899,11 +1899,12 @@ function findingsDelta(before, after) {
 
 // The delta as the paste preview and the bulk panel's preview (js/bulk.js)
 // both say it: "+2 Duplicate IP · −24 Gateway". Nothing when nothing would
-// change.
-function findingsDeltaHtml(delta, changes) {
+// change. bare: the spans only, no lead-in (the merge review leads with
+// its own sentence, js/mergeui.js).
+function findingsDeltaHtml(delta, changes, bare) {
     if (!changes) return '';
-    if (!delta.length) return escapeHtml(t('The findings stay the same.'));
-    return `${escapeHtml(t('Findings after this change:'))} ${delta.map((e) => `<span class="paste-delta-${e.diff > 0 ? 'up' : 'down'}">${e.diff > 0 ? '+' : '−'}${Math.abs(e.diff)} ${escapeHtml(e.check)}</span>`).join(' · ')}`;
+    if (!delta.length) return bare ? '' : escapeHtml(t('The findings stay the same.'));
+    return `${bare ? '' : `${escapeHtml(t('Findings after this change:'))} `}${delta.map((e) => `<span class="paste-delta-${e.diff > 0 ? 'up' : 'down'}">${e.diff > 0 ? '+' : '−'}${Math.abs(e.diff)} ${escapeHtml(e.check)}</span>`).join(' · ')}`;
 }
 
 // The same, as plain text, for a question asked in words (the Renumber

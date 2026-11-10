@@ -26,7 +26,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
   const el = (id) => document.getElementById(id);
   const answers = [];
-  const heldResponder = setDialogResponder((req) => (answers.length ? answers.shift()(req) : (req.kind === 'confirm' ? false : null)));
+  const heldResponder = setDialogResponder((req) => (req.kind === 'choice' && req.choices.some((c) => c.id === 'open') && req.choices.some((c) => c.id === 'merge') ? 'open' : answers.length ? answers.shift()(req) : (req.kind === 'confirm' ? false : null)));
   const json = (v) => JSON.stringify(v);
   const node = (id) => getNode(id);
   const fire = (e, type) => e.dispatchEvent(new Event(type, { bubbles: true }));

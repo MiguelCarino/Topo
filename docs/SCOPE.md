@@ -91,12 +91,129 @@ downloads the file, and wants it merged into the site's main network.
 - Restore point first, one undo step, and a history entry ("Merged from
   closet-2F.json, prepared by X, date").
 - The bound binder file (read at Back up all, or when binding a file that
-  already holds a binder) still updates newer-wins after a restore point,
-  without step 1's "Yours has N changes" question, which the binder file and
-  binder link doors ask. The three-way merge replaces it there too.
+  already holds a binder) goes through the same binder merge as the binder
+  file and binder link doors (js/mergedoors.js): this browser's own older
+  copies are up to date, an edit made in the file is merged on its own when it
+  merges three-way with nothing to decide (a restore point and a log entry
+  each), and the rest are listed in one summary (Review…, Replace with theirs,
+  Keep as a copy, Skip). Skip writes yours over the file's copy (D5); Cancel
+  cancels the back-up. Newer-wins is gone from every door.
 - **Three-way merge for edited copies.** A file records the version it was taken
   from (a base revision), so a copy coming back is merged against that base and
   edits on both sides survive. This replaces the newer-wins Update. Format v17.
+
+### Decisions made building step 2 (2026-11-09), for the owner
+
+Design decisions (the design and its review, D1–D17):
+
+- **D1.** The network log is identity for change counting: docChangeParts and
+  "changes since" ignore it, and a merge unions the two logs (by entry id)
+  instead of reviewing them. Otherwise every merge would make every other copy
+  look different.
+- **D2.** One landing tool, **⇄ Merge…**, with two answers (a file into this
+  network, this network into another), on network cards only: templates and
+  blocks are never merged or merged into (the spec's "on any card" narrowed).
+- **D3 (corrected).** The known-copy question keeps **Open mine**: Cancel does
+  not open yours, it leaves everything as it was.
+- **D4.** The review names fields by the table's column labels, translated.
+- **D5.** At Back up all, a bound-file copy skipped in the summary is replaced
+  in the file by yours (the button says so). Blocking the back-up would be worse.
+- **D6.** Serial number is a matcher for the merge only; the CSV importer could
+  take it later (one line).
+- **D7.** Added devices keep their own layout as a block, anchored on their
+  group's frame first, then the cable to one of yours, then beside the map; a
+  single device takes the ring spot beside its anchor.
+- **D8.** A device that matches several of yours is a conflict that defaults to
+  Skip, offering each candidate or Add as new. Never a guess.
+- **D9.** At binder doors only a three-way merge with nothing to decide goes
+  through on its own; everything else is a summary row defaulting to Skip.
+- **D10.** The revision store is its own IndexedDB database
+  (`nettopo_revisions`): 30 per network, about 40 MB in all, a card's own rev and
+  base never dropped; dropped with the card. A network nobody kept keeps its
+  revisions in the tab only.
+- **D11.** The log's hash chain is per document: entries brought in are chained
+  again here. It shows an entry was edited after it entered this network, not
+  where it came from.
+- **D13.** A copy also carries `prior`, the up to 8 revs it carried before, so a
+  second file from the same technician session still finds the first as its base
+  (otherwise it merged two-way and the technician's corrections lost by default).
+  Built ahead of the owner's answer; it can be dropped.
+- **D14.** Links (single and binder) carry the newest 50 log entries (binder
+  links are capped at 12000 characters); files carry up to 500. The entries left
+  out come back by id at the next merge.
+- **D15.** The base a copy goes out with is derived from the log (the newest
+  merged rev this network holds), so undo and restore points move it with the
+  merge. A card's own `base` is only where it started.
+- **D16.** A copy your network already has everything of is never merged (it
+  replaced D12's "already merged"): it left from here unchanged, or its merge is
+  still in your log, or its content is a revision that left from here, or it is
+  your last back-up. Undo the merge and the copy is offered again.
+- **D17.** A copy from before revisions (no rev, no base) edited after your last
+  back-up is compared with that back-up; older, it merges two-way. Built this way
+  it is never merged on its own at a binder door (a guessed base could remove
+  things): it is always a summary row.
+
+Decisions made in the build:
+
+- **D18. Replace with this copy** is the old Update, renamed, without a count
+  (the review's counts are the merge's): step 1's warning and restore point stay.
+  It is offered for every copy, including an ancestor (to roll back on purpose).
+- **D19.** The unknown-file question (Open as its own network / Merge into a
+  network…) is asked only when there is a network to merge into. Dismissing it
+  cancels the open, as every question's dismissal does.
+- **D20.** From a file or a link, the target opens only when the merge is
+  applied, and its restore point is taken before it opens: Cancel in the review
+  (or in the restore-point question) leaves the screen as it was.
+- **D21.** A base is only ever a revision held under the network merged into
+  that it grew from (emitted, opened as, or merged and still logged), never one
+  held under another network or only in the tab: a wrong base would read their
+  missing devices as removals.
+- **D22.** A copy whose `rev` is yours but whose content changed after it left
+  (edited by hand) is compared with that rev, not treated as yours.
+- **D23.** Binder rows for a template newer than yours, a site from a newer
+  Topo, or a network of yours from a newer Topo offer Replace, Keep as a copy
+  and Skip only (no review). An older or equal template copy is left as it is.
+- **D24.** A network's name is not merged: a copy whose content is the same as
+  yours is up to date whatever it is called (a rename made only on another
+  machine stays there).
+- **D25.** The binder summary's Cancel writes nothing (merges already reviewed
+  stay); when binding a file it does not bind; at Back up all it cancels the
+  back-up. A site skipped from the link shelf stays on the shelf.
+- **D26.** After a binder, the offer to read older copies into the address
+  history covers only the copies left as they were (skipped or up to date).
+- **D27.** (Review fixes, 2026-11-09.) Pointing at a record is editing it, for
+  the removal rules: a group, custom column, provider, Wi-Fi network or subnet
+  one side removed while the other started using it (a device put in the
+  group, a custom value filled, a provider assigned, a cable on the SSID) is a
+  "removed on one side, edited on the other" conflict that keeps it by
+  default. The same for an interface one side removed while the other plugged
+  a cable into it. A cable the other side removed only along with its device
+  follows that device's answer (kept with it, or gone with it).
+- **D28.** A range or name that must stay unique (a subnet's range, a saved
+  search's or a custom column's name) never takes theirs where the result
+  would hold it twice: that field is a conflict defaulting to yours, and if
+  theirs is chosen anyway yours stays and a note says why. A record of theirs
+  to add whose range or name one of yours has is not added, with a note. So a
+  merge never drops a record of yours behind its counts.
+- **D29.** A returning copy's base is the NEAREST revision it names that this
+  network grew from (the one held here last), not the first it names: after a
+  cross-merge a copy's own older rev (prior) and the merged copy (base) can
+  both be held here, and the older one would bring back deletions.
+- **D30.** In two-way, an id match is also contradicted for providers (another
+  name: the simple samples' pv_isp is a different ISP in each), Wi-Fi networks
+  (another SSID) and groups (another kind, or another name under another
+  parent). A contradicted one is added under a new id. A group renamed in place
+  (same kind, same parent) is still the same group, its name a conflict.
+- **D31.** A link visited, edited and then merged at Keep: the revision it
+  arrived with is recorded as the link was when it arrived, never as the
+  edited canvas, so a later copy naming it does not read the edits as removed.
+
+- **D32** (owner, 2026-11-09). In a two-way merge a field filled in yours and
+  blank in theirs keeps yours quietly: no conflict row. A technician's partial
+  file only says what it says.
+- **D33** (owner, 2026-11-09). In a two-way merge an interface of theirs with
+  no name, address or MAC is the device's next interface of yours with no
+  cable on it, not an extra one; with none free it is added.
 
 ## 4. The client-provider loop (step 4)
 
@@ -153,7 +270,11 @@ phpIPAM. Every import goes through the merge.
   expected lives and the table layout, names a field outside a kind's list as
   "changed: <field>", and says any part docChangeCount counts that no kind
   describes; tests/suites/changecount.js cross-checks every top-level key.
-- [ ] 2. Merge.
+- [x] 2. Merge (built 2026-11-09, not yet committed). Format v17 (rev, base,
+  prior, log) and the revision store (js/revisions.js); the merge engine
+  (js/merge.js); apply, the network log and its report tick (js/mergeapply.js);
+  the review (js/mergeui.js); every door (js/mergedoors.js, js/library.js,
+  js/app.js). Decisions D1–D33 above.
 - [ ] 3. Mobile B4, B5.
 - [ ] 4. Client-provider loop.
 - [ ] 5. Server.

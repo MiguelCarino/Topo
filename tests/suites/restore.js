@@ -25,8 +25,17 @@ window.addEventListener('load', () => { setTimeout(async () => {
     req.restoreOpen = !!el('restoreDialog') && !el('restoreDialog').hidden;
     asked.push(req);
     if (req.kind === 'confirm') return true;
+    if (req.kind === 'choice' && req.choices.some((c) => c.id === 'open') && !req.choices.some((c) => c.id === answer)) return 'open';
     if (req.kind === 'choice') return req.choices.some((c) => c.id === 'download') ? failAnswer : answer;
     return undefined;
+  });
+  // The binder merge's summary (js/mergedoors.js): Replace with theirs,
+  // unless rowAnswer says otherwise.
+  let rowAnswer = () => 'replace';
+  const heldSummary = TopoMergeDoors.setMergeSummaryResponder((req) => {
+    const o = {};
+    req.rows.forEach((r) => { o[r.id] = rowAnswer(r); });
+    return o;
   });
   const failQuestions = () => asked.filter((q) => q.kind === 'choice' && q.choices.some((c) => c.id === 'download'));
   const heldLib = L.loadLibrary();
@@ -104,30 +113,33 @@ window.addEventListener('load', () => { setTimeout(async () => {
     await applyImportedDoc(fileOf('c9', 3000, docOf('Solo')), { fileName: 'new.json' });
     ok('a file that only adds a card takes no restore point', !R.hasRestorePoints('c9') && f.writes.length === before && !!L.libraryEntry('c9'));
 
-    // ---- 2. A binder that updates cards ----
+    // ---- 2. A binder that replaces cards (the merge summary's Replace with theirs) ----
     const BK = L.BINDER_KIND;
     setLib([card('c1', 'Casa Roma', D1, 1000), card('c2', 'Torre A', docOf('Core'), 1000), card('c3', 'Bodega', docOf('Old'), Date.now() + 600000)]);
     R._reset();
+    rowAnswer = (r) => (r.id === 'c3' ? 'skip' : 'replace');
     await applyImportedDoc({ kind: BK, version: 1, sites: [
       { id: 'c1', name: 'Casa Roma', updated: 5000, doc: docOf('Router', 'NAS') },
       { id: 'c3', name: 'Bodega', updated: 5000, doc: docOf('Older') },
       { id: 'nb', name: 'Nueva', updated: 5000, doc: docOf('X') }] }, { fileName: 'estate.json' });
     pts = R.restorePointsOf('c1');
-    ok('a binder file: a point of each card it updates', pts.length === 1 && pts[0].reason === 'Before importing {file}' && pts[0].fileName === 'estate.json'
+    ok('a binder file: a point of each card it replaces', pts.length === 1 && pts[0].reason === 'Before merging {file}' && pts[0].fileName === 'estate.json'
        && names(L.libraryEntry('c1').doc) === 'Router,NAS', JSON.stringify(pts));
-    ok('none for a card it does not replace (yours is newer) or one it adds', !R.hasRestorePoints('c3') && !R.hasRestorePoints('nb'));
-    applyImportedBinder({ kind: BK, version: 1, sites: [{ id: 'c2', name: 'Torre A', updated: 6000, doc: docOf('Core', 'Edge') }] });
+    ok('none for a card it does not replace (skipped) or one it adds', !R.hasRestorePoints('c3') && !R.hasRestorePoints('nb') && names(L.libraryEntry('c3').doc) === 'Old');
+    rowAnswer = () => 'replace';
+    await applyImportedBinder({ kind: BK, version: 1, sites: [{ id: 'c2', name: 'Torre A', updated: 6000, doc: docOf('Core', 'Edge') }] });
     pts = R.restorePointsOf('c2');
-    ok('applyImportedBinder on its own takes them too', pts.length === 1 && pts[0].reason === 'Before importing a binder' && names(await R.restorePointDoc(pts[0].id)) === 'Core', JSON.stringify(pts));
+    ok('applyImportedBinder on its own takes them too', pts.length === 1 && pts[0].reason === 'Before merging a binder' && names(await R.restorePointDoc(pts[0].id)) === 'Core', JSON.stringify(pts));
 
     // ---- 3. The guest shelf's Keep ----
     const kept = keepGuestSites([{ id: 'c2', name: 'Torre A', updated: 7000, doc: docOf('Core', 'Edge', 'AP') }]);
-    ok('Keep that updates a card waits for its point', kept && typeof kept.then === 'function');
+    ok('Keep that replaces a card waits for its point', kept && typeof kept.then === 'function');
     await kept;
     pts = R.restorePointsOf('c2');
-    ok('and the point is "Before updating from a link"', pts[0].reason === 'Before updating from a link' && names(await R.restorePointDoc(pts[0].id)) === 'Core,Edge'
+    ok('and the point is "Before merging a link"', pts[0].reason === 'Before merging a link' && names(await R.restorePointDoc(pts[0].id)) === 'Core,Edge'
        && names(L.libraryEntry('c2').doc) === 'Core,Edge,AP', JSON.stringify(pts.map((p) => p.reason)));
-    ok('Keep that only adds stays synchronous', keepGuestSites([{ id: 'g9', name: 'Otra', updated: 1, doc: docOf('Y') }]) === undefined && !!L.libraryEntry('g9'));
+    await keepGuestSites([{ id: 'g9', name: 'Otra', updated: 1, doc: docOf('Y') }]);
+    ok('Keep that only adds takes no point', !!L.libraryEntry('g9') && !R.hasRestorePoints('g9'));
 
     // ---- 4. Keep this network over a card, from a link ----
     const linkDoc = Object.assign({ v: DOC_VERSION, id: 'c2', updated: Date.now() + 120000 }, docOf('Core', 'Edge', 'AP', 'Cam'));
@@ -175,12 +187,12 @@ window.addEventListener('load', () => { setTimeout(async () => {
       window.showSaveFilePicker = () => Promise.resolve(picked);
       await exportBinder();
       pts = R.restorePointsOf('c4');
-      ok('binding a file that holds a newer copy keeps a point first', pts.length === 1 && pts[0].reason === 'Before importing {file}' && pts[0].fileName === 'estate.json'
+      ok('binding a file that holds a different copy: Replace with theirs keeps a point first', pts.length === 1 && pts[0].reason === 'Before merging {file}' && pts[0].fileName === 'estate.json'
          && names(await R.restorePointDoc(pts[0].id)) === 'Old' && names(L.libraryEntry('c4').doc) === 'Old,New', JSON.stringify(pts));
       picked.written = JSON.stringify({ kind: BK, version: 1, sites: [{ id: 'c4', name: 'Clínica', created: 1, updated: Date.now() + 600000, doc: docOf('Old', 'New', 'Newer') }] });
       await exportBinder();
       pts = R.restorePointsOf('c4');
-      ok('so does Back up all reading a newer copy from the bound file', pts.length === 2 && pts[0].fileName === 'estate.json'
+      ok('so does Back up all reading a different copy from the bound file', pts.length === 2 && pts[0].fileName === 'estate.json'
          && names(await R.restorePointDoc(pts[0].id)) === 'Old,New' && names(L.libraryEntry('c4').doc) === 'Old,New,Newer', JSON.stringify(pts.map((p) => p.reason)));
     } finally {
       window.showSaveFilePicker = heldPicker;
@@ -339,9 +351,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('three cards past the total cap: each keeps its point, with no question', goTrio === true && failQuestions().length === 0
        && trio.every((id) => R.restorePointsOf(id).length === 1), trio.map((id) => R.restorePointsOf(id).length).join());
     ok('and each is on disk', trio.every((id) => R.restorePointsOf(id).length && f.disk.has(R.restorePointsOf(id)[0].id)));
-    applyImportedBinder({ kind: L.BINDER_KIND, version: 1, sites: trio.map((id, i) => ({ id, name: id, updated: 5000 + i, doc: docOf(id + '-new') })) });
+    await applyImportedBinder({ kind: L.BINDER_KIND, version: 1, sites: trio.map((id, i) => ({ id, name: id, updated: 5000 + i, doc: docOf(id + '-new') })) });
     await wait(0);
-    ok('applyImportedBinder on its own keeps one for each card it replaces too', trio.every((id) => R.restorePointsOf(id).some((p) => p.reason === 'Before importing a binder'
+    ok('applyImportedBinder on its own keeps one for each card it replaces too', trio.every((id) => R.restorePointsOf(id).some((p) => p.reason === 'Before merging a binder'
        && names(L.libraryEntry(id).doc) === id + '-new')), trio.map((id) => R.restorePointsOf(id).length).join());
     R.recordRestorePoint('cA', 'Before restoring');
     await wait(0);
@@ -539,6 +551,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     R.releaseRestoreStore(); R._reset();
     window.downloadJson = heldDownload;
     setDialogResponder(heldResponder);
+    TopoMergeDoors.setMergeSummaryResponder(heldSummary);
     L.persistLibrary(heldLib);
     const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
     document.body.appendChild(pre);

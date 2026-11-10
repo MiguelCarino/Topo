@@ -994,7 +994,9 @@ function serializeDoc() {
     // `columns` and `tableView` (v13): the custom columns and the Devices
     // table's arrangement (js/model.js "Custom columns"). And `searches`
     // (v16): the saved searches, through SEARCH_FIELDS, no key when none.
-    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), providers: serializeProviders(state.providers), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView), searches: serializeSearches(state.searches) };
+    // And `log` (v17): the network log, through LOG_FIELDS, last, no key
+    // when it is empty (js/model.js "Network log").
+    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), providers: serializeProviders(state.providers), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView), searches: serializeSearches(state.searches), log: serializeLog(state.log) };
 }
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
@@ -1172,9 +1174,19 @@ const LIVE_STATE_KEY = 'topoDoc';
 const cleanUrl = () => window.location.pathname + window.location.search;
 // `org` is where it came from, so the bar on the canvas still says "an
 // example" or "opened from a link" after a reload.
-const liveMeta = () => ({ lib: state.libraryId || null, did: state.docId || null, upd: state.docUpdated || 0, org: _docOrigin });
+// The rest of the identity rides too (rev, its content's hash, base, prior;
+// js/revisions.js), so a copy opened from a link and reloaded still says
+// which revision it is, and an edit made before the reload is not taken
+// for that revision.
+const liveMeta = () => ({ lib: state.libraryId || null, did: state.docId || null, upd: state.docUpdated || 0, org: _docOrigin,
+    rev: state.docRev || null, rh: state.docRevHash || null, base: state.docBase || null, prior: state.docPrior && state.docPrior.length ? state.docPrior.slice() : null });
 function liveState(json, meta = liveMeta()) {
-    return { [LIVE_STATE_KEY]: json, lib: meta.lib || null, did: meta.did || null, upd: meta.upd || 0, org: meta.org || null };
+    const out = { [LIVE_STATE_KEY]: json, lib: meta.lib || null, did: meta.did || null, upd: meta.upd || 0, org: meta.org || null };
+    if (meta.rev) out.rev = meta.rev;
+    if (meta.rh) out.rh = meta.rh;
+    if (meta.base) out.base = meta.base;
+    if (meta.prior) out.prior = meta.prior;
+    return out;
 }
 // Reading the entry means wanting the current document, so a throttled write
 // still waiting goes in first (see queueLiveDoc). popstate is the one reader
@@ -1235,7 +1247,8 @@ function writeLiveNow(json, push, meta = liveMeta()) {
     // changed nothing the entry holds): no call, no token. `upd` is left out
     // of the comparison: it only moves when the document does.
     if (!push && s && s[LIVE_STATE_KEY] === json && (s.lib || null) === (meta.lib || null)
-        && (s.did || null) === (meta.did || null) && s.eid === eid) return true;
+        && (s.did || null) === (meta.did || null) && s.eid === eid
+        && (s.rev || null) === (meta.rev || null) && (s.rh || null) === (meta.rh || null) && (s.base || null) === (meta.base || null)) return true;
     try {
         window.history[push ? 'pushState' : 'replaceState']({ ...liveState(json, meta), eid }, '', cleanUrl());
         liveTokens(); _liveTokens = Math.max(0, _liveTokens - 1);
@@ -1715,7 +1728,27 @@ function loadDocState(doc) {
     // serialize. Assigned unconditionally, including to null: leaving it alone
     // once put the previous document's client name on a shared link.
     state.report = d.report && typeof d.report === 'object' ? cloneData(d.report) : null;
+    // The network log, as every other list: assigned always, so a document
+    // without one never keeps the previous document's.
+    state.log = normalizeLog(d.log);
     return { newer };
+}
+
+// ---- Borrowing the document state ----
+// canonicalDoc() and withDoc() (js/library.js) and withDocRendered()
+// (js/report.js) read another document through loadDocState() and put the
+// open one back after. Every key loadDocState() writes is held here, in one
+// list: a key one of them forgot (the log was the risk) would leave the
+// borrowed document's in the open one, and the next save would write it
+// into the open card.
+const DOC_STATE_KEYS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'accepted', 'pinned', 'expectedLife', 'columns', 'tableView', 'searches', 'annotations', 'report', 'log'];
+function holdDocState() {
+    const held = {};
+    DOC_STATE_KEYS.forEach((k) => { held[k] = state[k]; });
+    return held;
+}
+function restoreDocState(held) {
+    DOC_STATE_KEYS.forEach((k) => { state[k] = held[k]; });
 }
 
 const EMPTY_DOC = Object.freeze({ nodes: [], links: [] });
@@ -1747,6 +1780,10 @@ const EMPTY_DOC = Object.freeze({ nodes: [], links: [] });
 //              the identity of a document that is not kept (a reload, a guest
 //              site); otherwise read from the card, or from the document as
 //              it travelled (docIdentity in js/library.js).
+//   docRev, docRevHash, docBase, docPrior
+//              the same for its revision (js/revisions.js): a guest site's
+//              (kept beside its doc, not in it) or a reload's. docRevHash
+//              given means the content may have changed since that rev.
 function replaceDocument(doc, opts = {}) {
     const origin = opts.origin || 'file';
     // The network going away keeps its last edits: a kept one's pending
@@ -1762,8 +1799,10 @@ function replaceDocument(doc, opts = {}) {
     state.selection = new Set(); state.linkSourceId = null;
     const { newer } = loadDocState(raw);
     // A template is a starting point, never the network it was saved from, so
-    // it brings no identity with it.
-    const ident = origin === 'template' ? { id: null, updated: 0 } : docIdentity(raw);
+    // it brings no identity with it, and no log: a network started from it
+    // has not had its merges.
+    if (origin === 'template') state.log = [];
+    const ident = origin === 'template' ? { id: null, updated: 0, rev: null, base: null, prior: [] } : docIdentity(raw);
     let lib = opts.libraryId || null;
     if (!lib && opts.claim && !newer) lib = ident.id || mintLibraryId();
     state.libraryId = lib;
@@ -1780,6 +1819,10 @@ function replaceDocument(doc, opts = {}) {
     // Serialized once, for the card, the timeline and the entry; a read-only
     // document's entry is as it arrived (liveJsonNow's branch).
     const now = JSON.stringify(serializeDoc());
+    // Its revision (js/revisions.js): a card's own, or what it carried. A
+    // copy arriving with a revision is held in this tab under it (never
+    // stored unless it is kept), so keeping it later keeps that revision too.
+    setDocRevision(card, ident, opts, now, newer, origin);
     const json = state.readOnly ? JSON.stringify(state.readOnly.doc) : now;
     noteDocLoaded(now, origin === 'live' ? (opts.shownAs || 'live') : origin);
     if (origin !== 'default') writeLiveDoc(json, !!opts.push);
@@ -1803,16 +1846,20 @@ function claimEmptyDocument() {
 // ---- The document as it leaves the tab ----
 // A build file or a link carries the document's identity: its id (the card's,
 // when kept) and when it last changed. Bringing it back is then recognised as
-// the same network and merged newer-wins (applyImportedDoc, keepThisNetwork),
-// where it used to become a second card. Written here and not by
-// serializeDoc(), because an identity is not an edit: in serializeDoc() it
-// would be an undo step and a history write of its own. `v` stays first.
-function identifiedDoc(doc) {
+// the same network (applyImportedDoc, keepThisNetwork), where it used to
+// become a second card. Written here and not by serializeDoc(), because an
+// identity is not an edit: in serializeDoc() it would be an undo step and a
+// history write of its own. `v` stays first.
+// Called only where the copy leaves (a back-up, a link): it stamps the
+// revision (js/revisions.js stampOpenDoc), a new one when the content
+// changed since the last copy that left, and keeps the content under it,
+// so the copy coming back finds what it was. `why`: 'export' or 'link'.
+function identifiedDoc(doc, why = 'export') {
     if (!state.docId) state.docId = mintLibraryId();   // so the next export or link is the same network
     const kept = isKept() && flushAutosave() ? libraryEntry(state.libraryId) : null;
     const updated = (kept && kept.updated) || state.docUpdated || Date.now();
     const { v, ...rest } = doc;
-    return { v, id: state.docId, updated, ...rest };
+    return Object.assign({ v, id: state.docId, updated }, revisionFields(stampOpenDoc(doc, why)), rest);
 }
 
 // What a download of this network is called (topoFileStem, js/report.js):
@@ -1962,6 +2009,7 @@ async function load() {
         if (landingIsOpen()) landingHandledDocument();
         replaceDocument(parseDocJson(live[LIVE_STATE_KEY]) || templatesData.house,
             { libraryId: live.lib || null, origin: 'live', docId: live.did || null, docUpdated: Number.isFinite(live.upd) ? live.upd : 0,
+              docRev: live.rev || null, docRevHash: live.rh || null, docBase: live.base || null, docPrior: Array.isArray(live.prior) ? live.prior : [],
               shownAs: typeof live.org === 'string' ? live.org : null });
         return;
     }
@@ -2908,6 +2956,7 @@ function applyLocale(lang) {
     document.getElementById('exportSvgBtn').innerHTML = `🖼️ ${t('SVG image')} <span class="cs-menu-note">${t('vector')}</span>`;
     document.getElementById('exportJsonBtn').innerHTML = `📄 ${t('Back up this network')} <span class="cs-menu-note">.json</span>`;
     document.getElementById('restorePointsBtn').textContent = `↺ ${t('Restore points…')}`;
+    document.getElementById('networkLogBtn').textContent = `≡ ${t('Network log…')}`;
     document.getElementById('csvMenuBtn').innerHTML = `📊 ${t('Spreadsheet')} <span class="cs-menu-note">CSV · TSV</span>`;
     document.getElementById('reportBtn').innerHTML = `📋 ${t('Site report')} <span class="cs-menu-note">${t('printable')}</span>`;
     document.getElementById('myNetworksBtn').innerHTML = `🗂️ ${t('My networks')} <span class="cs-menu-note">${t('saved here')}</span>`;
@@ -3326,12 +3375,12 @@ function docFromImported(parsed) {
 // swap logic is testable without a FileReader in the way. Resolves to whether
 // it took. opts.fileName names the card when the file itself does not.
 //
-// A file is kept: opening one is choosing to work on it here. And a build file
-// is a binder of one site, so it goes through the binder's merge: a file whose
+// A file is kept: opening one is choosing to work on it here. A file whose
 // network is already a card here (your own back-up, or a colleague's edit of
-// a network you sent) is offered as an update to that card, newer-wins, or as
-// a copy — never silently as a second card, which is what re-importing used
-// to do.
+// a network you sent) is offered as a merge into that card (js/mergedoors.js),
+// a replacement, or a copy — never silently as a second card, which is what
+// re-importing used to do. A file whose network is not here can be opened as
+// its own network or merged into one of yours.
 async function applyImportedDoc(parsed, opts = {}) {
     // A binder is a library, not a document — it merges into the saved networks
     // and leaves the canvas alone. Checked first because a binder also has a
@@ -3339,20 +3388,10 @@ async function applyImportedDoc(parsed, opts = {}) {
     // is the one door: the drop zone, "Open a file" and the File menu's
     // "Open a file…" all arrive here, and the file itself says which it is.
     const binder = binderFromImported(parsed);
-    if (binder) {
-        // The open network's pending edit goes into its card first, so what
-        // is compared (and kept as a restore point) is what is on screen.
-        if (isKept() && !state.readOnly) flushAutosave();
-        // A card with edits the binder's copy has not got is asked about
-        // (binderLossGuard): added as a copy, or updated anyway.
-        const sites = await binderLossGuard(parsed.sites);
-        if (!sites) return false;
-        // The cards it replaces get a restore point first (js/restore.js),
-        // and Cancel, when one cannot be stored, stops here.
-        const over = binderOverwrites(sites);
-        if (over.length && !(await keepRestorePoints(over, binderImportReason(opts.fileName), { fileName: opts.fileName }))) return false;
-        return applyImportedBinder(sites === parsed.sites ? parsed : Object.assign({}, parsed, { sites }), { pointsTaken: true, fileName: opts.fileName });
-    }
+    // Its networks go through the binder merge (js/mergedoors.js): restore
+    // points first, the clean three-way merges on their own, the rest asked
+    // about in one summary.
+    if (binder) return applyImportedBinder(parsed, { fileName: opts.fileName });
     const doc = docFromImported(parsed);
     if (!doc) { showToast(t('That file does not look like a Topo build or binder.'), 'err'); return false; }
     const ident = docIdentity(doc);
@@ -3367,8 +3406,18 @@ async function applyImportedDoc(parsed, opts = {}) {
         // else (outgoingDoc). The file is still the copy to keep.
         replaceDocument(doc, { origin: 'file' });
     } else if (known) {
-        const choice = await askAboutKnownCopy({ doc, updated: ident.updated }, known, { title: t('Open a file'), history: true });
+        // Merge is the main answer (js/mergedoors.js): three-way when the
+        // copy it was taken from is held here, else two-way. Never for a
+        // template's or a block's card, or one from a newer Topo.
+        const mergeable = !known.template && !known.block && !migrateDoc(known.doc).newer;
+        const ctx = mergeable ? await mergeContext(known.id, doc, ident) : null;
+        const choice = await askAboutKnownCopy({ doc, updated: ident.updated }, known, { title: t('Open a file'), history: true, ctx });
         if (!choice) return false;
+        if (choice === 'merge') {
+            const res = await mergeCopyInto(known.id, doc, { ident, ctx, source: opts.fileName || '', fileName: opts.fileName, replaceAsked: true });
+            if (res && res.ok && landingIsOpen()) landingHandledDocument();
+            return !!(res && res.ok);
+        }
         // An older back-up read into the card's address history (js/trail.js):
         // the card and the canvas stay as they are.
         if (choice === 'history') {
@@ -3383,13 +3432,30 @@ async function applyImportedDoc(parsed, opts = {}) {
             if (!(await keepRestorePoints([known.id], opts.fileName ? 'Before opening {file}' : 'Before opening a file', { fileName: opts.fileName }))) return false;
             // The card stays what it was: a template's file brought back
             // updates the template, it does not turn it into a network.
-            const result = importBinderSites([Object.assign({ id: known.id, name: known.name, created: known.created, updated: ident.updated, doc: stripIdentity(doc) },
-                known.template ? { template: true } : {}, known.block ? { block: true } : {})]);
+            const result = importBinderSites([Object.assign({ id: known.id, name: known.name, created: known.created, updated: ident.updated }, revisionFields(ident), { doc: stripIdentity(doc) },
+                known.template ? { template: true } : {}, known.block ? { block: true } : {})], { replace: [known.id] });
             if (!result) { showToast(t('Could not save — browser storage is unavailable (private mode or full).'), 'err'); return false; }
         }
         if (choice === 'copy') openImportedAsNewCard(doc, t('{name} (copy)', { name: known.name }), null);
         else replaceDocument(libraryEntry(known.id).doc, { libraryId: known.id, origin: 'library' });
     } else {
+        // A network not here: its own network (the main answer), or merged
+        // into one of yours (js/mergedoors.js), the technician's file of
+        // part of a site brought into the site's network.
+        if (mergeTargets().length) {
+            const how = await askChoice(t('This file holds a network that is not in this browser yet.'), {
+                title: t('Open a file'),
+                choices: [{ id: 'merge', label: t('Merge into a network…') }, { id: 'open', label: t('Open as its own network'), primary: true }]
+            });
+            if (!how) return false;
+            if (how === 'merge') {
+                const target = await pickMergeTarget(null);
+                if (!target) return false;
+                const res = await mergeCopyInto(target, doc, { ident, source: opts.fileName || '', fileName: opts.fileName, replaceAsked: true });
+                if (res && res.ok && landingIsOpen()) landingHandledDocument();
+                return !!(res && res.ok);
+            }
+        }
         const named = typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim() : '';
         // A file Topo named (topo_acme_casa-roma_2026-11-09.json) names the
         // card after its site part, not after the whole file name.
@@ -3408,9 +3474,13 @@ async function applyImportedDoc(parsed, opts = {}) {
 // A file's network as a new card (under the id it carries, when it has one),
 // opened and kept. Stored as the file holds it, like a binder site, and
 // rewritten by the serializer with the first edit.
+// Its revision comes along (js/revisions.js): the card is that revision. As
+// a copy (no id given) it is a new network started from it: base only.
 function openImportedAsNewCard(doc, name, id, updated, nameAuto = false) {
     const site = (doc.report && typeof doc.report.site === 'string' && doc.report.site.trim()) || '';
-    const result = importBinderSites([{ id: id || mintLibraryId(), name: name || site, updated: updated || Date.now(), doc: stripIdentity(doc) }]);
+    const ident = docIdentity(doc);
+    const revs = id ? revisionFields(ident) : revisionFields({ base: ident.rev || ident.base });
+    const result = importBinderSites([Object.assign({ id: id || mintLibraryId(), name: name || site, updated: updated || Date.now() }, revs, { doc: stripIdentity(doc) })]);
     if (!result || !result.storedIds.length) {
         // Not stored: still opened, as it always was, but not kept.
         showToast(t('Could not save — browser storage is unavailable (private mode or full).'), 'err');
@@ -3611,6 +3681,7 @@ document.getElementById('exportWebpBtn').onclick = () => handleExport('webp');
 document.getElementById('exportSvgBtn').onclick = exportSvgFile;
 document.getElementById('exportJsonBtn').onclick = exportJsonFile;
 document.getElementById('restorePointsBtn').onclick = () => openRestoreDialog(state.libraryId);
+document.getElementById('networkLogBtn').onclick = () => openLogDialog(isKept() ? state.libraryId : null);
 document.getElementById('importFileBtn').onclick = () => document.getElementById('importFileInput').click();
 
 // ---- Landing ----
@@ -3774,6 +3845,9 @@ showLibraryTab(state.settings.libraryTab || 'nodes');
         openTrailStore();
         // The restore points kept before outside changes (js/restore.js), the same way.
         openRestoreStore();
+        // The revisions of copies that left, kept to find a returning copy's
+        // base (js/revisions.js), the same way.
+        openRevisionStore();
         // Saved templates from before they were cards have to be in it.
         migrateUserTemplates();
         renderUserTemplates();

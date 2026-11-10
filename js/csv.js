@@ -1274,15 +1274,18 @@ function csvSheetKind(mapping) {
 const csvLower = (s) => String(s || '').trim().toLowerCase();
 
 // Lookups over the devices on the map, built once per plan: a sheet of 600
-// rows must not walk 600 devices per row per key.
-function csvIndex() {
-    const byId = new Map(), byName = new Map(), byMac = new Map(), byIp = new Map(), byTag = new Map();
+// rows must not walk 600 devices per row per key. `nodes`: the map's by
+// default; the merge (js/merge.js) indexes the network it merges into, and
+// is the one reader of bySerial (the importer does not match by serial).
+function csvIndex(nodes = state.nodes) {
+    const byId = new Map(), byName = new Map(), byMac = new Map(), byIp = new Map(), byTag = new Map(), bySerial = new Map();
     const push = (m, k, id) => { if (!k) return; const a = m.get(k) || []; if (!a.includes(id)) a.push(id); m.set(k, a); };
     const tagField = NODE_FIELDS.find((f) => f.key === 'assetTag');
-    state.nodes.forEach((n) => {
+    nodes.forEach((n) => {
         byId.set(n.id, [n.id]);
         push(byName, csvLower(n.name), n.id);
         if (tagField) push(byTag, csvLower(n.assetTag), n.id);
+        push(bySerial, csvLower(n.serial), n.id);
         (n.interfaces || []).forEach((i) => {
             const mac = normMac(i.mac);
             if (mac.length === 12) push(byMac, mac, n.id);
@@ -1290,7 +1293,7 @@ function csvIndex() {
             if (p) push(byIp, p.ip.toString(), n.id);
         });
     });
-    return { byId, byName, byMac, byIp, byTag, tagField };
+    return { byId, byName, byMac, byIp, byTag, bySerial, tagField };
 }
 
 // The matchers, strongest first. Each reads one cell of the row and answers

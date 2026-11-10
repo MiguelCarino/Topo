@@ -138,24 +138,27 @@ window.addEventListener('load', async () => {
   // Guarded: keeping from an empty shelf would throw rather than fail, and a
   // suite that dies says far less than a named assertion does.
   ok('the shelf has something to keep', guestSites().length === 2, String(guestSites().length));
-  // A card that loses the newer-wins comparison is NOT kept, and must not be
-  // swept off the shelf as though it had been — once the landing is dismissed
-  // the shelf is the only remaining copy.
+  // A card that differs from yours goes to the merge summary
+  // (js/mergedoors.js); skipped there it is NOT kept, and must not be swept
+  // off the shelf as though it had been — once the landing is dismissed the
+  // shelf is the only remaining copy.
   const firstId = guestSites()[0].id;
   const lib0 = loadLibrary();
   lib0[firstId] = { id: firstId, name: 'Mine, newer', doc: { nodes: [], links: [] }, created: 1, updated: Date.now() + 60000 };
   persistLibrary(lib0);
-  keepGuestSites([guestSites()[0]]);
-  ok('a shelf card that loses to a newer local copy stays on the shelf',
+  const heldSummary = TopoMergeDoors.setMergeSummaryResponder(() => ({}));
+  await keepGuestSites([guestSites()[0]]);
+  TopoMergeDoors.setMergeSummaryResponder(heldSummary);
+  ok('a shelf card skipped in the merge summary stays on the shelf',
      guestSites().some((x) => x.id === firstId) && loadLibrary()[firstId].name === 'Mine, newer',
      guestSites().map((x) => x.id).join(','));
   delete lib0[firstId]; persistLibrary(lib0);
 
-  keepGuestSites(guestSites().slice(0, 1));
+  await keepGuestSites(guestSites().slice(0, 1));
   ok('Keep moves exactly one network into the library',
      Object.keys(loadLibrary()).length === 1 && guestSites().length === 1,
      `${Object.keys(loadLibrary()).length} kept, ${guestSites().length} left`);
-  keepGuestSites(guestSites());
+  await keepGuestSites(guestSites());
   ok('and keeping the rest empties the shelf',
      Object.keys(loadLibrary()).length === 2 && guestSites().length === 0);
 

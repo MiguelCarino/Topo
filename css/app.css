@@ -843,6 +843,62 @@ html, body { overscroll-behavior-y: none; }
 @media (pointer: coarse) {
     .restore-acts .btn, .topo-restore .modal-foot .btn { min-height: 44px; min-width: 44px; }
     .topo-restore .modal-x { min-width: 44px; min-height: 44px; }
+    .topo-log .modal-foot .btn, .topo-log .modal-x { min-height: 44px; min-width: 44px; }
+}
+/* The network log (js/mergeapply.js): read-only, the restore points' rows without buttons. */
+.log-row .restore-n { font-family: inherit; }
+/* The merge review (js/mergeui.js): counts that filter, a kind filter, the
+   bulk buttons, then a row per item; a conflicting field is a Mine / Theirs
+   pair. On a phone the rows stack: the pair is two full-width buttons. */
+.modal.topo-merge { max-width: 46rem; }
+.merge-counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.merge-chip { font-size: var(--fs-label); }
+.merge-chip.zero { opacity: 0.55; }
+.merge-chip-n { font-family: var(--mono); }
+.merge-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
+.merge-tools .select { flex: 0 1 14rem; width: auto; min-width: 0; }
+.merge-bulk { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.merge-notes { margin: 0 0 8px; padding-left: 1.2em; font-size: var(--fs-sm); color: var(--text-sec); overflow-wrap: anywhere; }
+.merge-notes[hidden] { display: none; }
+.merge-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
+.merge-row { min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.merge-row.merge-conflict { border-color: var(--warn); }
+.merge-row.merge-sub { margin: 6px 0 0 6px; padding: 6px 0 0 10px; border: 0; border-left: 2px solid var(--border); border-radius: 0; }
+.merge-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.merge-mark { flex: none; width: 1.2em; text-align: center; font-weight: 700; color: var(--text-sec); }
+.merge-added .merge-mark { color: var(--ok); }
+.merge-removed .merge-mark { color: var(--err); }
+.merge-conflict > .merge-head .merge-mark { color: var(--warn); }
+.merge-kind { flex: none; font-size: var(--fs-micro); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.merge-label { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.merge-by { font-size: var(--fs-micro); color: var(--text-muted); }
+.merge-field { display: grid; gap: 4px; margin-top: 6px; min-width: 0; }
+.merge-fname { font-size: var(--fs-label); color: var(--text-sec); overflow-wrap: anywhere; }
+.merge-change { font-size: var(--fs-sm); color: var(--text-sec); overflow-wrap: anywhere; }
+.merge-pick { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+.merge-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+/* A value is shown as it was typed: not the fleet button's capitals, and a
+   long one wraps inside its button rather than spilling out of it. */
+.merge-btn { min-width: 0; height: auto; min-height: 38px; padding: 6px 10px; justify-content: flex-start; align-items: flex-start; text-align: left;
+    white-space: normal; overflow-wrap: anywhere; font-family: inherit; font-size: var(--fs-sm); font-weight: 400; text-transform: none; letter-spacing: normal; line-height: 1.35; }
+.merge-acts .merge-btn { align-items: center; }
+.merge-acts .merge-cand-btn { flex-direction: column; align-items: flex-start; gap: 0; }
+.merge-cand { display: block; font-size: var(--fs-micro); color: var(--text-muted); }
+.topo-merge .modal-title { overflow-wrap: anywhere; }
+.merge-btn[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--text); font-weight: 600; }
+.merge-btn[aria-pressed="false"] { color: var(--text-sec); }
+.merge-more { padding: 4px 0; font-size: var(--fs-sm); color: var(--text-muted); text-align: center; }
+@media (min-width: 641px) { .merge-list { max-height: min(48dvh, 28rem); overflow-y: auto; } }
+@media (max-width: 640px) {
+    .topo-merge .modal-title { font-size: var(--fs-sm); line-height: 1.35; }
+    .merge-pick { grid-template-columns: minmax(0, 1fr); }
+    .merge-tools .select, .merge-bulk { flex: 1 1 100%; margin-left: 0; }
+    .merge-bulk .btn, .merge-acts .btn { flex: 1 1 100%; }
+    .merge-chip { flex: 1 1 auto; }
+}
+@media (max-width: 640px), (pointer: coarse) {
+    .topo-merge .btn, .topo-merge .toggle-btn, .topo-merge .select { min-height: 44px; }
+    .topo-merge .modal-x { min-width: 44px; min-height: 44px; }
 }
 /* Expected life by type: one row per type, its count here, the years. */
 .life-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }

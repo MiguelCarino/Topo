@@ -24,6 +24,8 @@ window.addEventListener('load', async () => {
   let answer = true, promptWith = null, lastAsked = null;
   const heldResponder = setDialogResponder((req) => {
     lastAsked = req.message;
+    // A file not here: opened as its own network (js/mergedoors.js).
+    if (req.kind === 'choice' && req.choices.some((c) => c.id === 'open') && req.choices.some((c) => c.id === 'merge')) return 'open';
     if (req.kind === 'prompt') return promptWith;
     if (req.kind === 'choice') return null;
     return req.kind === 'confirm' ? answer : undefined;

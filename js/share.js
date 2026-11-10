@@ -107,7 +107,9 @@ function resetShareResult() {
 async function buildShareLink(mode, sealed, passphrase) {
     const binder = mode === 'binder';
     if (!binder && state.readOnly) throw new Error('A read-only document is not shared as a link.');
-    const json = JSON.stringify(binder ? binderLinkFile().file : identifiedDoc(serializeDoc()));
+    // Each copy that leaves is stamped with its revision (js/revisions.js),
+    // and carries only the newest LOG_LINK_MAX entries of its log.
+    const json = JSON.stringify(binder ? stampedBinderLinkFile() : withLinkLog(identifiedDoc(serializeDoc(), 'link')));
     const frag = sealed
         ? await sealFragment(json, binder ? SEAL_KIND.binder : SEAL_KIND.doc, passphrase)
         : binder ? await encodeBinderFragment(json) : await encodeShareFragment(json);
@@ -117,6 +119,12 @@ async function buildShareLink(mode, sealed, passphrase) {
     // publicBase()/publicQuery() (js/state.js) are this page's address on the
     // web, and the public site's from a file or the desktop app.
     return `${publicBase()}${binder ? '' : publicQuery()}#${frag}`;
+}
+
+function stampedBinderLinkFile() {
+    const file = binderLinkFile().file;
+    file.sites = stampSites(file.sites, 'link');
+    return file;
 }
 
 async function copyShareLink() {

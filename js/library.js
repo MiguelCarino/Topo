@@ -29,7 +29,8 @@
 //
 // A card's id is also the document's identity (state.docId): a build file or
 // a link carries it, which is how bringing the same network back is recognised
-// as that card, newer-wins, rather than becoming a second card.
+// as that card (and merged into it, js/mergedoors.js) rather than becoming a
+// second card.
 const LIBRARY_KEY = 'nettopo_library';
 
 // Time plus 64 random bits. The time keeps ids roughly ordered for a human
@@ -516,7 +517,7 @@ const libraryTemplates = () => libraryEntries().filter((e) => e.template && !e.b
 // `updated` is strictly increasing per entry, never merely Date.now(). Two saves
 // inside the same millisecond would otherwise be indistinguishable, and three
 // separate things read this field and get it wrong when it stands still: the
-// binder's "newer wins" merge, the "changed since you exported" line, and the
+// revision reuse (js/revisions.js), the "changed since you exported" line, and the
 // most-recent-first order of the cards.
 function stampUpdated(previous) {
     const now = Date.now();
@@ -542,14 +543,21 @@ function librarySave(name, id, opts = {}) {
         try { json = JSON.stringify(libraryEntryFor(key, name, prev, opts)); } catch (e) { return null; }
         // The same text writeCards would hold and put for it.
         if (_cards.get(key) !== json) { _cards.set(key, json); issueWrite(new Map([[key, json]]), [], false); }
+        if (!prev && savesOpenDocAsNew(key, opts)) adoptSessionRevisions(key, [state.docRev, state.docBase, ...state.docPrior]);
         return key;
     }
     const lib = loadLibrary();
     const prev = id && lib[id] && typeof lib[id] === 'object' ? lib[id] : null;
     const key = id || mintLibraryId();
     lib[key] = libraryEntryFor(key, name, prev, opts);
-    return persistLibrary(lib) ? key : null;
+    if (!persistLibrary(lib)) return null;
+    if (!prev && savesOpenDocAsNew(key, opts)) adoptSessionRevisions(key, [state.docRev, state.docBase, ...state.docPrior]);
+    return key;
 }
+// The canvas becoming a card under its own id (its first autosave, Keep
+// this network): the card takes the document's revision (js/revisions.js),
+// and the copies held in this tab for it go to the disk with it.
+const savesOpenDocAsNew = (key, opts) => !opts.doc && !opts.template && !opts.block && key === state.docId;
 // The card librarySave stores, built the same on both of its paths.
 function libraryEntryFor(key, name, prev, opts) {
     const given = String(name || '').trim();
@@ -567,7 +575,35 @@ function libraryEntryFor(key, name, prev, opts) {
     if (opts.template || (prev && prev.template)) entry.template = true;
     if (opts.block || (prev && prev.block)) entry.block = true;
     if (nameAuto) entry.nameAuto = true;
+    // A template or a block is a starting point: it carries no network's
+    // log, so nothing started from it inherits one.
+    if ((entry.template || entry.block) && entry.doc && entry.doc.log) { entry.doc = Object.assign({}, entry.doc); delete entry.doc.log; }
+    // The card's revision (js/revisions.js) is the card's, not the save's:
+    // rebuilt from scratch here, it would be lost at the next autosave. A
+    // new card for the open document takes the document's.
+    if (prev) applyCardRevision(entry, prev);
+    else if (savesOpenDocAsNew(key, opts)) applyCardRevision(entry, sessionCardMeta());
     return entry;
+}
+
+// A card's revision fields (rev, revHash, revAt, base, prior;
+// js/revisions.js), changed without touching `updated`: they are not an
+// edit of the network, and moving `updated` would make it look changed
+// since its last back-up. null or [] removes one.
+function setCardMeta(id, patch) {
+    if (_libStore === 'idb' && !diskOutOfStep()) {
+        const card = libraryEntry(id);
+        if (!card) return false;
+        applyCardRevision(card, patch);
+        let json;
+        try { json = JSON.stringify(card); } catch (e) { return false; }
+        if (_cards.get(id) !== json) { _cards.set(id, json); issueWrite(new Map([[id, json]]), [], false); }
+        return true;
+    }
+    const lib = loadLibrary();
+    if (!lib[id]) return false;
+    applyCardRevision(lib[id], patch);
+    return persistLibrary(lib);
 }
 
 // A second card holding the same network: how a new survey starts from an old
@@ -596,6 +632,8 @@ function libraryDelete(id) {
         dropSnapshot(id);
         if (typeof dropTrail === 'function') dropTrail(id);
         if (typeof dropRestorePoints === 'function') dropRestorePoints(id);
+        // And the revisions of its copies that left (js/revisions.js).
+        if (typeof dropRevisions === 'function') dropRevisions(id);
     }
     return ok;
 }
@@ -692,7 +730,7 @@ function binderLinkFile() {
     file.sites = file.sites.filter((s) => {
         if (migrateDoc(s.doc).newer) { newer++; return false; }
         return true;
-    }).map((s) => ({ ...s, doc: canonicalDoc(s.doc) }));
+    }).map((s) => ({ ...s, doc: withLinkLog(canonicalDoc(s.doc)) }));
     return { file, newer };
 }
 
@@ -706,16 +744,14 @@ function canonicalDoc(doc) {
     // Fixed ids: a record the document has no id for gets the same one on
     // every pass, so a file compared with its own copy is "the same".
     return withFixedIds(() => withoutLookupPass(() => {
-        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, searches: state.searches, annotations: state.annotations, report: state.report };
+        const held = holdDocState();   // js/app.js: every key loadDocState writes
         _borrowedState++;
         try {
             loadDocState(doc);
             return serializeDoc();
         } finally {
             _borrowedState--;
-            state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
-            state.columns = held.columns; state.tableView = held.tableView; state.searches = held.searches;
-            state.annotations = held.annotations; state.report = held.report;
+            restoreDocState(held);
         }
     }));
 }
@@ -733,12 +769,15 @@ function binderFromImported(parsed) {
     return { sites, exported: parsed.exported || null, dropped: parsed.sites.length - sites.length };
 }
 
-// Merge, never replace. Someone importing a colleague's binder is adding sites
-// to their own work, not throwing it away, and a binder that overwrote the
-// library would be one misclick from destroying an engagement. Same id means
-// the same network, and the newer `updated` wins — so a binder round-tripped
-// through a second machine converges instead of forking.
-function importBinderSites(sites) {
+// Add, never replace unasked. Someone importing a colleague's binder is
+// adding sites to their own work, not throwing it away, and a binder that
+// overwrote the library would be one misclick from destroying an engagement.
+// Same id means the same network: a card here is kept as it is, unless its
+// id is in opts.replace (Replace with this copy, the binder summary's
+// Replace with theirs). Newer-wins is gone (docs/SCOPE.md section 3): a copy
+// that differs is merged (js/mergedoors.js binderMergeSites) or asked about.
+function importBinderSites(sites, opts = {}) {
+    const replace = new Set(Array.isArray(opts.replace) ? opts.replace : []);
     const lib = loadLibrary();
     const result = { added: 0, updated: 0, kept: 0, skipped: 0, storedIds: [] };
     sites.forEach((site) => {
@@ -762,41 +801,41 @@ function importBinderSites(sites) {
         };
         if (site.template === true) theirs.template = true;
         if (site.template === true && site.block === true) theirs.block = true;
+        // The revision it arrived as (js/revisions.js): the card is that
+        // copy, started from it.
+        if (!theirs.template) applyCardRevision(theirs, arrivedCardMeta(site, theirs.updated));
         if (!mine) { lib[id] = theirs; result.added++; result.storedIds.push(id); return; }
-        if ((theirs.updated || 0) > (mine.updated || 0)) { lib[id] = theirs; result.updated++; result.storedIds.push(id); return; }
+        if (replace.has(id)) {
+            // Replaced, the card is the copy; its `updated` moves on, so
+            // every other tab and the autosave see the change.
+            theirs.updated = Math.max(theirs.updated || 0, (mine.updated || 0) + 1);
+            if (theirs.revAt != null) theirs.revAt = theirs.updated;
+            lib[id] = theirs; result.updated++; result.storedIds.push(id); return;
+        }
         result.kept++;
     });
-    return persistLibrary(lib) ? result : null;
+    if (!persistLibrary(lib)) return null;
+    // Kept, so the content it arrived as is kept under its rev: the base a
+    // later copy of it is compared with.
+    result.storedIds.forEach((id) => { if (lib[id] && lib[id].rev) recordRevision(id, lib[id].rev, lib[id].doc, 'opened', lib[id].revHash); });
+    return result;
 }
 
 // importBinderSites for the binder doors (a binder file, the guest shelf, a
 // bound binder file): the network open on the canvas is part of the merge.
-// Its pending edit goes into its card first, so the newer-wins comparison and
-// the restore point see it; and when a newer copy replaced that card, the
-// canvas opens the new copy. Left holding the old one, its next autosave put
-// the old network back over the import, newer, and the import was lost.
-function importBinderSitesOverOpen(sites) {
+// Its pending edit goes into its card first, so the restore point sees it;
+// and when a copy replaced that card, the canvas opens the new copy. Left
+// holding the old one, its next autosave put the old network back over the
+// import, newer, and the import was lost.
+function importBinderSitesOverOpen(sites, opts = {}) {
     const open = () => typeof isKept === 'function' && isKept() && !state.readOnly;
     if (open()) flushAutosave();
-    const result = importBinderSites(sites);
+    const result = importBinderSites(sites, opts);
     if (result && open() && result.storedIds.includes(state.libraryId) && !canvasIsBorrowed()) {
         const entry = libraryEntry(state.libraryId);
         if (entry) replaceDocument(entry.doc, { libraryId: entry.id, origin: 'library' });
     }
     return result;
-}
-
-// The ids of the cards importBinderSites(sites) would replace: a card here
-// and a newer copy of it. What a restore point is taken of first (js/restore.js).
-function binderOverwrites(sites) {
-    const lib = loadLibrary();
-    const out = [];
-    (sites || []).forEach((site) => {
-        if (!site || typeof site !== 'object' || !site.doc || !Array.isArray(site.doc.nodes)) return;
-        const mine = typeof site.id === 'string' && site.id ? lib[site.id] : null;
-        if (mine && (Number.isFinite(site.updated) ? site.updated : 0) > (mine.updated || 0) && !out.includes(site.id)) out.push(site.id);
-    });
-    return out;
 }
 
 // ---- The guest shelf: a binder someone sent you ----
@@ -847,7 +886,7 @@ function restoreGuestBinder() {
 // either overwrote the first or was refused as "already have a newer copy".
 // A content id is stable for the life of the shelf (the shelf stores the
 // minted ids), and two shelves only share one when they carry the same network,
-// where newer-wins treating them as one is the right answer.
+// where the merge treating them as one is the right answer.
 //
 // The same network twice on one shelf would share an id and so a card, so a
 // repeat gets its position appended.
@@ -909,35 +948,33 @@ function openBinderPayload(json) {
     openLanding(state.nodes.length === 0);
 }
 
-// A card the shelf would update gets a restore point first (js/restore.js);
-// with none to update this stays synchronous, as it always was.
-// One with edits the shelf's copy has not got is asked about first
-// (binderLossGuard): kept as it is with the copy added, or updated anyway.
-function keepGuestSites(sites) {
-    // The open network's pending edit is in its card before anything is compared.
-    if (typeof isKept === 'function' && isKept() && !state.readOnly) flushAutosave();
-    if (!binderOverwrites(sites).length || typeof keepRestorePoints !== 'function') return keepGuestSitesNow(sites);
-    return binderLossGuard(sites).then((guarded) => {
-        if (!guarded) return undefined;
-        const over = binderOverwrites(guarded);
-        if (!over.length) return keepGuestSitesNow(guarded);
-        return keepRestorePoints(over, 'Before updating from a link').then((go) => (go ? keepGuestSitesNow(guarded) : undefined));
-    });
+// The shelf's Keep goes through the binder merge (js/mergedoors.js
+// binderMergeSites): a network not here is added; one that is here and
+// differs is merged on its own when it can be (three-way, no conflicts),
+// else asked about in the summary (reviewed, replaced, kept as a copy, or
+// skipped: a skipped one stays on the shelf). Restore points first.
+async function keepGuestSites(sites) {
+    const result = await binderMergeSites(sites, { source: 'link', reason: 'Before merging a link' });
+    return keepGuestSitesDone(result);
 }
-function keepGuestSitesNow(sites) {
-    const result = importBinderSitesOverOpen(sites);
+function keepGuestSitesDone(result) {
     if (!result) { showToast(t('Could not save — browser storage is unavailable (private mode or full).'), 'err'); return; }
-    // Only the cards that were actually stored leave the shelf. One that lost
-    // the newer-wins comparison, or that could not be read, was NOT kept — and
-    // once the landing is dismissed the shelf is the only remaining copy, so
-    // clearing it on the strength of having been asked would lose the document.
+    // Only the networks actually stored, merged or copied leave the shelf.
+    // One that was skipped, already up to date, or could not be read was NOT
+    // kept — and once the landing is dismissed the shelf is the only
+    // remaining copy, so clearing it on the strength of having been asked
+    // would lose the document.
     const stored = new Set(result.storedIds);
     const left = guestSites().filter((x) => !stored.has(x.id));
     setGuestBinder(left.length ? { sites: left, exported: _guestBinder && _guestBinder.exported } : null);
     renderLanding();
-    if (result.added + result.updated === 0) {
-        showToast(t('Nothing was kept — you already have a newer copy of {n} of these.', { n: result.kept }));
+    if (result.cancelled && !stored.size) return;
+    if (!stored.size) {
+        if (result.kept) showToast(t('Nothing was kept — you already have a newer copy of {n} of these.', { n: result.kept }));
+        else if (result.skipped) showToast(binderMergeText(result));
+        return;
     }
+    if (result.merged || result.replaced || result.skipped) showToast(binderMergeText(result), 'ok');
 }
 
 // Open one shelved network without keeping it. pushState rather than replaceState
@@ -952,7 +989,8 @@ async function openGuestSite(id) {
     const site = guestSites().find((x) => x.id === id);
     if (!site) { renderLanding(); return; }
     if (!_landingBoot && !(await okToReplace(t('Replace the network on screen with "{name}"?', { name: site.name })))) return;
-    replaceDocument(site.doc, { origin: 'guest', push: true, docId: site.id, docUpdated: site.updated });
+    replaceDocument(site.doc, { origin: 'guest', push: true, docId: site.id, docUpdated: site.updated,
+        docRev: validRev(site.rev), docBase: validRev(site.base), docPrior: validPrior(site.prior) });
     landingHandledDocument();
 }
 
@@ -1058,7 +1096,7 @@ function binderStatus() { const s = backupStatus(); return s ? s.text : null; }
 // borrowed arrays. The state goes back first, then the pass.
 function withDoc(doc, fn) {
     return withoutLookupPass(() => {
-        const held = { nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, searches: state.searches, annotations: state.annotations, report: state.report };
+        const held = holdDocState();   // js/app.js: every key loadDocState writes
         _borrowedState++;
         try {
             // The same reader replaceDocument() uses, so a stored v1 card is
@@ -1073,9 +1111,7 @@ function withDoc(doc, fn) {
             return fn();
         } finally {
             _borrowedState--;
-            state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
-            state.columns = held.columns; state.tableView = held.tableView; state.searches = held.searches;
-            state.annotations = held.annotations; state.report = held.report;
+            restoreDocState(held);
         }
     });
 }
@@ -1341,6 +1377,10 @@ async function readBinderFrom(handle) {
 // Pick a file to bind to. If it already holds someone's binder, that binder is
 // merged in first rather than overwritten: the user asked where to keep their
 // networks, not to destroy what was already there.
+// -> the handle; null when the picker was closed; BINDER_CANCELLED when the
+// binder summary was cancelled (Back up all then cancels the back-up rather
+// than falling through to a download, docs/SCOPE.md D25).
+const BINDER_CANCELLED = Object.freeze({ cancelled: true });
 async function adoptBinderFile() {
     let handle;
     try {
@@ -1354,18 +1394,19 @@ async function adoptBinderFile() {
         const mine = new Set(Object.keys(loadLibrary()));
         const unknown = existing.sites.filter((x) => !mine.has(x.id));
         const known = existing.sites.filter((x) => mine.has(x.id));
-        // Networks already in this library are merged unconditionally, on the
-        // same newer-wins rule as every other door: they cannot overwrite
-        // anything newer, and skipping them was how a file edited on another
-        // machine got silently replaced by this one's older copy. Only ADDING
-        // networks the user has never seen is a question worth asking.
-        // Each card it would replace gets a restore point first (js/restore.js),
-        // compared once the open network's pending edit is in its card.
-        if (typeof isKept === 'function' && isKept() && !state.readOnly) flushAutosave();
-        const over = binderOverwrites(known);
-        if (over.length && typeof keepRestorePoints === 'function'
-            && !(await keepRestorePoints(over, 'Before importing {file}', { fileName: handle.name }))) return null;
-        if (known.length) importBinderSitesOverOpen(known);
+        // Networks already in this library go through the binder merge
+        // (js/mergedoors.js): this browser's own older copies are up to date
+        // already, a copy edited elsewhere is merged (on its own when it can
+        // be, else in the summary). Skipping them was how a file edited on
+        // another machine got silently replaced by this one's older copy.
+        // Cancel in the summary does not bind. Only ADDING networks the user
+        // has never seen is a separate question.
+        if (known.length) {
+            const merged = await binderMergeSites(known, { source: handle.name, fileName: handle.name, backup: true });
+            if (merged && merged.cancelled) return BINDER_CANCELLED;
+            // Networks merged or replaced on their own say so.
+            if (merged && (merged.merged || merged.replaced)) showToast(binderMergeText(merged), 'ok');
+        }
         // Declining (or a merge that could not be stored) leaves them out of
         // the LIBRARY, never out of the FILE: exportBinder() writes through
         // binderPayloadOver(), which carries them across. Returning the handle
@@ -1393,24 +1434,21 @@ async function adoptBinderFile() {
 // different version, so it is carried: an edit somebody else made outranks a
 // delete made before it.
 //
-// Networks the file holds that the library ALSO holds go through the usual
-// newer-wins merge first, so a newer copy from the file is read in rather than
-// overwritten by this browser's older one: the same rule adoptBinderFile()
-// applies when it binds.
+// Networks the file holds that the library ALSO holds have been through the
+// binder merge first (exportBinder, adoptBinderFile; js/mergedoors.js), so an
+// edit made in the file's copy is in the library before this browser's copy
+// is written over it.
 //
-// If that merge cannot be stored, the newer file copy is still what goes back
-// into the file: a full quota must not turn an export into an overwrite.
+// keepFileIds: the copies that merge could not store here; the file's copy
+// is what goes back into the file for them: a full quota must not turn an
+// export into an overwrite.
 //
 // Returns the payload and, separately, the sites that came from the library, so
 // the export record names only what this browser wrote. Recording the carried
 // ones too would make them look like "exported, then deleted here" next time,
 // and they would be dropped.
-function binderPayloadOver(existing) {
-    if (existing && existing.sites.length) {
-        const mine = loadLibrary();
-        const known = existing.sites.filter((x) => typeof x.id === 'string' && Object.prototype.hasOwnProperty.call(mine, x.id));
-        if (known.length) importBinderSitesOverOpen(known);
-    }
+function binderPayloadOver(existing, keepFileIds) {
+    const keepFile = new Set(keepFileIds || []);
     const file = binderFile();
     const ownSites = file.sites.slice();
     if (existing && existing.sites.length) {
@@ -1419,18 +1457,14 @@ function binderPayloadOver(existing) {
         const deletedHere = (x) => !!last && typeof x.id === 'string'
             && Object.prototype.hasOwnProperty.call(last.seen, x.id)
             && last.seen[x.id] === (Number.isFinite(x.updated) ? x.updated : 0);
-        const updatedOf = (x) => (Number.isFinite(x.updated) ? x.updated : 0);
         const at = new Map(file.sites.map((x, i) => [x.id, i]));
         const replaced = new Set();
         existing.sites.forEach((x) => {
             if (typeof x.id === 'string' && have.has(x.id)) {
-                // The merge above should already have read a newer file copy
-                // in. When it could not be stored (a full quota), the library
-                // still holds the older one, and writing that would overwrite
-                // the newer copy on disk. Newer-wins applies to the file even
-                // when the library could not keep up.
-                const i = at.get(x.id);
-                if (updatedOf(x) > updatedOf(file.sites[i])) { file.sites[i] = x; replaced.add(x.id); }
+                // A copy the merge could not store here (a full quota): the
+                // library still holds yours without it, and writing that
+                // would overwrite the file's copy on disk.
+                if (keepFile.has(x.id)) { file.sites[at.get(x.id)] = x; replaced.add(x.id); }
                 return;
             }
             if (deletedHere(x)) return;
@@ -1440,6 +1474,16 @@ function binderPayloadOver(existing) {
         if (replaced.size) return { file, ownSites: ownSites.filter((x) => !replaced.has(x.id)) };
     }
     return { file, ownSites };
+}
+
+// binderPayloadOver's answer with this browser's own sites stamped as they
+// leave (js/revisions.js), in the file and in ownSites alike.
+function stampOwnSites(payload, why) {
+    const own = new Set(payload.ownSites);
+    const stamped = new Map();
+    stampSites(payload.ownSites, why).forEach((x, i) => stamped.set(payload.ownSites[i], x));
+    const file = Object.assign({}, payload.file, { sites: payload.file.sites.map((x) => (own.has(x) ? stamped.get(x) : x)) });
+    return { file, ownSites: payload.ownSites.map((x) => stamped.get(x)) };
 }
 
 // What the landing says about where the binder goes. Cached, because
@@ -1482,19 +1526,35 @@ async function exportBinder() {
             // the library, so the snapshot to write CANNOT be taken before it:
             // doing that wrote a pre-merge binder back over the file and
             // deleted from it exactly the networks that had just been read in.
-            if (!handle) handle = await adoptBinderFile();
+            let adopted = false;
+            if (!handle) {
+                handle = await adoptBinderFile();
+                if (handle === BINDER_CANCELLED) { showToast(t('Back-up cancelled.')); return; }
+                adopted = !!handle;
+            }
             if (handle && await ensureBinderPermission(handle)) {
                 // Read at write time, every time: the file may have changed
                 // since it was bound (another machine, a synced folder).
                 const existing = await readBinderFrom(handle);
-                // A newer copy in the file replaces its card: a restore
-                // point first (js/restore.js); Cancel stops the back-up.
-                // Compared once the open network's pending edit is in its card.
-                if (typeof isKept === 'function' && isKept() && !state.readOnly) flushAutosave();
-                const over = existing ? binderOverwrites(existing.sites) : [];
-                if (over.length && typeof keepRestorePoints === 'function'
-                    && !(await keepRestorePoints(over, 'Before importing {file}', { fileName: handle.name }))) return;
-                const { file, ownSites } = binderPayloadOver(existing);
+                // The file's copies of networks here go through the binder
+                // merge (js/mergedoors.js; adoptBinderFile already did when it
+                // just bound): your own older copies are up to date, an edit
+                // made in the file is merged on its own when it can be, the
+                // rest are asked about once. Cancel stops the back-up; a copy
+                // skipped is replaced in the file by yours (docs/SCOPE.md D5).
+                let keepFile = [];
+                const known = !adopted && existing ? existing.sites.filter((x) => x && typeof x.id === 'string' && libraryEntry(x.id)) : [];
+                if (known.length) {
+                    const merged = await binderMergeSites(known, { source: handle.name, fileName: handle.name, backup: true });
+                    if (merged && merged.cancelled) { showToast(t('Back-up cancelled.')); return; }
+                    keepFile = merged ? merged.failedIds : known.map((x) => x.id);
+                    // Networks changed by the back-up are never changed in silence.
+                    if (merged && (merged.merged || merged.replaced)) showToast(binderMergeText(merged), 'ok');
+                }
+                const payload = binderPayloadOver(existing, keepFile);
+                // What this browser writes leaves with its revisions (js/revisions.js);
+                // the file's own sites carried across keep theirs.
+                const { file, ownSites } = stampOwnSites(payload, 'binder');
                 try {
                     await writeBinderTo(handle, file);
                     await putBinderHandle(handle);
@@ -1506,6 +1566,7 @@ async function exportBinder() {
             }
         }
         const file = binderFile();
+        file.sites = stampSites(file.sites, 'binder');
         downloadBinderFile(file);
         recordBinderExport(file.sites);   // what went in the file, not what the library holds now
         if (landingIsOpen()) renderLanding();
@@ -1517,44 +1578,43 @@ async function exportBinder() {
 async function rebindBinderFile() {
     if (!binderCanBind()) return;
     const handle = await adoptBinderFile();
-    if (!handle) return;
+    if (!handle || handle === BINDER_CANCELLED) return;
     await putBinderHandle(handle);
     await refreshBinderBinding();
     if (landingIsOpen()) renderLanding();
 }
 
-// A binder arriving from a file. Merging, not replacing — see importBinderSites.
-// Returns whether the file was a binder at all, so the single-build path can
-// take over when it was not.
+// A binder arriving from a file. Merging, not replacing — see importBinderSites
+// and js/mergedoors.js binderMergeSites: networks not here are added, one
+// that is here and differs is merged on its own when it can be (three-way,
+// no conflicts; a restore point and a log entry each), the rest are asked
+// about in one summary. Returns (a promise of) whether the file was a binder
+// at all, so the single-build path can take over when it was not.
 //
 // A site whose card here is newer, and that differs from it, is an older
 // back-up of that network: once the merge is done, one question offers to
 // read all of them into their cards' address history (js/trail.js). Asked
 // after, never in the way of the merge, and the cards stay as they are.
-//
-// Each card it replaces gets a restore point (js/restore.js). The file door
-// (applyImportedDoc) takes them first and asks when one cannot be stored,
-// then passes opts.pointsTaken; called on its own, they are taken here.
-function applyImportedBinder(parsed, opts = {}) {
+async function applyImportedBinder(parsed, opts = {}) {
     const binder = binderFromImported(parsed);
     if (!binder) return false;
     // The open network's last edit is in its card before anything is compared.
     if (typeof isKept === 'function' && isKept() && !state.readOnly) flushAutosave();
-    if (!opts.pointsTaken && typeof recordRestorePoint === 'function') {
-        const batch = new Set();   // taken together: the caps keep every one of them
-        binderOverwrites(binder.sites).forEach((id) => recordRestorePoint(id, binderImportReason(opts.fileName), { fileName: opts.fileName, batch }));
-    }
     const older = binderOlderSites(binder.sites);
-    const result = importBinderSitesOverOpen(binder.sites);
+    const result = await binderMergeSites(binder.sites, { source: opts.fileName || 'binder', fileName: opts.fileName, reason: binderImportReason(opts.fileName) });
     if (!result) { showToast(t('Could not save — browser storage is unavailable (private mode or full).'), 'err'); return true; }
+    if (result.cancelled && !result.storedIds.length) return false;
     if (landingIsOpen()) renderLanding();
     renderUserTemplates();
-    showToast(t('Binder loaded: {added} added, {updated} updated, {kept} already up to date.', result)
+    showToast(binderMergeText(result)
         + (binder.dropped ? ' ' + t('{n} entry in the file could not be read and was skipped.', { n: binder.dropped }) : ''), 'ok');
-    if (older.length && typeof offerOlderSitesToTrail === 'function') offerOlderSitesToTrail(older);
+    // The older copies left as they were (skipped, or already up to date):
+    // not one replaced, copied or merged just now.
+    const left = older.filter((o) => !result.storedIds.includes(o.id));
+    if (left.length && typeof offerOlderSitesToTrail === 'function') offerOlderSitesToTrail(left);
     return true;
 }
-const binderImportReason = (fileName) => (fileName ? 'Before importing {file}' : 'Before importing a binder');
+const binderImportReason = (fileName) => (fileName ? 'Before merging {file}' : 'Before merging a binder');
 // The binder's sites that are an older copy of a network card here (not a
 // template or block): the card is newer, and they differ. -> [{ id, doc, updated }].
 function binderOlderSites(sites) {
@@ -1645,6 +1705,15 @@ function landingCard(entry, opts = {}) {
     if (changed) tool('±', t('What changed'), () => showCardChanges(entry));
     // The copies kept before a file, binder, link or sheet changed it (js/restore.js).
     if (typeof hasRestorePoints === 'function' && hasRestorePoints(entry.id)) tool('↺', t('Restore points'), () => openRestoreDialog(entry.id));
+    // The network's log of merges (js/mergeapply.js), once it has one.
+    if (!entry.template && !entry.block && entry.doc && Array.isArray(entry.doc.log) && entry.doc.log.length && typeof openLogDialog === 'function') {
+        tool('≡', t('Network log'), () => openLogDialog(entry.id));
+    }
+    // Merge… (js/mergedoors.js): a file into this network, or this network
+    // into another. Network cards only (docs/SCOPE.md D2).
+    if (!entry.template && !entry.block && !migrateDoc(entry.doc).newer && typeof openCardMerge === 'function') {
+        tool('⇄', t('Merge…'), () => openCardMerge(entry.id));
+    }
     tool('✎', t('Rename'), async () => {
         const name = await askPrompt(t('Rename network — new name:'), { title: t('Rename'), value: entry.name, ok: t('Rename'), keys: 'name' });
         if (name === null) return;
@@ -1740,15 +1809,27 @@ async function keepThisNetwork() {
     let suggested = (state.report && typeof state.report.site === 'string' && state.report.site.trim()) || '';
     const known = state.docId && libraryEntry(state.docId);
     if (known) {
-        const choice = await askAboutKnownCopy({ doc: serializeDoc(), updated: state.docUpdated }, known,
-            { title: t('Keep this network'), copyLabel: t('Keep as a copy') });
+        // The visited copy, with the identity it arrived with (js/revisions.js):
+        // Merge is the main answer (js/mergedoors.js), three-way when the copy
+        // it was taken from is held here.
+        const theirs = serializeDoc();
+        const ident = { id: state.docId, updated: state.docUpdated, rev: state.docRev, base: state.docBase, prior: (state.docPrior || []).slice() };
+        const ctx = !known.template && !known.block && !migrateDoc(known.doc).newer ? await mergeContext(known.id, theirs, ident) : null;
+        const choice = await askAboutKnownCopy({ doc: theirs, updated: state.docUpdated }, known,
+            { title: t('Keep this network'), copyLabel: t('Keep as a copy'), ctx });
         if (!choice) return null;
         if (choice === 'mine') { replaceDocument(known.doc, { libraryId: known.id, origin: 'library' }); return known.id; }
+        if (choice === 'merge') {
+            const res = await mergeCopyInto(known.id, theirs, { ident, ctx, source: 'link', reason: 'Before merging a link', replaceAsked: true });
+            return res && res.ok ? known.id : null;
+        }
         if (choice === 'same' || choice === 'update') {
             // The card is about to hold the canvas: a restore point of it first (js/restore.js).
             if (choice === 'update' && typeof keepRestorePoints === 'function'
                 && !(await keepRestorePoints([known.id], 'Before updating from a link'))) return null;
-            const id = claimDocument(null, known.id);
+            // Updated, the card is the copy: its revision (js/revisions.js).
+            const meta = choice === 'update' ? sessionCardMeta() : null;
+            const id = claimDocument(null, known.id, {}, meta);
             if (id) showToast(t('Kept "{name}". From now on it saves itself.', { name: libraryEntry(id).name }), 'ok');
             return id;
         }
@@ -1760,7 +1841,10 @@ async function keepThisNetwork() {
     }
     const name = await askPrompt(t('Name this network:'), { title: t('Keep this network'), value: suggested, ok: t('Keep'), keys: 'name' });
     if (name === null) return null;
-    const id = claimDocument(name, known ? null : state.docId);
+    // A copy is a new network started from the one it was copied from: that
+    // revision is its base, and it carries no rev of its own yet.
+    const copyMeta = known ? { rev: null, revHash: null, revAt: null, prior: [], base: state.docRev || state.docBase } : null;
+    const id = claimDocument(name, known ? null : state.docId, {}, copyMeta);
     if (!id) { showToast(t('Could not save — browser storage is unavailable (private mode or full).'), 'err'); return null; }
     showToast(t('Kept "{name}". From now on it saves itself.', { name: libraryEntry(id).name }), 'ok');
     return id;
@@ -1768,12 +1852,20 @@ async function keepThisNetwork() {
 
 // Make the open network a card under `id` (a new one when null) and keep it.
 // -> the id, or null when it could not be stored.
-function claimDocument(name, id, opts = {}) {
+// revMeta: the card's revision when it is not what the save gives it (an
+// update from a copy, a copy; js/revisions.js); the tab's copies under
+// those revisions go to the disk with it.
+function claimDocument(name, id, opts = {}, revMeta = null) {
     if (state.readOnly) return null;
     const key = librarySave(name, id || null, opts);
     if (!key) return null;
+    if (revMeta) {
+        setCardMeta(key, revMeta);
+        adoptSessionRevisions(key, [revMeta.rev, revMeta.base, ...(revMeta.prior || [])]);
+    }
     state.libraryId = state.docId = key;
     state.docUpdated = libraryEntry(key).updated;
+    syncDocRevision(libraryEntry(key));
     _docOrigin = 'kept';
     cancelAutosave();
     refreshLiveEntry();   // a reload must come back kept, under this card
@@ -1794,99 +1886,64 @@ function releaseDocument() {
 // ---- Bringing back a network you already have ----
 // A build file, a link and the canvas's Keep can all carry a network whose id
 // is already a card here: your own file re-imported, or a colleague's edit of
-// a network you sent them. A .nettopo file is a binder of one site, so the
-// rule is the binder's: same id, same network, and the newer one is offered
-// as the update. Never silently: a single file is opened by hand, and the
-// visitor can always take it as a copy instead.
+// a network you sent them. Same id, same network: the copy is merged into
+// yours (docs/SCOPE.md section 3, js/mergedoors.js), never silently, and
+// never newer-wins any more.
 //
-// incoming = { doc, updated }. -> 'same' (nothing differs: just open the card),
-// 'update', 'copy', 'mine', 'history' or null (cancelled). opts.history offers,
-// when yours is newer, a third answer: read the older copy into the card's
-// address history (js/trail.js, feature 5 stage 4) and leave the card and
-// the canvas alone. Offered only for a copy that can go in (a time to put it
-// at, a version this build reads, recording on) of a network card: never a
-// template's or a block's, as the binder's question (trailReadInCard).
+// incoming = { doc, updated }; opts.ctx = mergeContext's answer for it (null
+// for a template's or a block's card, which are never merged).
+// -> 'same' (nothing differs: just open the card), 'merge', 'update' (Replace
+// with this copy), 'copy', 'mine', 'history' or null (cancelled).
+//   * A copy yours already has everything of (it left from here, or your log
+//     merged it, or it is your last back-up: opts.ctx.ancestor, A2): no
+//     Merge; Open mine is the main answer, and Replace with this copy rolls
+//     back to it on purpose.
+//   * Otherwise Merge is the main answer, three-way or two-way as the
+//     message says. Replace with this copy keeps step 1's warning (the edits
+//     of yours since your last back-up or report it would replace) and a
+//     restore point.
+// opts.history offers, when yours is newer, to read the older copy into the
+// card's address history (js/trail.js) and leave the card and the canvas
+// alone. Offered only for a copy that can go in (a time to put it at, a
+// version this build reads, recording on) of a network card.
 async function askAboutKnownCopy(incoming, entry, opts = {}) {
     const differ = docChangeParts(entry.doc, incoming.doc);
     const changes = differ.size;
     if (!changes) return 'same';
     const name = entry.name;
+    const ctx = opts.ctx || null;
     const copy = { id: 'copy', label: opts.copyLabel || t('Open as a copy') };
-    if ((incoming.updated || 0) > (entry.updated || 0)) {
-        // Newer is not the same as having yours. Against the card's last
-        // back-up or report (js/changes.js): when both sides changed since,
-        // the parts yours changed that this copy differs on are edits it has
-        // not got, and Update would replace them. Said plainly, and the copy
-        // becomes the main answer. With no baseline nothing can tell, so the
-        // question stays as it was. Either way the card is kept as a restore
-        // point first (js/restore.js), and the note says so.
-        const lost = updateWouldLose(entry, incoming.doc, differ);
-        const update = { id: 'update', primary: !lost,
-            label: t(changes === 1 ? 'Update "{name}" ({n} change)' : 'Update "{name}" ({n} changes)', { name, n: changes }) };
-        if (lost) copy.primary = true;
-        const note = lost ? updateLossNote(lost) : t('Updating keeps a restore point of yours first.');
-        return askChoice(t('You already have "{name}" in this browser. This copy is newer.', { name }) + '\n\n' + note, {
+    const mine = { id: 'mine', label: t('Open mine') };
+    const lost = updateWouldLose(entry, incoming.doc, differ);
+    const replace = { id: 'update', label: t('Replace with this copy') };
+    const replaceNote = lost ? updateLossNote(lost) : t('Replacing keeps a restore point of yours first.');
+    const history = opts.history && typeof trailCanReadIn === 'function' && trailCanReadIn(incoming.doc, incoming.updated)
+        && !entry.template && !entry.block && (incoming.updated || 0) < (entry.updated || 0)
+        ? [{ id: 'history', label: t('Add to its history') }] : [];
+    if (!ctx || ctx.ancestor) {
+        const head = ctx && ctx.ancestor
+            ? t('You already have "{name}" in this browser, and yours already has everything in this copy.', { name })
+            : t('You already have "{name}" in this browser, and this copy differs from it.', { name });
+        return askChoice(head + '\n\n' + replaceNote, {
             title: opts.title || '',
-            choices: [copy, update]
+            choices: [copy, ...history, replace, Object.assign(mine, { primary: true })]
         });
     }
-    const history = opts.history && typeof trailCanReadIn === 'function' && trailCanReadIn(incoming.doc, incoming.updated)
-        && !entry.template && !entry.block
-        ? [{ id: 'history', label: t('Add to its history') }] : [];
-    return askChoice(t('You already have "{name}" in this browser, and yours is newer than this copy.', { name }), {
+    const merge = { id: 'merge', primary: true, label: t('Merge into "{name}"', { name }) };
+    return askChoice(t('You already have "{name}" in this browser, and this copy differs from it.', { name }) + '\n\n' + mergeModeNote(ctx)
+        + '\n\n' + replaceNote, {
         title: opts.title || '',
-        choices: [copy, ...history, { id: 'mine', label: t('Open mine'), primary: true }]
+        choices: [merge, replace, copy, ...history, mine]
     });
 }
 
 // The sentence for updateWouldLose's answer.
 function updateLossNote(lost) {
     return t(lost.n === 1
-        ? (lost.kind === 'report' ? 'Yours has 1 change since its last report that this copy does not have; updating replaces it. A restore point is kept.'
-            : 'Yours has 1 change since its last back-up that this copy does not have; updating replaces it. A restore point is kept.')
-        : (lost.kind === 'report' ? 'Yours has {n} changes since its last report that this copy does not have; updating replaces them. A restore point is kept.'
-            : 'Yours has {n} changes since its last back-up that this copy does not have; updating replaces them. A restore point is kept.'), { n: lost.n });
-}
-
-// The binder's side of askAboutKnownCopy, for the doors that bring in a
-// binder by hand (a binder file opened, the guest shelf's Keep). A binder
-// replaces cards newer-wins; a card with edits since its last back-up or
-// report that the binder's copy has not got (updateWouldLose) would lose
-// them. One question for the whole binder, before anything is merged:
-// "Add as a copy" (the main answer) keeps your cards and adds the binder's
-// copies of those as new cards; "Update anyway" replaces them (after a
-// restore point, as every binder update). Cards with nothing to lose are
-// not asked about, and keep the newer-wins rule.
-// -> `sites` itself (nothing asked, or Update anyway), the sites with those
-// copies under new ids ("(copy)" names), or null (cancelled).
-async function binderLossGuard(sites) {
-    if (!Array.isArray(sites)) return sites;
-    const over = binderOverwrites(sites);
-    if (!over.length) return sites;
-    const losing = [];
-    over.forEach((id) => {
-        const entry = libraryEntry(id);
-        const site = sites.find((x) => x && typeof x === 'object' && x.id === id);
-        if (!entry || !site || entry.template || entry.block) return;
-        const lost = updateWouldLose(entry, site.doc);
-        if (lost) losing.push({ entry, lost });
-    });
-    if (!losing.length) return sites;
-    const one = losing.length === 1 ? losing[0] : null;
-    const message = one
-        ? t('You already have "{name}" in this browser. This copy is newer.', { name: one.entry.name }) + '\n\n' + updateLossNote(one.lost)
-        : t('You already have {n} of these networks in this browser, with changes since their last back-up or report that this binder\'s copies do not have; updating replaces them. A restore point is kept.', { n: losing.length });
-    const choice = await askChoice(message, {
-        title: '',
-        choices: [{ id: 'copy', label: one ? t('Add it as a copy') : t('Add them as copies'), primary: true },
-            { id: 'update', label: t('Update anyway') }]
-    });
-    if (choice === 'update') return sites;
-    if (choice !== 'copy') return null;
-    const ids = new Set(losing.map((x) => x.entry.id));
-    return sites.map((x) => (x && typeof x === 'object' && ids.has(x.id)
-        ? Object.assign({}, x, { id: mintLibraryId(), name: t('{name} (copy)', { name: String(x.name || '').trim() || libraryEntry(x.id).name }) })
-        : x));
+        ? (lost.kind === 'report' ? 'Yours has 1 change since its last report that this copy does not have; replacing with this copy loses it. A restore point is kept.'
+            : 'Yours has 1 change since its last back-up that this copy does not have; replacing with this copy loses it. A restore point is kept.')
+        : (lost.kind === 'report' ? 'Yours has {n} changes since its last report that this copy does not have; replacing with this copy loses them. A restore point is kept.'
+            : 'Yours has {n} changes since its last back-up that this copy does not have; replacing with this copy loses them. A restore point is kept.'), { n: lost.n });
 }
 
 // The edits on card `entry` that `incoming` has not got, judged against the
@@ -1920,7 +1977,11 @@ function updateWouldLose(entry, incoming, differ) {
 // only by a subnet or a group used to be "the same", and opening it dropped
 // it. Both sides go through the serializer first, so a key order or a
 // default filled in on load is not counted as somebody's change.
-const DOC_IDENTITY_KEYS = new Set(['v', 'id', 'updated']);
+// rev, base and prior are identity too (js/revisions.js), and the network
+// log is left out (docs/SCOPE.md D1): it is unioned by a merge, never
+// reviewed, and counting it would make every copy of a merged network look
+// changed.
+const DOC_IDENTITY_KEYS = new Set(['v', 'id', 'updated', 'rev', 'base', 'prior', 'log']);
 const DOC_WHOLE_KEYS = new Set(['report', 'accepted', 'pinned', 'searches']);
 function docChangeCount(a, b) { return docChangeParts(a, b).size; }
 // The same comparison as the parts that differ, named 'key' for a part
@@ -1958,16 +2019,17 @@ function docChangePartsOf(ca, cb) {
 // A document's identity as it travelled (identifiedDoc in js/app.js writes
 // it). Read defensively: a file is outside input, and an id is about to be
 // used as a library key.
+// rev, base and prior (document v17, js/revisions.js) the same way.
 function docIdentity(doc) {
     const id = doc && typeof doc.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(doc.id) ? doc.id : null;
     const updated = doc && Number.isFinite(doc.updated) && doc.updated > 0 ? doc.updated : 0;
-    return { id, updated };
+    return { id, updated, rev: validRev(doc && doc.rev), base: validRev(doc && doc.base), prior: validPrior(doc && doc.prior) };
 }
 // The same document without it, for storing in a card, where the entry holds
 // the identity instead.
 function stripIdentity(doc) {
     const out = Object.assign({}, doc);
-    delete out.id; delete out.updated;
+    delete out.id; delete out.updated; delete out.rev; delete out.base; delete out.prior;
     return out;
 }
 
@@ -2067,6 +2129,9 @@ function renderDocBar() {
     if (keepItem) keepItem.classList.toggle('hidden', kept || !!state.readOnly);
     const pointsItem = document.getElementById('restorePointsBtn');
     if (pointsItem) pointsItem.classList.toggle('hidden', !kept || !!state.readOnly || typeof hasRestorePoints !== 'function' || !hasRestorePoints(state.libraryId));
+    // The network log (js/mergeapply.js), once it has an entry: any network on screen, read-only ones too.
+    const logItem = document.getElementById('networkLogBtn');
+    if (logItem) logItem.classList.toggle('hidden', !Array.isArray(state.log) || !state.log.length);
     if (state.readOnly || (!kept && !docHasContent())) { bar.classList.add('hidden'); return; }
     bar.classList.remove('hidden');
     bar.classList.toggle('unkept', !kept);

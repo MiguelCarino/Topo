@@ -42,6 +42,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
   let choose = null;
   let asked = [];
   const heldResponder = setDialogResponder((req) => { asked.push(req); return req.kind === 'choice' ? choose : req.kind === 'confirm' ? true : undefined; });
+  // The binder merge's summary (js/mergedoors.js): every row skipped.
+  const heldSummary = TopoMergeDoors.setMergeSummaryResponder(() => ({}));
   const tick = () => new Promise((r) => setTimeout(r, 0));
   const day = (y, m, d) => new Date(y, m - 1, d, 12).getTime();
   const D1 = day(2026, 3, 2), D2 = day(2026, 6, 1), D3 = day(2026, 9, 14);
@@ -274,9 +276,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     asked = []; choose = 'history'; toasts.length = 0;
     const took = await applyImportedDoc(olderFile);
     const q = asked.find((r) => r.kind === 'choice');
-    ok('an older copy offers Add to its history between Open as a copy and Open mine', !!q && q.choices.map((c) => c.id).join() === 'copy,history,mine'
-      && q.choices[1].label === 'Add to its history' && /yours is newer/.test(q.message), q && JSON.stringify(q.choices));
-    ok('Open mine stays the main answer', !!q && q.choices[2].primary === true && !q.choices[1].primary);
+    ok('an older copy offers Add to its history between Open as a copy and Open mine', !!q && q.choices.map((c) => c.id).join() === 'merge,update,copy,history,mine'
+      && q.choices[3].label === 'Add to its history', q && JSON.stringify(q.choices));
+    ok('Merge is the main answer (js/mergedoors.js)', !!q && q.choices[0].primary === true && !q.choices[3].primary);
     const rec = T.trailOf(id);
     ok('it records a file point at the file’s time, before the card’s points', took === true
       && rec.points.map((p) => p.kind).join() === 'file,backup,report' && rec.points[0].at === D1, JSON.stringify(rec.points));
@@ -296,16 +298,16 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // Not offered.
     const offeredFor = async (file) => { asked = []; choose = null; await applyImportedDoc(file); const c = asked.find((r) => r.kind === 'choice'); return c ? c.choices.map((x) => x.id).join() : ''; };
     state.settings.trailRecording = false;
-    ok('with recording off it is not offered', (await offeredFor(fileOf(withIp('192.168.1.32/24'), D1 + 1))) === 'copy,mine');
+    ok('with recording off it is not offered', (await offeredFor(fileOf(withIp('192.168.1.32/24'), D1 + 1))) === 'merge,update,copy,mine');
     state.settings.trailRecording = true;
-    ok('nor for a file with no time', (await offeredFor(fileOf(withIp('192.168.1.32/24'), 0))) === 'copy,mine');
-    ok('nor for a newer copy (that one is an update)', (await offeredFor(fileOf(withIp('192.168.1.32/24'), Date.now() + 86400000))) === 'copy,update');
+    ok('nor for a file with no time', (await offeredFor(fileOf(withIp('192.168.1.32/24'), 0))) === 'merge,update,copy,mine');
+    ok('nor for a newer copy', (await offeredFor(fileOf(withIp('192.168.1.32/24'), Date.now() + 86400000))) === 'merge,update,copy,mine');
     ok('a cancelled question records nothing', T.trailOf(id).points.length === 3);
     {
       const lib = L.loadLibrary(); const k = 'tplTrail2';
       lib[k] = { id: k, name: 'Plantilla 2', doc: site(), created: 1, updated: Date.now(), template: true }; persistLibrary(lib); cards.push(k);
       const offered = await offeredFor({ ...withIp('192.168.1.34/24'), id: k, updated: D1 });
-      ok('an older file of a template: not offered (the binder does not ask either)', offered === 'copy,mine', offered);
+      ok('an older file of a template: not offered, nor a merge (the binder does not ask either)', offered === 'copy,update,mine', offered);
       ok('and a template takes no read-in', T.readIntoTrail(k, withIp('192.168.1.34/24'), D1) === 'failed' && !T.hasTrail(k) && T.trailReadInCard(k) === false && T.trailReadInCard(id) === true);
     }
     // A v1 back-up of the same card.
@@ -328,7 +330,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const pointsOf = (k) => (T.trailOf(k) || { points: [] }).points.length;
     const p0 = pointsOf(id), p1 = pointsOf(other);
     asked = []; choose = 'skip'; toasts.length = 0;
-    applyImportedBinder(binder([siteOf(id, withIp('192.168.1.41/24'), D1 + 2000), siteOf(other, withIp('192.168.1.42/24'), D1),
+    await applyImportedBinder(binder([siteOf(id, withIp('192.168.1.41/24'), D1 + 2000), siteOf(other, withIp('192.168.1.42/24'), D1),
       siteOf(tpl, withIp('192.168.1.43/24'), D1), siteOf('brandNew1', site(), D1)]));
     await tick(); await tick();
     const bq = asked.find((r) => r.kind === 'choice');
@@ -336,27 +338,27 @@ window.addEventListener('load', () => { setTimeout(async () => {
       && bq.choices.map((c) => c.id).join() === 'skip,history' && bq.choices[1].label === 'Add to their history' && asked.filter((r) => r.kind === 'choice').length === 1,
       bq && bq.message);
     ok('the merge itself is the binder’s: older copies kept as they were, the new network added', !!entryOf('brandNew1')
-      && JSON.stringify(entryOf(id).doc) === JSON.stringify(JSON.parse(libBefore)[id].doc) && toasts.some((x) => /^Binder loaded: 1 added, 0 updated, 3 already up to date\./.test(x.m)), JSON.stringify(toasts));
+      && JSON.stringify(entryOf(id).doc) === JSON.stringify(JSON.parse(libBefore)[id].doc) && toasts.some((x) => /^Binder loaded: 1 added, 0 merged, 1 already up to date\. 2 skipped\./.test(x.m)), JSON.stringify(toasts));
     ok('Not now adds nothing', pointsOf(id) === p0 && pointsOf(other) === p1 && !T.hasTrail(tpl) && !T.hasTrail('brandNew1'));
     cards.push('brandNew1');
     asked = []; choose = 'history'; toasts.length = 0;
-    applyImportedBinder(binder([siteOf(id, withIp('192.168.1.41/24'), D1 + 2000), siteOf(other, withIp('192.168.1.42/24'), D1)]));
+    await applyImportedBinder(binder([siteOf(id, withIp('192.168.1.41/24'), D1 + 2000), siteOf(other, withIp('192.168.1.42/24'), D1)]));
     await tick(); await tick();
     ok('yes adds each one’s point at its own time', pointsOf(id) === p0 + 1 && pointsOf(other) === p1 + 1
       && T.trailOf(other).points[0].at === D1 && T.trailOf(other).points[0].kind === 'file', `${pointsOf(id)} ${pointsOf(other)}`);
     ok('and says how many', toasts.some((x) => x.m === '2 older back-ups added to the history.'), JSON.stringify(toasts));
     asked = []; toasts.length = 0;
-    applyImportedBinder(binder([siteOf(id, withIp('192.168.1.41/24'), D1 + 2000), siteOf(other, withIp('192.168.1.42/24'), D1)]));
+    await applyImportedBinder(binder([siteOf(id, withIp('192.168.1.41/24'), D1 + 2000), siteOf(other, withIp('192.168.1.42/24'), D1)]));
     await tick(); await tick();
     ok('the same binder opened again: nothing asked, nothing added', !asked.some((r) => r.kind === 'choice') && pointsOf(id) === p0 + 1 && pointsOf(other) === p1 + 1
       && !toasts.some((x) => /older back-ups? added/.test(x.m)), JSON.stringify(toasts));
     asked = [];
-    applyImportedBinder(binder([siteOf(other, withIp('192.168.1.44/24'), D1 + 5)]));
+    await applyImportedBinder(binder([siteOf(other, withIp('192.168.1.44/24'), D1 + 5)]));
     await tick(); await tick();
     const one = asked.find((r) => r.kind === 'choice');
     ok('one older copy: the singular', !!one && /^1 network in this binder is older than yours here\. Add it to its history\?/.test(one.message) && one.choices[1].label === 'Add to its history', one && one.message);
     asked = [];
-    applyImportedBinder(binder([siteOf(other, JSON.parse(JSON.stringify(entryOf(other).doc)), D1 + 7), siteOf(other + 'x', site(), D1)]));
+    await applyImportedBinder(binder([siteOf(other, JSON.parse(JSON.stringify(entryOf(other).doc)), D1 + 7), siteOf(other + 'x', site(), D1)]));
     await tick(); await tick();
     cards.push(other + 'x');
     ok('a copy the same as the card, or a network new here, is never asked about', !asked.some((r) => r.kind === 'choice'));
@@ -390,6 +392,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     window.showToast = heldToast;
     state.settings.trailRecording = heldSetting;
     setDialogResponder(heldResponder);
+    TopoMergeDoors.setMergeSummaryResponder(heldSummary);
     cards.forEach((k) => { try { T.dropTrail(k); } catch (e) { /* gone */ } });
     persistLibrary(heldLib);
     held.forEach(([k, v]) => { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); });

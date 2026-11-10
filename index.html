@@ -160,6 +160,8 @@
                     <button id="exportJsonBtn" data-adv class="cs-menu-item" role="menuitem">📄 Back up this network <span class="cs-menu-note">.json</span></button>
                     <!-- The open network's restore points (js/restore.js): shown once it has some. -->
                     <button id="restorePointsBtn" data-adv class="cs-menu-item hidden" role="menuitem">↺ Restore points…</button>
+                    <!-- The open network's log of merges (js/mergeapply.js): shown once it has one. -->
+                    <button id="networkLogBtn" data-adv class="cs-menu-item hidden" role="menuitem">≡ Network log…</button>
                     <!-- Devices, interfaces, cables and findings as CSV / TSV, and a
                          sheet imported back with a column mapping and a review
                          (js/csv.js). The full editor's: a register's tool. -->
@@ -169,6 +171,7 @@
                     <button id="saveTemplateBtn" data-adv class="cs-menu-item" role="menuitem">📐 Save as template <span class="cs-menu-note">reusable</span></button>
                 </div>
                 <input type="file" id="importFileInput" accept=".json,.nettopo,application/json,application/vnd.carino.topo+json" hidden>
+                <input type="file" id="mergeFileInput" accept=".json,.nettopo,application/json,application/vnd.carino.topo+json" hidden>
             </div>
 
             <!-- This browser's preferences: the language, what the map shows,
@@ -1673,6 +1676,72 @@
                     </div>
                 </div>
             </div>
+            <!-- A network's log (js/mergeapply.js): each merge into it, newest
+                 first, read-only. It travels with the network. -->
+            <div id="logDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-log" role="dialog" aria-modal="true" aria-labelledby="logTitle">
+                    <div class="modal-head">
+                        <h2 id="logTitle" class="modal-title" data-i18n>Network log</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <p id="logName" class="restore-name"></p>
+                        <p class="ask-msg paste-blurb" data-i18n>Each merge into this network from another copy, newest first: where it came from, who merged it and what it changed. The log travels with the network in its files and links, and cannot be edited here.</p>
+                        <p id="logEmpty" class="dlg-dim hidden" data-i18n>Nothing has been merged into this network yet.</p>
+                        <p id="logHint" class="restore-status hidden" role="status"></p>
+                        <ul id="logList" class="restore-list"></ul>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" class="btn" data-close data-i18n>Close</button>
+                    </div>
+                </div>
+            </div>
+            <!-- The merge review (js/mergeui.js): every merge, whichever door it
+                 came through. Counts that filter, a kind filter, a row per item
+                 with Mine / Theirs on each conflict, the findings after, Apply. -->
+            <div id="mergeDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-merge" role="dialog" aria-modal="true" aria-labelledby="mergeTitle" aria-describedby="mergeMode">
+                    <div class="modal-head">
+                        <h2 id="mergeTitle" class="modal-title"></h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <p id="mergeMode" class="ask-msg paste-blurb"></p>
+                        <div id="mergeCounts" class="merge-counts" role="group" data-i18n-aria-label aria-label="Show"></div>
+                        <div class="merge-tools">
+                            <select id="mergeKind" class="select" data-i18n-aria-label aria-label="Kind"></select>
+                            <div class="merge-bulk">
+                                <button type="button" id="mergeAllMine" class="btn" data-i18n>Use mine for all</button>
+                                <button type="button" id="mergeAllTheirs" class="btn" data-i18n>Use theirs for all</button>
+                            </div>
+                        </div>
+                        <p id="mergeDelta" class="paste-delta" role="status" aria-live="polite"></p>
+                        <ul id="mergeNotes" class="merge-notes" hidden></ul>
+                        <ul id="mergeList" class="merge-list"></ul>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" id="mergeCancelBtn" class="btn" data-close data-i18n>Cancel</button>
+                        <button type="button" id="mergeApplyBtn" class="btn btn-primary">Apply</button>
+                    </div>
+                </div>
+            </div>
+            <div id="mergeSummaryDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-merge" role="dialog" aria-modal="true" aria-labelledby="mergeSummaryTitle" aria-describedby="mergeSummaryMsg">
+                    <div class="modal-head">
+                        <h2 id="mergeSummaryTitle" class="modal-title" data-i18n>Networks to decide on</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <p id="mergeSummaryMsg" class="ask-msg paste-blurb"></p>
+                        <p id="mergeSummaryAuto" class="paste-delta" hidden></p>
+                        <ul id="mergeSummaryList" class="merge-list"></ul>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" class="btn" data-close data-i18n>Cancel</button>
+                        <button type="button" id="mergeSummaryDone" class="btn btn-primary" data-i18n>Done</button>
+                    </div>
+                </div>
+            </div>
             <div id="lifeDialog" class="modal-scrim" hidden>
                 <div class="modal topo-paste topo-life" role="dialog" aria-modal="true" aria-labelledby="lifeTitle">
                     <div class="modal-head">
@@ -1889,6 +1958,7 @@
     <script src="js/changes.js"></script>
     <script src="js/trail.js"></script>
     <script src="js/restore.js"></script>
+    <script src="js/revisions.js"></script>
     <script src="js/share.js"></script>
     <script src="js/networks.js"></script>
     <script src="js/groups.js"></script>
@@ -1905,6 +1975,10 @@
     <script src="js/bulk.js"></script>
     <script src="js/add.js"></script>
     <script src="js/csv.js"></script>
+    <script src="js/merge.js"></script>
+    <script src="js/mergeapply.js"></script>
+    <script src="js/mergeui.js"></script>
+    <script src="js/mergedoors.js"></script>
     <script src="js/assets.js"></script>
     <script src="js/app.js"></script>
     <script src="js/settings.js"></script>

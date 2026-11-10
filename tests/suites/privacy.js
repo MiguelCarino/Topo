@@ -150,8 +150,9 @@ window.addEventListener('load', async () => {
   loadDocState(templatesData.hospital); autoBindLinks(); save();
   const hospitalJson = JSON.stringify(serializeDoc());
   // A link also carries the network's identity (identifiedDoc), so whoever
-  // keeps it keeps the same network: compared apart from the document.
-  const docPart = (json) => { const d = JSON.parse(json); delete d.id; delete d.updated; return JSON.stringify(d); };
+  // keeps it keeps the same network: compared apart from the document. Its
+  // revision too (rev, base, prior; js/revisions.js).
+  const docPart = (json) => { const d = JSON.parse(json); delete d.id; delete d.updated; delete d.rev; delete d.base; delete d.prior; return JSON.stringify(d); };
   const identOf = (json) => { const d = JSON.parse(json); return `${d.id}@${d.updated}`; };
   el('copyUrlBtn').click();
   ok('Copy link opens the share dialog', open('shareDialog'));
@@ -180,6 +181,7 @@ window.addEventListener('load', async () => {
   const plainJson = await decodeFragment(el('shareLink').value.split('#')[1]);
   ok('that decodes without any passphrase', docPart(plainJson) === hospitalJson);
   ok('and is the same network as the sealed one', identOf(plainJson) === identOf(unsealed), `${identOf(plainJson)} vs ${identOf(unsealed)}`);
+  ok('both carry one revision: the content did not change between them', !!JSON.parse(unsealed).rev && JSON.parse(plainJson).rev === JSON.parse(unsealed).rev);
   closeShareDialog();
 
   // ---- 3. The policy itself ----

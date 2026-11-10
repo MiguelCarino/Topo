@@ -21,7 +21,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const tick = () => new Promise((r) => setTimeout(r, 0));
   const answers = [];
   const asked = [];
-  const heldResponder = setDialogResponder((req) => { asked.push(req); return answers.length ? answers.shift()(req) : (req.kind === 'confirm' ? false : null); });
+  const heldResponder = setDialogResponder((req) => { asked.push(req); if (req.kind === 'choice' && req.choices.some((c) => c.id === 'open') && req.choices.some((c) => c.id === 'merge')) return 'open'; return answers.length ? answers.shift()(req) : (req.kind === 'confirm' ? false : null); });
   const json = (v) => JSON.stringify(v);
 
   // A small site: a building with a server room and a rack in it, and a

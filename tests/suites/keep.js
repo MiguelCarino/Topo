@@ -143,29 +143,45 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('re-importing your own file asks nothing', (await applyImportedDoc(same)) === true && offered === null);
     ok('makes no second card, and opens the card', cards().length === 1 && state.libraryId === id);
 
-    // A newer copy (a colleague's edit of the file you sent): Update.
+    // A copy edited elsewhere (a colleague's edit of the file you sent):
+    // Merge is the main answer (js/mergedoors.js), three-way against the
+    // copy that left, so their edits are taken without a question.
     const theirs = JSON.parse(JSON.stringify(same));
     theirs.doc.nodes[0].name = 'Their edit';
     theirs.doc.nodes[1].name = 'Their second edit';
     theirs.doc.updated = CarinoLibrary.loadLibrary()[id].updated + 60000;
     replaceDocument(templatesData.bank, { origin: 'template' });
-    choose = 'update';
+    choose = 'merge';
+    const heldMerge = TopoMergeUI.setMergeResponder(() => ({}));
     await applyImportedDoc(theirs);
-    ok('a newer copy is offered as an update, with the number of changes',
-       !!offered && offered.ids.join(',') === 'copy,update' && offered.labels[1] === 'Update "Casa Roma" (2 changes)' && /newer/.test(offered.message),
+    ok('a copy that differs is offered as a merge, first and main, with Replace, a copy and Open mine',
+       !!offered && offered.ids.join(',') === 'merge,update,copy,mine' && offered.labels[0] === 'Merge into "Casa Roma"'
+       && offered.labels[1] === 'Replace with this copy' && /It was taken from yours/.test(offered.message),
        offered && offered.labels.join(' | '));
-    ok('Update merges it into the same card', cards().length === 1 && state.libraryId === id
+    ok('Merge takes their edits into the same card', cards().length === 1 && state.libraryId === id
        && CarinoLibrary.loadLibrary()[id].doc.nodes[0].name === 'Their edit' && getNode(theirs.doc.nodes[0].id).name === 'Their edit');
-    ok('newer wins: the card takes the file’s version', CarinoLibrary.loadLibrary()[id].updated === theirs.doc.updated);
+    ok('and logs it', (CarinoLibrary.loadLibrary()[id].doc.log || []).length === 1 && state.log.length === 1);
+    TopoMergeUI.setMergeResponder(heldMerge);
 
-    // An older copy: yours is newer, so "Open mine" or a copy.
+    // Your own copy as it left, unchanged since: yours already has
+    // everything in it, so no Merge; Open mine is the main answer.
+    replaceDocument(templatesData.bank, { origin: 'template' });
+    offered = null; choose = 'mine';
+    await applyImportedDoc(same);
+    ok('your own older copy is not merged: yours already has everything; a copy, its history, Replace, Open mine first',
+       !!offered && offered.ids.join(',') === 'copy,history,update,mine' && /yours already has everything in this copy/.test(offered.message)
+       && offered.labels[2] === 'Replace with this copy', offered && offered.ids.join(',') + ' ' + offered.message);
+    ok('Open mine opens the card', state.libraryId === id && cards().length === 1);
+
+    // An older copy edited elsewhere: merged too; a copy is still offered,
+    // and its history.
     const older = JSON.parse(JSON.stringify(same));
     older.doc.nodes[0].name = 'Stale edit';
     older.doc.updated = 1000;
     offered = null; choose = 'copy';
     await applyImportedDoc(older);
-    ok('an older copy says yours is newer, and offers its history and Open mine', !!offered && offered.ids.join(',') === 'copy,history,mine' && /yours is newer/.test(offered.message),
-       offered && offered.message);
+    ok('an older copy edited elsewhere offers the merge, a copy, its history and Open mine', !!offered && offered.ids.join(',') === 'merge,update,copy,history,mine',
+       offered && offered.ids.join(','));
     ok('Open as a copy makes a second card of its own', cards().length === 2 && state.libraryId !== id
        && CarinoLibrary.loadLibrary()[state.libraryId].name === 'Casa Roma (copy)');
     ok('and leaves yours as it was', CarinoLibrary.loadLibrary()[id].doc.nodes[0].name === 'Their edit');
@@ -204,10 +220,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('so the next Keep still asks the Update / copy question', (await keepThisNetwork()) === null && !!offered && offered.ids.includes('copy'),
        offered && offered.ids.join(','));
     ok('and its file still carries the card’s id', identifiedDoc(serializeDoc()).id === id);
-    // Update or Open mine, depending on which copy the clock calls newer (the
-    // card was stamped ahead of it by the newer-file case above): either way
-    // the open network is that card again, not a second one.
-    choose = offered.ids.find((c) => c !== 'copy');
+    // Open mine: the open network is that card again, not a second one.
+    ok('the Keep question offers the merge first', offered.ids[0] === 'merge' && offered.ids.includes('mine'), offered.ids.join(','));
+    choose = 'mine';
     ok('answering the other way makes it the card again', (await keepThisNetwork()) === id && state.libraryId === id && cards().length === 1);
     choose = null;
 

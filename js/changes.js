@@ -1,13 +1,20 @@
 // ---- Changes since the last back-up ----
 // "What changed since I last handed this over?" is the question a register is
-// asked most often after "what is there?". A change log written into the
-// document (the draft's doc.log) would answer it, but a document travels: in
-// every share link, every binder link and every file, carrying the names of
-// who changed what, and a history the recipient was never meant to read. So
-// nothing is written into the document. Instead, at each back-up or report of
-// a kept network, a copy of the document as it was is kept beside its card —
-// one per card, the latest replacing the one before — and the changes are the
+// asked most often after "what is there?". A log of every edit written into
+// the document would answer it, but a document travels: in every share link,
+// every binder link and every file, carrying the names of who changed what,
+// and a history the recipient was never meant to read. So the edits are not
+// written into the document. Instead, at each back-up or report of a kept
+// network, a copy of the document as it was is kept beside its card — one per
+// card, the latest replacing the one before — and the changes are the
 // difference between that copy and the card now, matched by id.
+//
+// The network log (doc.log, document v17, js/model.js "Network log") is the
+// one exception, decided for the merge (docs/SCOPE.md section 3): it records
+// only what came from outside (a merge: from which file or link, how many
+// changes, the prepared-by name in Settings), not each edit, and it does
+// travel with the document, so whoever receives a copy can see it.
+// docChanges and docChangeParts leave it out.
 //
 // The copy is the baseline, nothing more. It is never in serializeDoc(), a
 // card, the binder file or a link of either (they are built from the cards,

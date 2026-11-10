@@ -5248,6 +5248,18 @@ function normalizeSearchRefs(searches = state.searches, columns = state.columns)
 //                   build would drop the pool, the saved searches, every
 //                   vendor and model and every tagged list, PoE fact and
 //                   budget, so it opens a v16 document read-only.
+//   v 17            the network's log ("Network log" below, docs/SCOPE.md
+//                   section 3): doc.log, an append-only list of what was
+//                   done to the network from outside (a merge first; step 4
+//                   adds incidents and visits). And a copy's revision as it
+//                   leaves (rev), the revision it was started from (base) and
+//                   the earlier revisions it carried (prior), which are
+//                   identity, not content: written only where a copy leaves
+//                   (identifiedDoc in js/app.js, a binder site's own keys),
+//                   never by serializeDoc(), never an undo step (js/revisions.js).
+//                   Nothing to convert: a document from before has no log,
+//                   and writes no key. A v16 build would drop the log on its
+//                   next save, so it opens a v17 document read-only.
 //
 // A document with a higher `v` was written by a newer Topo. Its unknown fields
 // cannot be kept — the serializer is an allowlist, and that is a privacy rule,
@@ -5599,7 +5611,83 @@ function serializeTableView(v) {
     return n.devices ? n : undefined;
 }
 
-const DOC_VERSION = 16;
+// ---- Network log (document v17) ----
+// What was done to the network from outside, kept in the document so it
+// travels with it (docs/SCOPE.md section 3; js/changes.js says why the
+// changes since a back-up are not kept this way). Append-only: an entry is
+// never edited, the oldest go past LOG_MAX. Each entry is
+// { id, at, kind, ...its kind's fields, prev? }: `prev` is the SHA-256 of
+// the entry before it in this document (js/merge.js), so an entry edited by
+// hand shows. The fields are an allowlist per kind (LOG_FIELDS), as every
+// other list in the document is; an entry of a kind this build does not
+// know is dropped (a document that has one comes from a newer Topo, and
+// opens read-only). Step 4 adds its kinds (incidents, visits) here.
+//   merge   source (a file's name, 'link', 'binder' or a card's name), by
+//           (Settings' prepared-by name, if any), counts { added, changed,
+//           removed, conflicts }, summary (English, the fallback text),
+//           mode ('two-way' | 'three-way'), rev (the revision merged in:
+//           the base a later copy of this network is compared with,
+//           js/revisions.js outgoingBase).
+const LOG_MAX = 500;
+// A link carries the newest LOG_LINK_MAX (a binder link has a size cap); a
+// file and a card keep LOG_MAX. Nothing is lost on the way back: entries are
+// unioned by id.
+const LOG_LINK_MAX = 50;
+const LOG_SUMMARY_MAX = 160;
+const LOG_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const LOG_HASH_RE = /^[0-9a-f]{64}$/;
+const LOG_COUNT_KEYS = ['added', 'changed', 'removed', 'conflicts'];
+const logText = (max) => (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+const LOG_FIELDS = {
+    merge: {
+        source: logText(200),
+        by: logText(120),
+        counts: (v) => {
+            const o = {};
+            LOG_COUNT_KEYS.forEach((k) => { o[k] = v && typeof v === 'object' && Number.isInteger(v[k]) && v[k] >= 0 ? v[k] : 0; });
+            return o;
+        },
+        summary: logText(LOG_SUMMARY_MAX),
+        mode: (v) => (v === 'two-way' || v === 'three-way' ? v : undefined),
+        rev: (v) => (typeof v === 'string' && LOG_ID_RE.test(v) ? v : undefined)
+    }
+};
+const LOG_KINDS = Object.keys(LOG_FIELDS);
+// One entry as this build keeps it, or null when it is not one.
+function normalizeLogEntry(e) {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) return null;
+    if (typeof e.id !== 'string' || !LOG_ID_RE.test(e.id) || !Number.isFinite(e.at) || e.at <= 0) return null;
+    if (!Object.prototype.hasOwnProperty.call(LOG_FIELDS, e.kind)) return null;
+    const out = { id: e.id, at: e.at, kind: e.kind };
+    const fields = LOG_FIELDS[e.kind];
+    Object.keys(fields).forEach((k) => { const v = fields[k](e[k]); if (v !== undefined) out[k] = v; });
+    if (typeof e.prev === 'string' && LOG_HASH_RE.test(e.prev)) out.prev = e.prev;
+    return out;
+}
+// The list in its order (the order is the chain's), the first of two
+// entries under one id kept, the newest `max` kept.
+function normalizeLog(list, max = LOG_MAX) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const out = [];
+    list.forEach((e) => {
+        const n = normalizeLogEntry(e);
+        if (n && !seen.has(n.id)) { seen.add(n.id); out.push(n); }
+    });
+    return out.length > max ? out.slice(out.length - max) : out;
+}
+function serializeLog(list, max = LOG_MAX) {
+    const n = normalizeLog(list, max);
+    return n.length ? n : undefined;
+}
+// A document as it goes into a link: its log cut to the newest
+// LOG_LINK_MAX. A copy; the document given is left as it is.
+function withLinkLog(doc) {
+    if (!doc || typeof doc !== 'object' || !Array.isArray(doc.log) || doc.log.length <= LOG_LINK_MAX) return doc;
+    return Object.assign({}, doc, { log: doc.log.slice(doc.log.length - LOG_LINK_MAX) });
+}
+
+const DOC_VERSION = 17;
 
 // ---- What a Topo file says it is ----
 // Every .json Topo writes (a network's back-up, a binder) opens with a
@@ -5634,7 +5722,7 @@ function withTopoSchema(payload) {
 const DOC_VERSION_RE = /^\s*[1-9]\d*\s*$/;
 const isDocShape = (doc) => !!doc && typeof doc === 'object' && !Array.isArray(doc)
     && (doc.v === undefined || (Number.isInteger(doc.v) && doc.v >= 1) || (typeof doc.v === 'string' && DOC_VERSION_RE.test(doc.v)))
-    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations', 'columns', 'pinned', 'accepted', 'searches'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
+    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations', 'columns', 'pinned', 'accepted', 'searches', 'log', 'prior'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
 
 // A version written as text ("14", a hand-edited file) is that version.
 const docVersionOf = (doc) => {
@@ -5772,7 +5860,10 @@ const MIGRATIONS = [
     // a device's vendor and model two more keys, and the tagged VLANs and
     // PoE facts of ports, interfaces and devices more keys again (folded in:
     // same unpushed series), not a new shape.
-    { from: 15, to: 16, run: (doc) => ({ ...doc, v: 16 }) }
+    { from: 15, to: 16, run: (doc) => ({ ...doc, v: 16 }) },
+    // The network log is a new list, and rev, base and prior are identity
+    // keys beside id and updated: not a new shape.
+    { from: 16, to: 17, run: (doc) => ({ ...doc, v: 17 }) }
 ];
 
 // The v2 interface zone flags of `src`, put back on the same node as written.

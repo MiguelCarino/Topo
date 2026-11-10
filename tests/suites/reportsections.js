@@ -2,7 +2,8 @@
 // docs/BACKLOG.md "Decisions taken": "Make ports table optional, we will make
 // check marks for more specific reports"). What is held here:
 //   1. reportParts().sections: every REPORT_SECTIONS key at its default
-//      (all on but the Capacity Ports table and the Address history), a
+//      (all on but the Capacity Ports table, the Network log and the
+//      Address history), a
 //      boolean given for a key winning, unknown keys and non-booleans
 //      ignored, no map meaning the defaults;
 //   2. the default report: on every shipped template and a nearly full
@@ -94,7 +95,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 1. reportParts().sections ----
     const def = reportParts().sections;
     ok('every section key is in the map', show(Object.keys(def)) === show(KEYS), show(def));
-    ok('every one on by default but the Ports table and the Address history', KEYS.every((k) => def[k] === !(k === 'capPorts' || k === 'history')), show(def));
+    ok('every one on by default but the Ports table, the Network log and the Address history', KEYS.every((k) => def[k] === !(k === 'capPorts' || k === 'history' || k === 'log')), show(def));
     ok('history is no longer reserved: it has a tick (stage 5)', REPORT_SECTIONS.find((s) => s.key === 'history').on === false
        && REPORT_SECTIONS.filter((s) => s.reserved).length === 0);
     const given = reportParts({ sections: { devices: false, capPorts: true, bogus: false, racks: 'no', history: true } }).sections;
@@ -168,9 +169,23 @@ window.addEventListener('load', () => { setTimeout(async () => {
     });
     // The Address history needs a kept network's trail, which these models
     // have not: tests/suites/addresshistory.js holds it.
-    const printable = KEYS.filter((k) => !REPORT_SECTIONS.find((s) => s.key === k).reserved && k !== 'history');
+    // The Network log needs a log, which no shipped template has: it is
+    // held just below (and in tests/suites/mergeapply.js).
+    const printable = KEYS.filter((k) => !REPORT_SECTIONS.find((s) => s.key === k).reserved && k !== 'history' && k !== 'log');
     ok('every section turns up in some document here', printable.every((k) => seen.has(k)), show(printable.filter((k) => !seen.has(k))));
     ok('each tick takes out exactly its own section and leaves every other byte for byte', !wrong.length, show(wrong));
+    {
+      // A network with a log: the Network log tick prints it after Changes
+      // and takes out only it.
+      const lm = modelOf(closet);
+      lm.log = [{ id: 'lg_rs1', at: Date.UTC(2026, 10, 9, 12), kind: 'merge', source: 'tech.json', counts: { added: 2, changed: 1, removed: 0, conflicts: 0 }, mode: 'two-way' }];
+      const lOn = reportSheet(lm, null, { sections: allOn });
+      const lOff = reportSheet(lm, null, { sections: Object.assign({}, allOn, { log: false }) });
+      const hs = cut(lOn).map(([h]) => h);
+      ok('a network with a log: its section after Changes', hs.indexOf('Network log') === hs.indexOf('Changes since the last back-up') + 1, show(hs));
+      ok('and its tick takes out only it', show(cut(lOn).filter(([h]) => h !== 'Network log')) === show(cut(lOff)));
+      ok('off by default', !reportSheet(lm, null, {}).includes('<h2>Network log</h2>'));
+    }
     // A diagram too big for the text goes on a landscape page of its own;
     // its tick takes that page as well.
     const big = modelOf(() => cloneData(templatesData[Object.keys(templatesData).sort()[0]]));

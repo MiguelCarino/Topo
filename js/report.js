@@ -1248,6 +1248,8 @@ function reportModelNow(searchIds) {
         searches: reportSearches(searchIds, devices),
         wifi: reportWifiSection(),
         providers: reportProviders(),
+        // The network log (doc.log), printed only when its tick is on.
+        log: Array.isArray(state.log) ? state.log.slice() : [],
         counts: {
             devices: devices.length,
             connections: connections.length,
@@ -2620,6 +2622,9 @@ ${capacity ? `
 ` : ''}${sec.changes && model.changes ? `
     <h2>${escapeHtml(t(model.changes.kind === 'report' ? 'Changes since the last report' : 'Changes since the last back-up'))}</h2>
     ${changesSection(model.changes)}
+` : ''}${sec.log && model.log && model.log.length && typeof logReportSection === 'function' ? `
+    <h2>${escapeHtml(t('Network log'))}</h2>
+    ${logReportSection(model.log)}
 ` : ''}${sec.history && model.history ? `
     <h2>${escapeHtml(t('Address history'))}</h2>
     ${addressHistorySection(model.history)}
@@ -2662,6 +2667,9 @@ const REPORT_SECTIONS = [
     { key: 'capPoe', label: 'Capacity: PoE budgets', on: true },
     { key: 'searches', label: 'Saved searches', on: true },
     { key: 'changes', label: 'Changes since the last back-up or report', on: true },
+    // The network log (docs/SCOPE.md step 2; js/mergeapply.js logReportSection):
+    // the merges into the network, off unless ticked.
+    { key: 'log', label: 'Network log', on: false },
     { key: 'history', label: 'Address history', on: false },
 ];
 // A sections map read for one report: every key of REPORT_SECTIONS, a
@@ -2945,11 +2953,12 @@ function captureReportDiagram(day, base = 4) {
 }
 
 async function withDocRendered(doc, fn) {
-    const held = {
-        nodes: state.nodes, links: state.links, networks: state.networks, groups: state.groups, wifi: state.wifi, providers: state.providers, accepted: state.accepted, pinned: state.pinned, expectedLife: state.expectedLife, columns: state.columns, tableView: state.tableView, searches: state.searches, annotations: state.annotations, report: state.report,
+    // Every key loadDocState writes (holdDocState, js/app.js): a site's log
+    // left behind would be saved into the open card.
+    const held = Object.assign(holdDocState(), {
         camera: { x: state.camera.x, y: state.camera.y, zoom: state.camera.zoom },
         selection: state.selection,   // the whole set: a getter pair would lose a set of several
-    };
+    });
     borrowCanvas(true);   // save() refuses while the canvas is not the user's document
     try {
         state.selection = new Set();
@@ -2957,9 +2966,7 @@ async function withDocRendered(doc, fn) {
         renderCanvasOnly();
         return await fn();
     } finally {
-        state.nodes = held.nodes; state.links = held.links; state.networks = held.networks; state.groups = held.groups; state.wifi = held.wifi; state.providers = held.providers; state.accepted = held.accepted; state.pinned = held.pinned; state.expectedLife = held.expectedLife;
-        state.columns = held.columns; state.tableView = held.tableView; state.searches = held.searches;
-        state.annotations = held.annotations; state.report = held.report;
+        restoreDocState(held);
         state.camera = held.camera;
         state.selection = held.selection;
         borrowCanvas(false);
@@ -3176,7 +3183,8 @@ function renderReportSections(keep) {
         const text = document.createElement('span');
         text.textContent = t(label);
         const dim = key === 'capPorts' ? 'The nearly full switches only; Switch ports lists every port.'
-            : key === 'history' ? 'What each device held at earlier back-ups and reports, from this browser. Networks kept here only.' : '';
+            : key === 'history' ? 'What each device held at earlier back-ups and reports, from this browser. Networks kept here only.'
+                : key === 'log' ? 'Each merge into this network from another copy, newest first.' : '';
         if (dim) {
             const why = document.createElement('span');
             why.className = 'dlg-dim';

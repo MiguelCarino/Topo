@@ -23,6 +23,16 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // Update is not held up by the could-not-be-saved question (tests/suites/restore.js).
   if (window.CarinoRestore) await CarinoRestore.openRestoreStore({ open: async () => [], readCards: async () => ({}), readDoc: async () => null, write: async () => true });
   const heldResponder = setDialogResponder((req) => (req.kind === 'confirm' ? confirmAnswer : req.kind === 'prompt' ? null : req.kind === 'choice' ? null : undefined));
+  // The binder merge's summary (js/mergedoors.js): `summaryAnswer` for every
+  // row, and what it was asked is kept.
+  let summaryAnswer = 'skip';
+  const summaries = [];
+  const heldSummary = TopoMergeDoors.setMergeSummaryResponder((req) => {
+    summaries.push(req);
+    const out = {};
+    req.rows.forEach((r) => { out[r.id] = summaryAnswer; });
+    return out;
+  });
 
   // IndexedDB's callbacks never fire under run.sh's virtual clock, so the real
   // store is swapped for an in-memory one. What is under test is everything
@@ -188,9 +198,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // a destination that happens to contain someone else's binder.
   ok('but the file is still bound', (await binderHandle()) !== null);
 
-  // A file holding a NEWER copy of a network you already have is merged without
-  // asking: newer-wins can never destroy anything newer, and skipping it was how
-  // a binder edited on another machine got overwritten by this one's older copy.
+  // A file holding a different copy of a network you already have, with no
+  // copy both started from, is asked about in the merge summary, never
+  // replaced newer-wins: skipping it was how a binder edited on another
+  // machine got overwritten by this one's older copy, and taking it unasked
+  // was how this one's edits got lost. Replace with theirs reads it in.
   await clearBinderHandle();
   const mineId = Object.keys(loadLibrary())[0];
   const newerFile = handleWith('granted', 'granted');
@@ -199,8 +211,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     sites: [{ id: mineId, name: 'Edited elsewhere', created: 1, updated: Date.now() + 120000, doc: { nodes: [], links: [] } }] })) });
   window.showSaveFilePicker = () => Promise.resolve(newerFile);
   confirmAnswer = false;   // nothing to ask about: no unknown ids
+  summaryAnswer = 'replace'; summaries.length = 0;
   await exportBinder();
-  ok('a newer copy in the picked file is read in before the file is overwritten',
+  ok('the copy is asked about in one summary, as a backup', summaries.length === 1 && summaries[0].backup === true
+     && summaries[0].rows.length === 1 && summaries[0].rows[0].id === mineId, JSON.stringify(summaries.map((q) => q.rows)));
+  ok('Replace with theirs reads it in before the file is overwritten',
      loadLibrary()[mineId].name === 'Edited elsewhere', loadLibrary()[mineId].name);
   ok('and the bytes written back carry it, rather than the older local copy',
      JSON.parse(newerFile.written).sites.some((x) => x.name === 'Edited elsewhere'),
@@ -277,40 +292,37 @@ window.addEventListener('load', () => { setTimeout(async () => {
      !/Casa Coyoacán/.test(namesIn(synced)), namesIn(synced));
   ok('without taking the other machine\'s network with it', /Added on machine B/.test(namesIn(synced)), namesIn(synced));
 
-  // A network both hold, newer in the file, while storage is full. The merge
-  // that would read the newer copy in cannot be stored, and the export used
-  // to write this browser's older copy over it.
+  // A network both hold, edited in the file (a device added there, its rev
+  // the one this browser wrote: three-way, no conflicts, so merged on its
+  // own), while storage is full. The merge cannot be stored, and the export
+  // used to write this browser's copy over the file's.
   const onDisk = JSON.parse(synced.written);
   const bothId = Object.keys(loadLibrary()).find((id) => onDisk.sites.some((x) => x.id === id));
   const theirCopy = onDisk.sites.find((x) => x.id === bothId);
+  const devicesIn = (h, id) => ((JSON.parse(h.written).sites.find((x) => x.id === id) || {}).doc || { nodes: [] }).nodes.map((n) => n.name).join(',');
   ok('(setup: the shared network is in the file)', !!theirCopy, namesIn(synced));
   if (theirCopy) {
-    theirCopy.name = 'Newer on machine B';
+    ok('(setup: it went out with its rev)', !!theirCopy.rev);
+    theirCopy.doc.nodes.push({ id: 'machineBpc', type: 'pc', name: 'Newer on machine B', x: 4000, y: 4000 });
     theirCopy.updated = (loadLibrary()[bothId].updated || 0) + 1000;
     synced.written = JSON.stringify(onDisk);
+    summaries.length = 0;
     Storage.prototype.setItem = function (k, v) {
       if (k === LIBRARY_KEY) throw new Error('QuotaExceededError');
       return realSetItem.call(this, k, v);
     };
     refuseIdb(true);
     try { await exportBinder(); await libraryWritesSettled(); } finally { Storage.prototype.setItem = realSetItem; refuseIdb(false); }
-    ok('with storage full, the newer file copy is not overwritten by the older local one',
-       /Newer on machine B/.test(namesIn(synced)) && JSON.parse(synced.written).sites.filter((x) => x.id === bothId).length === 1,
-       namesIn(synced));
-    // The fallback could not take the newer copy, so this browser's version
-    // was not what went into the file. IndexedDB's library did take it (the
-    // disk refused, which the banner says), so the file holds the library's
-    // own version and is recorded as such.
-    if (idb) ok('the library took the newer copy, and the export records that version',
-       loadLibrary()[bothId].name === 'Newer on machine B' && loadLastExport().seen[bothId] === theirCopy.updated
-       && storageFailed(), String(loadLastExport().seen[bothId]));
-    else ok('and it is not recorded as exported from here',
-       !Object.prototype.hasOwnProperty.call(loadLastExport().seen, bothId), Object.keys(loadLastExport().seen).join(','));
-    // With storage back, the same export reads it in as usual.
+    ok('a clean three-way merge asks nothing', summaries.length === 0, JSON.stringify(summaries.map((q) => q.rows)));
+    ok('with storage full, the file\'s edit is not overwritten by the local copy',
+       /Newer on machine B/.test(devicesIn(synced, bothId)) && JSON.parse(synced.written).sites.filter((x) => x.id === bothId).length === 1,
+       devicesIn(synced, bothId));
+    // With storage back, the same export merges it in on its own.
     await exportBinder();
-    ok('once storage works again the newer copy is read into the library',
-       loadLibrary()[bothId].name === 'Newer on machine B' && /Newer on machine B/.test(namesIn(synced)),
-       loadLibrary()[bothId].name);
+    ok('once storage works again the file\'s edit is merged into the library',
+       loadLibrary()[bothId].doc.nodes.some((n) => n.name === 'Newer on machine B') && /Newer on machine B/.test(devicesIn(synced, bothId)),
+       loadLibrary()[bothId].doc.nodes.map((n) => n.name).join(','));
+    ok('with a log entry naming the file', (loadLibrary()[bothId].doc.log || []).some((e) => e.kind === 'merge'));
   }
 
   // ---- Cleanup ----
@@ -323,6 +335,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   setHandleStore(realHandleStore);
   if (window.CarinoRestore) { CarinoRestore.releaseRestoreStore(); CarinoRestore._reset(); }
   setDialogResponder(heldResponder);
+  TopoMergeDoors.setMergeSummaryResponder(heldSummary);
   await refreshBinderBinding();
 
   const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');

@@ -475,15 +475,20 @@ window.addEventListener('load', () => { setTimeout(async () => {
      && !!loadLibrary()[bId] && !!loadLibrary()[bId2],
      Object.keys(loadLibrary()).join(','));
 
-  // The same network coming back newer is an update; coming back older is not.
+  // The same network coming back is never replaced newer-wins any more
+  // (docs/SCOPE.md section 3): the binder doors merge it (js/mergedoors.js);
+  // importBinderSites replaces only the ids it is told to.
   const newer = { kind: 'nettopo-binder', version: 1, sites: [
       { id: bId, name: 'Torre A — revisada', created: 1, updated: Date.now() + 60000, doc: { nodes: [], links: [] } }] };
-  ok('a newer copy of a network you already have wins',
-     importBinderSites(binderFromImported(newer).sites).updated === 1
+  ok('a newer copy of a network you already have does not win on its own',
+     importBinderSites(binderFromImported(newer).sites).kept === 1
+     && loadLibrary()[bId].name !== 'Torre A — revisada', loadLibrary()[bId].name);
+  ok('it replaces the card only when told to',
+     importBinderSites(binderFromImported(newer).sites, { replace: [bId] }).updated === 1
      && loadLibrary()[bId].name === 'Torre A — revisada');
   const older = { kind: 'nettopo-binder', version: 1, sites: [
       { id: bId, name: 'Torre A — vieja', created: 1, updated: 1, doc: { nodes: [], links: [] } }] };
-  ok('an older one does not', importBinderSites(binderFromImported(older).sites).kept === 1
+  ok('an older one does not either', importBinderSites(binderFromImported(older).sites).kept === 1
      && loadLibrary()[bId].name === 'Torre A — revisada', loadLibrary()[bId].name);
   // A hand-written file, or a stranger's link, can carry no timestamp at all.
   // That is the LEAST information about recency — it must lose, not win.

@@ -15,8 +15,18 @@ const state = {
     // too (an identity is not an edit, and must not cost an undo step); they
     // are written into the document only where it leaves this tab, a build
     // file or a link (identifiedDoc in js/app.js), so that bringing the same
-    // network back is recognised and merged newer-wins instead of becoming a
+    // network back is recognised as that network instead of becoming a
     // second card.
+    // docRev / docRevHash / docBase / docPrior: the rest of that identity
+    // (document v17, js/revisions.js). docRev is the revision the document
+    // carried when it last left (a file, a link, a binder) and docRevHash
+    // the hash of its content then; docBase the revision it was started
+    // from; docPrior the revisions it carried before docRev. A kept
+    // document's are its card's. Identity like docId: never serialized
+    // by serializeDoc(), never an undo step.
+    // log: the network log (js/model.js "Network log"). Document:
+    // serialized, an undo step (undoing a merge takes its entry back),
+    // carried by files and links.
     // readOnly: null, or { doc } — the document exactly as it arrived, when it
     // was written by a newer Topo than this one (see replaceDocument() in
     // js/app.js). Also bookkeeping, also never serialized.
@@ -62,7 +72,7 @@ const state = {
     // query: what the search box over the map and the table holds (plan 3.3,
     // js/query.js). A view, like the trace: never serialized, never an undo
     // step, not kept between visits, and kept when another network is opened.
-    nodes: [], links: [], networks: [], groups: [], wifi: [], providers: [], accepted: [], pinned: [], expectedLife: {}, columns: [], tableView: {}, searches: [], annotations: [], report: null, libraryId: null, docId: null, docUpdated: 0, readOnly: null, linkSourceId: null,
+    nodes: [], links: [], networks: [], groups: [], wifi: [], providers: [], accepted: [], pinned: [], expectedLife: {}, columns: [], tableView: {}, searches: [], annotations: [], report: null, log: [], libraryId: null, docId: null, docUpdated: 0, docRev: null, docRevHash: null, docBase: null, docPrior: [], readOnly: null, linkSourceId: null,
     query: '',
     selection: new Set(),
     get selectedId() { const one = soleSelected(this.selection); return one ? one.id : null; },

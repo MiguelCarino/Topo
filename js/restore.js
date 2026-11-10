@@ -37,7 +37,9 @@ const RESTORE_OPEN_MS = 1000;
 // Mutable for the suites (CarinoRestore.RESTORE_LIMITS); nothing else changes them.
 const RESTORE_LIMITS = { perCard: 20, totalBytes: 50 * 1024 * 1024, writeMs: 4000 };
 const RESTORE_REASONS = ['Before opening {file}', 'Before opening a file', 'Before importing {file}', 'Before importing a binder',
-    'Before importing pasted rows', 'Before updating from a link', 'Before restoring'];
+    'Before importing pasted rows', 'Before updating from a link', 'Before restoring',
+    // A merge (js/mergeapply.js): {file} a file's name, {name} another network's.
+    'Before merging {file}', 'Before merging a link', 'Before merging a binder', 'Before merging {name}'];
 
 // card id -> [meta], oldest first: what this tab knows of the points.
 const _restore = new Map();
@@ -70,32 +72,39 @@ function validRestoreMeta(rec) {
         updated: Number.isFinite(rec.updated) ? rec.updated : 0
     };
     if (typeof rec.fileName === 'string' && rec.fileName) out.fileName = rec.fileName.slice(0, 200);
+    // The card's revision then (js/revisions.js), put back with the document.
+    if (rec.ident && typeof rec.ident === 'object' && typeof applyCardRevision === 'function') {
+        const ident = applyCardRevision({}, { rev: rec.ident.rev, revHash: rec.ident.revHash, base: rec.ident.base, prior: rec.ident.prior });
+        if (Object.keys(ident).length) out.ident = ident;
+    }
     return out;
 }
 const validRestoreDoc = (doc) => (doc && typeof doc === 'object' && Array.isArray(doc.nodes) ? doc : null);
 
-// The IndexedDB store. Every call resolves, never rejects.
-function idbRestoreAdapter() {
+// The IndexedDB store. Every call resolves, never rejects. The database and
+// its two stores are parameters so the revision store (js/revisions.js),
+// which has the same shape, opens its own database through the same code.
+function idbRestoreAdapter(dbName = RESTORE_DB, metaStore = RESTORE_STORE, docStore = RESTORE_DOCS) {
     let db = null;
     const request = (fn) => new Promise((resolve) => { try { fn(resolve); } catch (e) { resolve(null); } });
     return {
         // -> [meta] of every point, or null when IndexedDB cannot be used here.
         open() {
             return request((resolve) => {
-                const req = indexedDB.open(RESTORE_DB, 1);
+                const req = indexedDB.open(dbName, 1);
                 req.onupgradeneeded = () => {
                     try {
-                        const s = req.result.createObjectStore(RESTORE_STORE, { keyPath: 'id' });
+                        const s = req.result.createObjectStore(metaStore, { keyPath: 'id' });
                         s.createIndex('cardId', 'cardId');
-                        req.result.createObjectStore(RESTORE_DOCS, { keyPath: 'id' });
+                        req.result.createObjectStore(docStore, { keyPath: 'id' });
                     } catch (e) { /* already there */ }
                 };
                 req.onerror = req.onblocked = () => resolve(null);
                 req.onsuccess = () => {
                     db = req.result;
                     db.onversionchange = () => { try { db.close(); } catch (e) { /* closed */ } db = null; };
-                    const tx = db.transaction(RESTORE_STORE, 'readonly');
-                    const all = tx.objectStore(RESTORE_STORE).getAll();
+                    const tx = db.transaction(metaStore, 'readonly');
+                    const all = tx.objectStore(metaStore).getAll();
                     tx.oncomplete = () => resolve(all.result || []);
                     tx.onerror = tx.onabort = () => resolve(null);
                 };
@@ -105,8 +114,8 @@ function idbRestoreAdapter() {
         readCards(cardIds) {
             return request((resolve) => {
                 if (!db) { resolve(null); return; }
-                const tx = db.transaction(RESTORE_STORE, 'readonly');
-                const idx = tx.objectStore(RESTORE_STORE).index('cardId');
+                const tx = db.transaction(metaStore, 'readonly');
+                const idx = tx.objectStore(metaStore).index('cardId');
                 const out = {};
                 cardIds.forEach((id) => { const g = idx.getAll(id); g.onsuccess = () => { out[id] = g.result || []; }; });
                 tx.oncomplete = () => resolve(out);
@@ -117,8 +126,8 @@ function idbRestoreAdapter() {
         readDoc(id) {
             return request((resolve) => {
                 if (!db) { resolve(null); return; }
-                const tx = db.transaction(RESTORE_DOCS, 'readonly');
-                const g = tx.objectStore(RESTORE_DOCS).get(id);
+                const tx = db.transaction(docStore, 'readonly');
+                const g = tx.objectStore(docStore).get(id);
                 tx.oncomplete = () => resolve(g.result ? g.result.doc : null);
                 tx.onerror = tx.onabort = () => resolve(null);
             });
@@ -127,10 +136,10 @@ function idbRestoreAdapter() {
         write(ops) {
             return request((resolve) => {
                 if (!db) { resolve(false); return; }
-                const tx = db.transaction([RESTORE_STORE, RESTORE_DOCS], 'readwrite');
+                const tx = db.transaction([metaStore, docStore], 'readwrite');
                 tx.oncomplete = () => resolve(true);
                 tx.onerror = tx.onabort = () => resolve(false);
-                const metas = tx.objectStore(RESTORE_STORE), docs = tx.objectStore(RESTORE_DOCS);
+                const metas = tx.objectStore(metaStore), docs = tx.objectStore(docStore);
                 (ops.put || []).forEach((p) => { metas.put(p.meta); docs.put({ id: p.meta.id, doc: p.doc }); });
                 (ops.del || []).forEach((id) => { metas.delete(id); docs.delete(id); });
             }).then((ok) => ok === true);
@@ -140,10 +149,10 @@ function idbRestoreAdapter() {
         dropCard(cardId) {
             return request((resolve) => {
                 if (!db) { resolve(false); return; }
-                const tx = db.transaction([RESTORE_STORE, RESTORE_DOCS], 'readwrite');
+                const tx = db.transaction([metaStore, docStore], 'readwrite');
                 tx.oncomplete = () => resolve(true);
                 tx.onerror = tx.onabort = () => resolve(false);
-                const metas = tx.objectStore(RESTORE_STORE), docs = tx.objectStore(RESTORE_DOCS);
+                const metas = tx.objectStore(metaStore), docs = tx.objectStore(docStore);
                 const keys = metas.index('cardId').getAllKeys(cardId);
                 keys.onsuccess = () => (keys.result || []).forEach((id) => { metas.delete(id); docs.delete(id); });
             }).then((ok) => ok === true);
@@ -310,7 +319,7 @@ function restorePointDoc(pointId) {
 }
 
 function restoreReasonText(meta) {
-    return t(meta.reason, { file: meta.fileName || '' });
+    return t(meta.reason, { file: meta.fileName || '', name: meta.fileName || '' });
 }
 
 // ---- Taking one ----
@@ -333,6 +342,11 @@ function recordRestorePoint(cardId, reason, opts = {}) {
         name: entry.name || '', updated: Number.isFinite(entry.updated) ? entry.updated : 0
     };
     if (opts.fileName) meta.fileName = String(opts.fileName).slice(0, 200);
+    // Its revision and base go with it, so restoring it puts them back too.
+    if (typeof applyCardRevision === 'function') {
+        const ident = applyCardRevision({}, { rev: entry.rev, revHash: entry.revHash, base: entry.base, prior: entry.prior });
+        if (Object.keys(ident).length) meta.ident = ident;
+    }
     list.push(meta);
     _restore.set(cardId, list);
     _restoreDocs.set(meta.id, doc);
@@ -394,18 +408,21 @@ function downloadRestoreBackup(cardIds) {
     if (!entries.length) return;
     if (entries.length === 1) {
         const e = entries[0];
-        downloadNetworkJson(e.name, e.id, e.updated, e.doc, todayISO());
+        downloadNetworkJson(e.name, e.id, e.updated, e.doc, todayISO(), typeof stampCard === 'function' ? stampCard(e.id, 'backup') : null);
         return;
     }
-    const sites = entries.map((e) => Object.assign({ id: e.id, name: e.name, created: e.created, updated: e.updated, doc: e.doc },
+    let sites = entries.map((e) => Object.assign({ id: e.id, name: e.name, created: e.created, updated: e.updated, doc: e.doc },
         e.template ? { template: true } : {}, e.block ? { block: true } : {}));
+    // Each a copy that leaves, with its revision (js/revisions.js).
+    if (typeof stampSites === 'function') sites = stampSites(sites, 'backup');
     downloadJson({ kind: BINDER_KIND, version: 1, exported: Date.now(), sites }, binderDownloadName(sites));
 }
 
 // The same envelope exportJsonFile() writes, for a stored document.
-function downloadNetworkJson(name, id, updated, doc, day) {
+// ident: its { rev, base, prior } (js/revisions.js), when it has one.
+function downloadNetworkJson(name, id, updated, doc, day, ident) {
     const rest = stripIdentity(cloneData(doc));
-    const out = Object.assign(rest.v !== undefined ? { v: rest.v } : {}, { id, updated }, rest);
+    const out = Object.assign(rest.v !== undefined ? { v: rest.v } : {}, { id, updated }, typeof revisionFields === 'function' ? revisionFields(ident) : {}, rest);
     downloadJson(Object.assign({ kind: 'nettopology', version: 1 }, name ? { name } : {}, { doc: out }), topoFileName({ org: (doc && doc.report && typeof doc.report.client === 'string' && doc.report.client) || '', site: name, date: day }, 'json'));
 }
 
@@ -454,6 +471,13 @@ async function restoreFromPoint(cardId, pointId) {
     const cur = lib[cardId];
     if (!cur) return false;
     lib[cardId] = Object.assign({}, cur, { doc, updated: Math.max(Date.now(), (cur.updated || 0) + 1) });
+    // The revision it had then (js/revisions.js): its rev is checked
+    // against the content before it is reused, and its base is where it
+    // was started from then. A point from before revisions keeps the card's
+    // base, and its next copy gets a new rev.
+    if (typeof applyCardRevision === 'function') {
+        applyCardRevision(lib[cardId], Object.assign({ rev: null, revHash: null, base: cur.base, prior: cur.prior }, meta.ident || {}, { revAt: null }));
+    }
     if (!persistLibrary(lib)) { showToast(t('Could not save — browser storage is unavailable (private mode or full).'), 'err'); return false; }
     closeRestoreDialog();
     const entry = libraryEntry(cardId);
@@ -474,7 +498,9 @@ async function downloadRestorePoint(cardId, pointId) {
     const doc = await restorePointDoc(pointId);
     if (!doc) { restorePointUnreadable(); return false; }
     const entry = libraryEntry(cardId);
-    downloadNetworkJson((entry && entry.name) || meta.name, cardId, meta.updated || meta.at, doc, todayISO(new Date(meta.at)));
+    // Its own revision: a copy that leaves, though not the card's content.
+    const ident = typeof stampCardDoc === 'function' ? stampCardDoc(cardId, doc, 'backup') : null;
+    downloadNetworkJson((entry && entry.name) || meta.name, cardId, meta.updated || meta.at, doc, todayISO(new Date(meta.at)), ident);
     return true;
 }
 

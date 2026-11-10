@@ -180,9 +180,16 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('no part docChangeCount counts goes without a row in docChanges', !silent.length, silent.join(' | '));
     ok('and each is said by its own kind, not the generic fallback', !generic.length, generic.join(' | '));
     const exercised = new Set(cases.map((c) => c[0]));
-    const emitted = Object.keys(canonicalDoc(rich())).filter((k) => k !== 'v');
+    // The network log (v17) is the one key left out on purpose (docs/SCOPE.md
+    // D1): a merge unions it, and counting it would make every copy of a
+    // merged network look changed. Asserted below.
+    const emitted = Object.keys(canonicalDoc(rich())).filter((k) => k !== 'v' && k !== 'log');
     ok('every top-level key serializeDoc writes is exercised', emitted.length === exercised.size && emitted.every((k) => exercised.has(k)),
        show(emitted.filter((k) => !exercised.has(k))) + ' ' + show([...exercised].filter((k) => !emitted.includes(k))));
+    const logged = richEdit((d) => { d.log = [{ id: 'lg_a', at: 5, kind: 'merge', source: 'x.json', counts: { added: 1, changed: 0, removed: 0, conflicts: 0 } }]; });
+    ok('the network log is written, but a copy differing only in it is no change', Array.isArray(canonicalDoc(logged).log)
+       && docChangeCount(rich(), logged) === 0 && docChanges(rich(), logged).total === 0 && docChanges(logged, rich()).total === 0);
+    ok('nor is a copy differing only in its rev, base or prior', docChangeCount(rich(), Object.assign({ rev: 'r1', base: 'r0', prior: ['q'] }, rich())) === 0);
     // The one exemption, on purpose: a report's date is when it was issued.
     const dated = richEdit((d) => { d.report.date = '2026-11-09'; });
     ok('the report date alone counts for Update but is no change since the back-up', docChangeCount(rich(), dated) === 1 && docChanges(rich(), dated).total === 0);
@@ -235,8 +242,10 @@ window.addEventListener('load', () => { setTimeout(async () => {
     offered = null; choose = 'update';
     const onlySubnet = edit((d) => { d.networks[0].gateway = '10.0.0.1'; });
     const answer = await askAboutKnownCopy({ doc: onlySubnet, updated: 3000 }, card);
-    ok('askAboutKnownCopy: a newer copy differing only by a subnet is asked about, with its count',
-       answer === 'update' && !!offered && offered.ids.join(',') === 'copy,update' && offered.labels[1] === 'Update "Casa Roma" (1 change)',
+    // (Replace with this copy: the old Update, js/mergedoors.js. Without a
+    // mergeContext answer, as here, Merge is not offered.)
+    ok('askAboutKnownCopy: a newer copy differing only by a subnet is asked about, not "the same"',
+       answer === 'update' && !!offered && offered.ids.join(',') === 'copy,update,mine' && offered.labels[1] === 'Replace with this copy',
        show(offered) + ' ' + answer);
     offered = null; choose = 'mine';
     const olderAnswer = await askAboutKnownCopy({ doc: edit((d) => { d.wifi = []; }), updated: 1500 }, card);
@@ -248,7 +257,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     offered = null; choose = 'update';
     const file = { kind: 'nettopology', version: 1, name: 'Casa Roma', doc: Object.assign({ v: DOC_VERSION, id, updated: 5000 }, stripIdentity(onlySubnet)) };
     const took = await applyImportedDoc(file, { fileName: 'casa-roma.json' });
-    ok('a file differing only by a subnet is offered as an update', took === true && !!offered && offered.labels[1] === 'Update "Casa Roma" (1 change)', show(offered));
+    ok('a file differing only by a subnet is offered as a merge, or Replace with this copy', took === true && !!offered
+       && offered.ids.join(',') === 'merge,update,copy,mine' && offered.labels[1] === 'Replace with this copy', show(offered));
     const kept = L.loadLibrary()[id];
     ok('and Update takes the subnet into the card', !!kept && kept.updated === 5000 && (kept.doc.networks || []).find((n) => n.id === 'net1').gateway === '10.0.0.1',
        show(kept && kept.doc.networks));

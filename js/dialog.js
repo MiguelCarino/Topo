@@ -42,7 +42,7 @@ function setDialogResponder(fn) {
 }
 
 // What dismissing answers, per kind: never the answer that does something.
-const ASK_DISMISSED = { tell: undefined, confirm: false, prompt: null, choice: null, ticks: null };
+const ASK_DISMISSED = { tell: undefined, confirm: false, prompt: null, choice: null, ticks: null, pick: null };
 
 function ask(req) {
     if (_askResponder) {
@@ -137,6 +137,18 @@ function askTicks(message, opts = {}) {
         .then((v) => (Array.isArray(v) ? rows.map((r) => r.id).filter((id) => v.includes(id)) : null));
 }
 
+// One of a list, by id, or null: a row each, one picked at a time (the
+// network a file is merged into, js/mergeui.js). opts.rows is [{ id, label,
+// detail? }], opts.value the one picked at first (none when omitted: the yes
+// waits for a pick). A test's responder answers with an id.
+function askPick(message, opts = {}) {
+    const rows = (opts.rows || []).filter((r) => r && r.id)
+        .map((r) => ({ id: String(r.id), label: String(r.label || ''), detail: r.detail ? String(r.detail) : '' }));
+    const value = rows.some((r) => r.id === opts.value) ? String(opts.value) : '';
+    return ask({ kind: 'pick', message, title: opts.title || '', ok: opts.ok, rows, value })
+        .then((v) => (rows.some((r) => r.id === v) ? v : null));
+}
+
 function showAsk(req) {
     return new Promise((resolve) => {
         const scrim = document.getElementById('topoAsk');
@@ -203,7 +215,8 @@ function showAsk(req) {
         // row names a device and its typed text.
         const ticksEl = document.getElementById('topoAskTicks');
         const afterEl = document.getElementById('topoAskAfter');
-        const ticking = req.kind === 'ticks' && !!ticksEl;
+        const ticking = (req.kind === 'ticks' || req.kind === 'pick') && !!ticksEl;
+        const radios = req.kind === 'pick';
         if (ticksEl) { ticksEl.hidden = !ticking; ticksEl.textContent = ''; }
         if (afterEl) { afterEl.hidden = !(ticking && req.after); afterEl.textContent = ticking ? req.after : ''; }
         if (ticking) {
@@ -212,7 +225,7 @@ function showAsk(req) {
                 const lab = document.createElement('label');
                 lab.className = 'ask-tick';
                 const box = document.createElement('input');
-                box.type = 'checkbox'; box.value = r.id; box.checked = r.checked;
+                if (radios) { box.type = 'radio'; box.name = 'topoAskPickRow'; box.value = r.id; box.checked = r.id === req.value; } else { box.type = 'checkbox'; box.value = r.id; box.checked = r.checked; }
                 const text = document.createElement('span');
                 const name = document.createElement('span');
                 name.className = 'ask-tick-name'; name.textContent = r.label;
@@ -227,7 +240,8 @@ function showAsk(req) {
                 ticksEl.appendChild(li);
             });
         }
-        const tickedIds = () => [...ticksEl.querySelectorAll('input[type=checkbox]')].filter((b) => b.checked).map((b) => b.value);
+        const tickedIds = () => [...ticksEl.querySelectorAll('input[type=checkbox], input[type=radio]')].filter((b) => b.checked).map((b) => b.value);
+        const pickedId = () => tickedIds()[0] || null;
         const dayTyped = () => (date.validity && date.validity.badInput ? '!' : date.value);
         const answer = () => (picking ? { value: input.value, pick: pick.value } : dating ? { value: input.value, date: dayTyped() } : input.value);
 
@@ -264,7 +278,7 @@ function showAsk(req) {
             req.choices.forEach((c) => { const b = button(c.label, c.id, !!c.primary); if (c.primary) main = b; });
         } else {
             button(req.cancel || t('Cancel'), ASK_DISMISSED[req.kind], false);
-            main = button(req.ok || t('Continue'), req.kind === 'prompt' ? answer : ticking ? tickedIds : true, true, req.danger);
+            main = button(req.ok || t('Continue'), req.kind === 'prompt' ? answer : radios ? pickedId : ticking ? tickedIds : true, true, req.danger);
         }
         if (ticking && main) {
             const sync = () => { main.disabled = !tickedIds().length; };
@@ -339,5 +353,5 @@ function focusForTyping(field, box, opts = {}) {
 const typingTarget = (field, fallback) => (holdKeyboard() && raisesKeyboard(field) ? fallback : field);
 
 // Published for the suites, which reach the app as bare globals anyway.
-window.TopoDialog = { ask, tell, askConfirm, askPrompt, askPromptPick, askPromptDate, askChoice, askTicks, setDialogResponder,
+window.TopoDialog = { ask, tell, askConfirm, askPrompt, askPromptPick, askPromptDate, askChoice, askTicks, askPick, setDialogResponder,
     holdKeyboard, raisesKeyboard, focusForTyping, typingTarget };
