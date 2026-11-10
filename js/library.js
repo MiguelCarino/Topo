@@ -629,7 +629,26 @@ function libraryRename(id, name) {
 // effort.
 const BINDER_KIND = 'nettopo-binder';
 const BINDER_VERSION = 1;
-const BINDER_FILENAME = 'networks.json';
+// What a binder file is called (topoFileStem, js/report.js): the one
+// organization its networks name, or "networks", and the day.
+// topo_acme_2026-11-09.json, topo_networks_2026-11-09.json.
+const binderFileName = (sites, day = todayISO()) => topoFileName({ org: binderOrganization(sites), date: day, fallback: 'networks' }, 'json');
+
+// The organization (the report header's client) a set of binder sites names,
+// when they name exactly one: networks from several clients, or from none,
+// name none (''). A network with no client typed does not count against it,
+// nor do templates and blocks, which belong to no client.
+function binderOrganization(sites) {
+    const names = new Map();
+    (sites || []).forEach((x) => {
+        if (!x || x.template || x.block) return;
+        const r = x.doc && x.doc.report;
+        const c = r && typeof r.client === 'string' ? r.client.trim() : '';
+        const key = c ? fileSlug(c, '') : '';
+        if (key && !names.has(key)) names.set(key, c);
+    });
+    return names.size === 1 ? [...names.values()][0] : '';
+}
 
 function binderFile() {
     // The open network's last edits belong in any copy of the library. When
@@ -1307,7 +1326,7 @@ async function ensureBinderPermission(handle) {
 
 async function writeBinderTo(handle, payload) {
     const w = await handle.createWritable();
-    try { await w.write(JSON.stringify(payload, null, 2)); await w.close(); return true; }
+    try { await w.write(JSON.stringify(withTopoSchema(payload), null, 2)); await w.close(); return true; }
     catch (e) { try { await w.abort(); } catch (e2) { /* already gone */ } throw e; }
 }
 
@@ -1326,8 +1345,8 @@ async function adoptBinderFile() {
     let handle;
     try {
         handle = await window.showSaveFilePicker({
-            suggestedName: BINDER_FILENAME,
-            types: [{ description: 'Topo binder', accept: { 'application/json': ['.json'] } }],
+            suggestedName: binderFileName(libraryEntries()),
+            types: [{ description: 'Topo binder', accept: { [TOPO_MEDIA_TYPE]: ['.json'] } }],
         });
     } catch (e) { return null; }   // AbortError: the user changed their mind, which is not a failure
     const existing = await readBinderFrom(handle);
@@ -1429,17 +1448,18 @@ let _binderBinding = { bound: false, name: '' };
 async function refreshBinderBinding() {
     if (!binderCanBind()) { _binderBinding = { bound: false, name: '' }; return _binderBinding; }
     const h = await binderHandle();
-    _binderBinding = h ? { bound: true, name: h.name || BINDER_FILENAME } : { bound: false, name: '' };
+    _binderBinding = h ? { bound: true, name: h.name || binderFileName([]) } : { bound: false, name: '' };
     return _binderBinding;
 }
 const binderBinding = () => _binderBinding;
 
-// Dated, like every download (docFileStem in js/app.js): a folder of back-ups
-// sorts by day instead of collecting "networks (7).json". The bound file keeps
-// the name it was given, because it is written over in place.
-const binderDownloadName = () => BINDER_FILENAME.replace(/^networks/, `networks-${todayISO()}`);
+// Dated, like every download (topoFileStem, js/report.js): a folder of
+// back-ups sorts by day instead of collecting "networks (7).json". The bound
+// file keeps the name it was given, because it is written over in place;
+// only the name the save picker suggests for it follows the scheme.
+const binderDownloadName = (sites = libraryEntries()) => binderFileName(sites);
 function downloadBinderFile(file) {
-    downloadJson(file, binderDownloadName());
+    downloadJson(file, binderDownloadName(file.sites));
 }
 
 // Write the whole library to a file and remember that it happened — the
@@ -1906,8 +1926,11 @@ function docChangeCount(a, b) { return docChangeParts(a, b).size; }
 // The same comparison as the parts that differ, named 'key' for a part
 // counted whole and 'key:id' for one item of a list: what askAboutKnownCopy
 // needs to tell which of yours a copy has not got.
-function docChangeParts(a, b) {
-    const ca = canonicalDoc(a), cb = canonicalDoc(b);
+function docChangeParts(a, b) { return docChangePartsOf(canonicalDoc(a), canonicalDoc(b)); }
+// The same on two documents already through canonicalDoc: docChanges
+// (js/changes.js) has them, and checks against these parts that no change it
+// counts goes without a row.
+function docChangePartsOf(ca, cb) {
     const byId = (list) => {
         if (list === undefined || list === null) return new Map();
         if (!Array.isArray(list)) return null;

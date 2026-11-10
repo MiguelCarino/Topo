@@ -201,7 +201,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- Export, then re-import ----
     downloads = []; exportJsonFile();
     const file = downloads[0] && downloads[0].payload;
-    ok('the back-up file names the site and carries the card’s id', !!file && file.doc.id === id && /^clinica-norte-/.test(downloads[0].name),
+    ok('the back-up file names the site and carries the card’s id', !!file && file.doc.id === id && /^topo_grupo-salud_clinica-norte_\d{4}-\d{2}-\d{2}\.json$/.test(downloads[0].name),
        downloads[0] && downloads[0].name);
     replaceDocument(templatesData.house, { origin: 'template' });
     ok('re-importing your own file takes, without a question', (await applyImportedDoc(file)) === true);

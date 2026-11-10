@@ -235,7 +235,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
        && names(L.libraryEntry('c1').doc) === 'Router,PC-1,New-3' && downloads.length === 1, String(downloads.length));
     const dl = downloads[0] && downloads[0].payload;
     ok('the back-up is the usual identified .json of the card as it was', !!dl && dl.kind === 'nettopology' && dl.version === 1 && dl.name === 'Casa Roma'
-       && dl.doc.id === 'c1' && dl.doc.updated === cardThen.updated && names(dl.doc) === 'Router,PC-1,New-2' && /^casa-roma-\d{4}-\d{2}-\d{2}\.json$/.test(downloads[0].name),
+       && dl.doc.id === 'c1' && dl.doc.updated === cardThen.updated && names(dl.doc) === 'Router,PC-1,New-2' && /^topo_casa-roma_\d{4}-\d{2}-\d{2}\.json$/.test(downloads[0].name),
        downloads[0] && downloads[0].name);
     f.mode = 'hang'; R.RESTORE_LIMITS.writeMs = 30; asked.length = 0; failAnswer = 'continue';
     await applyImportedDoc(later(4), { fileName: 'd.json' });
@@ -283,7 +283,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const d = downloads[0];
     ok('Download hands over the point as an identified back-up', !!d && d.payload.kind === 'nettopology' && d.payload.version === 1 && d.payload.name === 'Casa Roma'
        && d.payload.doc.id === 'c1' && d.payload.doc.updated === target.updated && d.payload.doc.v === DOC_VERSION && names(d.payload.doc) === 'Router,PC-1'
-       && /^casa-roma-\d{4}-\d{2}-\d{2}\.json$/.test(d.name), d && JSON.stringify(Object.assign({}, d.payload, { doc: '…' })) + ' ' + d.name);
+       && /^topo_casa-roma_\d{4}-\d{2}-\d{2}\.json$/.test(d.name), d && JSON.stringify(Object.assign({}, d.payload, { doc: '…' })) + ' ' + d.name);
     ok('and does not count as backing up the card', JSON.stringify(window.CarinoChanges ? CarinoChanges.snapshotOf('c1') : null) === snapBefore);
     ok('opened again, it is recognised as an older copy of the card', docIdentity(d.payload.doc).id === 'c1' && d.payload.doc.updated < L.libraryEntry('c1').updated);
 

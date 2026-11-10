@@ -28,7 +28,8 @@ const REPORT_FIELDS = [
 ];
 
 // The LOCAL calendar date (todayISO, js/model.js) dates every report and
-// names every download: <slug>-<this date> (docFileStem in js/app.js).
+// names every download: topo_<organization>_<site>_<this date> (topoFileStem
+// below).
 
 // A name as the first half of a filename. Accents fold to their letter
 // ("José" -> "jose") and every run of anything else becomes one hyphen, but a
@@ -41,6 +42,53 @@ function fileSlug(text, fallback = 'network') {
     const slug = String(text || '').normalize('NFKD').replace(/([A-Za-z])[\u0300-\u036f]+/g, '$1').normalize('NFC').toLowerCase()
         .replace(/[^\p{L}\p{M}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60).replace(/-+$/, '');
     return slug || fallback;
+}
+
+// ---- What a download is called ----
+// topo_<organization>_<site>_<YYYY-MM-DD>[_<kind>].<ext>: the client field of
+// the report header, then the network (its card's name or the report's
+// site), then the day, then what the file is (report, labels, devices, ...).
+// Underscores separate the parts and never occur inside one, so a name
+// splits back into its parts; inside a part every run of anything that is
+// not a letter or a number is one hyphen (fileSlug). An empty part is left
+// out, and a file naming neither organization nor site says `fallback`
+// ("network"; a binder of networks from several clients says "networks"). A
+// site that repeats the organization word for word is not said twice.
+//   topo_acme_casa-roma_2026-11-09.json
+//   topo_acme_casa-roma_2026-11-09_report.html
+//   topo_networks_2026-11-09.json
+// The date part is a YYYY-MM-DD day or today: a report's Date is free text
+// ("09/11/2026"), and a slash in a file name is not a day the folder sorts by.
+// Organization and site together stay within TOPO_NAMES_BYTES of UTF-8 (the
+// longer one is trimmed first), so a Cyrillic or Japanese name cannot push
+// the date and kind past the 255-byte limit of a file name.
+const TOPO_NAMES_BYTES = 180;
+const utf8Bytes = (s) => new TextEncoder().encode(s).length;
+function topoFileStem({ org = '', site = '', date = '', kind = '', fallback = 'network' } = {}) {
+    const part = (s) => fileSlug(s, '').replace(/_/g, '-');
+    let o = Array.from(part(org)), s = Array.from(part(site));
+    if (s.join('') === o.join('')) s = [];
+    // One character at a time off the longer (in bytes) of the two.
+    const room = TOPO_NAMES_BYTES - (o.length && s.length ? 1 : 0);
+    let ob = utf8Bytes(o.join('')), sb = utf8Bytes(s.join(''));
+    while (ob + sb > room) {
+        if (ob >= sb) ob -= utf8Bytes(o.pop()); else sb -= utf8Bytes(s.pop());
+    }
+    o = o.join('').replace(/-+$/, ''); s = s.join('').replace(/-+$/, '');
+    const names = [o, s].filter(Boolean);
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(String(date || '').trim()) ? String(date).trim() : todayISO();
+    return ['topo', ...(names.length ? names : [fallback]), day, part(kind)].filter(Boolean).join('_');
+}
+const topoFileName = (parts, ext) => `${topoFileStem(parts)}.${ext}`;
+// A card name read back from a file named that way when the file itself does
+// not carry one: its site part, or its organization when that is all it has.
+// '' for a name that is not one (a hand-named file keeps its name as it was).
+// A browser's " (1)" on a repeated download is not part of the name.
+function nameFromTopoFileName(stem) {
+    const m = /^topo_(.+?)_\d{4}-\d{2}-\d{2}(?:_[^_]+)?$/u.exec(String(stem || '').replace(/\s*\(\d+\)$/, ''));
+    if (!m) return null;
+    const last = m[1].split('_').pop();
+    return last === 'network' || last === 'networks' ? '' : last;
 }
 
 function normalizeReportMeta(meta) {
@@ -2790,11 +2838,19 @@ function deliverReport(html, meta, kind = 'report', onKept = null) {
     if (typeof onKept === 'function') onKept();
     return { url, name, opened: false, downloaded: true };
 }
-const reportFileName = (meta, kind) => `${fileSlug(meta.site)}-${kind}-${meta.date || todayISO()}.html`;
+// A report or sheet (topoFileStem): its header's client and site, the
+// report's own date, and the kind. An estate report (meta.binder) that
+// names no site and no client says "networks", as the binder file does.
+// A site report carries `fileSite` (buildSiteReport): the network's name as
+// every other download of it says it, the card's name first (docDisplayName,
+// js/app.js), so a kept network has one stem even when its report's Site
+// header says something else; the header's Site still heads the report.
+const reportFileName = (meta, kind) => topoFileName({ org: meta.client, site: typeof meta.fileSite === 'string' ? meta.fileSite : meta.site, date: meta.date || todayISO(), kind,
+    fallback: meta.binder ? 'networks' : 'network' }, 'html');
 function openReportTab(html, meta, kind) {
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const name = `${fileSlug(meta.site)}-${kind}-${meta.date || todayISO()}.html`;
+    const name = reportFileName(meta, kind);
 
     const tab = window.open(url, '_blank');
     // A blob: page inherits this page's CSP, which forbids inline handlers, so
@@ -2847,7 +2903,7 @@ async function buildSiteReport(meta, parts, cache = null) {
     }
     // The baseline moves when the report is handed over (downloaded or
     // printed), not when it is only looked at.
-    return { html: reportHtml(model, image, p), meta: model.meta, kind: p.technical ? 'report' : 'summary',
+    return { html: reportHtml(model, image, p), meta: Object.assign({}, model.meta, { fileSite: keptSiteName() || model.meta.site }), kind: p.technical ? 'report' : 'summary',
         onKept: keptId ? reportKept(p, [{ id: keptId, doc }]) : null };
 }
 async function generateSiteReport(meta, parts) {
@@ -2948,7 +3004,7 @@ async function buildBinderReport(estateMeta, opts = {}, cache = null) {
     if (p.technical && p.sections.history) binder.sites.forEach((s) => { if (s.model) s.model.history = trailReportHistory(s.id, s.doc); });
     const images = opts.images === false ? {}
         : await cachedImage(cache, 'binder', () => captureBinderImages(binder.sites, opts.onProgress, opts.capture));
-    return { html: binderHtml(binder, images, p), meta: { site: binder.meta.site || 'estate', date: binder.meta.date, ref: binder.meta.ref },
+    return { html: binderHtml(binder, images, p), meta: { site: binder.meta.site, client: binder.meta.client, date: binder.meta.date, ref: binder.meta.ref, binder: true },
         kind: p.technical ? 'report' : 'summary', onKept: reportKept(p, entries) };
 }
 

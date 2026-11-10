@@ -376,7 +376,7 @@ h2 { font-size: 16px; margin: 0 0 2px; }
 function printLocate(entries = [...state.selection]) {
     const rows = locateRows(entries);
     if (!rows.length) { showToast(t('Select devices to print where they are plugged in.')); return null; }
-    const meta = { site: docDisplayName(), date: todayISO() };
+    const meta = { site: docDisplayName(), client: docOrganization(), date: todayISO() };
     // Shown first (openSheetPreview, js/sheetpreview.js): its Print or
     // Download hands it over.
     return Object.assign({ rows }, openSheetPreview({ kind: 'locate', meta, build: () => locateHtml(rows, meta) }));

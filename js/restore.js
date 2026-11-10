@@ -399,14 +399,14 @@ function downloadRestoreBackup(cardIds) {
     }
     const sites = entries.map((e) => Object.assign({ id: e.id, name: e.name, created: e.created, updated: e.updated, doc: e.doc },
         e.template ? { template: true } : {}, e.block ? { block: true } : {}));
-    downloadJson({ kind: BINDER_KIND, version: 1, exported: Date.now(), sites }, binderDownloadName());
+    downloadJson({ kind: BINDER_KIND, version: 1, exported: Date.now(), sites }, binderDownloadName(sites));
 }
 
 // The same envelope exportJsonFile() writes, for a stored document.
 function downloadNetworkJson(name, id, updated, doc, day) {
     const rest = stripIdentity(cloneData(doc));
     const out = Object.assign(rest.v !== undefined ? { v: rest.v } : {}, { id, updated }, rest);
-    downloadJson(Object.assign({ kind: 'nettopology', version: 1 }, name ? { name } : {}, { doc: out }), `${fileSlug(name)}-${day}.json`);
+    downloadJson(Object.assign({ kind: 'nettopology', version: 1 }, name ? { name } : {}, { doc: out }), topoFileName({ org: (doc && doc.report && typeof doc.report.client === 'string' && doc.report.client) || '', site: name, date: day }, 'json'));
 }
 
 // Drop a deleted card's points: the ones this tab lists and, on disk, every

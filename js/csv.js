@@ -538,7 +538,7 @@ const csvSheetLabel = (s) => (s.plain ? t(s.label) : s.label);
 function downloadCsv(key) {
     const sheet = CSV_SHEETS.find((s) => s.key === key);
     if (!sheet) return;
-    saveBlob(new Blob([CSV_BOM + csvText(sheet.build(), ',')], { type: 'text/csv;charset=utf-8' }), `${docFileStem()}-${key}.csv`);
+    saveBlob(new Blob([CSV_BOM + csvText(sheet.build(), ',')], { type: 'text/csv;charset=utf-8' }), `${docFileStem(key)}.csv`);
 }
 
 async function copyTsv(key) {

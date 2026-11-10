@@ -148,9 +148,11 @@ phpIPAM. Every import goes through the merge.
 ## Status
 
 - [x] 1. Data safety: A, B, restore points (built 2026-11-09, not yet committed).
-  Follow-up: "Changes since the last back-up" (js/changes.js docChanges) still
-  ignores providers, columns, tableView, searches, expectedLife and fields
-  outside each kind's list; it needs new changeRows kinds and translations.
+  Follow-up done 2026-11-09: "Changes since the last back-up" (js/changes.js
+  docChanges) now has rows for providers, custom columns, saved searches,
+  expected lives and the table layout, names a field outside a kind's list as
+  "changed: <field>", and says any part docChangeCount counts that no kind
+  describes; tests/suites/changecount.js cross-checks every top-level key.
 - [ ] 2. Merge.
 - [ ] 3. Mobile B4, B5.
 - [ ] 4. Client-provider loop.

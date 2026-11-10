@@ -5601,6 +5601,30 @@ function serializeTableView(v) {
 
 const DOC_VERSION = 16;
 
+// ---- What a Topo file says it is ----
+// Every .json Topo writes (a network's back-up, a binder) opens with a
+// "$schema" naming the format and the document version it was written at, so
+// a file found in a folder or an email says what it is without a guess from
+// its name. Never fetched: readers ignore the key, and older builds, which
+// recognise a file by its shape and `kind`, open it as before. The schema
+// file itself lives in the repo at schema/ and is served at this address.
+// `v`: the version to name, never below this build's; a read-only document
+// from a newer Topo goes out as it came (outgoingDoc, js/app.js) and is
+// labelled with its own version, not this build's.
+const topoSchemaUrl = (v = DOC_VERSION) => `https://topo.carino.systems/schema/topo-v${Math.max(DOC_VERSION, Number.isInteger(v) ? v : DOC_VERSION)}.json`;
+// The media type of those files, beside their .json extension.
+const TOPO_MEDIA_TYPE = 'application/vnd.carino.topo+json';
+// The envelope as written: "$schema" first, then everything else in order.
+// Its version is the highest of the document's (a network) or the sites'
+// (a binder) and this build's.
+function withTopoSchema(payload) {
+    const p = payload || {};
+    const docs = [p.doc, ...(Array.isArray(p.sites) ? p.sites.map((x) => x && x.doc) : [])];
+    const v = Math.max(DOC_VERSION, ...docs.map((d) => docVersionOf(d)).filter(Number.isInteger));
+    const url = topoSchemaUrl(v);
+    return Object.assign({ $schema: url }, p, { $schema: url });
+}
+
 // A document's outline: an object whose lists, where present, are lists. The
 // loader tolerates a missing list (a bare { nodes } file is a document), but a
 // list that is something else is a damaged document, and saying so beats

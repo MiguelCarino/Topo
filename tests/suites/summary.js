@@ -206,7 +206,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       let b = await refreshReportPreview();
       ok('the dialog shows the report beside its questions', !!b && /^blob:/.test(el('reportPreviewFrame').getAttribute('src') || '')
          && el('reportDialog').contains(el('reportPreviewFrame')) && /Network documentation report/.test(b.html));
-      ok('named as the file it downloads as', /-report-\d{4}-\d{2}-\d{2}\.html$/.test(el('reportPreviewName').textContent), el('reportPreviewName').textContent);
+      ok('named as the file it downloads as', /_\d{4}-\d{2}-\d{2}_report\.html$/.test(el('reportPreviewName').textContent), el('reportPreviewName').textContent);
       ok('with its own toolbar hidden (the dialog prints)', getComputedStyle(el('reportPreviewFrame').contentDocument.querySelector('.toolbar')).display === 'none');
       ok('looking hands nothing over', !handed.length);
       el('report-site').value = 'Torre B'; el('report-site').dispatchEvent(new Event('input', { bubbles: true }));

@@ -72,7 +72,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       HTMLAnchorElement.prototype.click = realClick; window.renderCanvasOnly = realRender; URL.createObjectURL = realBlobUrl;
     }
     ok('the click saves a file named after the site and the date', !!saved && saved.name === `${docFileStem()}.svg`
-      && /^clinica-norte-\d{4}-\d{2}-\d{2}\.svg$/.test(saved.name), saved && saved.name);
+      && /^topo_clinica-norte_\d{4}-\d{2}-\d{2}\.svg$/.test(saved.name), saved && saved.name);
     ok('from a blob in the page, nothing uploaded', !!saved && saved.href.startsWith('blob:'));
     ok('typed as SVG', !!blob && /^image\/svg\+xml/.test(blob.type), blob && blob.type);
     const text = blob ? await blob.text() : '';

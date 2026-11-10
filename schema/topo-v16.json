@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://topo.carino.systems/schema/topo-v16.json",
+  "title": "Topo network file",
+  "description": "DRAFT. Describes the envelope of a file Topo writes (one network's back-up, or a binder of several networks) and the top-level keys of a Topo document (document version 16) only, with loose types. The full field-level specification is step 6 of docs/SCOPE.md in the Topo repository. Files are saved as application/vnd.carino.topo+json with a .json extension. Readers ignore \"$schema\"; nothing fetches this address.",
+  "anyOf": [
+    { "$ref": "#/$defs/networkFile" },
+    { "$ref": "#/$defs/binderFile" },
+    { "$ref": "#/$defs/document" }
+  ],
+  "$defs": {
+    "networkFile": {
+      "description": "One network's back-up: the envelope Topo's \"Back up\" (.json) writes.",
+      "type": "object",
+      "required": ["kind", "doc"],
+      "properties": {
+        "$schema": { "type": "string" },
+        "kind": { "const": "nettopology" },
+        "version": { "type": "integer", "description": "The envelope's own format version (1). The document's version is doc.v." },
+        "name": { "type": "string", "description": "The network's card name." },
+        "doc": { "$ref": "#/$defs/document" }
+      },
+      "additionalProperties": true
+    },
+    "binderFile": {
+      "description": "A binder: several networks (and templates or blocks) in one file.",
+      "type": "object",
+      "required": ["kind", "sites"],
+      "properties": {
+        "$schema": { "type": "string" },
+        "kind": { "const": "nettopo-binder" },
+        "version": { "type": "integer" },
+        "exported": { "type": ["string", "number"], "description": "When the file was written: an ISO date-time, or milliseconds since 1970." },
+        "sites": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["doc"],
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "created": { "type": "number" },
+              "updated": { "type": "number" },
+              "template": { "type": "boolean" },
+              "block": { "type": "boolean" },
+              "doc": { "$ref": "#/$defs/document" }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "document": {
+      "description": "A Topo document. Only nodes is required; a missing list is an empty one. Older documents (a lower v, or none) are migrated when they are opened.",
+      "type": "object",
+      "required": ["nodes"],
+      "properties": {
+        "v": { "type": ["integer", "string"], "description": "Document version (16 here)." },
+        "id": { "type": "string" },
+        "updated": { "type": "number" },
+        "nodes": { "type": "array", "description": "Devices." },
+        "links": { "type": "array", "description": "Cables." },
+        "networks": { "type": "array", "description": "Subnets." },
+        "groups": { "type": "array" },
+        "wifi": { "type": "array", "description": "Wi-Fi networks." },
+        "providers": { "type": "array" },
+        "accepted": { "type": "array", "description": "Findings accepted with a reason." },
+        "pinned": { "type": "array", "description": "Pinned findings." },
+        "expectedLife": { "type": "object", "description": "Expected life in years, by device type." },
+        "annotations": { "type": "array", "description": "Text notes on the map." },
+        "report": { "type": "object", "description": "The report header (site, client, engineer, ref, date, scope)." },
+        "columns": { "type": "array", "description": "Custom columns." },
+        "tableView": { "type": "object", "description": "The Devices table's arrangement." },
+        "searches": { "type": "array", "description": "Saved searches." }
+      },
+      "additionalProperties": true
+    }
+  }
+}

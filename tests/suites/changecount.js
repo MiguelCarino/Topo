@@ -13,7 +13,13 @@
 //   4. through the callers: askAboutKnownCopy asks (with the count) instead
 //      of answering 'same', applyImportedDoc offers Update for a file that
 //      differs only by a subnet and Update takes it, and binderOlderSites
-//      offers an older binder site that differs only by a group.
+//      offers an older binder site that differs only by a group;
+//   5. docChanges (the changes since the last back-up) has a row for every
+//      part counted here: one edit per kind across every top-level key
+//      serializeDoc writes, both ways round (the report's date alone the one
+//      exemption), and what the new rows (providers, custom columns, saved
+//      searches, expected lives, the table layout, a field outside a kind's
+//      list) say, in English and Spanish.
 window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
@@ -107,6 +113,116 @@ window.addEventListener('load', () => { setTimeout(async () => {
     is('a changed report header is one change', edit((d) => { d.report = { site: 'Casa Roma', client: 'Ana', tech: 'Luis' }; }), 1);
     is('both searches changed are still one change', edit((d) => { d.searches[0].name = 'Desktops'; d.searches[1].query = 'type:edge'; }), 1);
     is('a search added is one change', edit((d) => { d.searches.push({ id: 'sq_3', name: 'Printers', query: 'type:printer' }); }), 1);
+
+    // ---- 5: no part goes without a row ----
+    // docChanges (js/changes.js, the "± n changes since the last back-up" and
+    // the report's section) must say every part counted here. One document
+    // pair per kind of edit, each differing in one part; every top-level key
+    // serializeDoc writes is exercised, both ways round. 2026-11-09.
+    const rich = () => edit((d) => {
+      d.nodes[0].interfaces = [{ id: 'i1', name: 'eth0' }, { id: 'i2', name: 'eth1' }];
+      d.accepted = [{ check: 'age', nodeIds: ['p'], reason: 'Planned', until: '2027-01-31' }];
+      d.pinned = [{ check: 'age', nodeIds: ['p'], note: 'Look' }, { check: 'age', nodeIds: ['r'], note: 'Also' }];
+      // A column no device has a value in (a new kind would drop a value
+      // that does not fit it, a second change), and a group with no name of
+      // its own (it reads as its kind's).
+      d.columns.push({ id: 'c2', name: 'Floor' });
+      d.groups.push({ id: 'g9', name: '', kind: 'floor', parent: 'g1' });
+    });
+    const richEdit = (fn) => { const d = rich(); fn(d); return d; };
+    const cases = [
+      ['nodes', 'a device field', (d) => { d.nodes[1].model = 'T14'; }],
+      ['nodes', 'a device moved', (d) => { d.nodes[1].x = 300; }],
+      ['nodes', 'interfaces reordered', (d) => { d.nodes[0].interfaces.reverse(); }],
+      ['nodes', 'a device added', (d) => { d.nodes.push({ id: 'q', type: 'printer', name: 'PRN', x: 0, y: 200, interfaces: [] }); }],
+      ['nodes', 'a custom value', (d) => { d.nodes[0].extra = { c1: 'Rack B' }; }],
+      ['links', 'a cable field', (d) => { d.links[0].cable = { label: 'P-01' }; }],
+      ['links', 'a cable added', (d) => { d.links.push({ id: 'l2', source: 'p', target: 'r' }); }],
+      ['networks', 'a subnet edited', (d) => { d.networks[0].vlan = 20; }],
+      ['networks', 'a subnet removed', (d) => { d.networks.pop(); }],
+      ['groups', 'a group edited', (d) => { d.groups[0].kind = 'floor'; }],
+      ['groups', 'a group named its default', (d) => { d.groups[1].name = groupKindName('floor'); }],
+      ['groups', 'a group added', (d) => { d.groups.push({ id: 'g2', name: 'Rack 1', kind: 'rack', parent: 'g1' }); }],
+      ['wifi', 'a Wi-Fi network edited', (d) => { d.wifi[0].security = 'wpa3'; }],
+      ['wifi', 'a Wi-Fi network removed', (d) => { d.wifi = []; }],
+      ['providers', 'a provider edited', (d) => { d.providers[0].phone = '555 0100'; }],
+      ['providers', 'a provider added', (d) => { d.providers.push({ id: 'pv2', name: 'PowerCo' }); }],
+      ['providers', 'a provider removed', (d) => { d.providers = []; }],
+      ['columns', 'a column renamed', (d) => { d.columns[0].name = 'Inventory no.'; }],
+      ['columns', 'a column kind', (d) => { d.columns[1].kind = 'number'; }],
+      ['columns', 'a column added', (d) => { d.columns.push({ id: 'c3', name: 'Owner' }); }],
+      ['searches', 'a search edited', (d) => { d.searches[1].query = 'type:edge'; }],
+      ['searches', 'a search added', (d) => { d.searches.push({ id: 'sq_3', name: 'Printers', query: 'type:printer' }); }],
+      ['searches', 'a search removed', (d) => { d.searches.pop(); }],
+      ['annotations', 'a text note edited', (d) => { d.annotations[0].text = 'Other'; }],
+      ['accepted', 'a finding accepted', (d) => { d.accepted.push({ check: 'age', nodeIds: ['r'], reason: 'Spare' }); }],
+      ['accepted', 'an accepted finding’s date', (d) => { d.accepted[0].until = '2027-06-30'; }],
+      ['pinned', 'a finding pinned', (d) => { d.pinned.pop(); }],
+      ['pinned', 'the pins reordered', (d) => { d.pinned.reverse(); }],
+      ['expectedLife', 'an expected life', (d) => { d.expectedLife = { pc: 6 }; }],
+      ['tableView', 'the table layout', (d) => { d.tableView = { devices: { hidden: ['mac', 'ip'] } }; }],
+      ['report', 'a report header field', (d) => { d.report.client = 'Ana'; }]
+    ];
+    const silent = [], wrongCount = [], generic = [];
+    cases.forEach(([key, label, fn]) => {
+      const a = rich(), b = richEdit(fn);
+      [[a, b], [b, a]].forEach(([x, y], back) => {
+        const n = docChangeCount(x, y), ch = docChanges(x, y), rows = changeRows(ch);
+        if (n !== 1) wrongCount.push(`${label}${back ? ' (back)' : ''}: ${n} ${show([...docChangeParts(x, y)])}`);
+        if (n > 0 && !(ch.total > 0 && rows.length > 0)) silent.push(`${label}${back ? ' (back)' : ''}`);
+        // Said by its own kind, not by the generic fallback (unsaidParts):
+        // only a reorder of the pins has no kind of its own.
+        if (label !== 'the pins reordered' && (ch.other || []).length) generic.push(`${label}${back ? ' (back)' : ''}: ${show(ch.other)}`);
+        if (n === 0 && ch.total !== 0) silent.push(`${label}${back ? ' (back)' : ''}: rows with no count`);
+      });
+    });
+    ok('every single-part edit differs in exactly one part', !wrongCount.length, wrongCount.join(' | '));
+    ok('no part docChangeCount counts goes without a row in docChanges', !silent.length, silent.join(' | '));
+    ok('and each is said by its own kind, not the generic fallback', !generic.length, generic.join(' | '));
+    const exercised = new Set(cases.map((c) => c[0]));
+    const emitted = Object.keys(canonicalDoc(rich())).filter((k) => k !== 'v');
+    ok('every top-level key serializeDoc writes is exercised', emitted.length === exercised.size && emitted.every((k) => exercised.has(k)),
+       show(emitted.filter((k) => !exercised.has(k))) + ' ' + show([...exercised].filter((k) => !emitted.includes(k))));
+    // The one exemption, on purpose: a report's date is when it was issued.
+    const dated = richEdit((d) => { d.report.date = '2026-11-09'; });
+    ok('the report date alone counts for Update but is no change since the back-up', docChangeCount(rich(), dated) === 1 && docChanges(rich(), dated).total === 0);
+
+    // What the new rows say.
+    const rowsOf = (fn) => changeRows(docChanges(rich(), richEdit(fn)));
+    const one = (fn) => { const r = rowsOf(fn); return r.length === 1 ? `${r[0].op}|${r[0].what}|${r[0].name}|${r[0].detail}` : show(r); };
+    const expect = (name, fn, want) => { const got = one(fn); ok(name, got === want, got); };
+    expect('a provider edited: its row names the field', (d) => { d.providers[0].phone = '555 0100'; }, 'Changed|Provider|FiberCo|Phone');
+    expect('a provider renamed', (d) => { d.providers[0].name = 'FibraNet'; }, 'Changed|Provider|FibraNet|renamed from FiberCo');
+    expect('a provider added', (d) => { d.providers.push({ id: 'pv2', name: 'PowerCo' }); }, 'Added|Provider|PowerCo|');
+    expect('a custom column renamed', (d) => { d.columns[0].name = 'Inventory no.'; }, 'Changed|Custom column|Inventory no.|renamed from Asset tag');
+    expect('a custom column’s kind', (d) => { d.columns[1].kind = 'number'; }, 'Changed|Custom column|Floor|Kind');
+    expect('a saved search removed', (d) => { d.searches.pop(); }, 'Removed|Saved search|Routers|');
+    expect('a saved search sorted, by its field labels', (d) => { d.searches[0].sort = 'name'; d.searches[0].desc = true; }, 'Changed|Saved search|PCs|Sort by, Descending');
+    expect('the expected lives, by type', (d) => { d.expectedLife = { pc: 6, printer: 3 }; }, `Changed|Expected life by type||${typeName('pc')}, ${typeName('printer')}`);
+    expect('the table layout, one row', (d) => { d.tableView = { devices: { order: ['ip', 'name'] } }; }, 'Changed|Table layout||');
+    expect('an accepted finding’s date reads as reopened and accepted', (d) => { d.accepted[0].until = '2027-06-30'; }, 'Changed|Accepted findings||1 accepted, 1 reopened');
+    const named = one((d) => { d.groups[1].name = groupKindName('floor'); });
+    ok('a group given its kind’s own name (the label it already read as) says Name', named.startsWith('Changed|Group|') && named.endsWith('|Name'), named);
+    expect('interfaces only reordered are not "moved"', (d) => { d.nodes[0].interfaces.reverse(); }, 'Changed|Device|Router|changed: Interfaces');
+    expect('the pins only reordered: one row for them', (d) => { d.pinned.reverse(); }, 'Changed|Pinned findings||');
+    expect('a device moved is still moved', (d) => { d.nodes[1].x = 300; }, 'Moved|1 device||On the map only, nothing else changed.');
+    // A field outside a kind's list (a later build's, or a key that survived)
+    // is named rather than left out. Stubbed at the diff, past the
+    // serializer that would drop it today.
+    const realCanon = window.canonicalDoc;
+    window.canonicalDoc = (doc) => { const c = realCanon(doc); if (doc.__probe) c.providers[0].portal = doc.__probe; return c; };
+    let probe;
+    try { probe = changeRows(docChanges(Object.assign(rich(), { __probe: 'a' }), Object.assign(rich(), { __probe: 'b' }))); }
+    finally { window.canonicalDoc = realCanon; }
+    ok('a field outside the kind’s list is named: "changed: <field>"', probe.length === 1 && probe[0].what === 'Provider' && probe[0].detail === 'changed: portal', show(probe));
+    // Spanish, for the new words.
+    setLocale('es');
+    const es = one((d) => { d.searches.pop(); });
+    const esCol = one((d) => { d.columns[1].kind = 'number'; });
+    const esView = one((d) => { d.tableView = {}; });
+    setLocale('en');
+    ok('in Spanish: a saved search, a custom column, the table layout', es === 'Eliminado|Búsqueda guardada|Routers|'
+       && esCol === 'Modificado|Columna propia|Floor|Tipo' && esView === 'Modificado|Disposición de la tabla||', [es, esCol, esView].join(' / '));
 
     // ---- 4: through the callers ----
     const id = 'cc_card';

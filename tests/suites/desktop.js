@@ -61,13 +61,15 @@ window.addEventListener('load', () => { setTimeout(async () => {
     replaceDocument(templatesData.house, { origin: 'file' });
     clicked.length = 0; made.length = 0;
     exportJsonFile();
-    ok('Export saves the JSON through saveBlob, not empty', clicked.length === 1 && /^[a-z0-9-]+-\d{4}-\d\d-\d\d\.json$/.test(clicked[0].name) && made.length === 1 && made[0].b.size > 100, JSON.stringify(clicked));
+    ok('Export saves the JSON through saveBlob, not empty', clicked.length === 1 && /^topo_[a-z0-9_-]+_\d{4}-\d\d-\d\d\.json$/.test(clicked[0].name) && made.length === 1 && made[0].b.size > 100, JSON.stringify(clicked));
     ok('its URL still alive after the click', made.length === 1 && !revoked.includes(made[0].u));
     const json = made.length ? JSON.parse(await made[0].b.text()) : {};
     ok('with the document in it', json.kind === 'nettopology' && json.doc && json.doc.nodes.length === state.nodes.length);
+    ok('opening with $schema, saved as the Topo media type', Object.keys(json)[0] === '$schema' && json.$schema === topoSchemaUrl()
+       && made.length === 1 && made[0].b.type === 'application/vnd.carino.topo+json', made.length && made[0].b.type);
     clicked.length = 0; made.length = 0;
     downloadCsv('devices');
-    ok('a CSV download too, with its name and rows', clicked.length === 1 && /-devices\.csv$/.test(clicked[0].name) && made.length === 1 && made[0].b.size > 50 && !revoked.includes(made[0].u), JSON.stringify(clicked));
+    ok('a CSV download too, with its name and rows', clicked.length === 1 && /^topo_[a-z0-9_-]+_\d{4}-\d\d-\d\d_devices\.csv$/.test(clicked[0].name) && made.length === 1 && made[0].b.size > 50 && !revoked.includes(made[0].u), JSON.stringify(clicked));
     URL.createObjectURL = realCreate; URL.revokeObjectURL = realRevoke; HTMLAnchorElement.prototype.click = realClick;
 
     // ---- 5: the report preview and Print ----
@@ -89,7 +91,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const n1 = await printOnce();
     const sent = asked.filter((a) => a.cmd === 'host_print');
     ok('an app that prints (macOS) gets the report, and the frame is not printed', n1 === 0 && sent.length === 1
-       && /Mac Site/.test(sent[0].args.html) && /-report-\d{4}-\d{2}-\d{2}\.html$/.test(sent[0].args.name), JSON.stringify(asked.map((a) => [a.cmd, a.args && a.args.name])) + ' ' + n1);
+       && /Mac Site/.test(sent[0].args.html) && /^topo_mac-site_\d{4}-\d{2}-\d{2}_report\.html$/.test(sent[0].args.name), JSON.stringify(asked.map((a) => [a.cmd, a.args && a.args.name])) + ' ' + n1);
     ok('the header is stored all the same', state.report && state.report.site === 'Mac Site');
     asked.length = 0;
     await printOnce();

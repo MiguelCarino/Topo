@@ -1815,16 +1815,18 @@ function identifiedDoc(doc) {
     return { v, id: state.docId, updated, ...rest };
 }
 
-// What a download of this network is called: <site-slug>-<local date>. The
-// card's name if it is kept, the report's site if one was typed, "network"
-// otherwise. Fixed names ("network-build.json") filled a downloads
-// folder with copies nobody could tell apart.
+// What a download of this network is called (topoFileStem, js/report.js):
+// topo_<organization>_<site>_<local date>[_<kind>]. The organization is the
+// report header's client; the site is the card's name if it is kept, the
+// report's site if one was typed. Fixed names ("network-build.json") filled
+// a downloads folder with copies nobody could tell apart.
 function docDisplayName() {
     const card = state.libraryId ? libraryEntry(state.libraryId) : null;
     const site = state.report && typeof state.report.site === 'string' ? state.report.site.trim() : '';
     return (card && card.name) || site || '';
 }
-const docFileStem = () => `${fileSlug(docDisplayName())}-${todayISO()}`;
+const docOrganization = () => (state.report && typeof state.report.client === 'string' ? state.report.client.trim() : '');
+const docFileStem = (kind = '') => topoFileStem({ org: docOrganization(), site: docDisplayName(), date: todayISO(), kind });
 
 // ---- Read-only: a document from a newer Topo ----
 // What the build file writes for the open document: the document as it
@@ -3285,10 +3287,12 @@ function encodeCanvas(canvas, requested) {
 // ---- Portable build files (.json; older ones were named .nettopo) ----
 // The escape hatch for builds too big or too archival for a URL: a file has no
 // length ceiling, travels as an email/chat attachment, and diffs in git. Same
-// serializer as everything else, wrapped in a tiny self-identifying envelope so
-// the file can be recognised and can carry a schema version later.
+// serializer as everything else, wrapped in a tiny self-identifying envelope:
+// "$schema" first (topoSchemaUrl, js/model.js: the format and the document
+// version), then `kind`, so the file can be recognised. Saved as
+// TOPO_MEDIA_TYPE under a .json name.
 function downloadJson(payload, filename) {
-    saveBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), filename);
+    saveBlob(new Blob([JSON.stringify(withTopoSchema(payload), null, 2)], { type: TOPO_MEDIA_TYPE }), filename);
 }
 
 // `version` is the envelope's own format and stays 1; the document's schema
@@ -3387,7 +3391,11 @@ async function applyImportedDoc(parsed, opts = {}) {
         else replaceDocument(libraryEntry(known.id).doc, { libraryId: known.id, origin: 'library' });
     } else {
         const named = typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim() : '';
-        const fromFile = String(opts.fileName || '').replace(/(\.nettopo)?(\.json)?$/i, '').trim();
+        // A file Topo named (topo_acme_casa-roma_2026-11-09.json) names the
+        // card after its site part, not after the whole file name.
+        const stem = String(opts.fileName || '').replace(/(\.nettopo)?(\.json)?$/i, '').trim();
+        const fromName = nameFromTopoFileName(stem);
+        const fromFile = fromName === null ? stem : fromName;
         if (!openImportedAsNewCard(doc, named || fromFile, ident.id, ident.updated, !named)) return false;
     }
     // "Open a file" is one of the landing's four doors, and the file reader

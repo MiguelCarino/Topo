@@ -86,7 +86,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     replaceDocument(templatesData.house, { origin: 'template' });
     state.report = { site: 'Clínica José' }; save();
     // Not kept: the download is named after the report's site.
-    ok('an unkept network’s files are named <site-slug>-<local date>', docFileStem() === `clinica-jose-${todayISO()}`, docFileStem());
+    ok('an unkept network’s files are named topo_<site-slug>_<local date>', docFileStem() === `topo_clinica-jose_${todayISO()}`, docFileStem());
     ok('the date is the local calendar date', todayISO() === `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`);
     promptWith = 'Casa Roma';
     const id = await keepThisNetwork();
@@ -95,7 +95,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('the bar now shows its name and "Saved · just now"', !el('docBar').classList.contains('unkept') && el('docBarKeep').hidden
        && el('docBarName').textContent === 'Casa Roma' && status() === 'Saved · just now', status());
     ok('and Keep leaves the Export menu', el('saveNetworkBtn').classList.contains('hidden'));
-    ok('a kept network’s files are named after its card', docFileStem() === `casa-roma-${todayISO()}`, docFileStem());
+    ok('a kept network’s files are named after its card', docFileStem() === `topo_casa-roma_${todayISO()}`, docFileStem());
 
     // ---- Autosave ----
     const node = state.nodes[0];
@@ -119,7 +119,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     downloads = [];
     exportJsonFile();
     const file = downloads[0];
-    ok('Back up this network downloads <slug>-<date>.json', !!file && file.name === `casa-roma-${todayISO()}.json`, file && file.name);
+    ok('Back up this network downloads topo_<slug>_<date>.json', !!file && file.name === `topo_casa-roma_${todayISO()}.json`, file && file.name);
     ok('the file carries the card’s id, its version and its name', !!file && file.payload.doc.id === id
        && file.payload.doc.updated === CarinoLibrary.loadLibrary()[id].updated && file.payload.name === 'Casa Roma'
        && Object.keys(file.payload.doc)[0] === 'v');
@@ -130,7 +130,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     downloads = [];
     await exportBinder();
     ok('Back up all clears it too, and is dated', CarinoLibrary.backupStatus().stale === false && downloads[0]
-       && downloads[0].name === `networks-${todayISO()}.json`, downloads[0] && downloads[0].name);
+       && downloads[0].name === `topo_networks_${todayISO()}.json`, downloads[0] && downloads[0].name);
     node.name = 'Router'; save(); flushAutosave();
 
     // ---- Bringing it back ----

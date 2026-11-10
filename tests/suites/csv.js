@@ -115,7 +115,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     HTMLAnchorElement.prototype.click = function () { fileName = this.download; };
     try { downloadCsv('devices'); } finally { window.Blob = RealBlob; HTMLAnchorElement.prototype.click = realClick; }
     ok('the file is UTF-8 with a BOM', parts && parts[0].charCodeAt(0) === 0xFEFF && parts[0].slice(1).startsWith('id,type,name'));
-    ok('and named after the network and the sheet', /-devices\.csv$/.test(fileName), fileName);
+    ok('and named after the network and the sheet', /_devices\.csv$/.test(fileName), fileName);
     // A name that is a formula goes out guarded and comes back as it was.
     getNode('pc2').name = '=HYPERLINK("http://x","y")';
     const evil = csvText(csvDevicesSheet());

@@ -948,7 +948,7 @@ function printAssetLabels(entries = [...state.selection]) {
     }
     // Shown first (openSheetPreview, js/sheetpreview.js): its Print or
     // Download hands it over.
-    const out = openSheetPreview({ kind: 'labels', meta: { site: docDisplayName(), date: todayISO() }, build: () => labelsHtml(set) });
+    const out = openSheetPreview({ kind: 'labels', meta: { site: docDisplayName(), client: docOrganization(), date: todayISO() }, build: () => labelsHtml(set) });
     const left = [set.untagged ? t('Devices without an asset tag left out: {n}', { n: set.untagged }) : '',
         set.unlabelled ? t('Cables without a label left out: {n}', { n: set.unlabelled }) : ''].filter(Boolean);
     if (left.length) showToast(left.join(' '));

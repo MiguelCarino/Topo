@@ -2419,6 +2419,11 @@ const MESSAGES = {
         '{n} changes since the last report': '{n} cambios desde el último informe',
         'What changed': 'Qué cambió',
         '…and {n} more.': '…y {n} más.',
+        // Every part of the document has a row (js/changes.js, 2026-11-09).
+        'Saved search': 'Búsqueda guardada',
+        'Custom column': 'Columna propia',
+        'Table layout': 'Disposición de la tabla',
+        'changed: {field}': 'cambió: {field}',
         // Port names, labels and access VLANs (js/model.js, document v6).
         'Port names': 'Nombres de los puertos',
         'Prefix, e.g. Gi1/0/': 'Prefijo, p. ej. Gi1/0/',
@@ -4355,6 +4360,11 @@ const MESSAGES = {
         '{n} changes since the last report': '{n} alterações desde o último relatório',
         'What changed': 'O que mudou',
         '…and {n} more.': '…e mais {n}.',
+        // Every part of the document has a row (js/changes.js, 2026-11-09).
+        'Saved search': 'Busca salva',
+        'Custom column': 'Coluna própria',
+        'Table layout': 'Layout da tabela',
+        'changed: {field}': 'alterado: {field}',
         // Port names, labels and access VLANs (js/model.js, document v6).
         'Port names': 'Nomes das portas',
         'Prefix, e.g. Gi1/0/': 'Prefixo, ex.: Gi1/0/',
@@ -6292,6 +6302,11 @@ const MESSAGES = {
         '{n} changes since the last report': 'Изменений с последнего отчёта: {n}',
         'What changed': 'Что изменилось',
         '…and {n} more.': '…и ещё {n}.',
+        // Every part of the document has a row (js/changes.js, 2026-11-09).
+        'Saved search': 'Сохранённый поиск',
+        'Custom column': 'Свой столбец',
+        'Table layout': 'Вид таблицы',
+        'changed: {field}': 'изменено: {field}',
         // Port names, labels and access VLANs (js/model.js, document v6).
         'Port names': 'Имена портов',
         'Prefix, e.g. Gi1/0/': 'Префикс, напр. Gi1/0/',
@@ -8217,6 +8232,11 @@ const MESSAGES = {
         '{n} changes since the last report': '前回のレポート以降の変更 {n} 件',
         'What changed': '変更内容',
         '…and {n} more.': '…ほか {n} 件。',
+        // Every part of the document has a row (js/changes.js, 2026-11-09).
+        'Saved search': '保存した検索',
+        'Custom column': '独自の列',
+        'Table layout': '表のレイアウト',
+        'changed: {field}': '変更: {field}',
         // Port names, labels and access VLANs (js/model.js, document v6).
         'Port names': 'ポート名',
         'Prefix, e.g. Gi1/0/': 'プレフィックス（例: Gi1/0/）',

@@ -393,7 +393,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     await printed.ready;
     el('sheetPreviewDownload').click();
     HTMLAnchorElement.prototype.click = realClick;
-    ok('the preview\'s Download saves it, named as labels', /-labels-\d{4}-\d{2}-\d{2}\.html$/.test(downloaded || '') && downloaded === printed.name && el('sheetPreviewDialog').classList.contains('hidden'), downloaded);
+    ok('the preview\'s Download saves it, named as labels', /_\d{4}-\d{2}-\d{2}_labels\.html$/.test(downloaded || '') && downloaded === printed.name && el('sheetPreviewDialog').classList.contains('hidden'), downloaded);
     ok('a cable with no label alone prints nothing, and says why', printAssetLabels([{ type: 'link', id: 'l2' }]) === null);
     const html = labelsHtml(printed.set);
     const sheet = new DOMParser().parseFromString(html, 'text/html');

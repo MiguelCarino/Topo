@@ -11,7 +11,7 @@
 //      nothing is downloaded;
 //   3. Close, Esc and the backdrop each drop it, save nothing and give the
 //      focus back to the button that opened it;
-//   4. Download saves the same bytes under the old name (-labels-<date>.html)
+//   4. Download saves the same bytes under the usual name (topo_..._<date>_labels.html)
 //      and closes;
 //   5. Locate: the sheet on an A4 page (its own print rules on screen, white
 //      paper), a dashed line where each page ends and the count saying A4;
@@ -57,7 +57,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const navH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--nav-h')) || 0;
     ok('below the pinned navbar (top: var(--nav-h))', Math.abs(dlg.getBoundingClientRect().top - navH) < 1, `${dlg.getBoundingClientRect().top} vs ${navH}`);
     ok('titled as the sheet, with its note', el('sheetPreviewTitle').textContent === 'Labels' && /62 × 29 mm/.test(el('sheetPreviewBlurb').textContent), el('sheetPreviewTitle').textContent);
-    ok('the file name it saves under', el('sheetPreviewName').textContent === r.name && /-labels-\d{4}-\d{2}-\d{2}\.html$/.test(r.name), r.name);
+    ok('the file name it saves under', el('sheetPreviewName').textContent === r.name && /_\d{4}-\d{2}-\d{2}_labels\.html$/.test(r.name), r.name);
     ok('a label count (a cable gets two)', el('sheetPreviewStatus').textContent === '3 labels', el('sheetPreviewStatus').textContent);
     const fdoc = el('sheetPreviewFrame').contentDocument;
     ok('the frame shows the sheet, a page per label', !!fdoc && fdoc.querySelectorAll('.lbl').length === 3 && fdoc.querySelectorAll('.lbl.cable').length === 2);
@@ -115,7 +115,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       ok('Locate: previewed, nothing saved', !!r3 && r3.previewed === true && shown() && downloads.length === 0 && opened === 0);
       await r3.ready;
       ok('titled as the sheet', el('sheetPreviewTitle').textContent === 'Where they are plugged in');
-      ok('saved as -locate-<date>.html', /-locate-\d{4}-\d{2}-\d{2}\.html$/.test(el('sheetPreviewName').textContent));
+      ok('saved as _<date>_locate.html', /_\d{4}-\d{2}-\d{2}_locate\.html$/.test(el('sheetPreviewName').textContent));
       const d = el('sheetPreviewFrame').contentDocument;
       const m = /^(\d+) pages \(A4\)$/.exec(el('sheetPreviewStatus').textContent);
       const pages = m ? Number(m[1]) : 0;

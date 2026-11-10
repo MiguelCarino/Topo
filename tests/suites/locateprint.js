@@ -15,7 +15,7 @@
 //     selection holding devices (hidden for a set of cables, gone in the
 //     reduced views); a set with no device prints nothing and says why;
 //   - shown first like the labels (js/sheetpreview.js): no tab, no
-//     download until the preview's Download (named -locate-) or Print;
+//     download until the preview's Download (named _locate) or Print;
 //   - no edit and no undo step; Spanish; the strings in es, pt-BR, ja, ru;
 //   - a 300-device selection's rows in one lookup pass.
 window.addEventListener('load', () => { setTimeout(async () => {
@@ -207,8 +207,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
       if (r && r.ready) await r.ready;
       el('sheetPreviewDownload').click();
       HTMLAnchorElement.prototype.click = realClick;
-      ok('previewed, then the preview\'s Download saves -locate-<date>.html', !!r && r.previewed === true && before === null
-        && /-locate-\d{4}-\d{2}-\d{2}\.html$/.test(downloaded || '') && el('sheetPreviewDialog').classList.contains('hidden'), downloaded);
+      ok('previewed, then the preview\'s Download saves _<date>_locate.html', !!r && r.previewed === true && before === null
+        && /_\d{4}-\d{2}-\d{2}_locate\.html$/.test(downloaded || '') && el('sheetPreviewDialog').classList.contains('hidden'), downloaded);
     }
 
     // ---- The section: one device ----

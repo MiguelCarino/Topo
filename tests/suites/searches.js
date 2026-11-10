@@ -23,7 +23,8 @@
 //      live searches back untouched; a binder card's searches survive
 //      canonicalDoc; docChangeCount counts a changed list as one change (and
 //      none for an id-less hand-written document against itself), and
-//      docChanges (the changes since the last back-up) does not count it;
+//      docChanges (the changes since the last back-up) counts each search
+//      added, removed or edited, by field (they print in the report);
 //   5. each edit to state.searches through batch()+save() is one undo step.
 window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
@@ -168,7 +169,19 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const hand = { v: DOC_VERSION, nodes: [], links: [], searches: [{ name: 'PCs', query: 'type:pc' }] };
     ok('a hand-written document with id-less searches is the same as itself', docChangeCount(hand, cloneData(hand)) === 0, String(docChangeCount(hand, cloneData(hand))));
     ok('and the same as the card kept from its first opening', docChangeCount(canonicalDoc(cloneData(hand)), cloneData(hand)) === 0);
-    ok('the changes since the last back-up do not count them (a view)', docChanges(a, b).total === 0, String(docChanges(a, b).total));
+    // Counted in the changes since the last back-up too (2026-11-09): a saved
+    // search prints in the site report and travels in the file, so it is part
+    // of the register, and docChangeCount already counted it.
+    const sa = { ...cloneData(a), searches: [cloneData(cams), cloneData(plain)] };
+    const sb = { ...cloneData(a), searches: [{ ...cloneData(cams), name: 'Cams' }, cloneData(plain)] };
+    const sch = docChanges(sa, sb);
+    const srow = changeRows(sch).find((r) => r.what === 'Saved search');
+    ok('the changes since the last back-up count a renamed search as one change', sch.total === 1 && sch.searches.changed.length === 1, String(sch.total));
+    ok('with a row naming it and its old name', !!srow && srow.op === 'Changed' && srow.name === 'Cams' && srow.detail === 'renamed from Cameras with findings', JSON.stringify(srow));
+    const sq = docChanges(sa, { ...cloneData(sa), searches: [cloneData(cams), { ...cloneData(plain), query: 'type:laptop' }, { id: 'sq_new', name: 'New', query: 'type:nas' }] });
+    ok('an edited query and an added search are two, by field', sq.total === 2 && sq.searches.changed[0].fields.join() === 'Search' && sq.searches.added[0].name === 'New',
+       JSON.stringify(sq.searches));
+    ok('and the same searches are no change', docChanges(sa, cloneData(sa)).total === 0);
 
     // ---- 5. One undo step ----
     open({ searches: [cloneData(plain)] });
