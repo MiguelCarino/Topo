@@ -1,0 +1,4 @@
+# Build output and the staged app (make stage fills web/dist).
+/dist/
+/web/dist/*
+!/web/dist/.gitkeep

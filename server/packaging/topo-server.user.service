@@ -1,0 +1,28 @@
+# Topo server (systemd user unit), for a server on your own PC.
+#
+#   install -m 0755 dist/topo-server ~/.local/bin/topo-server
+#   install -m 0644 packaging/topo-server.user.service ~/.config/systemd/user/topo-server.service
+#   mkdir -p ~/.config/topo && editor ~/.config/topo/topo.env
+#   systemctl --user daemon-reload && systemctl --user enable --now topo-server
+#
+# The data lives in ~/.local/share/topo. To keep it running after you log
+# out: loginctl enable-linger $USER. docs/SERVER.md explains every setting.
+[Unit]
+Description=Topo server (network documentation, email sign-in, encrypted sync)
+Documentation=https://topo.carino.systems
+
+[Service]
+Type=simple
+Environment=TOPO_DATA=%h/.local/share/topo
+EnvironmentFile=-%h/.config/topo/topo.env
+ExecStart=%h/.local/bin/topo-server serve
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=60
+NoNewPrivileges=yes
+PrivateTmp=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

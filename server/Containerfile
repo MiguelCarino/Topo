@@ -1,0 +1,61 @@
+# Topo server container image. Podman first; Docker works too.
+#
+# The build context is the repository root (the image stages the app from
+# the website's own files), and server/Containerfile.dockerignore keeps the
+# rest out (docker finds it by name; podman gets --ignorefile):
+#
+#   cd server && make container
+#   (= podman build --format docker --ignorefile Containerfile.dockerignore \
+#        -f Containerfile -t localhost/topo-server ..)
+#   (or docker build -f Containerfile -t localhost/topo-server ..)
+#
+#   podman run -d --name topo-server -p 127.0.0.1:7380:7380 -v topo-data:/data \
+#     -e TOPO_PUBLIC_URL=https://topo.example.com --env-file topo.env \
+#     localhost/topo-server
+#
+# docs/SERVER.md explains the settings, https and the Quadlet unit.
+
+# ---- build: stage the app, then a static Go binary (CGO_ENABLED=0) ----
+FROM docker.io/library/golang:1.27-alpine AS build
+RUN apk add --no-cache bash
+WORKDIR /src/server
+COPY server/go.mod server/go.sum ./
+RUN go mod download
+WORKDIR /src
+# The whole context: Containerfile.dockerignore decides what is in it, so
+# this file never repeats desktop/stage.sh's list.
+COPY . ./
+RUN bash desktop/stage.sh server/web/dist && touch server/web/dist/.gitkeep
+ARG VERSION=0.0.0
+ARG BUILD=container
+WORKDIR /src/server
+RUN CGO_ENABLED=0 GOFLAGS=-p=4 go build -trimpath \
+      -ldflags "-s -w -X main.version=${VERSION} -X main.build=${BUILD}" \
+      -o /out/topo-server ./cmd/topo-server \
+ && mkdir -p /out/data && chown 65532:65532 /out/data && chmod 0700 /out/data
+
+# ---- runtime: no shell, no package manager; CA certificates and tzdata ----
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build --chown=65532:65532 /out/data /data
+COPY --from=build /out/topo-server /topo-server
+
+# Everything the server keeps (topo.db, server.key, mail/) is in one volume.
+# TOPO_PUBLIC_URL has no default: set the https address people open, or
+# http://127.0.0.1:7380 for a trial with the port published on 127.0.0.1.
+ENV TOPO_DATA=/data \
+    TOPO_LISTEN=:7380
+VOLUME ["/data"]
+EXPOSE 7380
+USER 65532:65532
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/topo-server", "healthcheck"]
+
+LABEL org.opencontainers.image.title="Topo server" \
+      org.opencontainers.image.description="Topo network documentation with email sign-in and end-to-end encrypted sync, hosted by you" \
+      org.opencontainers.image.source="https://github.com/MiguelCarino/Topo" \
+      org.opencontainers.image.url="https://topo.carino.systems" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
+
+ENTRYPOINT ["/topo-server"]
+CMD ["serve"]

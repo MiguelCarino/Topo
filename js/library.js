@@ -1252,18 +1252,21 @@ function landingHandledDocument() { _landingBoot = false; closeLanding(); }
 function renderLanding() {
     const list = document.getElementById('landingCards');
     const tplList = document.getElementById('landingTemplateCards');
-    const entries = libraryEntries();
+    // Cards on a Topo server show in their own section (js/serverui.js).
+    // Without a server the set is empty and nothing changes.
+    const onServer = typeof serverCardIds === 'function' ? serverCardIds() : new Set();
+    const entries = libraryEntries().filter((e) => !onServer.has(e.id));
     const networks = entries.filter((e) => !e.template);
     const templates = entries.filter((e) => e.template);
     // With nothing saved, the section and its storage warning would both be
     // talking about an empty grid; one muted line under the chips says the same
     // thing and teaches that saving exists. Once there are cards, the warning
     // is no longer premature and belongs under them.
-    document.getElementById('landingEmpty').classList.toggle('hidden', entries.length > 0);
+    document.getElementById('landingEmpty').classList.toggle('hidden', entries.length > 0 || onServer.size > 0);
     document.getElementById('landingSaved').classList.toggle('hidden', entries.length === 0);
     // Reorders and compacts the page for someone who came back for their own
     // work rather than for the pitch — see .has-saved in css/app.css.
-    document.getElementById('landing').classList.toggle('has-saved', entries.length > 0 || guestSites().length > 0);
+    document.getElementById('landing').classList.toggle('has-saved', entries.length > 0 || guestSites().length > 0 || onServer.size > 0);
     list.innerHTML = '';
     networks.forEach((entry) => list.appendChild(landingCard(entry)));
     tplList.innerHTML = '';
@@ -1271,6 +1274,7 @@ function renderLanding() {
     document.getElementById('landingTemplatesHead').classList.toggle('hidden', !templates.length);
 
     renderGuestSection();
+    if (typeof renderServerSection === 'function') renderServerSection();   // js/serverui.js
     renderUserTemplates();   // the rail's list reads the same store
 
     const target = document.getElementById('binderTarget');
@@ -1657,6 +1661,8 @@ function landingCard(entry, opts = {}) {
     const changed = opts.guest ? '' : cardChangesText(cardChanges(entry));
     // Its problem reports not closed (js/incidents.js): how many, the newest.
     const problems = !opts.guest && !entry.template && !entry.block && typeof landingProblemsText === 'function' ? landingProblemsText(entry.doc) : '';
+    // Its state on a Topo server ("Synced", "Needs merge: tap to review"; js/serverui.js).
+    const sync = !opts.guest && typeof serverCardText === 'function' ? serverCardText(entry.id) : null;
     const card = document.createElement('div');
     card.className = `landing-card${opts.guest ? ' guest' : ''}${entry.template ? ' template' : ''}${changed ? ' has-changes' : ''}`;
     card.dataset.id = entry.id;
@@ -1677,7 +1683,8 @@ function landingCard(entry, opts = {}) {
         <span class="landing-card-stats">${escapeHtml(t(s.devices === 1 ? '{n} device' : '{n} devices', { n: s.devices }))} · ${escapeHtml(t(s.subnets === 1 ? '{n} subnet' : '{n} subnets', { n: s.subnets }))}</span>
         <span class="landing-card-badges">${badges}</span>${changed ? `
         <span class="landing-card-changes">± ${escapeHtml(changed)}</span>` : ''}${problems ? `
-        <span class="landing-card-problems">⚠ ${escapeHtml(problems)}</span>` : ''}
+        <span class="landing-card-problems">⚠ ${escapeHtml(problems)}</span>` : ''}${sync ? `
+        <span class="landing-card-sync ${escapeHtml(sync.cls)}">${escapeHtml(sync.text)}</span>` : ''}
         <span class="landing-card-when">${escapeHtml(libraryWhen(entry.updated))}</span>`;
     open.onclick = () => (opts.guest ? openGuestSite(entry.id) : openFromLibrary(entry.id));
     card.appendChild(open);
@@ -1728,6 +1735,8 @@ function landingCard(entry, opts = {}) {
     if (!entry.template && !entry.block && !migrateDoc(entry.doc).newer && typeof openCardMerge === 'function') {
         tool('⇄', t('Merge…'), () => openCardMerge(entry.id));
     }
+    // A Topo server's tools: Put on the server, Members, Sync now (js/serverui.js).
+    if (typeof serverCardTools === 'function') serverCardTools(entry, tool);
     tool('✎', t('Rename'), async () => {
         const name = await askPrompt(t('Rename network — new name:'), { title: t('Rename'), value: entry.name, ok: t('Rename'), keys: 'name' });
         if (name === null) return;
@@ -1751,6 +1760,8 @@ function landingCard(entry, opts = {}) {
         if (await clearCardHistory(entry)) renderLanding();
     });
     tool('✕', t('Delete'), async () => {
+        // A card on a Topo server: this browser only, or the site for everyone (js/serverui.js).
+        if (typeof serverDeleteQuestion === 'function' && await serverDeleteQuestion(entry)) { renderLanding(); return; }
         if (!(await askConfirm(t('Delete saved network "{name}"? This cannot be undone.', { name: entry.name }), { ok: t('Delete'), danger: true }))) return;
         libraryDelete(entry.id);
         // The network on screen stays, no longer kept: it stops saving into a
@@ -2119,6 +2130,8 @@ function flushAutosave() {
     if (!docHasContent() && !libraryEntry(state.libraryId)) { renderDocBar(); return true; }
     const id = librarySave(null, state.libraryId);
     if (id) state.docUpdated = libraryEntry(id).updated;
+    // A card on a Topo server pushes the edit after a quiet spell (js/serversync.js).
+    if (id && typeof serverAfterSave === 'function') serverAfterSave(id);
     renderDocBar();
     // In IndexedDB mode the card always takes the edit and the disk follows;
     // while the disk is refusing, this network is no safer than the tab.
@@ -2219,6 +2232,8 @@ function renderDocBar() {
         : autosavePending() ? t('Saving…')
         : entry ? t('Saved · {when}', { when: libraryWhen(entry.updated) })
         : t('Saves itself once you add something.');
+    // A card on a Topo server says where it stands there as well (js/serverui.js).
+    if (!_storageFailed && typeof serverDocBar === 'function') serverDocBar(bar, status);
 }
 
 async function renameOpenNetwork() {

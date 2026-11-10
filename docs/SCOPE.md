@@ -336,6 +336,266 @@ Decisions made in the build:
   notifications. The "no outside requests" rule then allows only the server the
   user configured (one connect-src entry, set at deploy).
 - Legal: privacy page and LFPDPPP review before it ships.
+- **Owner decisions (2026-11-10).** The client always hosts it (Carino does
+  not run a shared one). Sign-in is by email (a one-time code or link sent
+  through the client's own SMTP). Notifications go by email only, through the
+  same SMTP.
+- **What E2E means for these** (2026-11-10). An email sign-in proves who someone
+  is; it never carries the encryption key. Each browser holds its own key pair;
+  an owner prints a recovery key at setup; access to a site is granted by an
+  owner's browser wrapping the site key for the new member, never by the
+  server. The server cannot read a network, so it cannot merge: a browser pulls
+  the latest revision, merges with the existing engine and pushes; the server
+  only refuses a push whose base is stale. Notification emails carry no network
+  content ("A provider recorded a visit. Open Topo to see it."), and the site's
+  name only if the owner allows it. Setup asks for the client's SMTP (Microsoft
+  365, Google Workspace, the ISP's), without which sign-in cannot work.
+
+### Backups and drives (opt-in, owner-approved 2026-11-10)
+
+- **Sync and backup are separate.** The server is the live copy and the only
+  sync path (every edit, visit and merge goes through it and the merge). A
+  drive never is: Drive, OneDrive and Nextcloud resolve two writers with
+  "conflicted copy" files and would lose or duplicate work. A drive only
+  receives backups, one way.
+- **Destinations**, one setting, off by default: a folder on the server (a USB
+  disk, a share, or a folder the OneDrive / Google Drive / Nextcloud desktop
+  client syncs, so no outside sign-in at all); WebDAV (Nextcloud, ownCloud,
+  Synology, QNAP); S3-compatible (Backblaze, Wasabi, MinIO, AWS); Google Drive
+  and OneDrive directly through rclone's Go backends, asking only for access
+  to Topo's own folder (`drive.file`), not the whole drive.
+- **What is written:** an encrypted snapshot of each site on a schedule and
+  after every merge or visit, named `topo_<org>_<site>_<date>.json`, kept 7
+  daily, 4 weekly and 12 monthly, encrypted with the client's key so the drive
+  company cannot read it either. A readable copy is a separate opt-in with a
+  warning (anyone with the drive could read it, passwords in notes included).
+- **Restore** from the server's backup list or by opening the file in Topo;
+  both go through the restore points and the merge, never a silent overwrite.
+- **Checks:** a weekly test that the latest backup opens and its hash matches;
+  a failed backup emails the owner.
+- **Without a server:** on Chromium browsers (Chrome, Edge) the app can write
+  its back-ups to a folder the user picks (File System Access API); a OneDrive,
+  Drive or Nextcloud folder is then uploaded by its own sync client. No outside
+  request, so it fits today's rules. Safari and Firefox keep the download.
+- **Order:** 5a the server itself (sites, roles, email sign-in, sync through
+  the merge, email notifications); 5b backups to a folder and WebDAV; 5c S3,
+  then Drive and OneDrive direct; installers and the desktop app's built-in
+  server alongside. The serverless folder save can ship on its own at any time.
+
+### Decisions made building step 5a (2026-11-10), for the owner
+
+How a client runs it: docs/SERVER.md (hosting, TLS, SMTP, backups until 5b,
+the threat model). What a client sees: docs/FEATURES.md, The Topo server.
+Tests: tests/README.md, The Topo server.
+
+**The program**
+
+- **D51.** One static Go binary, `topo-server`, in `server/` (module
+  `carino.systems/topo/server`): the standard library plus the pure-Go
+  `modernc.org/sqlite` v1.62.0, so `CGO_ENABLED=0` builds work for Linux,
+  macOS and Windows on amd64 and arm64 (`make cross`, one at a time). `go mod
+  tidy` sets the directive to `go 1.26.0` (sqlite's own minimum); the builder
+  image is `golang:1.27-alpine`. Subcommands: serve, healthcheck, version,
+  setup-token, mail-test.
+- **D52.** E2E needs a secure context, so plain http is allowed only on
+  loopback. The server refuses to start on another address unless built-in
+  TLS is set (TOPO_TLS_CERT/KEY, read again hourly and on SIGHUP) or
+  TOPO_PUBLIC_URL is https (a reverse proxy, recommended: Caddy and nginx
+  examples in SERVER.md). No ACME. A container listening on `:7380` with a
+  loopback public URL starts with a loud warning to publish on 127.0.0.1 only.
+- **D53.** The server owner is TOPO_OWNER_EMAIL, made sure of at every start
+  and sign-in (promotes and re-enables, never demotes; the admin API refuses
+  to demote or disable it). Without it, while there is no owner, a new setup
+  token is logged at every start (and `topo-server setup-token` mints one); the
+  sign-in that presents it becomes the owner and burns it. "First sign-in on an
+  empty server wins" was rejected: whoever reached a newly exposed server first
+  would own it.
+- **D54.** Sign-in codes: 6 digits, 10 minutes, single use, 5 tries, a newer
+  request supersedes; stored as HMAC-SHA256 under `server.key`, compared in
+  constant time. At most 10 failed codes per email per 24 h across all codes
+  (B1). The magic link is a separate token in a fragment (`/#signin=`),
+  consumed only by a POST after a tap and only in the browser that asked (a
+  challenge cookie), so mail scanners consume nothing. A code needs no cookie:
+  it can be typed anywhere the email is read.
+- **D55.** No user enumeration: every request answers 202 with a challenge
+  id; an address that may not sign in gets a decoy that never verifies, does
+  the same database work, counts against the same limits and sends nothing
+  (responses equal byte for byte but the id). Who may get a code: users, an
+  address with a pending invitation, the owner email, the setup token's
+  holder. Limits: 5 per 15 min and 20 per day per email, 20 requests and 30
+  failures per hour per IP (IPv6 by /64), 60 invitation peeks; the browser
+  that already asked has its own allowance (B2), so a flood from elsewhere
+  delays but does not lock out (the link still works; SERVER.md says so).
+- **D56.** Sessions: 32 random bytes, only the SHA-256 kept; cookie
+  `__Host-topo_s` (HttpOnly, Secure, SameSite=Lax) or `topo_s` without Secure
+  on a loopback http server; 30 days idle, 90 days in all, touched at most
+  hourly; list, revoke, sign out everywhere else. Signing in drops the
+  browser's other session and the challenge cookie (B4).
+- **D57.** CSRF: every non-GET `/api` request needs `X-Topo: 1`, a JSON body,
+  and an Origin equal to the public origin (loopback: any loopback host on
+  the same port), or with no Origin a `Sec-Fetch-Site` of same-origin or none.
+  No CORS headers at all. A Host allowlist (421) guards against DNS
+  rebinding. GET never changes anything.
+
+**Keys and access** (the browser: js/servercrypto.js, WebCrypto only)
+
+- **D58.** Each person has one user key pair (ECDH P-256 to unwrap, ECDSA
+  P-256 to sign); each browser a device key (ECDH P-256, non-extractable, in
+  IndexedDB `topo_keys`). The server holds the user keys wrapped once per
+  browser and, optionally, escrowed under a 128-bit recovery code (26 symbols
+  of the passphrase alphabet plus 2 check symbols, HKDF, not PBKDF2). Long-lived
+  CryptoKeys are never extractable. Everything is ECDH, HKDF-SHA256, AES-GCM-256
+  (no AES-KW); signatures are P1363 and checked by Go too (shared test vectors,
+  tests/gen-vectors.mjs). Linking a browser shows a code over the new
+  browser's key **and** the person's own keys, and after any unwrap the browser
+  derives the public keys from the bundle and refuses ones that differ (A2).
+  Wraps sign `by` and the salt (A4).
+- **D59.** Site keys are wrapped to a member's user key, not to each browser:
+  linking a browser re-wraps one bundle, not every site.
+- **D60.** The member list (roster: members, roles, key fingerprints, epoch,
+  seq) is signed by an owner and kept by the server as a blob it checks but
+  is not trusted for; browsers walk it from seq 1 and accept each only when an
+  owner of the previous one signed it. Revisions and wraps are accepted only
+  from an owner or provider in force. The server checks wrap and roster
+  signatures as well (cheap, so a bad one fails early), and `GET /rosters`
+  also returns the members' current public keys, used only when they match a
+  trusted roster line.
+- **D61.** Give access is an owner's tap, never automatic. The newcomer's card
+  shows their safety code (80 bits, 24 digits, A1; every member row shows one
+  too); the owner's sheet asks "Does {email} see the same code?" with **Yes,
+  give access** and **Give access without checking** (marked "Not checked").
+  The newcomer sees "Waiting for the owner to give you access". The owner is
+  told by the member-joined email, a dot on the card and the account, and the
+  row in Members. A re-grant after someone's keys changed is red and needs the
+  check (A6). "Also the older history" is ticked by default (all epochs).
+- **D62.** Removing a granted member rotates the site key (a new epoch); the
+  server deletes their wraps and refuses pushes under the old epoch. Only new
+  revisions are protected: what they downloaded stays with them. Removing
+  someone still waiting needs no rotation (they hold no key). A role change
+  needs only a new roster. Someone who leaves keeps the old key until an owner
+  presses Rotate (always offered in Members; not prompted yet).
+
+**Sync**
+
+- **D63.** Revisions are full encrypted snapshots in a signed hash chain. The
+  server's numbers and hashes never enter the document (no format change, no
+  v19): the ciphertext carries `{v, id, name, rev, base, prior, doc}` so the
+  v17 rev token is the same in every browser, and the browser maps server
+  numbers to rev tokens in its own sync record (index in localStorage, base
+  documents in IndexedDB). The merge base is the plaintext of the last server
+  revision, never looked up through the revision store. 'server' records in
+  js/revisions.js are evicted first and kept to 3 per card (C1), so binder and
+  link merges keep their bases. Middle revisions whose author's key is unknown
+  are checked by the chain only; the head's signature always.
+- **D64.** A push on a stale base gets 409; the browser pulls and then: no
+  local changes, a fast-forward (one undo step, no log entry, no restore
+  point); changes that merge cleanly, a quiet merge (one log entry from "the
+  server", no restore point) and a push; conflicts, the card says Needs merge
+  and the existing review opens only on a tap (with a restore point), always
+  against the newest server copy (C5). Whether a card has changes is judged by
+  content hash (C2). The open document is saved first and an update waits
+  while someone types or drags, at most 15 s (C3). A lost base is fetched
+  again, or the review is two-way (C4). A document newer than this build shows
+  "update needed" (C7). Rollback or a fork shows "The server sent an older or
+  different history" and stops pushing; **Trust the server's history** merges
+  this copy onto the server's head and pushes (A3: rseq and epoch only rise).
+- **D65.** Live updates by Server-Sent Events (`/api/events`, 20 s ping), not
+  long-polling; plus a check on coming online, on the tab showing, after a
+  save. One sync per site at a time (navigator.locks); the server's 409 keeps
+  it correct regardless.
+- **D66.** Detection makes no request on a static host: the server injects
+  `<meta name="topo-server">` into index.html and js/server.js does nothing
+  without it (no fetch, no listener, no UI; `#signin=` and `#invite=` behave as
+  before, E1). Same origin, so the meta CSP keeps `connect-src 'self'` and
+  needs no per-deploy entry (this replaces "one connect-src entry, set at
+  deploy" above). The header CSP is the page's own policy plus
+  `frame-ancestors 'none'` (E2). `/api/health` also says `signedIn`, so a
+  signed-out page makes no 401 call.
+- **D67.** Notification events are declared by the browser at push time from
+  the base and the pushed document (one function, `deriveEvents`):
+  incident-sent and incident-closed to the routed providers who are members
+  (matched by email), visit-recorded to the reporter's member; member-invited,
+  member-joined and granted come from the server only. An author may declare a
+  problem to the same person at most 5 times per site per hour (F2), and an
+  event never fails a push.
+- **D68.** The site name is encrypted with the epoch key; an owner may allow
+  it in clear for emails, with the warning that the host can read it. The
+  decrypted name always wins for display (A8). No email carries network
+  content.
+- **D69.** Storage: SQLite in the data folder (WAL, one writer, a read-only
+  pool; check-then-write in the driver's immediate transactions, D2),
+  migrations embedded and numbered (PRAGMA user_version; a newer database
+  stops an older server). Revision bodies in their own table behind a
+  `store.Blobs` interface where 5b/5c plug in (D3). TOPO_REV_CAP (500) bodies
+  kept per site, headers forever; TOPO_SITE_MAX_BYTES (2 GiB) drops old bodies,
+  then refuses (`site-full`). Signature and hash checks run before the write
+  transaction (D1). 20 concurrent pushes on one base: exactly one wins.
+- **D70.** The app is embedded from `desktop/stage.sh`'s output (the offline
+  zip's allow-list), every file with an ETag and `no-cache`; `/api/health`
+  reports `appHash` to compare with a release. The run.sh suites never reach
+  the binary; tests/server-e2e.mjs does.
+- **D71.** Client addresses come from X-Forwarded-For only from
+  TOPO_TRUSTED_PROXIES.
+- **D72.** Server roles: owner (runs it), staff (may put networks on the
+  server), member (came by invitation, may not). Site roles are separate:
+  owner, provider, viewer.
+- **D73.** Container: `distroless/static-debian12:nonroot`, `VOLUME /data`,
+  HEALTHCHECK `topo-server healthcheck`, podman first (`--format docker` keeps
+  the health check), a Quadlet and system and user systemd units in
+  `server/packaging/`.
+- **D74.** Mail: `smtp` (STARTTLS on 587 refused if not offered, implicit TLS
+  on 465, plain only to a loopback relay; AUTH PLAIN, LOGIN when that is all
+  there is), `file` (one .eml each plus `mail/outbox.jsonl`, for tests) and
+  `log`. Sent from a durable outbox, never from a request; a global cap per
+  minute; retries 1, 5, 15, 60 min, given up after 8. Header injection guarded
+  (B7). Sign-in emails in the language of the page that asked, others in the
+  person's chosen one.
+- **D75.** A provider member needs no links: "who am I" is the document's
+  provider whose email is theirs; Send to providers who are all members is
+  "Sent through the server", a visit is "Saved to the server". Otherwise the
+  link and file path stays, for everyone on that send.
+- **D76.** Private windows and browsers without IndexedDB keep keys in
+  memory, a new browser each time; the account sheet says so.
+- **D77.** Losing every browser without the recovery code is "Reset my keys":
+  new keys, memberships back to waiting, owners told. A site whose only owner
+  loses everything cannot be read again; setup makes owners keep the code (a
+  tick) and suggests a second owner.
+- **D78.** One tab per browser holds the live stream and passes events to the
+  others (navigator.locks and BroadcastChannel, C8); the server allows 12
+  streams per person and 500 in all.
+- **D79.** Pushes are grouped: 5 s of quiet, at most a minute apart (C6),
+  checked against the server's size limit first.
+
+**Found while building**
+
+- **D80.** Six email choices, not five: "revision" for sites you own (on) and
+  "revisionShared" for sites shared with you (off), then visit, incident,
+  closed and join (on). A per-site mute. A push's revision digest skips anyone
+  who got an event email from the same push; a digest due while the person has
+  a stream open is skipped. Event emails wait TOPO_NOTIFY_EVENT_SECONDS (120)
+  and merge repeats; the end-to-end test sets 0.
+- **D81.** Footers: emails a person can turn off end "Change them under
+  Account, Notifications"; the others "This email was sent by the Topo server
+  at {url}"; the sign-in email has none.
+- **D82.** Site ids are minted by the browser (D4: the roster and the wraps
+  must name the site before it exists); `POST /api/sites/new-id` was dropped.
+  An invitation can be accepted by token or, signed in as its address, by id.
+- **D83.** Not a member is 404 (ids are not confirmed); a member without the
+  role is 403. Errors are short codes the browser shows as translated
+  sentences (E4).
+- **D84.** No Cross-Origin-Opener-Policy (js/report.js keeps a handle to the
+  report tab it opens).
+- **D85.** One generic sheet (`#serverSheet`) serves every server dialog, a
+  full-height sheet on phones; every string a client sees is in all five
+  languages.
+
+Left for later (not in 5a): a per-session list with revoke in the account
+sheet (only "sign out everywhere else"); "Keep my copy as a separate network"
+for a viewer; the Problems tab line naming a provider who is not on the server
+(mixed sends fall back to links for everyone); the "Undid changes from the
+server" toast and "Newer changes arrived: review again" during a review;
+prompting Rotate on `roster-needed`; a two-tab test of the leader tab with a
+real IndexedDB; padding of revision sizes.
 
 ## 6. Imports and exports (step 6)
 
@@ -380,5 +640,10 @@ phpIPAM. Every import goes through the merge.
   back (js/providermode.js); the client's side: the merge review's rows, the
   Problems tab, the Simple lists and marker, the landing line, the report's
   tick. Built before step 3 (D34, owner to confirm). Decisions D34–D50 above.
-- [ ] 5. Server.
+- [~] 5. Server. 5a done 2026-11-10 (not yet committed): `topo-server`
+  (server/, Go, SQLite), email sign-in, sites with roles and invitations,
+  end-to-end encryption in the browser (js/servercrypto.js), sync through the
+  merge (js/serversync.js), email notifications, the client (js/server.js,
+  js/serverui.js), docs/SERVER.md, tests/server-e2e.mjs. Decisions D51–D85
+  above. Next: 5b (backups to a folder and WebDAV), then 5c.
 - [ ] 6. Importers and spec.

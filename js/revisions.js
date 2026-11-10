@@ -42,8 +42,14 @@ const REVISION_OPEN_MS = 1000;
 // Mutable for the suites (CarinoRevisions.REVISION_LIMITS); nothing else changes them.
 const REVISION_LIMITS = { perCard: 30, totalBytes: 40 * 1024 * 1024, writeMs: 4000, session: 30 };
 // Why a revision was kept: what left (export, backup, binder, link), what
-// arrived and was kept (opened), what was merged in (merge-theirs).
-const REVISION_WHY = ['export', 'backup', 'binder', 'link', 'opened', 'merge-theirs'];
+// arrived and was kept (opened), what was merged in (merge-theirs), what was
+// pulled from or pushed to a Topo server (server; js/serversync.js).
+const REVISION_WHY = ['export', 'backup', 'binder', 'link', 'opened', 'merge-theirs', 'server'];
+// A card on a Topo server makes a 'server' revision at every push and pull:
+// the newest few are enough (the sync keeps its own base), and they go first,
+// so they never push out the binder's and the links' that findBase needs
+// (amendment C1).
+const SERVER_REVISIONS_KEPT = 3;
 const PRIOR_MAX = 8;
 const REV_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const validRev = (v) => (typeof v === 'string' && REV_RE.test(v) ? v : null);
@@ -335,10 +341,21 @@ function enforceRevisionCaps(cardId) {
     const cards = cardId ? [cardId] : [..._revs.keys()];
     cards.forEach((id) => {
         const list = _revs.get(id);
-        if (!list || list.length <= REVISION_LIMITS.perCard) return;
+        if (!list) return;
+        // The server's: the newest SERVER_REVISIONS_KEPT only.
+        let heldS = null;
+        while (list.filter((m) => m.why === 'server').length > SERVER_REVISIONS_KEPT) {
+            if (!heldS) heldS = revisionHeld(id);
+            const i = list.findIndex((m) => m.why === 'server' && !heldS.has(m.rev));
+            if (i < 0) break;
+            drop(list, i);
+        }
+        if (!list.length) { _revs.delete(id); return; }
+        if (list.length <= REVISION_LIMITS.perCard) return;
         const held = revisionHeld(id);
         while (list.length > REVISION_LIMITS.perCard) {
-            let i = list.findIndex((m) => m.why === 'opened' && !held.has(m.rev));
+            let i = list.findIndex((m) => m.why === 'server' && !held.has(m.rev));
+            if (i < 0) i = list.findIndex((m) => m.why === 'opened' && !held.has(m.rev));
             if (i < 0) i = list.findIndex((m) => !held.has(m.rev));
             if (i < 0) break;
             drop(list, i);
@@ -352,8 +369,10 @@ function enforceRevisionCaps(cardId) {
         const heldOf = (id) => { if (!held.has(id)) held.set(id, revisionHeld(id)); return held.get(id); };
         while (total > REVISION_LIMITS.totalBytes) {
             let oldest = null;
+            // The server's first (C1), then the oldest.
+            const rank = (m) => (m.why === 'server' ? 0 : 1);
             _revs.forEach((list) => list.forEach((m, i) => {
-                if (!heldOf(m.cardId).has(m.rev) && (!oldest || m.at < oldest.m.at)) oldest = { m, list, i };
+                if (!heldOf(m.cardId).has(m.rev) && (!oldest || rank(m) < rank(oldest.m) || (rank(m) === rank(oldest.m) && m.at < oldest.m.at))) oldest = { m, list, i };
             }));
             if (!oldest) break;
             total -= oldest.m.bytes;

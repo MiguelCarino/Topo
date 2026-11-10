@@ -3314,7 +3314,7 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
        rack (a mouse's narrow window keeps the rows they would cover). */
     .handy-btn { width: 44px; height: 44px; }
     .topo-docbar { align-items: center; }
-    .docbar-name { min-height: 44px; }
+    .docbar-name { min-height: 44px; min-width: 44px; }
     .topo-docbar .cs-btn { height: auto; min-height: 44px; min-width: 44px; justify-content: center; }
     /* M28: the rack's head, its schedule and its picker (its rows of
        buttons too: a mouse's narrow window keeps the units' room). */
@@ -3508,4 +3508,69 @@ body:not(.simple-mode) .inc-simple { display: none; }
 @media (pointer: coarse) {
     .inc-acts .btn, .inc-where .link-btn { min-height: 44px; min-width: 44px; }
     .inc-changes summary { min-height: 44px; display: flex; align-items: center; }
+}
+
+/* ---- A Topo server (js/serverui.js) ----
+   The landing's "On this server" section reuses the landing's cards; the
+   sheet is one modal whose body is built per step. Phone: full height,
+   44px targets, 16px fields. Shown only on a page a Topo server served. */
+.landing-card-sync { display: block; font-size: var(--fs-micro, 12px); color: var(--text-sec); font-weight: 600; overflow-wrap: anywhere; }
+.landing-card-sync.ok { color: var(--ok, #15803d); }
+.landing-card-sync.warn { color: var(--warn, #b45309); }
+.landing-card-sync.bad { color: var(--err, #b91c1c); }
+.server-stub-body { cursor: default; }
+#serverNextBtn { margin: 4px 0 8px; }
+.server-account { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.server-account.badge::after { content: ''; display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: var(--warn, #b45309); vertical-align: middle; }
+.docbar-sync { border: 1px solid var(--border); background: var(--surface, transparent); color: var(--text-sec); border-radius: 999px; padding: 2px 9px; font: inherit; font-size: var(--fs-micro, 12px); cursor: pointer; white-space: nowrap; }
+.docbar-sync.ok { color: var(--ok, #15803d); }
+.docbar-sync.warn, .docbar-sync.busy { color: var(--warn, #b45309); }
+.docbar-sync.bad { color: var(--err, #b91c1c); }
+.modal.topo-server { max-width: 36rem; }
+.topo-server .srv-p { margin: 0 0 10px; overflow-wrap: anywhere; }
+.topo-server .srv-dim { color: var(--text-sec); font-size: var(--fs-sm); }
+.topo-server .srv-warn { color: var(--warn, #b45309); font-size: var(--fs-sm); }
+.topo-server .srv-email { font-weight: 700; margin: 0 0 10px; overflow-wrap: anywhere; }
+.topo-server .srv-field { display: grid; gap: 4px; margin: 0 0 10px; }
+.topo-server .srv-label { font-weight: 600; font-size: var(--fs-sm); }
+.topo-server .srv-hint { color: var(--text-sec); font-size: var(--fs-micro, 12px); }
+.topo-server .srv-field .input, .topo-server .srv-field .select, .topo-server .srv-group > .select { width: 100%; box-sizing: border-box; }
+.topo-server .srv-code { font-family: var(--mono); font-size: 1.4rem; letter-spacing: 0.3em; }
+.topo-server .srv-recovery { font-family: var(--mono); font-size: 1.1rem; font-weight: 700; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 6px; overflow-wrap: anywhere; text-align: center; margin: 0 0 10px; }
+.topo-server .srv-mono { font-family: var(--mono); }
+.topo-server .srv-err { color: var(--err, #b91c1c); margin: 0 0 8px; min-height: 0; }
+.topo-server .srv-err:empty, .topo-server .srv-status:empty { display: none; }
+.topo-server .srv-status { color: var(--text-sec); margin: 0 0 8px; }
+.topo-server .srv-acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }
+.topo-server .srv-acts.srv-stack { flex-direction: column; align-items: stretch; }
+.topo-server .srv-tick { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+.topo-server .srv-group { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin: 10px 0; min-width: 0; }
+.topo-server .srv-group legend { font-weight: 700; font-size: var(--fs-sm); padding: 0 4px; }
+.topo-server .srv-alert { border-color: var(--warn, #b45309); }
+.topo-server .srv-list { display: grid; gap: 8px; margin: 0 0 10px; }
+.topo-server .srv-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.topo-server .srv-row.srv-danger { border-color: var(--err, #b91c1c); }
+.topo-server .srv-row-text { display: grid; gap: 2px; min-width: 0; flex: 1 1 12rem; overflow-wrap: anywhere; }
+.topo-server .srv-sub { color: var(--text-sec); font-size: var(--fs-micro, 12px); }
+.topo-server .srv-danger .srv-sub { color: var(--err, #b91c1c); }
+.topo-server .srv-row-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.topo-server .srv-row-acts .select { width: auto; }
+/* The recovery key's Print: a block of its own, a direct child of <body>
+   (the sheet itself sits inside the workspace, which printing hides). */
+#srvPrint { display: none; }
+@media print {
+    body.srv-printing > *:not(#srvPrint) { display: none !important; }
+    body.srv-printing > #srvPrint { display: block !important; color: #000; background: #fff; padding: 24px; font: 13pt/1.45 system-ui, sans-serif; }
+    #srvPrint h1 { font-size: 18pt; margin: 0 0 6px; }
+    #srvPrint .srv-print-code { font-family: ui-monospace, monospace; font-size: 20pt; letter-spacing: 0.06em; margin: 18px 0; overflow-wrap: anywhere; }
+}
+@media (max-width: 600px) {
+    #serverSheet .modal.topo-server { width: 100%; max-width: none; max-height: calc(100dvh - 16px); }
+}
+@media (pointer: coarse), (max-width: 640px) {
+    .topo-server .btn, .topo-server .select, .topo-server .modal-x, .docbar-sync, #serverNextBtn { min-height: 44px; min-width: 44px; }
+    .topo-server .input, .topo-server .select { font-size: 16px; min-height: 44px; }
+    /* The label takes the tap around its box: 12px each side of a 22px box. */
+    .topo-server .srv-tick { min-height: 44px; padding: 0 0 0 12px; }
+    .topo-server .srv-tick input { width: 22px; height: 22px; }
 }

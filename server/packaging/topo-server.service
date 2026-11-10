@@ -1,0 +1,60 @@
+# Topo server (systemd system unit).
+#
+#   install -m 0755 dist/topo-server /usr/local/bin/topo-server
+#   install -m 0644 packaging/topo-server.service /etc/systemd/system/
+#   mkdir -p /etc/topo && editor /etc/topo/topo.env   (TOPO_PUBLIC_URL, SMTP...)
+#   systemctl daemon-reload && systemctl enable --now topo-server
+#
+# The data (topo.db, server.key, mail/) lives in /var/lib/topo, owned by a
+# user systemd makes for the service. docs/SERVER.md explains every setting.
+[Unit]
+Description=Topo server (network documentation, email sign-in, encrypted sync)
+Documentation=https://topo.carino.systems
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=topo
+DynamicUser=yes
+StateDirectory=topo
+StateDirectoryMode=0700
+Environment=TOPO_DATA=%S/topo
+EnvironmentFile=-/etc/topo/topo.env
+ExecStart=/usr/local/bin/topo-server serve
+Restart=on-failure
+RestartSec=5
+# SIGTERM: the server stops taking connections, ends live streams, lets
+# requests finish (45 s at most) and closes the database cleanly.
+KillMode=mixed
+TimeoutStopSec=60
+
+# Hardening. The server needs the network, its state folder and nothing else.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

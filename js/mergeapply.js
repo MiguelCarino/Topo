@@ -28,7 +28,7 @@
 // The log is also shown here, read-only (the Export menu's Network log…, a
 // card's ≡ tool), and printed by the report's Network log tick (js/report.js).
 
-const MERGE_REASONS = ['Before merging {file}', 'Before merging a link', 'Before merging a binder', 'Before merging {name}'];
+const MERGE_REASONS = ['Before merging {file}', 'Before merging a link', 'Before merging a binder', 'Before merging {name}', 'Before merging from the server'];
 const _mergeApply = { applying: false };
 
 // The keys of what is in conflict in a plan, in order: two plans with the
@@ -58,6 +58,8 @@ function mergeSourceName(source) {
 function logSourceText(source) {
     if (source === 'link') return t('a link');
     if (source === 'binder') return t('a binder');
+    // A Topo server's copy (js/serversync.js).
+    if (source === 'server') return t('the server');
     return source || t('a copy');
 }
 function logEntryText(e) {

@@ -1,0 +1,23 @@
+# The image's build context is the repository root. Docker reads this file
+# by name (<Containerfile>.dockerignore beside the Containerfile); podman and
+# buildah get it with --ignorefile (make container). The Containerfile copies
+# the whole context, so this list is the only allow-list: it admits the
+# website's files by kind (every carino-* shared file, whatever new one
+# desktop/stage.sh adds), and packaging/containerignore_test.go checks that
+# every item stage.sh copies is let in.
+*
+!index.html
+!css/
+!js/
+!fonts/
+!vendor/
+!carino-*.js
+!carino-*.css
+!logo*.svg
+!logo*.webp
+!LICENSE
+!desktop/stage.sh
+!server/
+server/dist/
+server/web/dist/
+**/.*

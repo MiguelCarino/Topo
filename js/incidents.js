@@ -249,6 +249,15 @@ async function sendIncident(id, opts = {}) {
     if (!res) return { ok: false, reason: 'stale' };
     const committed = JSON.stringify(serializeDoc());
     let url = null, file = '', why = 'link';
+    // Through a Topo server (js/serversync.js): no link and no file, the
+    // change is pushed and the server emails the providers.
+    if (opts.server) {
+        flushAutosave();
+        if (typeof serverPushNow === 'function') serverPushNow(state.libraryId);
+        const inc0 = incidentById(id);
+        const providers0 = to.map((p) => providerById(p)).filter(Boolean);
+        return { ok: true, url: null, file: '', why: 'server', message: composeIncidentMessage({ incident: inc0, providers: providers0, link: '', file: '', sealed: false }), providers: providers0 };
+    }
     if (!canSeal()) why = 'no-seal';
     else {
         const pass = String(opts.passphrase || '');
@@ -507,6 +516,15 @@ async function saveProblem(andSend) {
 function enterSendStage() {
     _pb.stage = 'send';
     incEl('problemError').textContent = '';
+    // A network on a Topo server whose chosen providers are all members
+    // there: sent through the server, no link or passphrase (D75).
+    const route = typeof serverSendRoute === 'function' ? serverSendRoute(state.libraryId, _pb.sendTo) : null;
+    if (route) {
+        _pb.send = { server: route, pass: '', shown: false, hits: [], result: null, busy: false, copied: '' };
+        renderProblemDialog();
+        makeIncidentLink();
+        return;
+    }
     const hits = secretHitsFor('doc');
     _pb.send = { pass: canSeal() ? generatePassphrase() : '', shown: false, hits, result: null, busy: false, copied: '' };
     renderProblemDialog();
@@ -523,7 +541,7 @@ async function makeIncidentLink() {
     renderProblemDialog();
     const gen = _pb.gen;
     let res;
-    try { res = await sendIncident(_pb.incidentId, { providerIds: _pb.sendTo, passphrase: s.pass }); }
+    try { res = await sendIncident(_pb.incidentId, { providerIds: _pb.sendTo, passphrase: s.pass, server: !!s.server }); }
     catch (e) { console.warn('Report: send failed', e); res = { ok: false, reason: 'build' }; }
     if (gen !== _pb.gen || _pb.send !== s) return;
     s.busy = false;
@@ -568,6 +586,7 @@ function renderProblemSend() {
     if (s.busy) status.textContent = canSeal() ? t('Locking the link…') : '';
     else if (!res) status.textContent = '';
     else if (res.why === 'link') status.textContent = t('Marked as sent. The link is locked: send the passphrase another way, such as a call or a text.');
+    else if (res.why === 'server') status.textContent = t('Sent through the server. {names} will get an email.', { names: names.join(', ') });
     else if (res.why === 'too-long') status.textContent = t('Marked as sent. This network is too big for a link, so the file {file} was downloaded: attach it to the email.', { file: res.file });
     else status.textContent = t('Marked as sent. This page cannot lock a link (it needs https), so the file {file} was downloaded instead: attach it to the email.', { file: res.file });
     if (res && s.copied === 'link') status.textContent = t('The link is in your clipboard. Paste it into the email where it says so.');
@@ -578,6 +597,14 @@ function renderProblemSend() {
     link.classList.toggle('hidden', !sealedLink);
     const email = incEl('problemEmailBtn'), share = incEl('problemShareBtn'), copy = incEl('problemCopyMsgBtn'), file = incEl('problemFileBtn');
     [email, share, copy, file].forEach((b) => b.classList.toggle('hidden', !res));
+    // Through the server: nothing to send by hand.
+    if (s.server) {
+        [email, share, copy, file].forEach((b) => b.classList.add('hidden'));
+        incEl('problemPassRow').classList.add('hidden');
+        make.classList.add('hidden');
+        if (s.busy) status.textContent = t('Saving to the server…');
+        return;
+    }
     // Nobody chosen has an email: a mailto: with no one in To helps nobody.
     if (res) email.classList.toggle('hidden', !(res.message && res.message.to.length));
     if (res) {

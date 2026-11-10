@@ -807,6 +807,17 @@ function enterReturnStage(entry) {
     vd.stage = 'return';
     vd.entry = entry;
     pmEl('visitError').textContent = '';
+    // A network on a Topo server: the visit is pushed and the client gets
+    // an email; there is no link to send back (D75, js/serversync.js).
+    if (typeof serverReturnRoute === 'function' && serverReturnRoute(state.libraryId)) {
+        flushAutosave();
+        if (typeof serverPushNow === 'function') serverPushNow(state.libraryId);
+        vd.ret = { pass: '', samePass: false, shown: false, hits: [], busy: false, copied: '', server: true,
+            result: { ok: true, url: null, file: '', why: 'server', message: composeVisitMessage({ incident: entry && entry.incidentId ? incidentById(entry.incidentId) : null, entry, link: '', file: '' }) } };
+        if (_pm.session && !state.readOnly) writeProviderSession(Object.assign({}, _pm.session, { lastVisitJson: JSON.stringify(serializeDoc()), lastVisitId: entry.id }));
+        renderVisitDialog();
+        return;
+    }
     const held = _pm.pass.get(_pm.docId || state.docId || null);
     const hits = secretHitsFor('doc');
     vd.ret = { pass: held || (canSeal() ? generatePassphrase() : ''), samePass: !!held, shown: false, hits, result: null, busy: false, copied: '' };
@@ -861,6 +872,7 @@ function renderVisitReturn() {
     const status = pmEl('visitReturnStatus');
     if (r.busy) status.textContent = canSeal() ? t('Locking the link…') : '';
     else if (!res) status.textContent = '';
+    else if (res.why === 'server') status.textContent = t('Saved to the server. The client will get an email.');
     else if (res.why === 'link') status.textContent = t('Send it back to the client: they open it in Topo and keep it, and the visit joins their network.');
     else if (res.why === 'too-long') status.textContent = t('This network is too big for a link, so the file {file} was downloaded: send it to the client.', { file: res.file });
     else if (res.why === 'no-seal') status.textContent = t('This page cannot lock a link (it needs https), so the file {file} was downloaded: send it to the client.', { file: res.file });
@@ -889,6 +901,8 @@ function renderVisitReturn() {
     copyMsg.textContent = `📋 ${t('Copy message')}`;
     copyLink.textContent = r.copied === 'linkonly' ? `✓ ${t('Link copied')}` : `🔗 ${t('Copy link')}`;
     file.textContent = res && res.file ? `⬇ ${t('Download the file again')}` : `⬇ ${t('Download the file')}`;
+    // Through the server: nothing to send by hand.
+    if (r.server) [email, call, share, copyMsg, copyLink, file, pmEl('visitPassRow'), make].forEach((b) => b.classList.add('hidden'));
 }
 async function visitEmail() {
     const r = _pm.vd && _pm.vd.ret;

@@ -1911,6 +1911,9 @@ function replaceDocument(doc, opts = {}) {
     // A copy with a problem report arriving, or the page's own network back
     // while this tab was in provider mode for it (js/providermode.js).
     if (typeof providerDocLoaded === 'function') providerDocLoaded(origin);
+    // A card on a Topo server: a viewer's opens read-only, a provider's knows
+    // which provider they are (js/serversync.js). Nothing without a server.
+    if (typeof serverDocLoaded === 'function') serverDocLoaded(origin);
 }
 
 // The blank canvas a dismissed landing leaves is a network started here, so it
@@ -1971,7 +1974,8 @@ function outgoingDoc() { return state.readOnly ? cloneData(state.readOnly.doc) :
 // True (and says why) when the open document may not be edited.
 function readOnlyRefuses() {
     if (!state.readOnly) return false;
-    showToast(t('This network is read-only: it was made by a newer version of Topo.'));
+    showToast(state.readOnly.viewer ? t('You can look at this network but not change it: you are a viewer on the server.')
+        : t('This network is read-only: it was made by a newer version of Topo.'));
     return true;
 }
 
@@ -1997,6 +2001,11 @@ function renderReadOnly() {
     document.body.classList.toggle('doc-readonly', on);
     const banner = document.getElementById('readOnlyBanner');
     if (banner) banner.classList.toggle('hidden', !on);
+    // A viewer on a Topo server (js/serversync.js) is told why, not "a newer version".
+    const viewer = !!(on && state.readOnly.viewer);
+    const why = document.getElementById('readOnlyWhy'), whyViewer = document.getElementById('readOnlyViewer');
+    if (why) why.hidden = viewer;
+    if (whyViewer) whyViewer.hidden = !viewer;
     // The Subnets tab's networks are document too; its "Subnet zones" switch
     // is a view setting and stays usable. The Groups tab's groups too.
     ['tabPanel-nodes', 'tabPanel-blocks', 'cfgPanel-config', 'networkList', 'undeclaredBox', 'addNetworkBtn', 'groupList', 'addGroupBtn'].forEach((id) => {
@@ -2046,6 +2055,11 @@ async function load() {
     // its own with the page's network (js/providermode.js). Typed, it is
     // consumed and the visit goes on as if it were not there.
     if (hash === 'provider') { window.history.replaceState(window.history.state, '', cleanUrl()); return load(); }
+    // A Topo server's sign-in link or invitation ('#signin=', '#invite=',
+    // js/server.js): taken off the URL here and handled once the server
+    // client is open. Only on a page a Topo server served; anywhere else this
+    // is false and the fragment goes on as it always did.
+    if (typeof serverHashToken === 'function' && serverHashToken(hash)) { window.history.replaceState(null, '', cleanUrl()); return load(); }
     let wizard = false, trigger = hash;
     if (hash === 'setup') { wizard = true; trigger = state.settings.profile; }
     else if (hash.startsWith('setup-') && PROFILES[hash.slice(6)]) { wizard = true; trigger = hash.slice(6); }
@@ -3055,6 +3069,7 @@ function applyLocale(lang) {
     if (shareDialogOpen()) renderShareDialog();
     if (typeof problemDialogLocale === 'function') problemDialogLocale();   // js/incidents.js
     if (typeof providerModeLocale === 'function') providerModeLocale();   // js/providermode.js
+    if (typeof serverLocale === 'function') serverLocale();   // js/serverui.js
     document.getElementById('binderReportBtn').innerHTML = `📋 ${t('Binder report')}`;
     document.getElementById('binderLinkBtn').innerHTML = `🔗 ${t('Copy binder link')}`;
     setMapInk(state.settings.mapInk);   // its title
@@ -3942,6 +3957,9 @@ showLibraryTab(state.settings.libraryTab || 'nodes');
         // The revisions of copies that left, kept to find a returning copy's
         // base (js/revisions.js), the same way.
         openRevisionStore();
+        // A Topo server, when this page was served by one (js/server.js):
+        // nothing at all otherwise. Not awaited; it draws its own section.
+        if (typeof openServerClient === 'function') openServerClient();
         // Saved templates from before they were cards have to be in it.
         migrateUserTemplates();
         renderUserTemplates();

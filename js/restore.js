@@ -39,7 +39,9 @@ const RESTORE_LIMITS = { perCard: 20, totalBytes: 50 * 1024 * 1024, writeMs: 400
 const RESTORE_REASONS = ['Before opening {file}', 'Before opening a file', 'Before importing {file}', 'Before importing a binder',
     'Before importing pasted rows', 'Before updating from a link', 'Before restoring',
     // A merge (js/mergeapply.js): {file} a file's name, {name} another network's.
-    'Before merging {file}', 'Before merging a link', 'Before merging a binder', 'Before merging {name}'];
+    'Before merging {file}', 'Before merging a link', 'Before merging a binder', 'Before merging {name}',
+    // A merge from a Topo server, reviewed (js/serversync.js).
+    'Before merging from the server'];
 
 // card id -> [meta], oldest first: what this tab knows of the points.
 const _restore = new Map();

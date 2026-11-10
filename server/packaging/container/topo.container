@@ -1,0 +1,36 @@
+# Quadlet unit: podman runs the Topo server as a systemd service.
+#
+# Rootless (your user):  copy this file to ~/.config/containers/systemd/
+# Rootful (whole host):  /etc/containers/systemd/
+# Then:  systemctl --user daemon-reload && systemctl --user start topo
+# (drop --user for rootful). A rootless service that keeps running after
+# you log out also needs:  loginctl enable-linger $USER
+#
+# Build the image first (cd server && make container), or point Image= at a
+# registry. Settings go in the env file (TOPO_PUBLIC_URL, SMTP, owner email):
+# docs/SERVER.md lists them.
+
+[Unit]
+Description=Topo server (network documentation, email sign-in, encrypted sync)
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=topo
+Image=localhost/topo-server:latest
+# Loopback only. For a LAN or the internet, put https in front (Caddy,
+# nginx, tailscale serve) and set TOPO_PUBLIC_URL to that https address.
+# Never publish plain http on every interface: sign-in would travel in clear.
+PublishPort=127.0.0.1:7380:7380
+Volume=topo-data:/data
+EnvironmentFile=%h/.config/topo/topo.env
+HealthCmd=/topo-server healthcheck
+HealthInterval=30s
+AutoUpdate=local
+
+[Service]
+Restart=on-failure
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

@@ -539,7 +539,7 @@ function showMergeReview(req) {
         // "a link", "a binder", "a copy" are words of this language and take
         // the title's capitals; only a file's name keeps its own.
         const src = mergeSourceName(req.source);
-        mergeTitleInto(mrEl('mergeTitle'), req.sourceText, req.name, !!src && src !== 'link' && src !== 'binder');
+        mergeTitleInto(mrEl('mergeTitle'), req.sourceText, req.name, !!src && src !== 'link' && src !== 'binder' && src !== 'server');
         mrEl('mergeMode').textContent = req.plan.mode === 'three-way'
             ? t('Three-way: compared with the copy both started from. An edit made on one side only is taken; an edit made on both sides to the same thing asks.')
             : t('Two-way: no copy both started from was found, so nothing is removed. Where the two differ, yours is kept unless you choose theirs; a blank of yours is filled from theirs.');
