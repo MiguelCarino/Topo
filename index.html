@@ -963,6 +963,7 @@
                 <p data-i18n>Topo documents a network: its devices, cables, addressing, racks and who is responsible for what, and prints it as a report.</p>
                 <p><span data-i18n>Runs in your browser. Nothing you add here is uploaded.</span></p>
                 <p id="setVersion" class="mono"></p>
+                <p id="aboutOffline" hidden><span data-i18n>To use it with no internet:</span> <a href="https://github.com/MiguelCarino/Topo/releases/latest" target="_blank" rel="noopener" data-i18n>download Topo for Windows, Mac or Linux</a></p>
                 <p><span data-i18n>The file format is published:</span> <a href="https://github.com/MiguelCarino/Topo/blob/main/docs/FORMAT.md" target="_blank" rel="noopener">docs/FORMAT.md</a></p>
             </div>
         </aside>
@@ -1298,6 +1299,18 @@
                             <button class="landing-chip accent" id="landingAddBtn" data-i18n>Add devices</button>
                         </div>
                         <div class="landing-chips-note" id="landingEmpty" data-i18n>Networks you save are kept in this browser, and show up here.</div>
+                    </div>
+
+                    <!-- Topo to keep on this computer (js/library.js offlineOffer):
+                         the installers and the offline zip of the latest release.
+                         Only on the website on a computer: never in the desktop
+                         app, the offline zip, a Topo server's page or on a phone. -->
+                    <div class="landing-offline" id="landingOffline" hidden>
+                        <div class="landing-offline-lbl" data-i18n>Working where there is no internet?</div>
+                        <div class="landing-chips-row">
+                            <a class="landing-chip accent" id="landingOfflineGet" href="https://github.com/MiguelCarino/Topo/releases/latest" target="_blank" rel="noopener" data-i18n>⤓ Get Topo for this computer</a>
+                        </div>
+                        <div class="landing-chips-note"><span data-i18n>An installer for Windows, Mac and Linux, or a folder to open in a browser. It works with no internet, and your networks stay on this computer.</span> <span id="landingOfflinePick"></span></div>
                     </div>
 
 

@@ -2730,6 +2730,12 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 }
 .landing-chip.accent { border-color: var(--accent-dim); color: var(--accent); background: var(--accent-faint); }
 .landing-chips-note { margin-top: 10px; color: var(--text-muted); font-size: 11px; }
+/* Topo to keep on this computer (js/library.js offlineOffer): after the
+   starting points on a first visit, under the saved networks after that. */
+.landing-offline { order: 3; text-align: center; max-width: 34rem; }
+#landing.has-saved .landing-offline { order: 5; }
+.landing-offline-lbl { color: var(--text-muted); font-size: 12px; margin-bottom: 9px; }
+a.landing-chip { display: inline-flex; align-items: center; text-decoration: none; }
 
 /* The shelf sits above the saved networks: it is the reason this visitor is
    here, and it is the only section with a deadline on it. */
