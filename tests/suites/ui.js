@@ -53,7 +53,7 @@ window.addEventListener('load', () => { setTimeout(() => {
 
   const classes = media.map(m => {
     const l = state.links.find(x => x.medium === m);
-    const el = document.getElementById('ui-link-' + l.id);
+    const el = document.getElementById('ui-flow-' + l.id);   // the moving twin (drawTraceFlow, js/ui.js)
     return el ? [...el.classList].find(c => c.startsWith('flow-')) : 'MISSING';
   });
   ok('every medium animates', classes.every(Boolean) && !classes.includes('MISSING'), classes.join(', '));
@@ -65,7 +65,7 @@ window.addEventListener('load', () => { setTimeout(() => {
   // (covered by wave.js), so it legitimately reports animation-name: none.
   const styles = media.filter(m => m !== 'wireless').map(m => {
     const l = state.links.find(x => x.medium === m);
-    const cs = getComputedStyle(document.getElementById('ui-link-' + l.id));
+    const cs = getComputedStyle(document.getElementById('ui-flow-' + l.id));
     return `${m}: dash=[${cs.strokeDasharray}] ${cs.animationName} ${cs.animationDuration}`;
   });
   const durations = styles.map(s => s.match(/([\d.]+)s$/)[1]);

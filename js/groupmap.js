@@ -924,7 +924,7 @@ function gmDropLabel(pt, text, cls) {
     cue.appendChild(label);
     document.getElementById('layer-nodes').appendChild(cue);
     let width = 20 + text.length * 6.5;
-    try { const bb = label.getBBox(); if (bb.width) width = 20 + bb.width; } catch (e) { /* not laid out */ }
+    try { const bb = measuredTextBox(label); if (bb.width) width = 20 + bb.width; } catch (e) { /* not laid out */ }
     pill.setAttribute('width', String(Math.round(width)));
 }
 
@@ -957,12 +957,37 @@ function drawPairDropCue(drop) {
 let _gmLast = { reach: null, qm: null, rollup: new Map() };
 const GM_TAB_TOGGLE_W = 16;   // the room the ▾ takes at a frame tab's left end
 
-function drawGroupFrames(view) {
+// reuse (a drag step, redrawGroupOverlay): when the frames are the same
+// groups with the same words as those drawn, they are moved where they are,
+// not drawn anew. Taking the layer's elements out and putting new ones in sent
+// WebKitGTK (the Linux desktop app) through a layout of the whole drawing on
+// every step, 55 ms at 400 devices; moving them costs nothing.
+const gmFrameKey = (group, words, tip) => JSON.stringify([group.id, group.kind || '', words, tip, t('Collapse')]);
+function placeGroupFrame(g, rect) {
+    const box = g.firstElementChild;
+    if (box) { box.setAttribute('x', rect.x); box.setAttribute('y', rect.y); box.setAttribute('width', rect.w); box.setAttribute('height', rect.h); }
+    const tab = g.querySelector(':scope > .grp-tab'), toggle = g.querySelector(':scope > .grp-toggle');
+    if (tab) tab.setAttribute('transform', `translate(${rect.x + 14}, ${rect.y})`);
+    if (toggle) toggle.setAttribute('transform', `translate(${rect.x + 25}, ${rect.y})`);
+    // What the last step's drop cue lit (drawGroupDropCue) is this step's to say again.
+    g.classList.remove('grp-drop', 'grp-drop-out');
+}
+function drawGroupFrames(view, reuse) {
     const layer = document.getElementById('layer-groups');
     if (!layer) return;
-    layer.innerHTML = '';
-    if (!view) return;
+    if (!view) { layer.innerHTML = ''; return; }
     const counts = new Map(view.frames.map((f) => [f.group.id, f.members.length]));
+    const words = (group) => `${groupLabel(group)} · ${counts.get(group.id)}`;
+    const tipOf = (group) => `${groupPath(group)}\n${devicesText(counts.get(group.id))}\n${t('Click to select its devices.')}`;
+    if (reuse) {
+        const kids = layer.children;
+        const keys = view.frames.map(({ group }) => gmFrameKey(group, words(group), tipOf(group)));
+        if (kids.length === keys.length && keys.every((k, i) => kids[i]._gmKey === k)) {
+            view.frames.forEach(({ rect }, i) => placeGroupFrame(kids[i], rect));
+            return;
+        }
+    }
+    layer.innerHTML = '';
     view.frames.forEach(({ group, rect }) => {
         const g = gmEl('g', { class: 'grp-frame', 'data-grp': group.id });
         g.appendChild(gmEl('rect', { x: rect.x, y: rect.y, width: rect.w, height: rect.h, rx: 14,
@@ -980,15 +1005,16 @@ function drawGroupFrames(view) {
         icon.style.pointerEvents = 'none';
         tab.appendChild(icon);
         const text = gmEl('text', { class: 'grp-tab-text', x: 24 + GM_TAB_TOGGLE_W, y: 3.5, 'font-size': 10, 'font-family': 'sans-serif', 'font-weight': 600, fill: '#334155' });
-        text.textContent = `${groupLabel(group)} · ${counts.get(group.id)}`;
+        text.textContent = words(group);
         text.style.pointerEvents = 'none';
         tab.appendChild(text);
         const tip = gmEl('title');
-        tip.textContent = `${groupPath(group)}\n${devicesText(counts.get(group.id))}\n${t('Click to select its devices.')}`;
+        tip.textContent = tipOf(group);
+        g._gmKey = gmFrameKey(group, text.textContent, tip.textContent);
         tab.appendChild(tip);
         tab.addEventListener('mousedown', (e) => pressGroup(e, groupMembers(group.id, true)));
         // A finger drags the frame as the mouse does (touchPress, js/app.js).
-        tab.addEventListener('touchstart', (e) => touchPress(e, (ev) => pressGroup(ev, groupMembers(group.id, true)), () => !!groupById(group.id)), { passive: true });
+        onMapTouch(tab, (e) => touchPress(e, (ev) => pressGroup(ev, groupMembers(group.id, true)), () => !!groupById(group.id)));
         g.appendChild(tab);
         // Over the tab's left end, but not in it (see gmToggle).
         const toggle = gmToggle(group.id, false);
@@ -997,7 +1023,7 @@ function drawGroupFrames(view) {
         layer.appendChild(g);
         // Sized to the words once they are laid out; a guess where they cannot be.
         let width = 46 + text.textContent.length * 6;
-        try { const bb = text.getBBox(); if (bb.width) width = 46 + bb.width; } catch (e) { /* not laid out */ }
+        try { const bb = measuredTextBox(text); if (bb.width) width = 46 + bb.width; } catch (e) { /* not laid out */ }
         pill.setAttribute('width', String(Math.round(width)));
     });
 }
@@ -1167,7 +1193,7 @@ function drawGroupFolds(view, ctx) {
         // the window's mouseup (js/app.js), as it does for a device's drag.
         g.addEventListener('mousedown', (event) => pressFold(event, group, members));
         // And a finger's, past the tap margin (touchPress, js/app.js).
-        g.addEventListener('touchstart', (e) => touchPress(e, (ev) => pressFold(ev, group, members), () => !!groupById(group.id)), { passive: true });
+        onMapTouch(g, (e) => touchPress(e, (ev) => pressFold(ev, group, members), () => !!groupById(group.id)));
         g.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); });   // no cable from a group
         lNodes.appendChild(g);
         // The ▸ on the card's top-left corner, beside the node rather than in
@@ -1258,7 +1284,7 @@ function redrawGroupOverlay() {
     document.querySelectorAll('#layer-links > .grp-drawn, #layer-nodes > .grp-drawn, #layer-nodes .host-drop-ring, #layer-nodes .pair-drop-ring').forEach((el) => el.remove());
     const view = gmDropFrames(groupMapNow());
     const ctx = { reach: _gmLast.reach, qm: _gmLast.qm, diag: null };
-    drawGroupFrames(view);
+    drawGroupFrames(view, true);
     drawGroupEdges(view, ctx);
     drawGroupFolds(view, ctx);
     drawGroupDropCue();

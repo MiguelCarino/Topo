@@ -11,16 +11,19 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"carino.systems/topo/server/internal/api"
 	"carino.systems/topo/server/internal/auth"
+	"carino.systems/topo/server/internal/backup"
 	"carino.systems/topo/server/internal/config"
 	"carino.systems/topo/server/internal/hub"
 	"carino.systems/topo/server/internal/mail"
 	"carino.systems/topo/server/internal/notify"
 	"carino.systems/topo/server/internal/platform"
+	"carino.systems/topo/server/internal/selfcert"
 	"carino.systems/topo/server/internal/store"
 	"carino.systems/topo/server/web"
 )
@@ -37,9 +40,19 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func
 	if err := platform.EnsureDir(cfg.DataDir); err != nil {
 		return fmt.Errorf("data folder %s: %w", cfg.DataDir, err)
 	}
-	key, err := platform.ServerKey(cfg.DataDir)
+	key, err := loadServerKey(cfg)
 	if err != nil {
 		return fmt.Errorf("server key: %w", err)
+	}
+	// The default backup folder lives in the data folder (never a mount
+	// point), so it is made here; a folder named in TOPO_BACKUP_FOLDERS is
+	// the installer's to make (amendment 13).
+	if cfg.BackupFoldersDefaulted {
+		for _, f := range cfg.BackupFolders {
+			if err := platform.EnsureDir(f); err != nil {
+				return fmt.Errorf("backup folder %s: %w", f, err)
+			}
+		}
 	}
 
 	st, err := store.Open(cfg.DataDir, nil)
@@ -72,6 +85,11 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func
 	// The certificate is loaded before anything else can fail late: a pair
 	// that is missing or unreadable stops the start.
 	var cr *certReloader
+	if cfg.TLSSelf {
+		if err := ensureSelfCert(cfg, log, time.Now()); err != nil {
+			return err
+		}
+	}
 	if cfg.TLSCert != "" {
 		if cr, err = newCertReloader(cfg.TLSCert, cfg.TLSKey, log); err != nil {
 			return err
@@ -106,13 +124,15 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func
 
 	baseCtx, cancelBase := context.WithCancel(context.Background())
 	defer cancelBase()
-	handler := api.New(api.Deps{Cfg: cfg, Store: st, App: app, Log: log, Version: version, Build: build, Key: key, Wake: worker.Wake, Hub: events})
+	backups := newBackupEngine(cfg, st, key, log, worker.Wake)
+	handler := api.New(api.Deps{Cfg: cfg, Store: st, App: app, Log: log, Version: version, Build: build, Key: key, Wake: worker.Wake, Hub: events, Backups: backups})
 
 	// The mail worker and housekeeping stop with the base context; serve
 	// waits for them (an in-flight send finishes) before closing the store.
 	var bg sync.WaitGroup
-	bg.Add(2)
+	bg.Add(3)
 	go func() { defer bg.Done(); worker.Run(baseCtx) }()
+	go func() { defer bg.Done(); backups.Run(baseCtx) }()
 	go func() { defer bg.Done(); housekeeping(baseCtx, st, handler, cfg, log) }()
 	defer func() { cancelBase(); bg.Wait() }()
 	srv := &http.Server{
@@ -220,4 +240,51 @@ func housekeeping(ctx context.Context, st *store.Store, h *api.Server, cfg *conf
 		case <-t.C:
 		}
 	}
+}
+
+// loadServerKey reads server.key: TOPO_SERVER_KEY when set (never created
+// there, amendment 21), else <data>/server.key (made at the first start).
+func loadServerKey(cfg *config.Config) ([]byte, error) {
+	if cfg.ServerKeyPath != "" {
+		return platform.ServerKeyAt(cfg.ServerKeyPath, false)
+	}
+	return platform.ServerKey(cfg.DataDir)
+}
+
+// ensureSelfCert makes or keeps the self-signed certificate of
+// TOPO_TLS_SELF (D113) and logs its fingerprint, which people compare with
+// what their browser shows before they accept it.
+func ensureSelfCert(cfg *config.Config, log *slog.Logger, now time.Time) error {
+	hostname, _ := os.Hostname()
+	extra := append([]string{cfg.PublicURL.Hostname()}, cfg.AllowedHosts...)
+	lan := selfcert.LANAddresses()
+	if len(lan) == 0 && wildcardListen(cfg.Listen) {
+		log.Warn("self-signed certificate: no LAN address found (a sandbox without AF_NETLINK?); other PCs reaching this server by IP will see a name mismatch")
+	}
+	res, err := selfcert.Ensure(filepath.Dir(cfg.TLSCert), selfcert.Default(hostname, lan, extra...), now)
+	if err != nil {
+		return fmt.Errorf("self-signed certificate in %s: %w", filepath.Dir(cfg.TLSCert), err)
+	}
+	if res.Made {
+		log.Info("made a self-signed certificate", "why", res.Why, "until", res.NotAfter.Format("2006-01-02"))
+	}
+	log.Info("self-signed certificate: compare this fingerprint with the one the browser shows before accepting it", "sha256", res.Fingerprint)
+	return nil
+}
+
+// wildcardListen reports a listen address on every interface.
+func wildcardListen(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	return host == "" || host == "0.0.0.0" || host == "::"
+}
+
+// newBackupEngine builds the backup engine (step 5b).
+func newBackupEngine(cfg *config.Config, st *store.Store, key []byte, log *slog.Logger, wake func()) *backup.Engine {
+	return backup.New(backup.Options{
+		Store: st, Key: key, Origin: cfg.Origin(), Roots: cfg.BackupFolders,
+		Debounce: cfg.BackupDebounce, Tick: cfg.BackupTick, Log: log.With("part", "backups"), Wake: wake,
+	})
 }

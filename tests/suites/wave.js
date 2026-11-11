@@ -15,7 +15,7 @@ window.addEventListener('load', () => { setTimeout(() => {
   // Speeds must be unchanged from the previous design.
   const EXPECT = { utp:40, fiber:112.5, vpn:35.556, powerline:22.5 };
   Object.entries(EXPECT).forEach(([m, want]) => {
-    const el = document.getElementById('ui-link-' + state.links.find(l=>l.medium===m).id);
+    const el = document.getElementById('ui-flow-' + state.links.find(l=>l.medium===m).id);
     const cs = getComputedStyle(el);
     const off = Math.abs(parseFloat(getComputedStyle(el).getPropertyValue('stroke-dashoffset')) || 0);
     const dur = parseFloat(cs.animationDuration);
@@ -31,15 +31,36 @@ window.addEventListener('load', () => { setTimeout(() => {
   });
 
   // Patterns must all differ from each other.
-  const dashes = media.filter(m=>m!=='wireless').map(m => getComputedStyle(document.getElementById('ui-link-'+state.links.find(l=>l.medium===m).id)).strokeDasharray);
+  const dashes = media.filter(m=>m!=='wireless').map(m => getComputedStyle(document.getElementById('ui-flow-'+state.links.find(l=>l.medium===m).id)).strokeDasharray);
   ok('cable patterns are all distinct', new Set(dashes).size === dashes.length, dashes.join(' | '));
+
+  // ---- The trace's own layer (drawTraceFlow, js/ui.js) ----
+  // What moves is drawn under the map on an SVG of its own, so a moving dash
+  // repaints that layer and not every device on the map each frame.
+  const layer = document.getElementById('traceLayer'), map = document.getElementById('networkCanvas');
+  const wired = state.links.filter(l => l.medium !== 'wireless');
+  ok('every traced cable has its moving twin on the trace layer',
+     wired.every(l => { const t = document.getElementById('ui-flow-' + l.id); return t && layer.contains(t); }));
+  ok('the trace layer is under the map and takes no pointer',
+     layer.nextElementSibling === map && getComputedStyle(layer).pointerEvents === 'none' && getComputedStyle(layer).willChange === 'transform');
+  ok('nothing in the map itself moves', [...map.querySelectorAll('*')].every(e => getComputedStyle(e).animationName === 'none') && !map.querySelector('animate'));
+  const cable = document.getElementById('ui-link-' + wired[0].id);
+  ok('the cable on the map is still there to press, its ink hidden',
+     getComputedStyle(cable).stroke === 'rgba(0, 0, 0, 0)' && cable.getAttribute('stroke') === '#f59e0b');
+  ok('the layer follows the camera',
+     document.getElementById('traceWorkspace').getAttribute('transform') === document.getElementById('workspace').getAttribute('transform'));
+  const shape = cable.getAttribute('d');
+  applyLinkGeometry(cable, { src: { x: 1, y: 2 }, ctrl: { x: 3, y: 4 }, tgt: { x: 5, y: 6 } });
+  ok('a dragged cable moves its twin', document.getElementById('ui-flow-' + wired[0].id).getAttribute('d') === cable.getAttribute('d'));
+  [cable, document.getElementById('ui-flow-' + wired[0].id)].forEach(e => e.setAttribute('d', shape));
 
   // ---- The ))) waves ----
   const wl = state.links.find(l => l.medium === 'wireless');
   const waves = [...document.querySelectorAll('.flow-wave')];
   ok('wireless link emits a wave overlay', waves.length === 1, 'found ' + waves.length);
   const tp = waves[0] && waves[0].querySelector('textPath');
-  ok('waves ride the link path', tp && tp.getAttribute('href') === '#ui-link-' + wl.id, tp && tp.getAttribute('href'));
+  ok('waves ride the link path', tp && tp.getAttribute('href') === '#ui-flow-' + wl.id
+     && document.getElementById('ui-flow-' + wl.id).getAttribute('d') === document.getElementById('ui-link-' + wl.id).getAttribute('d'), tp && tp.getAttribute('href'));
   ok('waves are ) arcs', tp && /^\)/.test(tp.textContent.trim()), JSON.stringify(tp && tp.textContent.slice(0,10)));
   ok('waves actually laid out (non-zero length)', waves[0].getComputedTextLength() > 0, String(waves[0] && waves[0].getComputedTextLength().toFixed(1)));
   ok('wave overlay does not eat clicks', getComputedStyle(waves[0]).pointerEvents === 'none');

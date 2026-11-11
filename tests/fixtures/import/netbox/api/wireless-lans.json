@@ -1,0 +1,3 @@
+{"count": 1, "next": null, "previous": null, "results": [
+ {"id": 2, "url": "https://netbox.example.test/api/wireless/wireless-lans/2/", "ssid": "HotelMar-Guest", "vlan": {"id": 1, "vid": 100}, "auth_type": {"value": "wpa-personal"}, "auth_psk": "welcome2026", "status": {"value": "active"}}
+]}

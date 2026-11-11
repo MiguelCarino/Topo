@@ -1,0 +1,5 @@
+device,name,label,type,enabled,mgmt_only,mode,untagged_vlan,tagged_vlans,lag,poe_mode,poe_type,description
+edge-rtr,ether1,,1000base-t,true,false,,,,,,,WAN
+edge-rtr,ether2,,1000base-t,true,false,tagged,10,"10,20",,,,
+hv-01,eno1,,1000base-t,true,false,,,,,,,
+lab-pc,eth0,,1000base-t,true,false,,,,,,,

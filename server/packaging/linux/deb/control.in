@@ -1,0 +1,15 @@
+Package: topo-server
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: Carino Systems <miguel.carino1994@outlook.com>
+Section: net
+Priority: optional
+Depends: systemd, adduser
+Homepage: https://topo.carino.systems
+Installed-Size: @SIZE@
+Description: Topo server: network documentation with email sign-in and encrypted sync
+ The Topo server serves the Topo app and its API: email sign-in, sites with
+ roles and invitations, end-to-end encrypted sync and backups. One static
+ binary; data in /var/lib/topo; settings in /etc/topo/topo.env. The service
+ is not started on install: edit /etc/topo/topo.env, then
+ systemctl enable --now topo-server.

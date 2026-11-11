@@ -213,6 +213,20 @@ jobs:
           (cd desktop && tauri icon ../logo.svg -o src-tauri/icons)
           node desktop/set-version.mjs "$V"
 
+      # "This PC as the server" (D113): tauri.conf.json bundles topo-server
+      # (bundle.externalBin), and tauri-build refuses to compile until the
+      # file for the target exists, so it is built first, for the same target.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Built-in server
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: ./desktop/sidecar.sh "$TARGET"
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -222,3 +236,24 @@ jobs:
           releaseId: ${{ needs.release.outputs.release_id }}
           args: ${{ matrix.args }}
           retryAttempts: 1
+
+      # "Use this PC as the server" (D125): the one package carries the unit,
+      # the sysusers file and the polkit action, and enables nothing.
+      - name: Check the Linux packages
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y rpm cpio libxml2-utils
+          b=desktop/src-tauri/target/release/bundle
+          tests/desktop-packages.sh "$(ls $b/rpm/*.rpm | head -1)" "$(ls $b/deb/*.deb | head -1)"
+
+      # The NSIS installer cannot be built on the Linux machine the rest is
+      # made on, so its server tick box is checked here: a silent install
+      # with /SERVER on this throwaway runner, a reinstall, an uninstall.
+      - name: Check the Windows installer's server service
+        if: matrix.name == 'windows-x64'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          pwsh -File tests/desktop-installer-windows.ps1 -Setup $setup.FullName

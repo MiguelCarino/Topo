@@ -1,0 +1,17 @@
+{"count": 3, "next": null, "previous": null, "results": [
+ {"id": 7, "url": "https://netbox.example.test/api/dcim/devices/7/", "display": "sw-floor2", "name": "sw-floor2",
+  "device_type": {"id": 3, "url": "https://netbox.example.test/api/dcim/device-types/3/", "display": "USW-24-PoE", "manufacturer": {"id": 2, "name": "Ubiquiti", "slug": "ubiquiti"}, "model": "USW-24-PoE", "slug": "usw-24-poe"},
+  "role": {"id": 1, "name": "Switch", "slug": "switch"}, "platform": null, "serial": "F4E2C6000001", "asset_tag": null,
+  "site": {"id": 1, "name": "Hotel Mar", "slug": "hotel-mar"}, "location": {"id": 4, "name": "Floor 2"}, "rack": null, "position": null, "face": null,
+  "status": {"value": "active", "label": "Active"}, "primary_ip4": {"id": 20, "address": "10.0.2.2/24"}, "cluster": null,
+  "comments": "", "description": "", "tags": [{"id": 1, "name": "Floor", "slug": "floor"}], "custom_fields": {"room_count": 14, "snmp_community": "public"}},
+ {"id": 8, "url": "https://netbox.example.test/api/dcim/devices/8/", "display": "ap-201", "name": "ap-201",
+  "device_type": {"id": 4, "manufacturer": {"id": 2, "name": "Ubiquiti"}, "model": "U6-Lite"},
+  "role": {"id": 2, "name": "Access Point", "slug": "ap"}, "platform": null, "serial": "", "asset_tag": "HM-201",
+  "site": {"id": 1, "name": "Hotel Mar"}, "location": {"id": 5, "name": "Room 201"}, "rack": null,
+  "status": {"value": "active", "label": "Active"}, "primary_ip4": null, "comments": "", "description": "Ceiling", "tags": [], "custom_fields": {"room_count": null, "snmp_community": null}},
+ {"id": 9, "url": "https://netbox.example.test/api/dcim/devices/9/", "display": "tv-201", "name": "tv-201",
+  "device_type": {"id": 5, "manufacturer": {"id": 3, "name": "Samsung"}, "model": "HG43"},
+  "role": {"id": 3, "name": "Smart TV", "slug": "tv"}, "site": {"id": 1, "name": "Hotel Mar"}, "location": {"id": 5, "name": "Room 201"},
+  "status": {"value": "planned", "label": "Planned"}, "tags": [], "custom_fields": {}}
+]}

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Topo server MSI (WiX Toolset v4 or later). A recipe: it has not been built
+  here (no WiX and no Windows on the build machine); build-msi.ps1 builds it
+  on Windows. Not signed (docs/SERVER.md, "Signing").
+
+  It installs:
+    - topo-server.exe in Program Files\Topo;
+    - the Windows service TopoServer: automatic (delayed) start, as
+      NT AUTHORITY\LocalService, serve with the settings file C:\ProgramData\Topo\topo.conf;
+      not started by the installer (the settings come first);
+    - C:\ProgramData\Topo (the data folder) for Local Service, SYSTEM and
+      Administrators only, with a first topo.conf that is never overwritten
+      or removed.
+  Uninstall stops and removes the service and the program; the data and
+  topo.conf stay.
+
+  Variables (wix build -d): Version (MAJOR.MINOR.PATCH), Exe (path to
+  topo-server-windows-<arch>.exe), Conf (path to the topo.conf template).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="Topo server"
+           Manufacturer="Carino Systems"
+           Version="$(var.Version)"
+           UpgradeCode="6f3d1a4e-2b7c-4d59-9a1e-7c0b5e2f8a31"
+           Scope="perMachine"
+           Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer Topo server is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Topo" />
+    </StandardDirectory>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATAFOLDER" Name="Topo" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="Server" Directory="INSTALLFOLDER">
+      <Component Id="ServerExe" Guid="*">
+        <File Id="TopoServerExe" Source="$(var.Exe)" Name="topo-server.exe" KeyPath="yes" />
+        <ServiceInstall Id="TopoServerService"
+                        Name="TopoServer"
+                        DisplayName="Topo server"
+                        Description="Topo: network documentation with email sign-in and end-to-end encrypted sync."
+                        Type="ownProcess"
+                        Start="auto"
+                        Account="NT AUTHORITY\LocalService"
+                        ErrorControl="normal"
+                        Arguments="serve --config &quot;[DATAFOLDER]topo.conf&quot;">
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="5"
+                              ResetPeriodInDays="1" />
+          <ServiceConfig DelayedAutoStart="yes" OnInstall="yes" OnReinstall="yes" />
+        </ServiceInstall>
+        <!-- Not started on install; stopped before an upgrade or removal. -->
+        <ServiceControl Id="TopoServerControl" Name="TopoServer" Stop="both" Remove="uninstall" Wait="yes" />
+        <util:EventSource Name="TopoServer" Log="Application"
+                          EventMessageFile="%SystemRoot%\System32\EventCreate.exe" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Data" Directory="DATAFOLDER">
+      <Component Id="DataFolder" Guid="b8a5d0c2-4e61-4f3a-8d27-1c9e6a0f5b44" Permanent="yes">
+        <!-- The folder's access is set by LockDataFolder below, not by
+             util:PermissionEx: WiX's SecureObjects adds entries to the
+             inherited access list without protecting it, so BUILTIN\Users
+             would keep reading server.key and topo.db. -->
+        <CreateFolder />
+      </Component>
+      <Component Id="ConfFile" Guid="0c47e9b1-73d2-4a8e-b6f5-29d3e1a7c860" NeverOverwrite="yes" Permanent="yes">
+        <File Id="TopoConf" Source="$(var.Conf)" Name="topo.conf" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- No inherited access, exactly as `topo-server service install` does:
+         Local Service may change, SYSTEM and Administrators have full
+         control, nobody else can read (icacls /inheritance:r). The trailing
+         "." keeps the folder's backslash from escaping the closing quote. -->
+    <SetProperty Id="LockDataFolder" Sequence="execute" Before="LockDataFolder"
+                 Value="&quot;[System64Folder]icacls.exe&quot; &quot;[DATAFOLDER].&quot; /inheritance:r /grant:r *S-1-5-19:(OI)(CI)M /grant:r *S-1-5-18:(OI)(CI)F /grant:r *S-1-5-32-544:(OI)(CI)F" />
+    <CustomAction Id="LockDataFolder" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="LockDataFolder" After="CreateFolders" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
+
+    <Feature Id="Main" Title="Topo server">
+      <ComponentGroupRef Id="Server" />
+      <ComponentGroupRef Id="Data" />
+    </Feature>
+  </Package>
+</Wix>

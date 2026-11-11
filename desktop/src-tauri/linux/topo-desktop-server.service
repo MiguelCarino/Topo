@@ -1,0 +1,73 @@
+# Topo server as a system service, shipped DISABLED in the Topo desktop
+# app's rpm and deb (/usr/lib/systemd/system/topo-desktop-server.service,
+# docs/SCOPE.md D125). Nothing enables it on install. When the person answers
+# "Use this PC as the server" in the app, the app runs, through pkexec,
+#
+#   /usr/bin/topo-desktop-server service install --start --config FILE
+#
+# which makes the topo user (sysusers), writes
+# /etc/topo/topo-desktop-server.conf (root:topo 0640) and runs
+# `systemctl enable --now topo-desktop-server`. From then on it starts with
+# the computer, whether or not anyone signs in or opens Topo.
+#
+# It is server/packaging/linux/topo-server.service (checked by
+# server/packaging/installers_test.go) with three differences marked
+# "desktop": Conflicts=topo-server.service, the binary the app bundles, and
+# --config instead of EnvironmentFile.
+[Unit]
+Description=Topo server (network documentation, email sign-in, encrypted sync)
+# desktop: the server's own rpm/deb (server/packaging/linux) runs the same server on
+# the same data: never both at once.
+Conflicts=topo-server.service
+Documentation=https://topo.carino.systems
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# packaged: a fixed user (topo.sysusers), not DynamicUser
+User=topo
+Group=topo
+StateDirectory=topo
+StateDirectoryMode=0700
+Environment=TOPO_DATA=%S/topo
+# desktop: the settings file the app writes through pkexec
+ExecStart=/usr/bin/topo-desktop-server serve --config /etc/topo/topo-desktop-server.conf
+Restart=on-failure
+RestartSec=5
+# SIGTERM: the server stops taking connections, ends live streams, lets
+# requests finish (45 s at most) and closes the database cleanly.
+KillMode=mixed
+TimeoutStopSec=60
+
+# Hardening. The server needs the network, its state folder and nothing else.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+# AF_NETLINK: listing this machine's addresses (TOPO_TLS_SELF puts them
+# in its certificate; without it the list is empty).
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

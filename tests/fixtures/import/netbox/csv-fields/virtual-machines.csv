@@ -1,0 +1,3 @@
+name,status,role,site,cluster,platform,comments
+ris-01,active,Server,Clinic North,PVE,Ubuntu 24.04,RIS application
+web-ct,active,Container,Clinic North,PVE,,

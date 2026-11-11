@@ -15,6 +15,10 @@ tauri-build = { version = "2.7", features = [] }
 [dependencies]
 tauri = { version = "2.12", features = [] }
 tauri-plugin-opener = "2.7"
+# Already in Cargo.lock through tauri (no new crate): the built-in server's
+# settings file and command arguments (src/server.rs).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [profile.release]
 strip = true

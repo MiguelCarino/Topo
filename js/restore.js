@@ -41,7 +41,9 @@ const RESTORE_REASONS = ['Before opening {file}', 'Before opening a file', 'Befo
     // A merge (js/mergeapply.js): {file} a file's name, {name} another network's.
     'Before merging {file}', 'Before merging a link', 'Before merging a binder', 'Before merging {name}',
     // A merge from a Topo server, reviewed (js/serversync.js).
-    'Before merging from the server'];
+    'Before merging from the server',
+    // A server backup restored (js/backupfile.js, D107).
+    'Before restoring a backup'];
 
 // card id -> [meta], oldest first: what this tab knows of the points.
 const _restore = new Map();
@@ -423,9 +425,20 @@ function downloadRestoreBackup(cardIds) {
 // The same envelope exportJsonFile() writes, for a stored document.
 // ident: its { rev, base, prior } (js/revisions.js), when it has one.
 function downloadNetworkJson(name, id, updated, doc, day, ident) {
+    const f = networkJsonFile(name, id, updated, doc, day, ident);
+    // A back-up folder picked in Settings takes it (js/backupdir.js); else the download.
+    if (typeof saveBackupJson === 'function') saveBackupJson(f.payload, f.fileName);
+    else downloadJson(f.payload, f.fileName);
+}
+// The envelope and its file name, also for a server's readable copy
+// (js/serversync.js) and the back-up folder (js/backupdir.js).
+function networkJsonFile(name, id, updated, doc, day, ident) {
     const rest = stripIdentity(cloneData(doc));
     const out = Object.assign(rest.v !== undefined ? { v: rest.v } : {}, { id, updated }, typeof revisionFields === 'function' ? revisionFields(ident) : {}, rest);
-    downloadJson(Object.assign({ kind: 'nettopology', version: 1 }, name ? { name } : {}, { doc: out }), topoFileName({ org: (doc && doc.report && typeof doc.report.client === 'string' && doc.report.client) || '', site: name, date: day }, 'json'));
+    return {
+        payload: Object.assign({ kind: 'nettopology', version: 1 }, name ? { name } : {}, { doc: out }),
+        fileName: topoFileName({ org: (doc && doc.report && typeof doc.report.client === 'string' && doc.report.client) || '', site: name, date: day }, 'json')
+    };
 }
 
 // Drop a deleted card's points: the ones this tab lists and, on disk, every

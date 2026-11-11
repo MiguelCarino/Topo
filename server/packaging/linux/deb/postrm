@@ -1,0 +1,8 @@
+#!/bin/sh
+# topo-server postrm. The data in /var/lib/topo is never deleted, not even
+# on purge: it holds the networks and the server key (docs/SERVER.md).
+set -e
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+exit 0

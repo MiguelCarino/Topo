@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Topo server LaunchDaemon (/Library/LaunchDaemons/systems.carino.topo-server.plist),
+  installed by the pkg (build-pkg.sh). It runs as the _topo user the pkg makes,
+  with its settings in /Library/Application Support/Topo/topo.conf and its data
+  in /Library/Application Support/Topo/data. Build-tested only (no Mac here).
+
+    sudo launchctl bootstrap system /Library/LaunchDaemons/systems.carino.topo-server.plist
+    sudo launchctl bootout system/systems.carino.topo-server
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>systems.carino.topo-server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/topo-server</string>
+        <string>serve</string>
+        <string>--config</string>
+        <string>/Library/Application Support/Topo/topo.conf</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TOPO_DATA</key>
+        <string>/Library/Application Support/Topo/data</string>
+    </dict>
+    <key>UserName</key>
+    <string>_topo</string>
+    <key>GroupName</key>
+    <string>_topo</string>
+    <key>Umask</key>
+    <integer>63</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ExitTimeOut</key>
+    <integer>60</integer>
+    <key>StandardOutPath</key>
+    <string>/Library/Logs/Topo/topo-server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Library/Logs/Topo/topo-server.log</string>
+</dict>
+</plist>

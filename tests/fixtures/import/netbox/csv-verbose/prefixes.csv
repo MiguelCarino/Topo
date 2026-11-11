@@ -1,0 +1,4 @@
+ID,Prefix,Status,Children,VRF,Utilization,Tenant,Site,VLAN,Role,Description
+401,192.168.10.0/24,Active,4,,10%,,Oficina Centro,Data (10),Staff,Oficinas
+402,192.168.20.0/24,Active,0,,0%,,Oficina Centro,20,,
+403,203.0.113.0/29,Active,1,,12%,,Oficina Centro,,,WAN

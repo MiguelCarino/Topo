@@ -177,7 +177,7 @@ window.addEventListener('load', () => { setTimeout(() => {
     select(null, null);
     open('showcase');
     state.settings.traceMode = true; select('oap', 'node'); renderCanvasOnly();
-    ok('traced, a 6 GHz link still emits the ))) arcs', !!document.querySelector('#layer-links text.flow-wave') && dashOf('k22') === FLOW_DASH.wireless);
+    ok('traced, a 6 GHz link still emits the ))) arcs', !!document.querySelector('#traceLayer text.flow-wave') && dashOf('k22') === FLOW_DASH.wireless);
     state.settings.traceMode = false; select(null, null); renderCanvasOnly();
 
     // ---- 5: the CSV round trip ----

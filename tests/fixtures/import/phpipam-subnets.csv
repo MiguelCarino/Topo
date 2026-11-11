@@ -1,0 +1,5 @@
+Section,Subnet,Mask,Description,VLAN,VRF,Master subnet,Requests,Hosts check,Discover
+Clinica Norte,192.168.40.0,24,Consultorios,40 - Consultorios,,,0,0,0
+Clinica Norte,192.168.41.0,255.255.255.0,Imagenologia,41,,,0,0,0
+Clinica Norte,10.40.0.0,22,Servidores,,,,0,0,0
+Clinica Norte,192.168.300.0,24,Mal escrito,,,,0,0,0

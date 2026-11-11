@@ -420,6 +420,7 @@ func (s *Store) Housekeep(ctx context.Context, now int64, l HousekeepLimits) ([]
 			{"DELETE FROM declared WHERE at < ?", []any{now - day}},
 			{"DELETE FROM invite_sends WHERE at < ?", []any{now - day}},
 			{"DELETE FROM outbox WHERE sent = -2 AND created < ?", []any{now - 3600*1000}},
+			{"DELETE FROM oauth_states WHERE created < ?", []any{now - 10*60*1000}},
 			{"DELETE FROM outbox WHERE sent IS NOT NULL AND sent <> -2 AND created < ?", []any{now - 7*day}},
 			// A file no waiting row names any more (its rows were deleted
 			// with an invite or a site, or the worker stopped between the

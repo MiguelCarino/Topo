@@ -21,7 +21,7 @@
 'use strict';
 
 const C = window.TopoServerCrypto;
-const _hooks = { force: false, fetch: null, EventSource: null, BroadcastChannel: undefined, locks: undefined, now: () => Date.now(), origin: null };
+const _hooks = { force: false, fetch: null, EventSource: null, BroadcastChannel: undefined, locks: undefined, now: () => Date.now(), origin: null, navigate: null };
 const S = {
     on: false,          // a Topo server served this page (or a test said so)
     status: 'off',      // off | checking | insecure | unreachable | signed-out | needs-keys | locked | ready
@@ -103,6 +103,7 @@ function takeArrival() {
     if (!a || !ui()) return;
     if (a.kind === 'signin') ui().linkArrived(a.token);
     else if (a.kind === 'invite') ui().inviteArrived(a.token);
+    else if (a.kind === 'backup-connect') ui().backupConnectArrived(a.token);
 }
 
 // load() (js/app.js) hands the fragment over before anything else reads it.
@@ -110,7 +111,9 @@ function takeArrival() {
 // false without the marker, so a static page reads it exactly as before.
 function serverHashToken(hash) {
     if (!serverMarked() || typeof hash !== 'string') return false;
-    const m = /^(signin|invite)=([A-Za-z0-9_.-]{8,200})$/.exec(hash);
+    // '#backup-connect=': back from Google or Microsoft after Connect in
+    // Account, Backups (D110); the sign-in answer, URL-encoded.
+    const m = /^(signin|invite)=([A-Za-z0-9_.-]{8,200})$/.exec(hash) || /^(backup-connect)=([A-Za-z0-9_.%~+-]{1,9000})$/.exec(hash);
     if (!m) return false;
     S.arrival = { kind: m[1], token: m[2] };
     // Typed over a page already open: handled now, not at the next boot.

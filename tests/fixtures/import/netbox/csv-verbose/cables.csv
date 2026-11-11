@@ -1,0 +1,5 @@
+ID,Label,Device A,Termination A,Device B,Termination B,Status,Type,Color,Length,Length unit
+201,C-001,core-sw-01,GigabitEthernet1/0/1,fw-01,internal1,Connected,CAT6,0000ff,2,Meters
+202,C-002,core-sw-01,GigabitEthernet1/0/2,ap-recepcion,eth0,Connected,CAT6,,15,Meters
+203,,core-sw-01,GigabitEthernet1/0/3,srv-files,NIC1,Connected,SMF,ffff00,,
+204,,fw-01,wan1,nowhere,eth9,Connected,CAT6,,,

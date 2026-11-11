@@ -21,9 +21,18 @@ are D51 onward there.
   provider's report attached when the client asks: that PDF is the one
   piece of network content the server reads in clear (the owner's choice,
   D97; the browser warns).
-- **What it does not do (yet):** backups of its data (step 5b/5c; until then,
-  see "Data and backups" below), installers and a server inside the desktop
-  apps (later), Postgres or blob stores (later; the settings are reserved).
+- **Backups (steps 5b, 5c):** off until the server owner turns them on in
+  the app (Account, Backups): an encrypted copy of every network to a folder
+  on the server, a WebDAV server (Nextcloud, ownCloud, Synology, QNAP),
+  S3-compatible storage, Google Drive or OneDrive, daily and after edits,
+  kept 24 hours + 7 days + 4 weeks + 12 months, checked weekly. See
+  "Backups" below.
+- **Installed how you like (5c):** a container, an rpm or deb with a systemd
+  unit, a Windows service, a macOS LaunchDaemon, or the desktop app on a PC
+  on site ("Install"). Only the Linux packages were built and inspected
+  here; the Windows and macOS installers are build-tested recipes.
+- **What it does not do (yet):** Postgres or blob stores (later; the
+  settings are reserved), signed installers.
 
 Without a server Topo works exactly as before: the same app served by any
 static host never talks to a server and shows nothing of this.
@@ -94,12 +103,17 @@ The unit runs the server as a user systemd makes for it, keeps the data in
 read-only system, only the network). `packaging/topo-server.user.service` is
 the same as a user service (data in `~/.local/share/topo`).
 
-### c) Windows and macOS
+### c) The desktop app, or the server's own packages
 
-`make cross` builds `topo-server` for Linux, macOS and Windows (amd64 and
-arm64). For now run it in a terminal with its settings in the environment or
-in a file named by `--config`; services and installers come later. Data goes to
-`%LOCALAPPDATA%\Topo` and `~/Library/Application Support/Topo`.
+For a site, the usual server is a PC with the Topo desktop app: its
+installer (Windows) or its first start (Linux, macOS) offers to make that PC
+the server, as a service that starts with the PC ("Install" below, D125).
+The server's own rpm, deb, MSI and pkg recipes are not offered to clients;
+they stay for an advanced host who builds them. `make cross` builds the bare
+`topo-server` for Linux, macOS and Windows (amd64 and arm64), to run in a
+terminal with its settings in the environment or in a file named by
+`--config`. Data then goes to `%LOCALAPPDATA%\Topo` and
+`~/Library/Application Support/Topo`.
 
 ### Commands
 
@@ -108,6 +122,12 @@ in a file named by `--config`; services and installers come later. Data goes to
     topo-server version
     topo-server setup-token      mint a new first sign-in token (only while there is no owner)
     topo-server mail-test TO     send one test email through the mail settings
+    topo-server backup-now       back up every changed network now (--check: then read
+                                 the newest backups back); refused while a running
+                                 server is backing up the same data folder
+    topo-server lan-addresses    this PC's IPv4 addresses other PCs can reach, one per line
+    topo-server service CMD      install, uninstall, start, stop, configure, status or log the
+                                 service that starts with the computer (below, "Install")
     flags: --config FILE  --static DIR  --listen ADDR
 
 ## Configuration
@@ -121,11 +141,12 @@ that holds the value (podman and docker secrets).
 
 | Key | Default | Meaning |
 |---|---|---|
-| TOPO_DATA | container `/data`; Linux `$XDG_DATA_HOME/topo` (`~/.local/share/topo`); macOS `~/Library/Application Support/Topo`; Windows `%LOCALAPPDATA%\Topo` | the data folder, made 0700: `topo.db`, `server.key`, `mail/` |
+| TOPO_DATA | container `/data`; Linux `$XDG_DATA_HOME/topo` (`~/.local/share/topo`); macOS `~/Library/Application Support/Topo`; Windows `%LOCALAPPDATA%\Topo`, as a Windows service `%ProgramData%\Topo` | the data folder, made 0700: `topo.db`, `server.key`, `mail/` |
 | TOPO_LISTEN | `127.0.0.1:7380` (container `:7380`) | the address to listen on |
 | TOPO_PUBLIC_URL | `http://<listen>` when that is loopback; required otherwise | the address people open (scheme, host, port, no path). Links in emails, the Origin check, the cookies' Secure flag and the allowed Host come from it |
 | TOPO_ALLOWED_HOSTS | | more Host header values to accept (comma separated) |
 | TOPO_TLS_CERT, TOPO_TLS_KEY | | built-in https: PEM files, read again every hour and on SIGHUP |
+| TOPO_TLS_SELF | 0 | 1: built-in https with a certificate the server signs itself, in `$TOPO_DATA/tls` (see "TLS"); not with TOPO_TLS_CERT |
 | TOPO_TRUSTED_PROXIES | | CIDRs (e.g. `127.0.0.1/32`) whose X-Forwarded-For is believed for the per-address limits |
 | TOPO_OWNER_EMAIL (\_FILE) | | the server owner (see "First sign-in") |
 | TOPO_MAIL | `smtp` when TOPO_SMTP_HOST is set, else `log` | `smtp`, `file` (one .eml per message plus `outbox.jsonl`, for tests) or `log` |
@@ -145,10 +166,17 @@ that holds the value (podman and docker secrets).
 | TOPO_NOTIFY_REVISION_MINUTES | 60 | at most one "changes on one of your sites" email per person and site in this many minutes |
 | TOPO_NOTIFY_EVENT_SECONDS | 120 | how long an event email (a report sent, a visit, someone waiting) waits and merges repeats; 0 sends at once |
 | TOPO_LOG_LEVEL, TOPO_LOG_FORMAT | info, text | `debug`/`info`/`warn`/`error`; `text` or `json`, to stderr |
+| TOPO_BACKUP_FOLDERS | `$TOPO_DATA/backups` (made at start) | the folders a "folder on the server" backup may be in, as an OS path list (`:` on Linux and macOS, `;` on Windows). Set by whoever installs the server, so an owner's session cannot make the server write anywhere else |
+| TOPO_BACKUP_DEBOUNCE | 2m | how long a network must be quiet after an edit before it is backed up (30 s after a visit; at most 15 minutes after the first edit). 0s writes at the next tick |
+| TOPO_BACKUP_TICK | 30s | how often the backup engine looks for work (1s to 1h) |
+| TOPO_SERVER_KEY | `$TOPO_DATA/server.key` | where `server.key` is. Set, the file must exist: a missing file stops the start (a new key is never made there) |
 
+The backup destination itself is not an environment setting: the server
+owner sets it in the app (D99). The keys reserved for it before 5b
+(TOPO_BACKUP_DEST, TOPO_BACKUP_SCHEDULE, TOPO_BACKUP_KEEP,
+TOPO_BACKUP_WEBDAV_\*, TOPO_BACKUP_S3_\*) are accepted and logged as ignored.
 Reserved for later steps, accepted and logged as "not yet used": TOPO_DB,
-TOPO_BLOBS, TOPO_BACKUP_DEST, TOPO_BACKUP_SCHEDULE, TOPO_BACKUP_KEEP,
-TOPO_BACKUP_WEBDAV_\*, TOPO_BACKUP_S3_\*.
+TOPO_BLOBS.
 
 The server stops at start with a clear message for: plain http on a
 non-loopback address (no TLS and no https public URL), `smtp` without a host
@@ -228,8 +256,48 @@ copy the pair somewhere it can read (a certbot deploy hook), or use
 (no ACME).
 
 A server on a LAN address without https cannot do the encryption, so it
-refuses to start; a PC on site as the server needs a certificate (a tailnet
-name, or a local CA) until a later step solves this.
+refuses to start. A PC on site without a name to get a certificate for can
+sign its own:
+
+**Self-signed (`TOPO_TLS_SELF=1`, D113).** At start the server makes an ECDSA
+certificate in `$TOPO_DATA/tls/` (`cert.pem`, `key.pem` 0600, and
+`cert.sha256` with its fingerprint), valid 825 days, covering `localhost`,
+127.0.0.1, ::1, the PC's name (and `<name>.local`), every IPv4 address of
+the PC that is up and not loopback or link-local, the public URL's host and
+TOPO_ALLOWED_HOSTS. It is kept at the next start, and made again when an
+address is no longer covered (the PC got a new address: restart the server),
+30 days before it expires, or when the files do not load. The log prints its
+SHA-256 fingerprint at every start. Settings for a PC on 192.168.1.20:
+
+```sh
+TOPO_LISTEN=0.0.0.0:7380
+TOPO_PUBLIC_URL=https://192.168.1.20:7380
+TOPO_TLS_SELF=1
+```
+
+Each other PC's browser warns once ("Your connection is not private"). Open
+the certificate from the warning (the padlock or "Not secure", then the
+certificate), check that its SHA-256 fingerprint is the one in the server's
+log (or the desktop app's Settings), then go on (Advanced, Proceed). Checked
+in Chromium (stage 4, 2026-11-10): after going on, the page is a secure
+context and the encryption (WebCrypto) works. Firefox and Safari were not
+checked here. To get no warning at all, trust the certificate on each PC:
+
+- **Windows**: copy `cert.pem` over, rename it `topo.crt`, double-click,
+  Install Certificate, Local Machine, "Place all certificates in the
+  following store", Trusted Root Certification Authorities.
+- **macOS**: open `cert.pem` in Keychain Access (System keychain), open the
+  certificate, Trust, "When using this certificate: Always Trust".
+- **Linux** (Chrome and Chromium use the system store on Fedora and Debian):
+  `sudo cp cert.pem /etc/pki/ca-trust/source/anchors/topo.pem && sudo update-ca-trust`
+  (Fedora), or `/usr/local/share/ca-certificates/topo.crt` and
+  `sudo update-ca-certificates` (Debian, Ubuntu). Firefox keeps its own list:
+  Settings, Privacy & Security, Certificates, View Certificates, Authorities,
+  Import.
+
+Give the PC a fixed address (a DHCP reservation in the router): the address
+is in every sign-in link and invitation, and a new address means a new
+certificate to accept.
 
 ## Email
 
@@ -477,19 +545,21 @@ What members can do to each other:
   new keys, and each site's owners must give access again. If a site's only
   owner loses everything, nobody can read that site again.
 
-## Data and backups (until step 5b)
+## Data and server backups
 
 The data folder holds:
 
 - `topo.db` (and `topo.db-wal`, `topo.db-shm` while it runs): SQLite with the
   accounts, sessions, sites, member lists, wrapped keys and encrypted
-  revisions, and the email queue;
-- `server.key`: 32 random bytes that check sign-in codes (losing it only voids
-  codes in flight);
+  revisions, the email queue, and the backup settings and list;
+- `server.key` (unless `TOPO_SERVER_KEY` puts it elsewhere): 32 random bytes
+  that check sign-in codes and lock the backup destination's password
+  (losing it voids codes in flight and means typing that password again);
+- `backups/`: the default folder for folder backups;
 - `mail/`: only with `TOPO_MAIL=file`.
 
-A backup holds ciphertext, member emails and the metadata above, not readable
-networks. Until the server makes its own backups (5b):
+The backups below (step 5b) save the networks. To also keep the server
+itself (accounts, members, pending invitations) copy the data folder:
 
 - **stop and copy**: stop the server (or the container), copy the whole data
   folder, start it again; or
@@ -502,6 +572,556 @@ Browsers whose last revision is newer than the restored one will say "The
 server sent an older or different history"; **Trust the server's history**
 on the card merges that browser's copy onto the restored head and pushes it,
 so nothing a browser still holds is lost.
+
+## Backups
+
+Off until the server owner turns them on: Account, Backups in the app (the
+settings live in the database, D99). One destination at a time:
+
+- **A folder on the server**: a USB disk, a network share mounted on the
+  server, or a folder that the OneDrive, Google Drive or Nextcloud desktop
+  client syncs (no outside sign-in at all). The folder must be inside one of
+  `TOPO_BACKUP_FOLDERS` and must already exist: Topo never makes it. Saving a
+  new or changed folder (after its test passes) writes a `.topo-backups` file
+  in it, and every later run, test and save of that same folder requires that
+  file, so an unplugged USB disk (whose mount point is an empty folder on the
+  system disk) gives "The backup folder is not there (is the disk
+  connected?)" instead of filling the system disk. "Save anyway" (for a disk
+  not plugged in yet) writes no marker, so nothing is backed up there until
+  you connect the disk and press Save again; the status says so. The systemd unit's
+  `ReadWritePaths` must include the folder (the packaged unit: a drop-in,
+  see "Install on Linux"); a Windows service runs as Local Service, which
+  cannot reach a share or a mapped drive (see "Install on Windows").
+- **WebDAV**: the folder's address, a user name and an app password.
+  - Nextcloud and ownCloud: `https://cloud.example.com/remote.php/dav/files/<user>/Topo`
+    (make an app password under Settings, Security).
+  - Synology (WebDAV Server package): `https://nas.local:5006/<shared folder>/Topo`.
+  - QNAP (WebDAV on in Control Panel, Network & File Services):
+    `https://nas.local/<shared folder>/Topo`.
+  - https only; plain http only to this machine (the password would cross the
+    network in clear). A NAS with its own (self-signed) certificate: press
+    Test, compare the fingerprint it shows with the one the NAS shows, and
+    paste it in "Certificate fingerprint (SHA-256)"; then exactly that
+    certificate is accepted. Redirects are never followed.
+- **S3-compatible storage** (Backblaze B2, Wasabi, MinIO, AWS), **Google
+  Drive** and **OneDrive** (5c, D109-D111): see the sections below. Topo
+  talks to them with small clients of its own on Go's standard library
+  (no rclone, D109), and never follows a redirect, except OneDrive's own
+  download and upload addresses, which never get the sign-in token.
+
+What is written (D100-D103): one folder per network, `<site id>/`, holding
+`topo_<name>_<date>.json` (the name only when the network's owner shows it
+in clear, else `network-<the last 8 characters of the id>`; later files of
+the same day get `_HHMM`, server local time). A file is the network's latest
+encrypted revision exactly as the server holds it, the member list in force
+and the newest one, the members' public keys, and each owner's locked site
+key and locked recovery copy. The drive company (and anyone who can read the
+folder) sees the members' emails, the site id, the dates and the rough size,
+not the network. An owner opens a file in Topo, with or without this server,
+with their recovery key (see "Restoring" below). A file is
+written about 2 minutes after the last edit (30 seconds after a visit, at
+most 15 minutes into a long session), and every day at the set time (default
+02:30, server time) for networks that changed; a network that did not change
+is not written again. Kept: everything from the last 24 hours (up to 24),
+then the newest of each of the 7 latest days, 4 latest weeks and 12 latest
+months that have one. Topo deletes only files it wrote. A deleted network's
+backups stay until the server owner deletes them (Account, Backups).
+
+- **After a key reset or a new recovery key** a fresh backup is written at
+  once. Older files still open only with the recovery key their owners had
+  then, so keep an old recovery key until the backups made before it have
+  aged out (12 months at most). The useful side: a sole owner who reset their
+  keys can still open an older backup with the old recovery key.
+- **Checks** (D104): every week the server reads each network's newest backup
+  back and checks its fingerprint (SHA-256), its ciphertext hash and its
+  signature, then writes, reads and deletes a test file. It cannot check that
+  a file decrypts (it has no key): "Open the latest backup here" in the app
+  does that. A failed backup or check emails the server owners, at most once
+  a day each, with the reason and no network detail. After a failure that
+  means the destination is down (no answer, refused, full, not there) the
+  server waits 5, 15, then 60 minutes, then until the next daily time; Back
+  up now ignores the wait.
+- `topo-server backup-now [--check]` does the same from a shell (cron,
+  debugging). A lease in the database stops it while a running server is
+  backing up the same data folder. Run it as the user the service runs as,
+  never as root, or the folders and files it makes belong to root and the
+  service can no longer write or read them (it refuses to run as root when
+  the data folder belongs to another user):
+  - packaged Linux: `sudo -u topo env TOPO_DATA=/var/lib/topo topo-server backup-now`
+    (or `sudo systemd-run --uid=topo --pipe -E TOPO_DATA=/var/lib/topo /usr/bin/topo-server backup-now`);
+  - the desktop app's service on Linux (D125): `sudo -u topo env TOPO_DATA=/var/lib/topo topo-desktop-server backup-now --config /etc/topo/topo-desktop-server.conf`;
+  - Windows (an elevated prompt): `"C:\Program Files\Topo\topo-desktop-server.exe" backup-now --config C:\ProgramData\Topo\topo.conf`
+    (the desktop app's server; `topo-server.exe` wherever a hand install put it);
+  - macOS: `sudo -u _topo /usr/local/bin/topo-server backup-now --config /Library/Application\ Support/Topo/topo.conf`
+    (the desktop app's: `/Applications/Topo.app/Contents/MacOS/topo-desktop-server`).
+
+### WebDAV
+
+The address, user name and app password are in the list above. Test shows the
+certificate a self-hosted NAS presents when it is not trusted, to compare and
+paste.
+
+### S3-compatible storage
+
+Fields: **Endpoint** (https; plain http only to this machine), **Region**
+(empty: `us-east-1`), **Bucket**, **Folder in the bucket** (empty: `topo/`),
+**Access key ID**, **Secret access key**, **Path-style addresses**, and the
+optional certificate fingerprint for a store with its own certificate.
+
+- **Backblaze B2**: endpoint `https://s3.<region>.backblazeb2.com` (for
+  example `https://s3.us-west-004.backblazeb2.com`, region `us-west-004`).
+  Make an application key limited to the bucket, with read and write.
+- **Wasabi**: `https://s3.<region>.wasabisys.com`, region as in the address.
+- **MinIO** and other self-hosted stores: `https://minio.example.lan:9000`,
+  tick **Path-style addresses**; a self-signed certificate: paste its
+  fingerprint.
+- **AWS**: `https://s3.<region>.amazonaws.com` and that region. A bucket
+  name with a dot always uses path-style addresses (it would not match the
+  certificate as a host name).
+- Give the key list, read, write and delete on the bucket (or on the folder).
+  Uploads carry `Content-MD5`, so buckets with object lock (B2, Wasabi)
+  accept them. If the bucket keeps files locked, Topo cannot delete old
+  backups; the status says so once ("The bucket keeps files locked") and the
+  files stay until the lock lets them go.
+- Requests are signed with AWS Signature V4 with this server's clock: a clock
+  off by more than 15 minutes is refused, and the status says "This server's
+  clock is wrong".
+
+### Google Drive
+
+Topo writes into a folder **Topo** in the Drive of the Google account that
+presses Connect, with the `drive.file` scope: Google lets Topo see only the
+files Topo itself made, nothing else in the Drive. Set up once:
+
+1. In the Google Cloud console (console.cloud.google.com), make a project
+   (or use one), and enable the **Google Drive API** (APIs & Services,
+   Library).
+2. **OAuth consent screen**: with Google Workspace, choose **Internal**.
+   Otherwise choose **External**, fill in the app name and your email, add the
+   scope `.../auth/drive.file`, and then **Publish app** (In production). Left
+   in "Testing", Google ends the sign-in after 7 days and backups stop with
+   "press Connect again" (`invalid_grant`). `drive.file` is a non-sensitive
+   scope, so publishing should need no Google review; that is per Google's
+   documentation, not checked here.
+3. **Credentials, Create credentials, OAuth client ID**, type **Web
+   application**. Under **Authorized redirect URIs** add the address the
+   Backups sheet shows under "Redirect address to register in the app":
+   `<TOPO_PUBLIC_URL>/api/backups/oauth/callback`, or
+   `http://localhost:<port>/api/backups/oauth/callback` (see below).
+4. Copy the **Client ID** and **Client secret** into Account, Backups, Google
+   Drive, and press **Connect**. Sign in, allow Topo, and the page comes back
+   saying "Connected as <the account>". Save turns backups on (Connect saves
+   what was typed, with backups on or off as the sheet had it).
+
+`drive.file` ties the files to that OAuth client: a new client ID starts a
+new Topo folder, and backups in the old one can then only be opened by
+downloading them from Drive's web page and opening them in Topo.
+
+### OneDrive
+
+Topo writes into its **app folder** (`Apps/<your app's name>` in the OneDrive
+of the account that presses Connect), with `Files.ReadWrite.AppFolder`:
+nothing else in the OneDrive. Set up once:
+
+1. In the Microsoft Entra admin center (entra.microsoft.com), **App
+   registrations, New registration**. Supported accounts: personal Microsoft
+   accounts and/or your organisation, as needed.
+2. **Authentication, Add a platform, Web**, redirect URI as the Backups
+   sheet shows it (as for Google above).
+3. **Certificates & secrets, New client secret**. Microsoft secrets expire
+   (24 months at most): put a reminder in your calendar. An expired secret
+   shows "The app's client ID or client secret was refused" and sends the
+   failure email; make a new one, paste it, and Save.
+4. **API permissions, Add, Microsoft Graph, Delegated**:
+   `Files.ReadWrite.AppFolder` and `offline_access`.
+5. Copy the **Application (client) ID** and the secret's **Value** into
+   Account, Backups, OneDrive. **Tenant**: empty (`common`, personal and work
+   accounts), `consumers` (personal only), or your organisation's tenant ID.
+   Press **Connect**.
+
+Microsoft's documentation describes the app folder for personal OneDrive
+accounts; work or school accounts were not tried here. Microsoft replaces
+the refresh token from time to time; the server saves each new one before
+using it.
+
+### Connect: how the sign-in works
+
+- Connect posts what was typed to `POST /api/admin/backups/oauth/start`. The
+  server keeps it locked for 10 minutes with a random state and a PKCE
+  verifier, tied to this sign-in session, the provider, the app's client ID
+  and the redirect address, and answers the provider's sign-in page.
+- The provider sends the browser back to `GET
+  /api/backups/oauth/callback?code=…&state=…`, which changes nothing: it
+  redirects (303) to `/#backup-connect=…`. The app takes that off the address
+  and posts `oauth/finish`. The server checks the state (once only, same
+  session, in time), trades the code for tokens, locks the refresh token with
+  the other drive passwords, makes or finds the folder, tests it, and saves.
+- **Servers without a public name.** Google and Microsoft accept a redirect
+  address only on a public domain with https, or `http://localhost`. A LAN
+  address such as `https://192.168.1.20` cannot be registered. Then open the
+  app **in a browser on the server machine itself** at
+  `http://localhost:<port>`, sign in there as the server owner, and press
+  Connect: the server uses `http://localhost:<port>/api/backups/oauth/callback`
+  for a request that came from this machine. Register that address.
+- Access tokens stay in the server's memory only. The refresh token, client
+  secret and Drive folder id are in `backup_config` (the token and secret
+  locked, D105). Changing the client ID (or the tenant) forgets the sign-in:
+  Connect again.
+
+**The backup routes** (JSON, the usual `X-Topo` header and same-origin
+check on every change; the app's sheets use them):
+
+| Route | Who | What |
+|---|---|---|
+| `GET /api/admin/backups` | server owner | the destination (no secret: `secretsSet` names the saved ones), `allowedFolders`, the status (`lastOk`, `lastError {at, code}`, `nextRun`, `lastCheck {at, ok, code}`, `backoffUntil`), per-network counts, deleted networks' counts, files on a previous destination |
+| `PUT /api/admin/backups[?force=1]` | server owner | `{enabled, kind, fields, secrets, dailyAt, readableAllowed}`; with backups on the destination is checked first (20 s) and saved only when that works (`force=1` saves anyway); 422 `backup-dest` with `code` (and `fingerprint` for a certificate), 422 `backup-folder-not-allowed`. A secret left out is kept, `""` clears it |
+| `POST /api/admin/backups/test` | server owner | the same check, nothing saved |
+| `POST /api/admin/backups/oauth/start` | server owner | Connect for Google Drive or OneDrive: the Save body (with the client secret, typed or saved); answers `{url, redirect}`; 400 `oauth-kind` for another kind |
+| `GET /api/backups/oauth/callback` | anyone | the provider's return: only a 303 to `/#backup-connect=<state, code or error>`; changes nothing |
+| `POST /api/admin/backups/oauth/finish` | server owner | `{state, code}` or `{state, error}`: 400 `oauth-state` (unknown, used, another session's, older than 10 minutes), 422 `oauth-denied`, 422 `backup-dest` when the code exchange fails; else saves and answers the GET view plus `connect {account, code}` (`code`: the test's problem, if any) |
+| `POST /api/admin/backups/run`, `…/check` | server owner | Back up now, Check now: 202, the status shows the outcome; 409 `backup-off` while off |
+| `GET /api/admin/backups/deleted/{site}`, `DELETE …` | server owner | a deleted network's files: list, delete (at the destination too) |
+| `GET /api/admin/backups/files/{id}` | server owner | a deleted network's file |
+| `GET /api/sites/{site}/backups` | the network's owners | its files (`id, name, kind, at, revN, size, missing, previousDest`) |
+| `GET /api/sites/{site}/backups/{id}` | the network's owners | the file's bytes, from the destination (`X-Topo-Backup-Sha256`); 410 for a previous destination |
+| `POST /api/sites/{site}/backups/readable` | the network's owners | a readable copy made by an owner's browser: only while the server owner allows them and the network's owner turned them on (`PATCH /api/sites/{site}` `backupReadable`), and only of the head (409 `stale`) |
+| `DELETE /api/sites/{site}/backups/readable` | the network's owners | deletes the network's readable copies (at the destination too); the encrypted backups stay |
+
+The failure email reasons (`code`): `unreachable`, `refused`, `not-found`,
+`full`, `too-large`, `conflict`, `bad-answer`, `certificate`, `secrets`,
+`mismatch`, `damaged`, `connect` (the drive's sign-in ended: Connect again),
+`client-secret` (the app's client ID or secret refused), `clock` (this
+server's clock is wrong for S3), `other`. The GET view also has
+`config.connected` and `config.account` (Drive, OneDrive; the refresh token
+itself is never returned), `status.dropNote` (`locked`: a bucket that keeps
+files locked) and `oauthRedirect`.
+
+**In the app** (D99, D106-D107; translated, phone-sized):
+
+- **Account, Backups…** (server owner only): Where (Off, a folder on the
+  server, Google Drive, OneDrive, S3, WebDAV), the fields of that kind (the
+  folder's path with the allowed folders under it; WebDAV's address, user,
+  app password and certificate fingerprint; S3's fields and path-style tick;
+  Drive's and OneDrive's client ID and secret, OneDrive's tenant, the
+  connection with Connect / Connect again and the redirect address to
+  register), a "How to set this up" link to this file, Every day at, Also allow readable copies (with
+  its warning), Save (which tests first and asks "Save anyway?" when the test
+  fails), Test, Back up now, Check now; then the status in words (last
+  backup, last problem, next daily backup, the wait after a failure, the last
+  check, files missing at the destination, files on an earlier destination),
+  each network with its count and, for networks you own, **Open the latest
+  backup here** (opens it for real and says how many devices it holds), and
+  deleted networks with Download the latest and Delete. A saved password
+  shows as an empty field saying "Saved (type to replace)".
+- **Members, Backups…** (each network's owners, while backups are on): the
+  network's files, newest first (date and time, Encrypted or Readable, size,
+  Missing, On an earlier destination), each with **Restore…** and
+  **Download** (the file as it is), and **Keep a readable copy too** when
+  the server owner allows readable copies.
+
+**Restoring** (D107). Restore… in Members, Backups, or opening a backup
+file in Topo (Open a file, dropping it, on any Topo: this server, another
+one, topo.carino.systems, the offline zip, the desktop app). The browser
+checks the file (ciphertext hash, chain hash, the member list against the
+one it already trusts when it is on the same server, the author's signature
+while the author's key is still the one on the list), then unlocks it:
+
+- on this server, signed in as one of the network's owners: with this
+  browser's own keys, no question;
+- anywhere else: it asks for **the recovery key of one of its owners** and
+  lists them (an owner who skipped the recovery key is listed "no recovery
+  key"). The key never leaves the page and nothing is stored. A wrong key
+  says "This backup is from {date}. It needs the recovery key its owners had
+  then." With no owner who kept a recovery key, a file opens only in a
+  browser on this server that still holds an owner's keys.
+
+Then it is offered like any copy of the network: **Merge** (the review,
+a restore point "Before restoring a backup", the log says "a backup"),
+**Replace with this copy** (a restore point first) or **Open as a copy**; a
+network not in that browser opens as its own or merges into one. To go back
+to how it was, use Replace with this copy (a merge never removes). On a
+network kept on this server the restored copy is pushed as one new revision
+on top of the newest, never a rewind of the history.
+
+**Readable copies** (D106), off unless both the server owner allows them and
+a network's owner turns them on. The server cannot read a network, so an
+owner's browser makes the copy: after it saves to or takes from the server,
+at most every 10 minutes per network, it sends the file Download a back-up
+gives, and the server writes it under `<site id>/readable/` (same naming and
+keeping rules). Plainly: a readable copy is **not end-to-end encrypted**.
+Anyone with the drive can read it, passwords in notes included; it passes
+through this server in clear (whoever runs the server could read it); with
+the folder destination it is a readable file on the server's own disk. It is
+only as recent as the last time an owner opened the network. Turning it off
+offers to delete the copies made.
+
+**Without a server** (D108): on Chrome and Edge, Settings, Back-ups in the
+app picks a folder (for example one the OneDrive or Nextcloud desktop client
+syncs) that Download a back-up and a daily copy of changed networks are
+written to, kept by the same rule. That is the browser's own feature; this
+server is not involved.
+
+**The destination's password at rest** (D105; the same for S3's secret,
+the Drive/OneDrive client secret and refresh token). It is stored locked
+(AES-256-GCM) with a key derived from `server.key`, and never sent back to a
+browser (the sheet shows "Saved"; typing replaces it; changing the address
+clears it). This protects a database that leaks on its own: a copied
+`topo.db`, a database backup. It does **not** protect against someone who has
+the whole data folder (`server.key` sits beside `topo.db`) or root on the
+server. For more, keep `server.key` elsewhere with `TOPO_SERVER_KEY` (another
+disk, a credentials mount). Losing `server.key` means typing the password
+again; the backups themselves stay openable, since they are locked with the
+networks' own keys, not with `server.key`.
+
+## Install
+
+**One package per computer: the Topo desktop app** (D125). It carries the
+server, and the PC it is installed on can become the server for the site:
+then the server runs as a service, always, from startup, even when Topo is
+closed or nobody is signed in. **Nothing is signed yet** (see "Signing").
+
+### This PC as the server (the desktop app)
+
+| | Where the choice is | What it sets up |
+|---|---|---|
+| **Windows** | the installer's first page: **Use this PC as the server for your network** (off unless the PC already is the server) | the service `TopoServer`: automatic (delayed) start, Local Service, restarted on failure; data and settings in `C:\ProgramData\Topo` (Local Service, SYSTEM and Administrators only); a firewall rule "Topo server" for the program on private and domain networks, never public ones |
+| **Linux** (rpm, deb) | Topo's first start: **Use this PC as the server for your network?** | the unit `topo-desktop-server.service` (shipped disabled), enabled and started; the `topo` user; data in `/var/lib/topo`, settings in `/etc/topo/topo-desktop-server.conf` (root:topo 0640) |
+| **macOS** | Topo's first start, the same question (a copy in Applications only) | the LaunchDaemon `systems.carino.topo-server` as the hidden `_topo` user; settings in `/Library/Application Support/Topo/topo.conf`, data in its `data` folder, log in `/Library/Logs/Topo/topo-server.log` |
+
+Then, in the app, Settings, **This PC as the server**: fill in the owner's
+email (and the mail settings, which other PCs need for their sign-in codes),
+choose **This PC only** or **Other PCs on this network**, and press **Run it
+in the background from startup**. One administrator prompt (UAC, the Linux
+password prompt, the Mac's) writes the settings and starts it. From then on
+the section shows whether it runs, the addresses to give people, the
+certificate's fingerprint (other PCs, below) and, when this account may
+read it, its log. **Save**, **Start** and **Stop** go through the service
+manager, each with an administrator prompt (Stop lasts until the next
+startup). **Stop using this PC as the server** removes the service and
+keeps its data. A PC that said "Not now" sets it up from the same section
+later.
+
+- **Windows installer, for IT**: `Topo_<version>_x64-setup.exe /S /SERVER`
+  installs silently and makes the PC the server; `/NOSERVER` removes it;
+  neither keeps what the PC has. The installer installs for every user of
+  the PC (Program Files), so it asks for an administrator: a service must
+  run a program ordinary users cannot change. An update stops the service,
+  replaces the files and starts it again. Uninstalling removes the service
+  and its firewall rule; `C:\ProgramData\Topo` stays. There is no MSI any
+  more (it could not ask).
+- **Linux packages** enable nothing when installed: an upgrade restarts a
+  server that already runs, and removal stops and disables it (the data in
+  `/var/lib/topo` and `/etc/topo` stay). The admin prompt is polkit's
+  (`pkexec`, action `systems.carino.topo.server`, remembered for a few
+  minutes). The AppImage cannot be a service (its files vanish when it
+  closes): it offers only "while Topo is open" (below). Another firewall
+  than the default may need the port opened (`sudo firewall-cmd
+  --add-port=7380/tcp --permanent && sudo firewall-cmd --reload`).
+- **By hand**, the same commands the app runs (as an administrator):
+
+      topo-desktop-server service install [--start] [--config FILE] [--smtp-pass FILE]
+      topo-desktop-server service configure FILE [--smtp-pass FILE] [--start]
+      topo-desktop-server service start | stop | uninstall
+      topo-desktop-server service status [--port 7380]   # JSON, no administrator needed
+      topo-desktop-server service log                    # when this account may read it
+
+  `configure` takes only the settings the app writes (TOPO_LISTEN,
+  TOPO_PUBLIC_URL, TOPO_ALLOWED_HOSTS, TOPO_TLS_SELF, TOPO_OWNER_EMAIL,
+  TOPO_MAIL, TOPO_SMTP_HOST/PORT/SECURITY/USER/FROM, TOPO_BACKUP_FOLDERS),
+  checks them as the server will and keeps the old file if the server would
+  refuse them. The SMTP password goes into the service's own folder
+  (`smtp.pass`), never into the settings file. The Windows exe is
+  `C:\Program Files\Topo\topo-desktop-server.exe`; on Linux
+  `/usr/bin/topo-desktop-server`; on macOS inside `Topo.app/Contents/MacOS`.
+
+What was run where: the service commands have Go tests (Linux against a
+stand-in systemd); the Linux rpm and deb are built and inspected
+(`tests/desktop-packages.sh`: the files, the scripts, nothing enabled).
+**Not run here**: the Windows installer (no makensis on Linux; CI builds it
+and runs it silently on a Windows runner, `tests/desktop-installer-windows.ps1`:
+install with `/SERVER`, the service, ACL, firewall rule and an answer on
+127.0.0.1:7380, a reinstall, an uninstall that keeps the data), installing
+the Linux packages and the pkexec prompt (root), the macOS daemon (no Mac),
+and the running app talking to a real service.
+
+### Advanced hosts: the server's own packages
+
+Not offered to clients (D125): a client installs the desktop app. These
+recipes stay for a host who builds them, for a server without the app.
+What was built and checked where: the rpm and deb are built and inspected
+on Linux; the Windows service and the macOS LaunchDaemon are cross-compiled
+and their files checked by tests, but have not been run on Windows or macOS.
+
+#### Install on Linux (rpm, deb)
+
+    cd server
+    make rpm ARCH=amd64          # dist/topo-server-<version>-1.x86_64.rpm  (rpmbuild)
+    make deb ARCH=amd64          # dist/topo-server_<version>_amd64.deb     (dpkg-deb)
+    make packages                # both, for amd64 and arm64
+    make packages-test           # builds the amd64 pair and checks them (tests/packaging.sh)
+
+They are built from the static binary by `packaging/linux/build-rpm.sh` and
+`build-deb.sh` (no nfpm needed; no root to build). Installed:
+
+| Path | What |
+|---|---|
+| `/usr/bin/topo-server` | the server |
+| `/usr/lib/systemd/system/topo-server.service` | the unit (`packaging/linux/topo-server.service`) |
+| `/usr/lib/sysusers.d/topo.conf` | the `topo` user and group |
+| `/etc/topo/topo.env` | the settings, every line a comment as shipped (root:topo 0640; kept on upgrade and removal) |
+| `/usr/share/doc/topo-server/` | this file and `backup-folder.conf.example` |
+| `/var/lib/topo` | the data, made by systemd at the first start (never deleted, not even on purge) |
+
+    sudo dnf install ./topo-server-<version>-1.x86_64.rpm      # or: sudo apt install ./topo-server_<version>_amd64.deb
+    sudo editor /etc/topo/topo.env                             # TOPO_PUBLIC_URL, owner, SMTP
+    sudo systemctl enable --now topo-server
+    journalctl -u topo-server                                  # the log (and the setup token)
+
+The service is **not** enabled or started on install: it needs its settings
+first. Upgrades restart a running server; removal stops and disables it. The
+packaged unit is the hand-install unit with one difference: a fixed user
+`topo` instead of systemd's DynamicUser, so a backup folder on a USB disk or
+a share can be given to it:
+
+    sudo mkdir -p /mnt/backup/topo && sudo chown topo:topo /mnt/backup/topo
+    sudo mkdir -p /etc/systemd/system/topo-server.service.d
+    sudo cp /usr/share/doc/topo-server/backup-folder.conf.example \
+            /etc/systemd/system/topo-server.service.d/backup-folder.conf
+    # edit its ReadWritePaths= line; add the folder to TOPO_BACKUP_FOLDERS in topo.env
+    sudo systemctl daemon-reload && sudo systemctl restart topo-server
+
+The drop-in is needed because the unit sees the system read-only
+(`ProtectSystem=strict`) and no home folders.
+
+Checked here (`make packages-test`, 35 checks): files, modes and owners,
+`topo.env` as a config file (rpm `noreplace`, deb conffile), the scripts
+(the user made, nothing enabled on install, stop and disable on removal,
+restart on upgrade, the data kept), `systemd-analyze verify` on the unit,
+and the binary inside runs. **Not checked here**: installing them (needs
+root), rpmlint and lintian (not installed).
+
+#### Install on Windows
+
+**Build-tested only**: the code is compiled and vetted for Windows
+(`make windows`), and the WiX source and settings file are checked by Go
+tests, but nothing below has been run on Windows. (Under Wine, `service
+install` and `service uninstall` worked and the server answered when run
+directly; Wine's service manager did not start the service, so the service
+start itself is untested.)
+
+**Without an installer**, in an administrator prompt:
+
+    topo-server.exe service install     :: the service TopoServer, C:\ProgramData\Topo and a first topo.conf
+    notepad C:\ProgramData\Topo\topo.conf
+    topo-server.exe service start
+    topo-server.exe service stop
+    topo-server.exe service uninstall   :: the data stays
+
+`service install` registers the service with automatic (delayed) start as
+**Local Service**, restart on failure (5 s, 30 s, 2 min), and the command
+line `serve --config C:\ProgramData\Topo\topo.conf`; it makes
+`C:\ProgramData\Topo` readable only by Local Service, SYSTEM and
+Administrators, and writes a first `topo.conf` (every line a comment) if
+there is none. The data goes in `C:\ProgramData\Topo`. The log goes to
+Event Viewer, Windows Logs, Application, source TopoServer. The exe stays
+where it was when installed: put it somewhere fixed first (Program Files).
+
+**The MSI** (WiX Toolset v4 or later, on Windows):
+
+    dotnet tool install --global wix
+    wix extension add -g WixToolset.Util.wixext
+    powershell -File server\packaging\windows\build-msi.ps1 -Version 1.2.3 -Arch x64
+
+`packaging/windows/topo-server.wxs` installs `topo-server.exe` in Program
+Files\Topo, the same service (not started), and `C:\ProgramData\Topo` with
+the same access and the same first `topo.conf`, kept on upgrade and
+uninstall.
+
+**Backups to a share or a mapped drive.** Local Service has no network
+credentials and cannot see drive letters a user mapped, so a folder
+destination on `\\nas\share` or `Z:` fails. Use a WebDAV or S3 destination
+instead, or run the service as an account that can reach the share:
+`sc config TopoServer obj= "DOMAIN\topo-svc" password= "…"` (that account
+then also needs full control of `C:\ProgramData\Topo`).
+
+#### Install on macOS
+
+**Build-tested only**: `make macos` cross-compiles both architectures and a
+Go test parses the LaunchDaemon; `build-pkg.sh` has not been run (it needs a
+Mac).
+
+    cd server && make macos
+    packaging/macos/build-pkg.sh 1.2.3       # on a Mac: dist/topo-server-1.2.3.pkg (universal binary)
+
+The pkg installs `/usr/local/bin/topo-server` and the LaunchDaemon
+`/Library/LaunchDaemons/systems.carino.topo-server.plist`, makes a hidden
+`_topo` user, `/Library/Application Support/Topo/topo.conf` (from
+`topo.conf.default`, never overwritten) and its `data` folder (0700), logs to
+`/Library/Logs/Topo/topo-server.log`, and loads the daemon. As shipped it
+answers only on this Mac (127.0.0.1:7380). After editing `topo.conf`:
+
+    sudo launchctl kickstart -k system/systems.carino.topo-server
+
+To remove it: `sudo launchctl bootout system/systems.carino.topo-server`,
+then delete the plist and the binary (the data stays).
+
+### Only while the app is open
+
+The desktop app (desktop/, Tauri) bundles `topo-server` and can also run it
+as its own child, only while Topo is open (D113): the second choice in
+Settings, **This PC as the server**, for a PC that cannot run the service
+(the AppImage, a Mac copy outside Applications) or a trial. Off by default;
+it stops when the app closes. When the service is set up (above), the
+section talks to the service instead and this way is not offered.
+
+- **This PC only**: `http://127.0.0.1:<port>` (7380 by default). Sign-in
+  codes can be sent by email or shown in the section's log.
+- **Other PCs on this network**: https on every address of the PC, with the
+  self-signed certificate above (`TOPO_TLS_SELF`). The section lists each
+  address (`https://192.168.1.20:7380`) with Copy and Open in browser, and
+  the certificate's fingerprint to compare. Sign-in codes must go by email
+  (SMTP), since nobody on another PC can read this PC's log. The OS firewall
+  may ask to let "topo-desktop-server" in. Give the PC a fixed address.
+  **Address to give people** picks the one that goes into sign-in links and
+  invitations; Automatic takes the first the server lists, which puts real
+  network cards before virtual ones (WSL, Hyper-V, Docker, VirtualBox, VPNs
+  and tunnels, recognised by name). Pick it by hand when the PC has several
+  real networks.
+- The owner's email is required; the SMTP password is kept in
+  `<app data>/server/smtp.pass` (0600) and never shown again. The server's data
+  is `<app data>/server` (on Linux `~/.local/share/systems.carino.topo/server`,
+  on Windows `%APPDATA%\systems.carino.topo\server`, on macOS
+  `~/Library/Application Support/systems.carino.topo/server`), with
+  `server.pid` so a second copy of the app (or this one after a crash) never
+  starts a second server on the same data.
+- The app's own window does not sync with its server (its page may talk only
+  to the app): open the address in a browser on this PC too.
+- "Start it when Topo opens" starts it with the app.
+- Its data folder is the app's, not the service's: a server tried this way
+  first does not carry over to the service.
+
+How it is built: `desktop/sidecar.sh [target]` stages the app into the
+server and builds `topo-server` for the target into
+`desktop/src-tauri/binaries/topo-desktop-server-<target triple>`; `tauri.conf.json`
+names it in `bundle.externalBin`. It has its own name so the desktop app's
+deb/rpm (which puts it in `/usr/bin`) never conflicts with the topo-server
+package's `/usr/bin/topo-server`; and `tauri-build` refuses to compile until
+it exists (CI's builds.yml runs it before the Tauri build). What was tested
+here: the Linux debug build (`cargo build --offline`) and its Rust unit
+tests, the Settings section against a stub of the app's commands
+(`tests/suites/desktopserver.js`), and the bundled binary with
+`TOPO_TLS_SELF` in Chromium. **Not tested**: starting the server from the
+running desktop app, the bundled layout in a real installer (no tauri-cli
+here), and the Windows and macOS desktop builds.
+
+### Signing (later)
+
+Nothing is signed yet: rpm (`rpmsign` with a GPG key) and deb (a signed apt
+repository or `debsigs`), the MSI and the exe (Authenticode with `signtool`),
+the macOS binary and pkg (Developer ID with `codesign` and `productsign`, then
+`notarytool` and `stapler`), and the desktop app (desktop/release-notes.md).
+Until then Windows SmartScreen and macOS Gatekeeper warn on first run, and
+packages are installed from a file the client trusts by its source.
 
 ## Upgrading, logs, health
 

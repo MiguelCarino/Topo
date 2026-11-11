@@ -1,0 +1,17 @@
+{"code":200,"success":true,"data":[
+{"id":"7","subnet":"172.16.5.0","mask":"24","sectionId":"2","description":"Oficinas","linked_subnet":null,"vlanId":"3","vrfId":null,"masterSubnetId":"0","nameserverId":"0","showName":"1","permissions":"{\"3\":\"1\",\"2\":\"2\"}","pingSubnet":"0","discoverSubnet":"0","isFolder":"0","isFull":"0","state":"2","threshold":"0","location":null,"editDate":null,"gateway":{"ip_addr":"172.16.5.1","id":"41"}},
+{"id":"8","subnet":"172.16.6.0","mask":"25","sectionId":"2","description":"","vlanId":"4","masterSubnetId":"0"}
+],"time":0.004}
+{"code":200,"success":true,"data":[
+{"id":"41","subnetId":"7","ip":"172.16.5.1","is_gateway":"1","description":"Router","hostname":"rtr-oficinas","mac":"","owner":"","tag":"2","deviceId":"0","port":"","note":"","lastSeen":"0000-00-00 00:00:00","excludePing":"0","editDate":null},
+{"id":"42","subnetId":"7","ip":"172.16.5.30","is_gateway":"0","description":"NAS de respaldos","hostname":"nas-01","mac":"00:11:32:05:00:30","owner":"TI","tag":"2","deviceId":"5","port":"7","note":"","lastSeen":"2026-11-10 08:00:00"},
+{"id":"43","subnetId":"8","ip":"172.16.6.12","is_gateway":"0","description":"","hostname":"cam-pasillo","mac":"","owner":"","tag":"3","deviceId":"5","port":"Port 8","note":""}
+],"time":0.003}
+{"code":200,"success":true,"data":[
+{"vlanId":"3","domainId":"1","name":"Oficinas","number":"50","description":""},
+{"vlanId":"4","domainId":"1","name":"Camaras","number":"60","description":""},
+{"vlanId":"5","domainId":"1","name":"Gestion","number":"99","description":""}
+]}
+{"code":200,"success":true,"data":[
+{"id":"5","hostname":"sw-oficinas","ip_addr":"172.16.5.2","description":"Switch de oficinas","sections":"2","type":"1"}
+]}

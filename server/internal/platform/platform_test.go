@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -69,5 +70,26 @@ func TestServerKeyStable(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "server.key"), []byte("short"), 0o600)
 	if _, err := ServerKey(dir); err == nil {
 		t.Fatal("a short key must be refused")
+	}
+}
+
+// TOPO_SERVER_KEY set: a missing file is an error, never a new key
+// (amendment 21); the default path makes one.
+func TestServerKeyAt(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "elsewhere", "server.key")
+	if _, err := ServerKeyAt(p, false); err == nil || !strings.Contains(err.Error(), "TOPO_SERVER_KEY") {
+		t.Fatalf("missing explicit key: %v", err)
+	}
+	if _, err := os.Stat(p); err == nil {
+		t.Fatal("a key was made")
+	}
+	k, err := ServerKey(dir)
+	if err != nil || len(k) != KeySize {
+		t.Fatal(err)
+	}
+	k2, err := ServerKeyAt(filepath.Join(dir, "server.key"), false)
+	if err != nil || string(k2) != string(k) {
+		t.Fatal("explicit path to an existing key")
 	}
 }

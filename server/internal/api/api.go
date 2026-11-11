@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"carino.systems/topo/server/internal/auth"
+	"carino.systems/topo/server/internal/backup"
 	"carino.systems/topo/server/internal/config"
 	"carino.systems/topo/server/internal/hub"
 	"carino.systems/topo/server/internal/store"
@@ -106,6 +107,9 @@ type Deps struct {
 	Hub *hub.Hub
 	// Blobs holds revision bodies (nil: the rev_bodies table).
 	Blobs store.Blobs
+	// Backups is the backup engine (step 5b; nil: no engine, every touch
+	// is a no-op and Test/Save cannot check a destination).
+	Backups *backup.Engine
 }
 
 // Server is the assembled handler.
@@ -256,6 +260,23 @@ func (s *Server) routesV1() {
 	s.handle("GET /api/sites/{site}/revs", Reader, s.pullRevs)
 	s.handle("GET /api/sites/{site}/revs/{n}", Reader, s.getRev)
 	s.handle("GET /api/events", User, s.events)
+
+	// Backups (step 5b, D99-D105).
+	s.handle("GET /api/admin/backups", Admin, s.adminBackups)
+	s.handle("PUT /api/admin/backups", Admin, s.adminPutBackups)
+	s.handle("POST /api/admin/backups/test", Admin, s.adminTestBackups)
+	s.handle("POST /api/admin/backups/run", Admin, s.adminRunBackups)
+	s.handle("POST /api/admin/backups/check", Admin, s.adminCheckBackups)
+	s.handle("POST /api/admin/backups/oauth/start", Admin, s.adminOAuthStart)
+	s.handle("POST /api/admin/backups/oauth/finish", Admin, s.adminOAuthFinish)
+	s.handle("GET "+oauthCallbackPath, Public, s.oauthCallback)
+	s.handle("GET /api/admin/backups/deleted/{sid}", Admin, s.adminDeletedBackups)
+	s.handle("DELETE /api/admin/backups/deleted/{sid}", Admin, s.adminDeleteDeletedBackups)
+	s.handle("GET /api/admin/backups/files/{id}", Admin, s.adminDeletedBackupFile)
+	s.handle("GET /api/sites/{site}/backups", Owner, s.siteBackups)
+	s.handle("GET /api/sites/{site}/backups/{id}", Owner, s.siteBackupFile)
+	s.handle("POST /api/sites/{site}/backups/readable", Owner, s.siteReadableCopy)
+	s.handle("DELETE /api/sites/{site}/backups/readable", Owner, s.siteDeleteReadable)
 	// Anything else under /api is JSON 404, never the app.
 	s.handle("/api/", Public, func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, ErrNotFound, nil)
@@ -348,5 +369,18 @@ func (s *Server) adminInfo(w http.ResponseWriter, r *http.Request) {
 		"appFiles":  s.d.App.Count,
 		"dataDir":   s.d.Cfg.DataDir,
 		"publicUrl": s.d.Cfg.Origin(),
+		"backups":   s.backupBrief(r),
 	})
+}
+
+// backupBrief is {on, kind} for adminInfo.
+func (s *Server) backupBrief(r *http.Request) map[string]any {
+	out := map[string]any{"on": false, "kind": ""}
+	if s.d.Store == nil {
+		return out
+	}
+	if cfg, err := store.GetBackupConfig(r.Context(), s.d.Store.R); err == nil {
+		out["on"], out["kind"] = cfg.Enabled && cfg.Kind != "", cfg.Kind
+	}
+	return out
 }

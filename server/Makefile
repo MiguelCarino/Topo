@@ -12,7 +12,7 @@ export CGO_ENABLED := 0
 # stays well inside a shared machine's memory (amendment D6).
 export GOFLAGS := -p=4
 
-.PHONY: stage build test vet cross container container-run dev e2e clean
+.PHONY: stage build test vet cross container container-run dev e2e clean rpm deb packages packages-test windows macos
 
 # The app the binary embeds: desktop/stage.sh's web stage (byte for byte the
 # website's files, the offline zip's allow-list) into web/dist.
@@ -43,6 +43,49 @@ cross: stage
 		echo "build $$os/$$arch"; \
 		GOOS=$$os GOARCH=$$arch go build $(BUILDFLAGS) -o dist/topo-server-$$os-$$arch$$ext ./cmd/topo-server || exit 1; \
 	done
+
+# ---- Installers (D112). Nothing is signed (docs/SERVER.md, "Signing"). ----
+# Not offered to clients (D125): they install the desktop app, which carries
+# the server and sets it up as a service. These stay for an advanced host.
+# ARCH is amd64 or arm64. Each target builds only the binary it packs.
+ARCH ?= amd64
+# One binary: $(call gobin,os,arch,ext)
+gobin = GOOS=$(1) GOARCH=$(2) go build $(BUILDFLAGS) -o dist/topo-server-$(1)-$(2)$(3) ./cmd/topo-server
+
+# Linux rpm and deb, from the static binary (rpmbuild and dpkg-deb, no root).
+rpm: stage
+	$(call gobin,linux,$(ARCH),)
+	packaging/linux/build-rpm.sh $(VERSION) $(ARCH)
+
+deb: stage
+	$(call gobin,linux,$(ARCH),)
+	packaging/linux/build-deb.sh $(VERSION) $(ARCH)
+
+# Both packages for both architectures, one after another.
+packages:
+	$(MAKE) rpm ARCH=amd64
+	$(MAKE) deb ARCH=amd64
+	$(MAKE) rpm ARCH=arm64
+	$(MAKE) deb ARCH=arm64
+
+# Build the amd64 packages and inspect them (tests/packaging.sh); installing
+# them needs root and is not done here.
+packages-test: rpm deb
+	../tests/packaging.sh dist/topo-server-$(VERSION)-1.x86_64.rpm dist/topo-server_$(VERSION)_amd64.deb
+
+# Windows: the service binaries and a vet of the Windows code. The MSI is
+# built on Windows with WiX (packaging/windows/build-msi.ps1).
+windows: stage
+	GOOS=windows go vet ./...
+	$(call gobin,windows,amd64,.exe)
+	$(call gobin,windows,arm64,.exe)
+
+# macOS: the LaunchDaemon's binaries and a vet of the macOS code. The pkg is
+# built on a Mac (packaging/macos/build-pkg.sh).
+macos: stage
+	GOOS=darwin go vet ./...
+	$(call gobin,darwin,amd64,)
+	$(call gobin,darwin,arm64,)
 
 clean:
 	rm -rf dist

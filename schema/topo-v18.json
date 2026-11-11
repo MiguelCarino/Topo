@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://topo.carino.systems/schema/topo-v18.json",
   "title": "Topo network file",
-  "description": "DRAFT. Describes the envelope of a file Topo writes (one network's back-up, or a binder of several networks) and the top-level keys of a Topo document (document version 18) only, with loose types. The full field-level specification is step 6 of docs/SCOPE.md in the Topo repository. Files are saved as application/vnd.carino.topo+json with a .json extension. Readers ignore \"$schema\"; nothing fetches this address.",
+  "description": "A Topo network file (document version 18): the envelope of a network's back-up or a binder, and every field of the document. The format is described in docs/FORMAT.md in the Topo repository. Files are saved as application/vnd.carino.topo+json with a .json extension, with \"$schema\" as the first key. Readers ignore \"$schema\"; nothing fetches this address. Records allow only the keys listed here (Topo drops any other on reading), except the envelopes.",
   "anyOf": [
     {
       "$ref": "#/$defs/networkFile"
@@ -155,51 +155,108 @@
         },
         "nodes": {
           "type": "array",
-          "description": "Devices. Each may name the providers responsible for it (providers: a list of provider ids, v18; v15-v17 wrote one id as provider)."
+          "description": "Devices. Each may name the providers responsible for it (providers: a list of provider ids, v18; v15-v17 wrote one id as provider).",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
         },
         "links": {
           "type": "array",
-          "description": "Cables. Each may name its providers (providers: a list of provider ids, v18)."
+          "description": "Cables. Each may name its providers (providers: a list of provider ids, v18).",
+          "items": {
+            "$ref": "#/$defs/link"
+          }
         },
         "networks": {
           "type": "array",
-          "description": "Subnets."
+          "description": "Subnets.",
+          "items": {
+            "$ref": "#/$defs/network"
+          }
         },
         "groups": {
           "type": "array",
-          "description": "Groups (buildings, floors, rooms, racks). Each may name its providers (providers: a list of provider ids, v18), which answer for every device inside for the services the device names nobody for."
+          "description": "Groups (buildings, floors, rooms, racks). Each may name its providers (providers: a list of provider ids, v18), which answer for every device inside for the services the device names nobody for.",
+          "items": {
+            "$ref": "#/$defs/group"
+          }
         },
         "wifi": {
           "type": "array",
-          "description": "Wi-Fi networks."
+          "description": "Wi-Fi networks.",
+          "items": {
+            "$ref": "#/$defs/wifi"
+          }
         },
         "providers": {
           "type": "array",
-          "description": "Who is responsible for what: a name, a service, contact details, support hours, notes."
+          "description": "Who is responsible for what: a name, a service, contact details, support hours, notes.",
+          "items": {
+            "$ref": "#/$defs/provider"
+          },
+          "maxItems": 100
         },
         "accepted": {
           "type": "array",
-          "description": "Findings accepted with a reason."
+          "description": "Findings accepted with a reason.",
+          "items": {
+            "$ref": "#/$defs/findingNote"
+          }
         },
         "pinned": {
           "type": "array",
-          "description": "Pinned findings."
+          "description": "Pinned findings.",
+          "items": {
+            "$ref": "#/$defs/findingNote"
+          }
         },
         "expectedLife": {
           "type": "object",
-          "description": "Expected life in years, by device type."
+          "description": "Expected life in years, by device type.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
         },
         "annotations": {
           "type": "array",
-          "description": "Text notes on the map."
+          "description": "Text notes on the map.",
+          "items": {
+            "$ref": "#/$defs/annotation"
+          }
         },
         "report": {
           "type": "object",
-          "description": "The report header (site, client, engineer, ref, date, scope)."
+          "description": "The report header (site, client, engineer, ref, date, scope).",
+          "properties": {
+            "site": {
+              "type": "string"
+            },
+            "client": {
+              "type": "string"
+            },
+            "engineer": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string"
+            },
+            "date": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         },
         "columns": {
           "type": "array",
-          "description": "Custom columns."
+          "description": "Custom columns.",
+          "items": {
+            "$ref": "#/$defs/column"
+          },
+          "maxItems": 40
         },
         "tableView": {
           "type": "object",
@@ -207,7 +264,10 @@
         },
         "searches": {
           "type": "array",
-          "description": "Saved searches."
+          "description": "Saved searches.",
+          "items": {
+            "$ref": "#/$defs/search"
+          }
         },
         "incidents": {
           "type": "array",
@@ -230,7 +290,12 @@
                 "description": "When it was reported, milliseconds since 1970."
               },
               "status": {
-                "type": "string",
+                "enum": [
+                  "open",
+                  "sent",
+                  "visited",
+                  "closed"
+                ],
                 "description": "'open', 'sent', 'visited' or 'closed'; it only moves forward."
               },
               "reopened": {
@@ -238,7 +303,15 @@
                 "description": "How many times it was reopened."
               },
               "symptom": {
-                "type": "string",
+                "enum": [
+                  "internet",
+                  "wifi",
+                  "phone",
+                  "camera",
+                  "printer",
+                  "power",
+                  "other"
+                ],
                 "description": "'internet', 'wifi', 'phone', 'camera', 'printer', 'power' or 'other'."
               },
               "nodeIds": {
@@ -257,7 +330,19 @@
               },
               "reporter": {
                 "type": "object",
-                "description": "name, phone, email."
+                "description": "Who reported it: name, phone, email (each optional).",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  }
+                }
               },
               "routedTo": {
                 "type": "array",
@@ -283,126 +368,929 @@
                 "type": "string"
               }
             },
-            "additionalProperties": true
+            "additionalProperties": false
           }
         },
         "log": {
           "type": "array",
-          "description": "The network log (v17; v18 adds the kinds 'incident' and 'visit'): an append-only list of what was done to the network from outside, oldest first, at most 500 (a link carries the newest 50). Unknown kinds are dropped by this version.",
+          "description": "The network log (v17), oldest first, at most 500.",
           "items": {
-            "type": "object",
-            "required": [
-              "id",
-              "at",
-              "kind"
-            ],
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "at": {
-                "type": "number",
-                "description": "Milliseconds since 1970."
-              },
-              "kind": {
-                "type": "string",
-                "description": "'merge', 'incident' (a problem report opened, sent, closed or reopened) or 'visit' (a provider's visit)."
-              },
-              "source": {
-                "type": "string",
-                "description": "Where it came from: a file's name, 'link', 'binder' or a network's name."
-              },
-              "by": {
-                "type": "string",
-                "description": "merge: the prepared-by name in Settings, when one was set; visit: the technician."
-              },
-              "counts": {
-                "type": "object",
-                "properties": {
-                  "added": {
-                    "type": "integer"
-                  },
-                  "changed": {
-                    "type": "integer"
-                  },
-                  "removed": {
-                    "type": "integer"
-                  },
-                  "conflicts": {
-                    "type": "integer"
-                  }
-                }
-              },
-              "summary": {
-                "type": "string",
-                "description": "English text, at most 160 characters."
-              },
-              "mode": {
-                "type": "string",
-                "description": "'two-way' or 'three-way'."
-              },
-              "rev": {
-                "type": "string",
-                "description": "The revision merged in."
-              },
-              "incidentId": {
-                "type": "string",
-                "description": "incident, visit: the problem report's id."
-              },
-              "event": {
-                "type": "string",
-                "description": "incident: 'opened', 'sent', 'closed' or 'reopened'."
-              },
-              "symptom": {
-                "type": "string",
-                "description": "incident: the symptom."
-              },
-              "routedTo": {
-                "type": "array",
-                "description": "incident: provider ids it was sent to."
-              },
-              "providerId": {
-                "type": "string",
-                "description": "visit: the provider who visited."
-              },
-              "provider": {
-                "type": "string",
-                "description": "visit: that provider's name as it was then."
-              },
-              "arrived": {
-                "type": "number",
-                "description": "visit: milliseconds since 1970."
-              },
-              "left": {
-                "type": "number",
-                "description": "visit: milliseconds since 1970."
-              },
-              "outcome": {
-                "type": "string",
-                "description": "visit: 'fixed', 'partly', 'not-fixed' or 'follow-up'."
-              },
-              "notes": {
-                "type": "string",
-                "description": "visit: at most 4000 characters."
-              },
-              "changes": {
-                "type": "object",
-                "description": "visit: counts { added, changed, removed } and up to 200 items { kind, id, name, status } changed since the copy the provider received."
-              },
-              "signoff": {
-                "type": "string",
-                "description": "visit: the client's name, typed on the provider's device."
-              },
-              "prev": {
-                "type": "string",
-                "description": "SHA-256 (64 hex characters) of the entry before it in this document."
-              }
-            },
-            "additionalProperties": true
-          }
+            "$ref": "#/$defs/logEntry"
+          },
+          "maxItems": 500
         }
       },
       "additionalProperties": true
+    },
+    "iface": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name the device gives it (eth0, Gi1/0/1). May be empty."
+        },
+        "ip": {
+          "type": "string",
+          "description": "Its address with the prefix length, \"192.168.1.10/24\" (IPv4 or IPv6). Kept as typed when it does not parse; findings then say \"Invalid CIDR\". Empty: no address."
+        },
+        "mac": {
+          "type": "string",
+          "description": "MAC address, any common notation; compared as 12 hex digits. Omitted when empty."
+        },
+        "wireless": {
+          "type": "boolean",
+          "description": "Wireless (true), wired (false), or omitted: guessed from the name."
+        },
+        "bond": {
+          "type": "object",
+          "required": [
+            "mode",
+            "members"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "active-backup",
+                "802.3ad"
+              ]
+            },
+            "members": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Interface ids of the same device."
+            }
+          },
+          "additionalProperties": false,
+          "description": "A bond (LAG) of other interfaces of this device."
+        },
+        "vlan": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4094,
+          "description": "Untagged VLAN of a wired interface (v16)."
+        },
+        "tagged": {
+          "type": "string",
+          "description": "Tagged VLANs of a wired interface (v16)."
+        },
+        "radio": {
+          "type": "object",
+          "required": [],
+          "properties": {
+            "standard": {
+              "enum": [
+                "n",
+                "ac",
+                "ax",
+                "axe",
+                "be"
+              ]
+            },
+            "bands": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "band"
+                ],
+                "properties": {
+                  "band": {
+                    "enum": [
+                      "2.4",
+                      "5",
+                      "6"
+                    ]
+                  },
+                  "channel": {
+                    "type": "integer"
+                  },
+                  "width": {
+                    "enum": [
+                      20,
+                      40,
+                      80,
+                      160,
+                      320
+                    ]
+                  },
+                  "power": {
+                    "type": "integer",
+                    "minimum": -20,
+                    "maximum": 40
+                  },
+                  "ssids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Wi-Fi ids (doc.wifi) this band broadcasts; absent: all; empty: none."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false,
+          "description": "A wireless interface's radio (v12)."
+        }
+      },
+      "additionalProperties": false,
+      "description": "An interface of a device (IFACE_FIELDS in js/model.js)."
+    },
+    "node": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "type": {
+          "type": "string",
+          "description": "The device type: cloud, router, loadbalancer, l3switch, edge, firewall, vpn, switch, ap, server, vm, container, pc, voip, iot, printer, camera, dicom, custom, or another the palette adds."
+        },
+        "name": {
+          "type": "string",
+          "description": "Its name (\"Unnamed Node\" when none was given)."
+        },
+        "x": {
+          "type": "number",
+          "description": "Position on the map."
+        },
+        "y": {
+          "type": "number",
+          "description": "Position on the map."
+        },
+        "gw": {
+          "type": "string",
+          "description": "Default gateway."
+        },
+        "dns": {
+          "type": "string",
+          "description": "DNS servers, comma separated."
+        },
+        "vendor": {
+          "type": "string",
+          "description": "Make (v16)."
+        },
+        "model": {
+          "type": "string",
+          "description": "Model (v16)."
+        },
+        "os": {
+          "type": "string",
+          "description": "Firmware or operating system."
+        },
+        "ports": {
+          "type": "string",
+          "description": "Allowed ports, as text (\"443, 22\")."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free text."
+        },
+        "nat": {
+          "type": "boolean",
+          "description": "Does NAT (routing types)."
+        },
+        "siteRef": {
+          "type": "object",
+          "required": [],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "description": "A cloud that stands for another site of the client."
+        },
+        "portCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096,
+          "description": "Faceplate ports of a switch or AP; absent: its type's size or the highest port in use."
+        },
+        "portScheme": {
+          "type": "object",
+          "required": [],
+          "properties": {
+            "prefix": {
+              "type": "string",
+              "description": "Must not end in a digit."
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9999
+            }
+          },
+          "additionalProperties": false,
+          "description": "How the ports are named: prefix + (start + n - 1)."
+        },
+        "portAttrs": {
+          "type": "object",
+          "description": "What is written about each port, by port id p1, p2...",
+          "patternProperties": {
+            "^p[1-9][0-9]{0,3}$": {
+              "type": "object",
+              "required": [],
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "vlan": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4094,
+                  "description": "An 802.1Q VLAN, 1 to 4094."
+                },
+                "tagged": {
+                  "type": "string",
+                  "description": "VLANs as canonical text: \"all\", or numbers ascending with runs of three or more as a range (\"10,11,20-23\")."
+                },
+                "poe": {
+                  "type": [
+                    "string",
+                    "number"
+                  ],
+                  "description": "af, at, bt3, bt4, or watts 0.5 to 100."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "poeBudget": {
+          "type": "number",
+          "description": "Watts all PoE ports can give together (a switch or AP)."
+        },
+        "poeDraw": {
+          "type": "number",
+          "description": "Watts this device draws over PoE."
+        },
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/iface"
+          }
+        },
+        "serial": {
+          "type": "string"
+        },
+        "assetTag": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string",
+          "description": "Where it is, as text."
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "active",
+            "retired"
+          ]
+        },
+        "inService": {
+          "type": "string",
+          "description": "A date as much as is known: \"2021\", \"2021-03\" or \"2021-03-15\"."
+        },
+        "serviced": {
+          "type": "string",
+          "description": "A date as much as is known: \"2021\", \"2021-03\" or \"2021-03-15\"."
+        },
+        "serviceEvery": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Months between services."
+        },
+        "lifeYears": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Expected life in years, when not its type's."
+        },
+        "extra": {
+          "type": "object",
+          "description": "Values of the custom columns (doc.columns), by column id.",
+          "patternProperties": {
+            "^c[0-9a-z]{1,12}$": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "group": {
+          "type": "string",
+          "description": "The group (doc.groups) it is in."
+        },
+        "rackU": {
+          "type": "integer",
+          "minimum": -99,
+          "maximum": 99,
+          "description": "In a rack: the lowest unit it occupies, counted from the bottom whatever the rack's numbering."
+        },
+        "rackHeight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 99,
+          "description": "Units it takes (1 when absent)."
+        },
+        "rackFace": {
+          "enum": [
+            "front",
+            "rear"
+          ]
+        },
+        "rackDepth": {
+          "enum": [
+            "half"
+          ],
+          "description": "Half depth; absent: full depth."
+        },
+        "portsFace": {
+          "enum": [
+            "front",
+            "rear"
+          ],
+          "description": "Where its ports are, when not its type's side."
+        },
+        "host": {
+          "type": "string",
+          "description": "A VM or container: the device it runs on."
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Provider ids (doc.providers), v18."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A device (NODE_FIELDS in js/model.js)."
+    },
+    "cable": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "length": {
+          "type": "string",
+          "description": "\"2.5 m\", \"8 ft\", or free text."
+        },
+        "color": {
+          "type": "string"
+        },
+        "via": {
+          "type": "string",
+          "description": "What it runs through, as text."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A cable's own facts."
+    },
+    "link": {
+      "type": "object",
+      "required": [
+        "id",
+        "source",
+        "target"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "source": {
+          "type": "string",
+          "description": "Device id."
+        },
+        "target": {
+          "type": "string",
+          "description": "Device id."
+        },
+        "attachment": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "How it attaches (passthrough, or null: as drawn)."
+        },
+        "medium": {
+          "enum": [
+            "utp",
+            "fiber",
+            "wireless",
+            "powerline",
+            "vpn"
+          ],
+          "description": "Absent: guessed."
+        },
+        "sourceIface": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Interface id on source (a port grid port is p<n>)."
+        },
+        "targetIface": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Interface id on target."
+        },
+        "cable": {
+          "$ref": "#/$defs/cable"
+        },
+        "wifi": {
+          "type": "object",
+          "required": [],
+          "properties": {
+            "ssid": {
+              "type": "string",
+              "description": "Wi-Fi id (doc.wifi)."
+            },
+            "band": {
+              "enum": [
+                "2.4",
+                "5",
+                "6"
+              ]
+            },
+            "signal": {
+              "type": "integer",
+              "minimum": -100,
+              "maximum": 0,
+              "description": "dBm."
+            }
+          },
+          "additionalProperties": false
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Provider ids (doc.providers), v18."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A cable, radio association or VPN link (LINK_FIELDS)."
+    },
+    "network": {
+      "type": "object",
+      "required": [
+        "id",
+        "cidr"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "cidr": {
+          "type": "string",
+          "description": "The range, \"192.168.1.0/24\". Unique in the document."
+        },
+        "name": {
+          "type": "string"
+        },
+        "vlan": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4094,
+          "description": "An 802.1Q VLAN, 1 to 4094."
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "gateway": {
+          "type": "string"
+        },
+        "dns": {
+          "type": "string"
+        },
+        "dhcp": {
+          "type": "boolean"
+        },
+        "dhcpFirst": {
+          "type": "string"
+        },
+        "dhcpLast": {
+          "type": "string"
+        },
+        "drawZone": {
+          "type": "boolean",
+          "description": "Draw its zone; absent: private ranges only."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A subnet (NETWORK_FIELDS)."
+    },
+    "group": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "name": {
+          "type": "string",
+          "description": "Absent: shown as its kind."
+        },
+        "kind": {
+          "enum": [
+            "building",
+            "floor",
+            "room",
+            "rack",
+            "custom"
+          ]
+        },
+        "parent": {
+          "type": "string",
+          "description": "Group id."
+        },
+        "uHeight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 99,
+          "description": "A rack's height in units (42 when absent)."
+        },
+        "width": {
+          "enum": [
+            "10in",
+            "19in",
+            "23in"
+          ]
+        },
+        "depthMm": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3000
+        },
+        "numbering": {
+          "enum": [
+            "top"
+          ],
+          "description": "Units numbered from the top; absent: from the bottom."
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Provider ids (doc.providers), v18."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A building, floor, room, rack or other group (GROUP_FIELDS)."
+    },
+    "wifi": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "ssid": {
+          "type": "string"
+        },
+        "security": {
+          "enum": [
+            "open",
+            "owe",
+            "wpa2",
+            "wpa3",
+            "wpa2/3",
+            "wpa2-ent",
+            "wpa3-ent",
+            "wep",
+            "wpa"
+          ]
+        },
+        "bands": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "2.4",
+              "5",
+              "6"
+            ]
+          },
+          "description": "Bands it is on; absent: all."
+        },
+        "network": {
+          "type": "string",
+          "description": "Subnet id."
+        },
+        "hidden": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A Wi-Fi network (WIFI_FIELDS). Never holds a password."
+    },
+    "provider": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "name": {
+          "type": "string"
+        },
+        "service": {
+          "enum": [
+            "internet",
+            "phone",
+            "it",
+            "security",
+            "power",
+            "vendor",
+            "cloud",
+            "other"
+          ]
+        },
+        "contact": {
+          "type": "string"
+        },
+        "phone": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "account": {
+          "type": "string"
+        },
+        "hours": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Who is responsible for something (PROVIDER_FIELDS), at most 100."
+    },
+    "column": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^c[0-9a-z]{1,12}$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Unique in any case."
+        },
+        "kind": {
+          "enum": [
+            "text",
+            "number",
+            "date",
+            "yesno"
+          ],
+          "description": "Absent: text (Topo writes text as absent)."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A custom column (at most 40)."
+    },
+    "search": {
+      "type": "object",
+      "required": [
+        "name",
+        "query"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "columns": {
+          "type": [
+            "array",
+            "string"
+          ]
+        },
+        "sort": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "boolean"
+        },
+        "print": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A saved search (SEARCH_FIELDS)."
+    },
+    "annotation": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "text": {
+          "type": "string"
+        },
+        "style": {
+          "enum": [
+            "note"
+          ]
+        },
+        "size": {
+          "type": "number"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "A text note on the map."
+    },
+    "findingNote": {
+      "type": "object",
+      "required": [
+        "check"
+      ],
+      "properties": {
+        "check": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "nodeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "linkIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string"
+        },
+        "until": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "An accepted (reason, until) or pinned (note) finding, by its check, scope and what it names."
+    },
+    "logEntry": {
+      "type": "object",
+      "required": [
+        "id",
+        "at",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "description": "One entry of the network log (v17). Append-only; prev is the SHA-256 (hex) of the previous entry's stable JSON, so an edit outside Topo shows.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "at": {
+          "type": "number",
+          "description": "Milliseconds since 1970."
+        },
+        "kind": {
+          "enum": [
+            "merge",
+            "incident",
+            "visit"
+          ]
+        },
+        "prev": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "source": {
+          "type": "string"
+        },
+        "by": {
+          "type": "string"
+        },
+        "counts": {
+          "type": "object"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "two-way",
+            "three-way"
+          ]
+        },
+        "rev": {
+          "type": "string"
+        },
+        "incidentId": {
+          "type": "string"
+        },
+        "event": {
+          "type": "string"
+        },
+        "symptom": {
+          "type": "string"
+        },
+        "routedTo": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "arrived": {
+          "type": "number"
+        },
+        "left": {
+          "type": "number"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "changes": {
+          "type": "object"
+        },
+        "signoff": {
+          "type": "string"
+        }
+      }
     }
   }
 }

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 
+	"carino.systems/topo/server/internal/backup"
 	"carino.systems/topo/server/internal/mail"
 	"carino.systems/topo/server/internal/notify"
 	"carino.systems/topo/server/internal/store"
@@ -441,6 +442,18 @@ func (s *Server) getSite(w http.ResponseWriter, r *http.Request) {
 			list = append(list, invJSON{i.ID, i.EmailNorm, i.Role, i.Status, i.Created, i.Expires})
 		}
 		out["invites"] = list
+		// What the owner's browser needs to know about backups (D106).
+		bcfg, err := store.GetBackupConfig(ctx, q)
+		if err != nil {
+			s.internal(w, "site", err)
+			return
+		}
+		info, err := store.SiteForBackup(ctx, q, site)
+		if err != nil {
+			s.internal(w, "site", err)
+			return
+		}
+		out["backups"] = map[string]any{"on": bcfg.Enabled && bcfg.Kind != "", "readableAllowed": bcfg.ReadableAllowed, "readable": info.Readable}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -452,6 +465,13 @@ func (s *Server) patchSite(w http.ResponseWriter, r *http.Request) {
 		NameCt    json.RawMessage `json:"nameCt"`
 		ShowName  *bool           `json:"showName"`
 		NameClear *string         `json:"nameClear"`
+		// NameSlug is the name in file-name form, made by the browser
+		// (fileSlug), for backup file names while the name is shown in
+		// clear (amendment 4).
+		NameSlug *string `json:"nameSlug"`
+		// BackupReadable turns this network's readable copies on (D106),
+		// only while the server owner allows them.
+		BackupReadable *bool `json:"backupReadable"`
 	}
 	if err := decodeBody(w, r, siteBody, &req); err != nil {
 		writeDecodeError(w, err)
@@ -480,7 +500,34 @@ func (s *Server) patchSite(w http.ResponseWriter, r *http.Request) {
 		if clear == "" {
 			show = false
 		}
-		return store.SetSiteName(ctx, tx, site, nameCt, show, clear, s.d.Now().UnixMilli())
+		if err := store.SetSiteName(ctx, tx, site, nameCt, show, clear, s.d.Now().UnixMilli()); err != nil {
+			return err
+		}
+		if req.NameSlug != nil && *req.NameSlug != "" && !backup.ValidSlug(*req.NameSlug) {
+			return failWith(http.StatusBadRequest, ErrBadRequest, map[string]any{"field": "nameSlug"})
+		}
+		if !show {
+			if err := store.SetSiteNameSlug(ctx, tx, site, ""); err != nil {
+				return err
+			}
+		} else if req.NameSlug != nil {
+			if err := store.SetSiteNameSlug(ctx, tx, site, *req.NameSlug); err != nil {
+				return err
+			}
+		}
+		if req.BackupReadable != nil {
+			if *req.BackupReadable {
+				bcfg, err := store.GetBackupConfig(ctx, tx)
+				if err != nil {
+					return err
+				}
+				if !bcfg.ReadableAllowed {
+					return fail(http.StatusConflict, ErrReadableOff)
+				}
+			}
+			return store.SetSiteBackupReadable(ctx, tx, site, *req.BackupReadable)
+		}
+		return nil
 	})
 	if err != nil {
 		s.answer(w, "patch site", err)
@@ -758,6 +805,8 @@ func (s *Server) grant(w http.ResponseWriter, r *http.Request) {
 	s.publish(grantees, "granted", map[string]string{"site": site})
 	s.publish(members, "roster", map[string]any{"site": site})
 	s.wake()
+	// The next backup carries the new roster and the new owner's wrap.
+	s.d.Backups.TouchNow(site)
 	s.writeSite(w, r, site, http.StatusOK)
 }
 

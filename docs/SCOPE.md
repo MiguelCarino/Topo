@@ -366,8 +366,9 @@ Decisions made in the build:
   disk, a share, or a folder the OneDrive / Google Drive / Nextcloud desktop
   client syncs, so no outside sign-in at all); WebDAV (Nextcloud, ownCloud,
   Synology, QNAP); S3-compatible (Backblaze, Wasabi, MinIO, AWS); Google Drive
-  and OneDrive directly through rclone's Go backends, asking only for access
-  to Topo's own folder (`drive.file`), not the whole drive.
+  and OneDrive directly through small clients of Topo's own (D109; this line
+  said "rclone's Go backends" before), asking only for access to Topo's own
+  folder (`drive.file`; OneDrive's app folder), not the whole drive.
 - **What is written:** an encrypted snapshot of each site on a schedule and
   after every merge or visit, named `topo_<org>_<site>_<date>.json`, kept 7
   daily, 4 weekly and 12 monthly, encrypted with the client's key so the drive
@@ -862,11 +863,493 @@ server" toast and "Newer changes arrived: review again" during a review;
 prompting Rotate on `roster-needed`; a two-tab test of the leader tab with a
 real IndexedDB; padding of revision sizes.
 
+### Decisions made building step 5b (2026-11-10), for the owner
+
+The server side of backups (stage 1 of 5b). How a client sets it up:
+docs/SERVER.md, Backups. The browser side (the settings sheet, restoring,
+readable copies, the folder save without a server) follows as D106-D108.
+
+- **D99. Off until turned on, set in the app.** Backups are off until the
+  server owner turns them on in Account, Backups. One destination at a time
+  (a folder on the server or WebDAV now; S3, Google Drive and OneDrive in
+  5c). The settings live in the server's database, not in environment
+  settings. The only environment setting is which folders the server may
+  write to (`TOPO_BACKUP_FOLDERS`, by default the data folder's `backups`),
+  set by whoever installs the server, so a stolen owner session cannot make
+  the server write anywhere else. The old reserved `TOPO_BACKUP_*` keys are
+  ignored with a log line. Saving checks the destination first (write, read
+  back, delete a test file); "save anyway" exists for a disk not plugged in
+  yet.
+- **D100. What a backup file is.** The network's latest encrypted copy
+  exactly as the server holds it, plus each owner's locked key and locked
+  recovery copy, the member list in force for that copy and the newest one,
+  and the members' public keys. An owner opens it in Topo, with or without a
+  server, by typing their recovery key (the browser side comes next). An
+  owner who never saved a recovery key can open it only in their own browser
+  on that server. The drive company sees the members' emails, the site's id,
+  the dates and the rough size, not the network; the server's address is not
+  in the file. After a key reset or a new recovery key a fresh file is
+  written at once; older files still need the recovery key their owners had
+  then, so keep an old recovery key until those files have aged out (12
+  months at most). The useful side: a sole owner who reset their keys can
+  still open an older backup with the old recovery key.
+- **D101. Names.** One folder per network (its id), holding
+  `topo_<name>_<date>.json`. `<name>` is the network's name only while the
+  owner shows it to the server in clear (the browser sends the file-name form
+  of it), otherwise `network-<the last 8 characters of the id>`. Later files
+  of the same day get the time (`_HHMM`, then `_HHMMSS`), server local time.
+- **D102. When.** About 2 minutes after someone stops editing (30 seconds
+  after a visit), and at least every 15 minutes during a long session; every
+  day at a set time (02:30 by default, server time) for the networks that
+  changed; and at start, for networks behind (a restart loses nothing). A
+  network that did not change is not written again. One network at a time,
+  never in parallel; a push never waits for a backup.
+- **D103. Keeping.** Everything from the last 24 hours (up to 24 files), then
+  the newest of each of the last 7 days, 4 weeks and 12 months that have one
+  (a network left alone for months still keeps its last files). Topo only
+  deletes files it wrote. The backups of a deleted network stay until the
+  server owner deletes them. A file missing at the destination is marked and
+  shown.
+- **D104. Checks and failure mail.** Every week the server reads the newest
+  backup of each network back and checks its fingerprint, its ciphertext
+  hash and its signature, then writes and deletes a test file. It cannot
+  check that a file decrypts, so the owner gets "Open the latest backup here"
+  for a full test. A failed backup or check emails the server owners, at most
+  once a day each, with a one-sentence reason and no network details. When
+  the destination as a whole is down, the server waits 5, 15 and 60 minutes,
+  then until the next daily time; Back up now does not wait.
+  `topo-server backup-now` does the same from a shell, and refuses while a
+  running server is backing up the same data.
+- **D105. Drive passwords.** Kept locked with a key derived from
+  `server.key`, never sent back to the browser, cleared when the address
+  changes. That protects a copied database, not a stolen data folder or
+  server (`TOPO_SERVER_KEY` can keep `server.key` elsewhere; set, a missing
+  file stops the start instead of making a new key). Losing `server.key`
+  means typing the password again; the backups themselves stay openable.
+
+The browser side (stage 2 of 5b):
+
+- **D106. Readable copies, and what they mean.** Off unless two people turn
+  them on: the server owner allows them (Account, Backups, "Also allow
+  readable copies"), then each network's owner turns them on for that network
+  (Members, Backups, "Keep a readable copy too"), after a question that says
+  plainly who could read it. The server cannot read a network, so an owner's
+  browser makes the readable copy: after it saves a change to the server or
+  takes one from it, at most every 10 minutes per network, it sends the same
+  file Download a back-up gives, of the copy the server holds now; the server
+  writes it under `readable/` beside the encrypted backups and keeps only its
+  name and date. What that means, said plainly: a readable copy is **not**
+  end-to-end encrypted. The drive company and anyone with access to the
+  drive can read it, passwords in notes included; it passes through the
+  server in clear, so whoever runs the server could read it too; with the
+  folder destination it is a readable file on the server's own disk, next to
+  a database that holds only ciphertext. It is only as recent as the last
+  time an owner opened the network (nobody opens it, nothing new is sent).
+  Turning it off stops new copies and offers to delete the ones made
+  (`DELETE /api/sites/{site}/backups/readable`); retention deletes the rest
+  over the following days. A switch on the server is enough: the server
+  already serves the app's code, so a second consent kept in the browser
+  would add nothing.
+- **D107. Restoring.** Two doors, one path. From the server: Members,
+  Backups lists the network's files (date, Encrypted or Readable, size,
+  Missing), each with Restore… and Download. From a file: Open a file (or
+  dropping it) recognises a backup file. Either way the file is unlocked in
+  the browser (this browser's own keys on its server; otherwise the recovery
+  key of one of the owners the file lists, typed in a box that says which
+  owners have none), checked (the ciphertext hash, the chain hash, the member
+  list against the one this browser trusts on the same server, the author's
+  signature when their key is still the one on the list), and then offered
+  as any copy of a network is: Merge (through the review, with a restore
+  point "Before restoring a backup", logged as "a backup"), Replace with this
+  copy (a restore point first), or Open as a copy; a network not in this
+  browser opens as its own or merges into one. Nothing is written without
+  the review or a restore point. Going back in time is Replace with this copy
+  or Open as a copy, because a merge never removes. On a network kept on a
+  server, the restored copy is pushed as one new revision on top of the
+  newest, never a rewind of the server's history, and a co-owner's later
+  edit merges on top of it. An author whose keys changed since: the file
+  still opens (the network's key proves it was not changed) and the review
+  says the signature could not be checked. Who made the file is checked from
+  whoever opens it: every member list in the file whose signer's key is in it
+  must verify, and trust starts from the owner whose keys or recovery key
+  opened it (and the lists this browser already trusts on that server); a
+  list signed by a trusted owner makes its owners trusted. When the network
+  key's wrap or the member list in force cannot be tied to that chain (for
+  example a file someone wrote to the drive naming you as an owner), it
+  still opens with your recovery key, and the review says plainly "Topo could
+  not confirm who made this backup". A list newer than this browser's trust
+  record is checked this way rather than refused. "Open the latest backup here"
+  (the server owner's sheet, for networks they own) opens the newest file
+  for real and says how many devices it holds: the full test the server
+  cannot do.
+- **D108. A back-up folder without a server.** On Chrome and Edge (the File
+  System Access API), Settings, Back-ups lets a person pick a folder once (a
+  OneDrive, Google Drive or Nextcloud folder whose own app uploads it, a USB
+  disk, a share). Download a back-up (and a restore point's back-up) is then
+  written there under the same name a download gets, and the browser asks for
+  the folder's permission only on that click; refused, or no folder, it is
+  the download as before. With "Also back up a network I change, once a day"
+  (on once a folder is picked) a kept network that changed is written there a
+  minute after the last edit, as one file per day, but only while the browser
+  still grants the folder (it never asks outside a click). Topo keeps those
+  files as the server keeps its backups (D103) and deletes only files it
+  wrote and recorded itself; picking another folder starts a new list. Two
+  networks with the same name and client never write over each other: the
+  second one's files carry a short piece of its id after the name
+  (`topo_office-3f9k2a_2026-11-10.json`), and each network's files are kept
+  apart. Safari and Firefox have no such API: the section does not show and the
+  download stays. Nothing leaves the browser.
+
+### Decisions made building step 5c (2026-11-10), for the owner
+
+- **D109. Topo talks to the drives itself, not through rclone.** This
+  changes the approved line above ("through rclone's Go backends"). Topo
+  needs five things from a drive: write a file, read it, list a folder,
+  delete a file, and a quick test. For S3, Google Drive and OneDrive that is
+  a few hundred lines each on Go's standard library (request signing, the
+  sign-in, the uploads), every one tested against a local fake. rclone would
+  bring well over a hundred other modules and tens of MB to a 17-19 MB
+  server that today depends on one library, and its drive code is not meant
+  to be used as a library (its supported way in is a separate program). Those
+  rclone figures are from memory, not measured here. The server still has
+  one outside dependency.
+- **D110. Google Drive and OneDrive.** The client registers its own app with
+  Google or Microsoft (docs/SERVER.md has the steps) and pastes the client
+  ID and secret into Account, Backups; Topo is not a registered app of its
+  own. Topo asks only for its own folder: Drive's `drive.file` (only files
+  Topo made, in a folder "Topo") and OneDrive's app folder
+  (`Files.ReadWrite.AppFolder`, plus `offline_access` to keep working). Press
+  **Connect**: the server keeps what was typed for 10 minutes, tied to that
+  sign-in session, the app and the return address, and opens the provider's
+  page; the provider sends the browser back to the server, which only
+  redirects to the app; the app then finishes it with a normal request, so a
+  plain link can never change the settings. The provider's long-lived
+  sign-in (refresh token) is kept locked like the other drive passwords
+  (D105) and is never sent to a browser; Microsoft replaces it now and then,
+  and the new one is saved before it is used. A server with no public name
+  (a LAN address) cannot be registered with Google or Microsoft: press
+  Connect from a browser on the server machine itself, at `http://localhost`.
+  When the sign-in ends (revoked, or a Google app left in "Testing" after 7
+  days) the status and the failure email say "press Connect again"; an
+  expired Microsoft client secret says so too. Drive names are not unique,
+  so Topo keeps each file's id; writing a name again leaves one file.
+- **D111. S3-compatible stores** (Backblaze B2, Wasabi, MinIO, AWS): endpoint,
+  region, bucket, a folder in the bucket (default `topo/`), key ID and
+  secret, and a "path-style addresses" tick for MinIO and most self-hosted
+  stores (a bucket name with a dot uses it anyway). Requests are signed with
+  AWS Signature V4, checked against AWS's own published example; uploads
+  carry Content-MD5 so buckets with object lock accept them. A bucket that
+  keeps files locked is said once in the status ("Topo cannot delete old
+  backups there") rather than as an error every run. A server clock that is
+  off by more than 15 minutes is named as the problem. The same optional
+  certificate fingerprint as WebDAV works for a self-hosted store with its
+  own certificate.
+
+- **D112. Installers: packages and services, not enabled until set up
+  (except on macOS, where it starts answering only on that Mac).**
+  *Changed by D125 (2026-11-11): clients install one package, the desktop
+  app; these server packages are no longer offered to them, and stay only
+  as recipes for an advanced host who builds them.*
+  - **Linux**: an rpm and a deb, built by two small scripts on rpmbuild and
+    dpkg-deb (nfpm is not needed). They install the binary, a systemd unit,
+    a `topo` user (sysusers) and `/etc/topo/topo.env` with every line a
+    comment. The service is not started on install, because it needs its
+    settings first. The packaged unit uses a fixed `topo` user instead of
+    systemd's throwaway user, so a backup disk or share can be given to it;
+    a backup folder outside `/var/lib/topo` also needs a one-line drop-in,
+    shipped as an example. Removing the package never deletes the data.
+  - **Windows**: `topo-server service install|uninstall|start|stop`, a
+    service running as Local Service with its data and settings in
+    `C:\ProgramData\Topo` (readable only by Local Service, SYSTEM and
+    Administrators), restarted on failure, logging to the Event Viewer.
+    Local Service cannot reach network shares or mapped drives: a backup to
+    a share needs WebDAV or S3, or the service run as another account. A WiX
+    recipe makes the MSI on Windows; it locks the data folder the same way
+    `service install` does (no access inherited from ProgramData). The
+    sidecar the desktop app bundles is called `topo-desktop-server`, so the
+    desktop app's packages never clash with these.
+  - **macOS**: a LaunchDaemon running as a hidden `_topo` user, and a
+    pkgbuild recipe that makes a universal pkg on a Mac. The one exception
+    to "not enabled": the pkg loads the daemon at once, and with its
+    all-comment settings it answers only on 127.0.0.1 of that Mac (no other
+    computer can reach it) until the settings are filled in.
+  - **Nothing is signed yet** (GPG for rpm and deb, Authenticode for
+    Windows, Developer ID and notarization for macOS); that is a later step.
+  - What was really run: the Linux packages are built and inspected here
+    (35 checks), but not installed (that needs root). The Windows and macOS
+    parts are cross-compiled and their files checked by tests, but never run
+    on those systems.
+- **D113. The desktop app can be the server.** Settings, **This PC as the
+  server**, only in the desktop app, off by default. The app carries
+  `topo-server` inside it and starts it when asked (or when the app opens,
+  if ticked), and stops it when the app closes.
+  *Extended by D125: the usual way is now a service that starts with the
+  PC; this "only while Topo is open" way stays as the second choice.*
+  - **This PC only** is `http://127.0.0.1`, which browsers already treat as
+    safe.
+  - **Other PCs on this network** need https, which a PC on a LAN has no
+    certificate for. So the server makes its own certificate
+    (`TOPO_TLS_SELF`), covering every address of the PC, and the app shows
+    each address and the certificate's fingerprint. Each other PC's browser
+    warns once; the person compares the fingerprint and goes on, or trusts
+    the certificate for good (steps in SERVER.md). Checked in Chromium:
+    after going on, the page can do the encryption. Not checked in Firefox
+    or Safari.
+  - Sign-in codes for other PCs must go by email, since only this PC can
+    read its log. The PC needs a fixed address, because sign-in links carry
+    it.
+  - The app's own window does not sync with that server; its address is
+    opened in a browser.
+  - Not tested: starting the server from the running app, and the Windows
+    and macOS app builds. The Linux app builds and its settings section is
+    tested against a stand-in.
+- **D125. One package, and it can make this PC the server (owner,
+  2026-11-11: "I want the installer to offer becoming the server. Only one
+  package is meant to be installed.").** A client installs the Topo desktop
+  app and nothing else, on Windows, Linux or macOS. The app carries the
+  server (`topo-desktop-server`). When the PC becomes the server, the server
+  runs as a service: always, from startup, even when Topo is closed or
+  nobody is signed in.
+  - **Windows** (the main case): the installer is the NSIS `-setup.exe`
+    only (the MSI is no longer built: it could not ask). It now installs
+    for every user of the PC, in Program Files, so it asks for an
+    administrator; a service must run a program that ordinary users cannot
+    change. Its first page has one more tick box, "Use this PC as the
+    server for your network", off unless the PC already is the server, in
+    English, Spanish, Portuguese (Brazil), Japanese or Russian as Windows
+    is. Ticked, the installer runs `topo-desktop-server service install
+    --start`: the service TopoServer, automatic (delayed) start, Local
+    Service, data and settings in `C:\ProgramData\Topo` (Local Service,
+    SYSTEM and Administrators only), restarted on failure. It also adds one
+    firewall rule letting that program in on private and domain networks,
+    never public ones (a service cannot show Windows' own "allow?" prompt;
+    the program still answers only on 127.0.0.1 until its settings say
+    other PCs may reach it). The owner's email and the mail settings are
+    left to the app (below). An update stops the service, replaces the
+    files and starts it again; unticking on a reinstall removes it;
+    uninstalling removes it and the firewall rule, and keeps the data.
+    Silent installs: `/S /SERVER` turns it on, `/NOSERVER` off, neither
+    keeps what the PC has.
+  - **Linux**: an rpm or deb cannot ask while it installs. The package
+    carries the unit `topo-desktop-server.service`, a sysusers file for the
+    `topo` user and a polkit action, and enables nothing: its scripts only
+    reload systemd and restart a server that already runs (on an upgrade),
+    and on removal stop and disable it; the data in `/var/lib/topo` and the
+    settings in `/etc/topo` stay. The app asks instead (below), and sets
+    it up through the system's administrator prompt (`pkexec`, with Topo's
+    own message). An AppImage cannot be a service (its files vanish when it
+    closes), so it only offers "while Topo is open".
+  - **macOS**: the app asks on first start too, and installs a
+    LaunchDaemon (the same label, `_topo` user and folders as the server's
+    own pkg recipe, D112) through the Mac's administrator prompt. Only from
+    a copy in Applications. Built for, not run (no Mac here).
+  - **The app.** On its first start, once, on a PC that can run the
+    service and does not yet, and unless the Windows installer already
+    asked, Topo asks "Use this PC as the server for your network?" (only
+    the desktop app; phones never see it). Yes opens Settings at **This PC
+    as the server** with the owner's email to fill in (and the mail
+    settings for other PCs), then **Run it in the background from
+    startup**: one administrator prompt sets it up and starts it. When the
+    service is there, the section talks to it: running or not, the
+    addresses to give people, the certificate's fingerprint, its log when
+    the account may read it; Save, Start and Stop go through the service
+    manager, each with an administrator prompt (Stop stops it until the next
+    startup); **Stop using this PC as the server** removes it, data kept.
+    The tick "Start it when Topo opens" is for the other way, which stays:
+    the server as the app's own child, only while Topo is open (D113).
+    Their data folders differ, so a server tried that way first does not
+    carry over to the service.
+  - **One set of service commands** in the server itself, the same on every
+    OS: `service install|uninstall|start|stop|configure|status|log`.
+    `configure` accepts only the settings the app writes (never the data
+    folder or a password file), checks them the way the server will, and
+    keeps the old file if the server would refuse them. The SMTP password
+    reaches the service once, through a private temporary file, and is kept
+    only in the service's own folder.
+  - **The server's own packages** (D112's rpm, deb, MSI and pkg recipes)
+    are no longer offered to clients. The plain `topo-server` binary and
+    the container stay for an advanced host; the recipes stay in the tree
+    for one who builds them, unchanged.
+  - What was really run: the Go service commands (unit tests with a stand-in
+    systemd), the app's Rust unit tests, the Settings section and the
+    question against a stand-in (`desktopserver` suite), and the Linux rpm
+    and deb built here and inspected (`tests/desktop-packages.sh`). Not run:
+    the Windows installer (no makensis here: CI builds it and runs it
+    silently on a Windows runner, `tests/desktop-installer-windows.ps1`),
+    installing the Linux packages and the pkexec prompt (they need root),
+    the macOS LaunchDaemon, and the running app talking to a real service.
+
 ## 6. Imports and exports (step 6)
 
 NetBox first, both ways (so clients are not afraid of lock-in). Then nmap XML,
 UniFi/Omada, MikroTik `/export`, Cisco CDP and MAC tables, Lansweeper and
 phpIPAM. Every import goes through the merge.
+
+What shipped (2026-11-10, not yet committed):
+
+- **One Import… entry** (Export menu; Open a file and the landing's drop send
+  anything that is not a Topo file there too). It reads the format from the
+  file, with a "Not right?" picker, shows what was understood (counts, what
+  could not be read by file and row or line, notes), lets the user leave out
+  passing devices (wireless clients, DHCP leases), then merges it as a copy:
+  the review, a restore point first, the log entry and one undo step. It
+  never deletes.
+- **Formats read:** NetBox (REST JSON and both CSV header styles), nmap XML,
+  UniFi (API JSON and the client and device CSV lists), Omada (Open API JSON
+  and CSV lists), MikroTik `/export` (v6 and v7, with "/ip neighbor print
+  detail" pasted in), Cisco "show cdp neighbors detail" and "show mac
+  address-table" (IOS, IOS-XE, NX-OS), Lansweeper asset CSV, phpIPAM (CSV
+  and API JSON). Parsers are pure functions in js/importers/*.js with
+  hand-written fixtures in tests/fixtures/import/ and a suite each.
+- **Export to NetBox:** a zip of NetBox bulk-import CSV files in import
+  order with a README; a round trip on every sample keeps everything NetBox
+  can hold.
+- **The format is published:** docs/FORMAT.md, schema/topo-v18.json and
+  schema/topo-backup-v1.json, checked against every sample.
+
+Left for later: pulling from a live NetBox, UniFi or Omada API (files only
+for now); checking the NetBox headers and the Omada field names against live
+systems; reading a MikroTik `.backup` or a running Cisco switch directly.
+
+### Decisions made building step 6 (2026-11-10), for the owner
+
+- **D114. One Import… entry.** Export, **Import…** takes any number of files
+  at once (an export is often a set). Each file shows what Topo read it as,
+  with a "Not right?" picker to choose another format or leave it out. The
+  next step, **What was understood**, shows the counts (devices, interfaces,
+  cables, subnets, VLANs, groups, racks, Wi-Fi, providers, columns), what
+  could not be read with its file and row (the first 50, then "and N more"),
+  and notes such as "VLAN 30 has no subnet: it stays on its ports". Then where
+  it goes: merged into the open network (the default when it is kept),
+  merged into another one, or opened as its own network. A merge is the
+  usual review, as a copy of a network, two-way: a restore point first, a log
+  entry naming the files, one undo step. **Importing adds and updates; it
+  never deletes**, and the dialog says so. Topo's own files keep their own
+  doors: a Topo .json opens as a network, a Topo spreadsheet goes to
+  Spreadsheet. Open a file and a drop on the landing send a file that is not
+  Topo's (a CSV, a NetBox page, a zip) to Import… instead of saying "not
+  valid JSON". The parsers return codes and the dialog says them in the
+  page's language; passwords and keys are never read, and the count of what
+  was left out is said once.
+- **D115. Imported records keep the source's own ids** (NetBox's,
+  `nb-<source>-d12`), so importing the same export again updates instead of
+  duplicating. `<source>` is a short tag of the NetBox address (or, for CSV,
+  of its site names), so two NetBox servers' device 12 stay two devices; it
+  is a plain FNV hash, not SHA-256, because the parsers are synchronous.
+  A record whose source has no key gets a stand-in id starting `imp-`. The
+  merge never treats an `imp-` id as an identity and gives the record an id
+  of its own when it is added (one rule in js/merge.js, rather than an option
+  passed to every merge: it holds on every re-plan of the review too). So an
+  imported device that happens to be called `n1` is never matched with your
+  `n1` by id; it is matched by asset tag, serial, MAC, address or name like
+  any copy. Topo's own ids that come back from a NetBox export (`topo_id`) are
+  identities, so a round trip matches everything to itself.
+- **D116. NetBox to Topo.** The REST API's JSON saved to files (a page, a
+  list, or several pages in one file), the list views' CSV export (verbose
+  headers) and the bulk-import CSV (field names) are all read. Sites (when
+  there are several) and locations become groups (floor, building or room by
+  their words in five languages), racks become rack groups (height, width,
+  depth, numbering), devices and virtual machines become devices (role to
+  type, make, model, platform, serial, asset tag, rack position and face),
+  a switch's or AP's numbered ports become its port grid (labels, VLANs,
+  PoE), LAGs become bonds, addresses go on their interfaces, prefixes become
+  subnets named by their VLANs, cables and wireless links become cables
+  (label, colour, length, medium), wireless LANs become Wi-Fi networks,
+  providers become providers, virtual machines run on the device their
+  cluster names when only one does. Tags become a "Tags" column and custom
+  fields become custom columns (at most 40). Statuses map to active, planned
+  (planned, staged, inventory) or retired (offline, failed,
+  decommissioning); staged, inventory, offline and failed are also kept in a
+  "NetBox status" column. A VLAN with no subnet is noted and stays on its
+  ports. An address on no interface is skipped and listed, because Topo keeps
+  addresses on interfaces. Power and console cables are listed and left out.
+  Regions, tenants, contacts, power, inventory items and the like are counted
+  as "not read". NetBox 4.2's separate MAC addresses are read.
+- **D117. Topo to NetBox.** Export, **Export to NetBox…** asks which NetBox
+  (4.2 to 4.4, the default, or 4.1: they differ in where MAC addresses and a
+  prefix's site go) and downloads one zip, `topo_<org>_<site>_<date>_netbox.zip`:
+  NetBox's own bulk-import CSV files, numbered in the order NetBox must import
+  them, and a README with the order and what is not carried. NetBox gets its
+  own columns for everything it holds; what it does not (the map position,
+  gateway, DNS, service dates, PoE budget...) rides in custom fields named
+  `topo_*`, and `topo_more` keeps each record exactly as Topo holds it. So
+  Topo to NetBox to Topo gives back the same network (tested on every sample
+  and on a fixture with every field filled), and changes made in NetBox to
+  names, serials, asset tags, comments, platforms, makes, models, MACs and
+  cable labels are read back. NetBox refuses some things Topo allows, so the
+  export makes names unique where NetBox needs it ("AP (2)", the original
+  kept), gives a second cable on one port and a cable bound to no port a
+  generated interface ("to <device>"), and keeps VPN links and links to
+  virtual machines in the device's `topo_more` (listed in the README). Not
+  carried: map notes, the report header, saved searches, the table layout,
+  accepted findings and pins, problem reports and the log. **The column lists
+  were written from NetBox's documented import forms and were not checked
+  against a live NetBox**; the README says to check the first file first.
+  The zip is written by Topo itself (stored, no compression), because the
+  page may not fetch a library.
+- **D118. UniFi and Omada controller backups (.unf, .cfg) are locked binary
+  files and are not read.** Import… recognises them and says to export the
+  device and client lists instead. (Their JSON and CSV exports come with the
+  other importers.)
+- **D119. From a Cisco MAC table, an uplink's addresses are left out.** A
+  port with more than 3 addresses, a port-channel, or a port with a switch,
+  router or AP behind it (from CDP) is an uplink: the addresses seen there
+  belong to devices further away, so cabling them to that port would be
+  wrong. They are left out and the ports are named in one note. A phone with
+  a PC behind it does not make an uplink: that port is in two VLANs, takes
+  the one with more addresses as its access VLAN and carries the other
+  tagged, and the note says which ports. Addresses on access ports become
+  devices named after their maker ("Dell 0003"), cabled to the port, so the
+  merge finds the ones already in the network by their MAC. Interface names
+  are written long (Gi1/0/5 is GigabitEthernet1/0/5) so CDP and the MAC table
+  agree; the switch's name comes from its prompt, and the dialog asks for it
+  when the capture has none.
+- **D120. The file format is published.** docs/FORMAT.md describes the .json
+  format (version 18): the envelopes, every field, ids, providers, problem
+  reports, the log and its hash chain, revisions, merge rules, the migrations
+  and rules for other tools. schema/topo-v18.json is now field-level and no
+  longer a draft, beside schema/topo-backup-v1.json for server backups. Every
+  sample, block, migrated old document and import result is checked against
+  it, and a new field fails the check until the schema and FORMAT.md describe
+  it. The About tab links it (the GitHub page, which is a link, not a
+  request).
+- **D121. Passing devices can be left out, and start left out.** UniFi and
+  Omada client lists and MikroTik DHCP leases can add hundreds of phones and
+  laptops that come and go. "What was understood" has a tick for each kind
+  with its count: wired clients are ticked, wireless clients and DHCP leases
+  are not. Leaving them out drops them and their cables from the import, and
+  the counts follow the ticks.
+- **D122. Discovery tools give devices, not decisions.** nmap writes what it
+  saw: the address (with the scan's subnet prefix, else /32 and a note),
+  MAC and maker, the host name (a reverse-DNS name without its domain), the
+  open ports as a notes line, and the OS only when nmap is 85% sure (else a
+  notes line with the guess). Nothing goes in Allowed Ports, which is a rule
+  Topo checks, not what a scan saw. A scan has no stable ids, so a second
+  scan finds devices by MAC, then address, then name. The same goes for
+  MikroTik exports, Cisco captures and Lansweeper or phpIPAM files without
+  ids; UniFi, Omada, Lansweeper (AssetID) and phpIPAM (API ids) keep the
+  source's ids, so importing again updates instead of duplicating (D115).
+- **D123. Controllers and routers: what is read.** UniFi and Omada: devices
+  (gateways are routers; switches and APs get their port grid with labels,
+  PoE and native VLAN), uplinks as cables to the parent's port (a mesh AP as a
+  wireless link), clients wired to their switch port or associated with their
+  AP on their SSID with band and signal, subnets with gateway, VLAN and DHCP
+  range, Wi-Fi with security and hidden. MikroTik: one export is one device
+  (name, model, RouterOS version, serial), its interfaces, VLANs, bonds,
+  addresses, DHCP networks and pools, Wi-Fi (v6 and v7), leases as clients,
+  and neighbours from a pasted "/ip neighbor print detail"; a CRS or CSS
+  switch's etherN ports are its port grid with access and tagged VLANs.
+  Sections it does not read are named in a note. **The Omada and UniFi field
+  names, and the Lansweeper and phpIPAM CSV headers, are written from
+  knowledge of those products and checked only against hand-written samples,
+  not live systems.**
+- **D124. Dates the local way are read only when the file settles them.**
+  Lansweeper and phpIPAM exports made with Excel write dates as 03/04/2024.
+  Topo decides the order per column across the whole file: a first part over
+  12 means day-first, a second part over 12 means month-first. A column that
+  never says is left empty with one note, never guessed. ISO dates are always
+  read. Passwords, keys and community strings are never read from any file,
+  and the count of what was left out is said once.
 
 ## Order
 
@@ -905,12 +1388,54 @@ phpIPAM. Every import goes through the merge.
   back (js/providermode.js); the client's side: the merge review's rows, the
   Problems tab, the Simple lists and marker, the landing line, the report's
   tick. Built before step 3 (D34, owner to confirm). Decisions D34–D50 above.
-- [~] 5. Server. 5a done 2026-11-10 (not yet committed): `topo-server`
+- [x] 5. Server. 5a done 2026-11-10 (not yet committed): `topo-server`
   (server/, Go, SQLite), email sign-in, sites with roles and invitations,
   end-to-end encryption in the browser (js/servercrypto.js), sync through the
   merge (js/serversync.js), email notifications, the client (js/server.js,
   js/serverui.js), docs/SERVER.md, tests/server-e2e.mjs. Decisions D51–D85
   above; the infrastructure link and the server's report email D86–D90
   (2026-11-10); the provider's part, its report and the attachment D91–D98
-  (2026-11-10). Next: 5b (backups to a folder and WebDAV), then 5c.
-- [ ] 6. Importers and spec.
+  (2026-11-10). 5b stage 1 done 2026-11-10 (not yet committed): the backup
+  engine in the server (server/internal/backup: a folder and WebDAV, the
+  encrypted file, when it writes, keeping, the weekly check, failure mail,
+  locked drive passwords, the owner's routes, `backup-now`), D99–D105. 5b
+  stage 2 done 2026-11-10 (not yet committed): the server owner's Backups
+  sheet and the network owner's Backups list (js/serverui.js), opening and
+  restoring a backup file with or without a server (js/backupfile.js),
+  readable copies (js/serversync.js, and `DELETE …/backups/readable`), the
+  back-up folder without a server (js/backupdir.js), D106–D108. 5c stage 3
+  done 2026-11-10 (not yet committed): S3-compatible stores, Google Drive and
+  OneDrive with Connect (server/internal/backup s3.go, sigv4.go, oauth.go,
+  gdrive.go, onedrive.go; the `oauth/start`, `oauth/finish` and callback
+  routes; the Backups sheet's new kinds), tested against local fakes only
+  (no real cloud call), D109–D111. 5c stage 4 done 2026-11-10 (not yet
+  committed): the rpm and deb (server/packaging/linux, `make rpm deb
+  packages packages-test`, tests/packaging.sh), the Windows service
+  (`topo-server service …`, a WiX recipe) and the macOS LaunchDaemon and pkg
+  recipe, both build-tested only; `TOPO_TLS_SELF` (server/internal/selfcert)
+  and "This PC as the server" in the desktop app (desktop/sidecar.sh,
+  desktop/src-tauri/src/server.rs, js/desktopserver.js), D112–D113.
+- [x] 5b. Backups (2026-11-10, not yet committed): off until the server
+  owner turns them on; a folder on the server or WebDAV; the encrypted
+  topo-backup file opened with an owner's keys or recovery key with no
+  server; daily and after-edit writes, keeping 7 daily, 4 weekly and 12
+  monthly; the weekly check and failure mail; readable copies made by an
+  owner's browser on purpose; restore through restore points and the merge;
+  the back-up folder without a server on Chrome and Edge. D99–D108.
+- [x] 5c. More destinations, installers, desktop server (2026-11-10, not yet
+  committed): S3-compatible stores, Google Drive and OneDrive with Connect
+  (Topo's own small clients, D109; tested against local fakes only); Linux
+  rpm and deb, the Windows service and macOS LaunchDaemon (build-tested only,
+  nothing signed); "This PC as the server" in the desktop app (wired and
+  build-tested, not run in a GUI session). D109–D113. 2026-11-11 (not yet
+  committed): one package per OS, the desktop app, which offers to make
+  the PC the server as a service from startup (the Windows installer's
+  tick box, the app's first-run question on Linux and macOS; D125).
+- [x] 6. Importers and spec (2026-11-10, not yet committed): the Import…
+  framework (js/importui.js, js/importers/registry.js and common.js), NetBox
+  both ways (js/importers/netbox.js, js/netboxexport.js, a round trip on every
+  sample), nmap, UniFi, Omada, MikroTik, Cisco, Lansweeper and phpIPAM
+  (js/importers/*.js, a suite and hand-written fixtures each), docs/FORMAT.md
+  and the field-level schema/topo-v18.json with schema/topo-backup-v1.json.
+  D114–D124. Not checked against live NetBox, UniFi, Omada, Lansweeper or
+  phpIPAM systems (D117, D123).

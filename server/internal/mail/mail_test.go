@@ -3,6 +3,7 @@ package mail
 import (
 	"bufio"
 	"bytes"
+	"carino.systems/topo/server/internal/backup"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -117,7 +118,7 @@ func TestRenderEveryKindEveryLocale(t *testing.T) {
 				if strings.Count(m.HTML, "<a ") != 1 {
 					t.Errorf("%s %s: want one link button, got %d", kind, lang, strings.Count(m.HTML, "<a "))
 				}
-				if named && kind != "signin" && kind != "welcome" && kind != "test" && kind != "link-request" && kind != "report" && !strings.Contains(m.Text, "Clínica Sol") {
+				if named && kind != "signin" && kind != "welcome" && kind != "test" && kind != "link-request" && kind != "report" && !backupKinds[kind] && !strings.Contains(m.Text, "Clínica Sol") {
 					t.Errorf("%s %s: name allowed in clear but not shown", kind, lang)
 				}
 				if !named && strings.Contains(m.Text+m.Subject, "Clínica") {
@@ -861,5 +862,38 @@ func TestFileSinkAttachment(t *testing.T) {
 	json.Unmarshal(bytes.TrimSpace(b), &l)
 	if l.Attachment != "r.pdf" || l.AttachmentBytes != 8 {
 		t.Fatalf("sink line %+v", l)
+	}
+}
+
+// The backup failure mails (D104): every reason code has a sentence in
+// every language, the sentence is in the text, a network name never is,
+// and the only link is the server's own.
+func TestBackupMails(t *testing.T) {
+	for _, kind := range []string{"backup-failed", "backup-check-failed"} {
+		for _, lang := range Langs {
+			for _, code := range backup.Codes {
+				key := "backup.why." + code
+				if _, ok := locales[lang][key]; !ok {
+					t.Fatalf("%s: no %s", lang, key)
+				}
+				m, err := Render(kind, lang, Data{"why": code, "name": "Clínica Sol", "url": "https://topo.example.com/"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(m.Text, locales[lang][key]) {
+					t.Errorf("%s %s %s: reason missing: %s", kind, lang, code, m.Text)
+				}
+				if strings.Contains(m.Text+m.Subject+m.HTML, "Clínica") {
+					t.Errorf("%s %s: names a network", kind, lang)
+				}
+				if strings.Contains(m.Text, "infrastructure") {
+					t.Errorf("%s %s: uses the infrastructure link wording", kind, lang)
+				}
+			}
+		}
+	}
+	m, _ := Render("backup-failed", "en", Data{"why": "nonsense", "url": "https://topo.example.com/"})
+	if !strings.Contains(m.Text, "Something went wrong.") || !strings.Contains(m.Text, "https://topo.example.com/") {
+		t.Fatalf("unknown code: %s", m.Text)
 	}
 }

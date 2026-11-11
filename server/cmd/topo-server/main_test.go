@@ -377,3 +377,54 @@ func TestStaticRefusesBrokenIndex(t *testing.T) {
 		t.Fatalf("want a stage error, got %v", err)
 	}
 }
+
+// backup-now: refused with no data, while backups are off, and while
+// another engine holds the lease; otherwise it backs up (amendment 11).
+func TestBackupNowCommand(t *testing.T) {
+	data := t.TempDir()
+	env := []string{"TOPO_DATA=" + data, "TOPO_LOG_LEVEL=error"}
+	var out, errb bytes.Buffer
+	if code := run([]string{"backup-now"}, env, &out, &errb); code != 1 || !strings.Contains(errb.String(), "no Topo server data") {
+		t.Fatalf("no data: %d %s", code, errb.String())
+	}
+	st, err := store.Open(data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	errb.Reset()
+	if code := run([]string{"backup-now"}, env, &out, &errb); code != 1 || !strings.Contains(errb.String(), "backups are off") {
+		t.Fatalf("off: %d %s", code, errb.String())
+	}
+	dir := filepath.Join(data, "backups", "bk")
+	os.MkdirAll(dir, 0o700)
+	os.WriteFile(filepath.Join(dir, ".topo-backups"), []byte("{}"), 0o600)
+	fields, _ := json.Marshal(map[string]string{"path": dir})
+	store.SetBackupConfig(ctx, st.W, &store.BackupConfig{Enabled: true, Kind: "folder", Fields: string(fields), ConfigID: "bc_1", DailyAt: "02:30", Updated: 1})
+	// A running server holds the lease.
+	store.AcquireBackupLease(ctx, st.W, "e_server", time.Now().UnixMilli(), time.Now().Add(time.Minute).UnixMilli())
+	errb.Reset()
+	if code := run([]string{"backup-now"}, env, &out, &errb); code != 1 || !strings.Contains(errb.String(), "running Topo server") {
+		t.Fatalf("leased: %d %s", code, errb.String())
+	}
+	store.ReleaseBackupLease(ctx, st.W, "e_server")
+	out.Reset()
+	errb.Reset()
+	if code := run([]string{"backup-now", "--check"}, env, &out, &errb); code != 0 || !strings.Contains(out.String(), "Backups: done.") || !strings.Contains(out.String(), "Check: passed.") {
+		t.Fatalf("run: %d %s %s", code, out.String(), errb.String())
+	}
+	// The lease was given back.
+	if ok, _ := store.AcquireBackupLease(ctx, st.W, "e_other", time.Now().UnixMilli(), time.Now().Add(time.Minute).UnixMilli()); !ok {
+		t.Fatal("backup-now kept the lease")
+	}
+	st.Close()
+}
+
+// TOPO_SERVER_KEY naming a missing file stops the start.
+func TestExplicitServerKeyMissing(t *testing.T) {
+	var out, errb bytes.Buffer
+	env := []string{"TOPO_DATA=" + t.TempDir(), "TOPO_LISTEN=127.0.0.1:0", "TOPO_SERVER_KEY=" + filepath.Join(t.TempDir(), "none", "server.key")}
+	if code := run([]string{"serve"}, env, &out, &errb); code != 1 || !strings.Contains(errb.String(), "TOPO_SERVER_KEY") {
+		t.Fatalf("%d %s", code, errb.String())
+	}
+}

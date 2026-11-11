@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  The administrator prompt the Topo app shows when it sets up, starts, stops
+  or reconfigures "This PC as the server" (pkexec /usr/bin/topo-desktop-server
+  service ..., docs/SCOPE.md D125). Shipped in the Topo desktop rpm and deb as
+  /usr/share/polkit-1/actions/systems.carino.topo.policy. An administrator's
+  password, remembered for a few minutes (auth_admin_keep).
+-->
+<policyconfig>
+  <vendor>Carino Systems</vendor>
+  <vendor_url>https://topo.carino.systems/</vendor_url>
+  <action id="systems.carino.topo.server">
+    <description>Run this PC as the Topo server</description>
+    <description xml:lang="es">Usar este PC como servidor de Topo</description>
+    <description xml:lang="pt_BR">Usar este PC como servidor do Topo</description>
+    <description xml:lang="ja">このPCを Topo サーバーとして使う</description>
+    <description xml:lang="ru">Использовать этот ПК как сервер Topo</description>
+    <message>Topo needs an administrator to set up, start, stop or change the Topo server on this PC.</message>
+    <message xml:lang="es">Topo necesita un administrador para configurar, iniciar, detener o cambiar el servidor de Topo en este PC.</message>
+    <message xml:lang="pt_BR">O Topo precisa de um administrador para configurar, iniciar, parar ou alterar o servidor do Topo neste PC.</message>
+    <message xml:lang="ja">このPCの Topo サーバーの設定、開始、停止、変更には管理者の認証が必要です。</message>
+    <message xml:lang="ru">Чтобы настроить, запустить, остановить или изменить сервер Topo на этом ПК, нужны права администратора.</message>
+    <icon_name>topo</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/topo-desktop-server</annotate>
+  </action>
+</policyconfig>

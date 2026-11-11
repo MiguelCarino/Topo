@@ -1,0 +1,67 @@
+# Topo server (systemd system unit), as the rpm and deb packages install it
+# (/usr/lib/systemd/system/topo-server.service). Not enabled on install:
+#
+#   sudo editor /etc/topo/topo.env          (TOPO_PUBLIC_URL, SMTP, owner...)
+#   sudo systemctl enable --now topo-server
+#
+# It differs from ../topo-server.service (the unit for a binary installed by
+# hand) only in the lines marked "packaged": a fixed user "topo" made by
+# sysusers.d instead of DynamicUser, so a backup folder on a USB disk or a
+# share can be given to that user (chown topo:topo), and the binary in
+# /usr/bin. A backup folder outside /var/lib/topo also needs a drop-in that
+# makes it writable (backup-folder.conf.example in the documentation).
+[Unit]
+Description=Topo server (network documentation, email sign-in, encrypted sync)
+Documentation=https://topo.carino.systems
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# packaged: a fixed user (topo.sysusers), not DynamicUser
+User=topo
+Group=topo
+StateDirectory=topo
+StateDirectoryMode=0700
+Environment=TOPO_DATA=%S/topo
+EnvironmentFile=-/etc/topo/topo.env
+# packaged
+ExecStart=/usr/bin/topo-server serve
+Restart=on-failure
+RestartSec=5
+# SIGTERM: the server stops taking connections, ends live streams, lets
+# requests finish (45 s at most) and closes the database cleanly.
+KillMode=mixed
+TimeoutStopSec=60
+
+# Hardening. The server needs the network, its state folder and nothing else.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+# AF_NETLINK: listing this machine's addresses (TOPO_TLS_SELF puts them
+# in its certificate; without it the list is empty).
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

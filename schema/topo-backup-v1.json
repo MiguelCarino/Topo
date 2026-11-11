@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://topo.carino.systems/schema/topo-backup-v1.json",
+  "title": "Topo server backup",
+  "description": "A backup a Topo server writes to a drive (docs/SCOPE.md D100, docs/FORMAT.md section 2). The network inside is end-to-end encrypted: rev.ct is the AES-GCM ciphertext of a Topo document (schema topo-v18.json), opened in a browser with an owner's own keys or an owner's recovery key. JSON keys are sorted; the server records the SHA-256 of the exact bytes.",
+  "type": "object",
+  "required": ["kind", "v", "site", "made", "rev", "rosters", "pubs", "owners"],
+  "properties": {
+    "kind": { "const": "topo-backup" },
+    "v": { "const": 1 },
+    "site": { "type": "string", "description": "The network's id on its server." },
+    "made": { "type": "string", "description": "When the backup was written (RFC 3339)." },
+    "originHash": { "type": "string", "description": "SHA-256 (hex) of the server's origin, so a browser knows it is on the same server; the address itself is not written." },
+    "name": { "type": ["string", "null"], "description": "The network's name in clear, only when its owner allowed it; else null." },
+    "nameCt": { "description": "The name encrypted, as the server holds it." },
+    "rev": {
+      "type": "object",
+      "description": "The head revision exactly as the server stores it.",
+      "required": ["n", "ctHash", "iv", "ct"],
+      "properties": {
+        "n": { "type": "integer" }, "base": { "type": "integer" }, "prev": { "type": "string" }, "epoch": { "type": "integer" },
+        "rseq": { "type": "integer" }, "author": { "type": "string" }, "dev": { "type": "string" }, "at": { "type": "integer" },
+        "ctHash": { "type": "string", "description": "SHA-256 of the ciphertext." }, "sig": { "type": "string", "description": "The author's signature over the header." },
+        "h": { "type": "string" }, "iv": { "type": "string" }, "ct": { "type": "string", "description": "Base64 AES-GCM ciphertext of the document." }
+      },
+      "additionalProperties": true
+    },
+    "rosters": { "type": "array", "description": "The member lists in force (signed), the head's and the newest." },
+    "pubs": { "type": "object", "description": "Members' public keys (encPub, sigPub) that match the rosters.", "additionalProperties": { "type": "object" } },
+    "owners": {
+      "type": "array",
+      "description": "For each owner at backup time: their wrap of the site key for the head's epoch and their locked recovery copy (escrow), or null.",
+      "items": { "type": "object", "required": ["u"], "properties": { "u": { "type": "string" }, "wrap": {}, "escrow": {} } }
+    }
+  },
+  "additionalProperties": true
+}

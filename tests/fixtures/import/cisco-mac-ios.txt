@@ -1,0 +1,28 @@
+SW-CORE#show mac address-table
+          Mac Address Table
+-------------------------------------------
+
+Vlan    Mac Address       Type        Ports
+----    -----------       --------    -----
+ All    0100.0ccc.cccc    STATIC      CPU
+ All    0180.c200.0000    STATIC      CPU
+   1    0050.56aa.0001    DYNAMIC     Gi1/0/48
+   1    0050.56aa.0002    DYNAMIC     Gi1/0/48
+  10    d067.e5ee.0003    DYNAMIC     Gi1/0/3
+  10    0014.38ee.0004    DYNAMIC     Gi1/0/4
+  10    3ca9.f4ee.0005    DYNAMIC     Gi1/0/5
+  20    0056.2b00.1122    DYNAMIC     Gi1/0/5
+  10    a45e.60ee.0010    DYNAMIC     Gi1/0/10
+  10    a45e.60ee.0011    DYNAMIC     Gi1/0/10
+  10    a45e.60ee.0012    DYNAMIC     Gi1/0/10
+  10    d067.e5ee.0020    DYNAMIC     Gi1/0/20
+  10    d067.e5ee.0021    DYNAMIC     Gi1/0/20
+  10    d067.e5ee.0022    DYNAMIC     Gi1/0/20
+  10    d067.e5ee.0023    DYNAMIC     Gi1/0/20
+  30    d067.e5ee.0030    DYNAMIC     Po1
+  10    5ce0.c5ee.0031    STATIC      Gi1/0/31
+  10    0100.5e00.0001    STATIC      Gi1/0/31,Gi1/0/32
+   1    5c0a.5b00.0099    DYNAMIC     Router
+garbage line in the table
+Total Mac Addresses for this criterion: 19
+SW-CORE#

@@ -183,6 +183,14 @@ func (s *Server) pushRev(w http.ResponseWriter, r *http.Request) {
 	}
 	s.publish(members, "head", map[string]any{"site": site, "n": e.N, "h": h})
 	s.wake()
+	// A backup follows after a quiet spell (D102); never blocks the push.
+	why := "push"
+	for _, ev := range req.Events {
+		if ev.Kind == "visit-recorded" {
+			why = "visit"
+		}
+	}
+	s.d.Backups.Touch(site, why)
 	writeJSON(w, http.StatusCreated, map[string]any{"n": e.N, "h": h})
 }
 

@@ -2137,6 +2137,8 @@ function flushAutosave() {
     if (id) state.docUpdated = libraryEntry(id).updated;
     // A card on a Topo server pushes the edit after a quiet spell (js/serversync.js).
     if (id && typeof serverAfterSave === 'function') serverAfterSave(id);
+    // And is written to the back-up folder a minute later, when one is picked (js/backupdir.js).
+    if (id && typeof backupDirAfterSave === 'function') backupDirAfterSave(id);
     renderDocBar();
     // In IndexedDB mode the card always takes the edit and the disk follows;
     // while the disk is refusing, this network is no safer than the tab.

@@ -167,7 +167,7 @@ async function mergeCopyInto(targetId, theirs, opts = {}) {
         return { ok: false, reason: 'ancestor' };
     }
     return openMergeReview({ targetId, theirs, base: ctx.base, theirsRev: ident.rev, source: opts.source, fileName: opts.fileName,
-        reason: opts.reason, name: opts.name, replaceAsked: opts.replaceAsked, open: opts.open, part: ctx.part || null });
+        reason: opts.reason, name: opts.name, replaceAsked: opts.replaceAsked, open: opts.open, part: ctx.part || null, note: opts.note || '' });
 }
 
 // ---- The landing card's ⇄ Merge… ----
@@ -203,6 +203,8 @@ async function mergeCardInto(fromId, targetId) {
 }
 // A file picked for "A file into this network…".
 function mergeFileIntoCard(targetId, parsed, fileName) {
+    // A server backup is unlocked first, then offered as any copy of a network is (js/backupfile.js).
+    if (typeof isBackupFile === 'function' && isBackupFile(parsed)) return openBackupFile(parsed, { fileName, mergeInto: targetId });
     if (binderFromImported(parsed)) { showToast(t('That file is a binder of several networks: open it with Open a file.')); return Promise.resolve(null); }
     const doc = docFromImported(parsed);
     if (!doc) { showToast(t('That file does not look like a Topo build or binder.'), 'err'); return Promise.resolve(null); }

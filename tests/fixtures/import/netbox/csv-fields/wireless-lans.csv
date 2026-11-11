@@ -1,0 +1,3 @@
+ssid,status,vlan,auth_type,auth_cipher,auth_psk,description
+Clinic-Staff,active,10,wpa-personal,aes,supersecret123,
+Clinic-Guest,active,,open,,,

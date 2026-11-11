@@ -8,6 +8,11 @@
 // the default browser (see host_print).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// "This PC as the server" (D113, D125): the bundled topo-server, off by
+// default; as a service that starts with the computer, or only while the
+// app is open.
+mod server;
+
 // The download handler (and its helpers) is not built on Windows; see main.
 #[cfg(not(target_os = "windows"))]
 use std::path::{Path, PathBuf};
@@ -18,7 +23,7 @@ use tauri::webview::NewWindowResponse;
 #[cfg(not(target_os = "windows"))]
 use tauri::Manager;
 use tauri::window::Color;
-use tauri::{AppHandle, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
 /// The page's own addresses: the bundled files (tauri:// on macOS and Linux,
@@ -152,8 +157,24 @@ fn main() {
                 .open_js_links_on_click(false)
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![host_prints, host_print])
+        .manage(server::ServerState::default())
+        .invoke_handler(tauri::generate_handler![
+            host_prints,
+            host_print,
+            server::server_info,
+            server::server_save,
+            server::server_start,
+            server::server_stop,
+            server::server_open,
+            server::server_service_install,
+            server::server_service_remove,
+            server::server_question,
+            server::server_question_done
+        ])
         .setup(|app| {
+            // Off the main thread: starting waits a moment for a refusal.
+            let server_handle = app.handle().clone();
+            std::thread::spawn(move || server::autostart(&server_handle));
             let nav_handle = app.handle().clone();
             let win_handle = app.handle().clone();
             let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("intro.html".into()))
@@ -217,6 +238,12 @@ fn main() {
             builder.build()?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Topo");
+        .build(tauri::generate_context!())
+        .expect("error while building Topo")
+        // A server the app started itself stops with it (a service does not).
+        .run(|handle, event| {
+            if let RunEvent::Exit = event {
+                server::on_exit(handle);
+            }
+        });
 }

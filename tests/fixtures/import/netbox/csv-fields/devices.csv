@@ -1,0 +1,4 @@
+name,role,manufacturer,device_type,platform,site,location,rack,position,face,serial,asset_tag,status,cluster,comments,tags
+edge-rtr,Router,MikroTik,RB5009UG+S+IN,RouterOS 7,Clinic North,,,,,HEX0001,,active,,,
+hv-01,Server,Supermicro,SYS-1019,Proxmox VE,Clinic North,,,,,S123,,active,PVE,,
+lab-pc,Workstation,Lenovo,ThinkCentre M70q,Windows 11,Clinic South,,,,,,,staged,,Lab front desk,

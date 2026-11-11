@@ -11,4 +11,6 @@ desktop/dist/
 desktop/out/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+# The bundled topo-server (desktop/sidecar.sh).
+desktop/src-tauri/binaries/
 desktop/src-tauri/icons/

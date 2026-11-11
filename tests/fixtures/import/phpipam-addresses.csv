@@ -1,0 +1,8 @@
+IP address,IP state,Description,Hostname,Firewall object,MAC,Owner,Device,Port,Note,Last seen
+192.168.40.1,Gateway,Router consultorios,gw-consultorios,,50:91:E3:40:00:01,TI,,,,
+192.168.40.10,Used,PC consultorio 1,pc-cons1,,D0:67:E5:40:00:10,Dra. Ruiz,sw-norte,Gi1/0/10,,2026-11-09
+192.168.40.11,Used,Impresora consultorios,imp-cons,,00:14:38:40:00:11,Recepción,sw-norte,Gi1/0/11,Toner HP 58A,
+192.168.40.20,Reserved,Reservada para equipo nuevo,,,,,,,,
+192.168.41.5,Offline,Equipo de rayos X (viejo),rx-01,,00:0E:C6:41:00:05,Imagenologia,sw-norte,Gi1/0/12,,
+10.40.1.20,DHCP,,,,,,,,,
+not.an.ip,Used,,roto,,,,,,,

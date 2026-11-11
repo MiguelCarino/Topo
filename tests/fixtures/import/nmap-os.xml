@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<!-- Hand-written test fixture for Topo's importer, not a real scan:
+     an OS-detection scan of three named hosts (no subnet on the command line). -->
+<nmaprun scanner="nmap" args="nmap -O -sV -oX nmap-os.xml 10.20.0.5 10.20.0.6 192.168.50.33 2001:db8:20::9" start="1794305000" version="7.95" xmloutputversion="1.05">
+<host starttime="1794305010" endtime="1794305070"><status state="up" reason="echo-reply" reason_ttl="63"/>
+<address addr="10.20.0.5" addrtype="ipv4"/>
+<hostnames><hostname name="files01.corp.example" type="PTR"/></hostnames>
+<ports>
+<port protocol="tcp" portid="22"><state state="open" reason="syn-ack" reason_ttl="63"/><service name="ssh" product="OpenSSH" version="8.9p1 Ubuntu 3ubuntu0.10" method="probed" conf="10"/></port>
+<port protocol="tcp" portid="2049"><state state="open" reason="syn-ack" reason_ttl="63"/><service name="nfs" method="probed" conf="10"/></port>
+</ports>
+<os>
+<osmatch name="Linux 5.0 - 5.14" accuracy="96" line="69748"><osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="5.X" accuracy="96"/></osmatch>
+<osmatch name="Linux 4.15" accuracy="90" line="65000"><osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="4.X" accuracy="90"/></osmatch>
+</os>
+</host>
+<host starttime="1794305010" endtime="1794305075"><status state="up" reason="echo-reply" reason_ttl="254"/>
+<address addr="10.20.0.6" addrtype="ipv4"/>
+<hostnames></hostnames>
+<ports>
+<port protocol="tcp" portid="443"><state state="open" reason="syn-ack" reason_ttl="254"/><service name="https" method="table" conf="3"/></port>
+</ports>
+<os>
+<osmatch name="MikroTik RouterOS 7.X" accuracy="70" line="51000"><osclass type="router" vendor="MikroTik" osfamily="RouterOS" accuracy="70"/></osmatch>
+</os>
+</host>
+<host starttime="1794305011" endtime="1794305080"><status state="up" reason="echo-reply" reason_ttl="127"/>
+<address addr="192.168.50.33" addrtype="ipv4"/>
+<address addr="3C:A9:F4:00:33:01" addrtype="mac" vendor="Intel Corporate"/>
+<hostnames><hostname name="conta-pc03" type="user"/></hostnames>
+<ports>
+<port protocol="tcp" portid="5900"><state state="open" reason="syn-ack" reason_ttl="127"/><service name="vnc" product="TightVNC" method="probed" conf="10"/></port>
+</ports>
+</host>
+<host starttime="1794305012" endtime="1794305081"><status state="up" reason="echo-reply" reason_ttl="64"/>
+<address addr="2001:db8:20::9" addrtype="ipv6"/>
+<hostnames><hostname name="v6-sensor" type="user"/></hostnames>
+</host>
+<runstats><finished time="1794305100" elapsed="100.00" exit="success"/><hosts up="4" down="0" total="4"/></runstats>
+</nmaprun>

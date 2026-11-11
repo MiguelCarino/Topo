@@ -1,0 +1,7 @@
+ID,IP Address,VRF,Status,Role,Tenant,Assigned,Parent,Interface,DNS Name,Description
+301,192.168.10.2/24,,Active,,,True,core-sw-01,Vlan10,core-sw-01.example.lan,
+302,203.0.113.2/29,,Active,,,True,fw-01,wan1,,
+303,192.168.10.1/24,,Active,,,True,fw-01,internal1,,
+304,192.168.10.30/24,,Active,,,True,srv-files,NIC1,,
+305,192.168.10.31/24,,Active,,,True,srv-files,NIC1,,
+306,192.168.10.250/24,,Reserved,,,False,,,,Spare

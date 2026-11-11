@@ -1,0 +1,6 @@
+{"errorCode":0,"msg":"Success.","result":{"data":[
+{"id":"64f0c2a1b2c3d4e5f6a7d001","name":"LAN","purpose":"interface","vlan":1,"gatewaySubnet":"192.168.0.1/24","dhcpSettings":{"enable":true,"ipaddrStart":"192.168.0.100","ipaddrEnd":"192.168.0.199","priDns":"1.1.1.1","sndDns":"8.8.8.8"}},
+{"id":"64f0c2a1b2c3d4e5f6a7d002","name":"Imagenologia","purpose":"vlan","vlan":30,"gatewaySubnet":"192.168.30.1/24","dhcpSettings":{"enable":false}},
+{"id":"64f0c2a1b2c3d4e5f6a7e001","name":"Clinica","ssid":"Clinica","band":3,"security":3,"broadcast":true,"pskSetting":{"securityKey":"clave-clinica-2026","versionPsk":2,"encryptionPsk":3},"vlanSetting":{"mode":0}},
+{"id":"64f0c2a1b2c3d4e5f6a7e002","name":"Pacientes","ssid":"Pacientes","band":3,"security":0,"broadcast":false,"vlanSetting":{"mode":1,"customConfig":{"vlanId":30}}}
+]}}

@@ -1,0 +1,3 @@
+address,status,device,virtual_machine,interface,is_primary
+192.168.88.1/24,active,edge-rtr,,ether2,true
+10.10.10.5/24,active,,ris-01,ens18,true

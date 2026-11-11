@@ -45,7 +45,9 @@ const PUSH_MAX_MS = 60000;
 const NEEDS_MERGE_LONG_MS = 24 * 3600 * 1000;
 const BUSY_MAX_MS = 15000;
 const SERVER_REASON = 'Before merging from the server';
-const _hooks = { quietMs: PUSH_QUIET_MS, maxMs: PUSH_MAX_MS, busyMs: BUSY_MAX_MS, now: () => Date.now() };
+// readableMs: a readable copy at most this often per network (D106);
+// readableDelayMs: how long after a sync it is sent.
+const _hooks = { quietMs: PUSH_QUIET_MS, maxMs: PUSH_MAX_MS, busyMs: BUSY_MAX_MS, now: () => Date.now(), readableMs: 10 * 60 * 1000, readableDelayMs: 5000 };
 
 // ---- The index ----
 const indexKey = () => 'topo-sync:' + (T()._hooks.origin || location.origin);
@@ -527,6 +529,7 @@ async function doSync(r, opts) {
             if (p) {
                 const res = await applyPull(r, p);
                 if (res === 'needs-merge' || res === 'update-needed' || res === 'deferred') return res;
+                if (res === 'applied' || res === 'merged' || res === 'own') readableAfterSync(r);
             } else if (r.state === 'needs-merge' && await getDoc(r.cardId, 'pending')) { setState(r, 'needs-merge'); return 'needs-merge'; }
             if (opts.pull) { setState(r, 'synced'); return 'pulled'; }
             const pushed = await pushCard(r);
@@ -534,6 +537,7 @@ async function doSync(r, opts) {
             if (pushed === 'refresh') { _keys.delete(r.siteId); await walkRosters(r.siteId); continue; }
             if (r.state !== 'error') setState(r, 'synced');
             r.lastSyncAt = _hooks.now(); putRec(r);
+            if (pushed === 'pushed') readableAfterSync(r);
             return pushed;
         }
         setState(r, 'error', { err: 'catch-up' });
@@ -610,6 +614,7 @@ async function open() {
     T().on('online', syncAll);
     T().on('visible', syncAll);
     T().on('hidden', flushAll);
+    T().on('hidden', flushReadable);
     if (window.BroadcastChannel) {
         try {
             _bc = new BroadcastChannel('topo-server-tabs');
@@ -638,6 +643,8 @@ async function putCard(cardId, opts = {}) {
     const body = { id: siteId, roster, wrap, nameCt };
     if (opts.showName) { body.showName = true; body.nameClear = card.name || ''; }
     await T().api('POST', '/api/sites', body);
+    // The name in file-name form, for the backups' file names (amendment 4).
+    if (opts.showName && nameSlugOf(card.name)) { try { await T().api('PATCH', `/api/sites/${siteId}`, { nameSlug: nameSlugOf(card.name) }); } catch (e) { /* the server's own name then */ } }
     _keys.set(siteId, new Map([[1, key]]));
     const r = { cardId, siteId, role: 'owner', baseN: 0, baseH: await C.genesis(siteId), baseRev: null, baseHash: '', epoch: 1, pinSeq: 1, state: 'pushing' };
     putRec(r);
@@ -845,7 +852,7 @@ async function invite(siteId, email, role, lang) {
 }
 async function setShowName(siteId, show) {
     const body = { showName: !!show };
-    if (show) body.nameClear = await siteName(siteId);
+    if (show) { body.nameClear = await siteName(siteId); const slug = nameSlugOf(body.nameClear); if (slug) body.nameSlug = slug; }
     await T().api('PATCH', `/api/sites/${siteId}`, body);
     await T().refreshSites();
 }
@@ -861,6 +868,78 @@ async function afterMembers(siteId) {
     const r = recBySite(siteId);
     if (r) syncCard(r.cardId);
 }
+
+// ---- Backups on the server (docs/SCOPE.md step 5b, D106, D107) ----
+// The name as backup files say it (fileSlug, js/report.js), within the
+// server's 180 bytes; '' when there is none.
+function nameSlugOf(name) {
+    if (typeof fileSlug !== 'function') return '';
+    let s = fileSlug(name || '', '');
+    while (s && new TextEncoder().encode(s).length > 180) s = s.slice(0, -1).replace(/-+$/, '');
+    return s;
+}
+// The readable copy (D106). The server cannot read the network, so when its
+// owner asked for a readable copy too, an owner's browser makes it: after a
+// sync that moved the network, at most every readableMs per network, the
+// same file Download a back-up gives (networkJsonFile, js/restore.js) of the
+// copy the server holds now (the base), sent with its revision number. The
+// server refuses it when the network moved on meanwhile ('stale'), and
+// writes nothing it is not allowed to.
+const _readable = new Map();   // siteId -> { timer, last, cardId }
+function readableAfterSync(r) {
+    if (!r || r.role !== 'owner' || !T().ready()) return;
+    // Known to be off (the cached site detail): nothing to send, no fetch.
+    const c = _members.get(r.siteId);
+    const cb = c && c.data && c.data.backups;
+    if (cb && !(cb.on && cb.readable && cb.readableAllowed)) return;
+    const st = _readable.get(r.siteId) || { timer: 0, last: 0, cardId: r.cardId };
+    st.cardId = r.cardId;
+    _readable.set(r.siteId, st);
+    if (st.timer) return;
+    const wait = Math.max(_hooks.readableDelayMs, st.last + _hooks.readableMs - _hooks.now());
+    st.timer = setTimeout(() => { st.timer = 0; sendReadable(st.cardId).catch(() => {}); }, wait);
+}
+function flushReadable() {
+    _readable.forEach((st) => { if (st.timer) { clearTimeout(st.timer); st.timer = 0; sendReadable(st.cardId).catch(() => {}); } });
+}
+// -> 'sent' | 'off' | 'idle' | 'stale' | an error code.
+async function sendReadable(cardId) {
+    const r = rec(cardId);
+    if (!r || r.role !== 'owner' || !T().ready() || !r.baseN) return 'idle';
+    const d = await siteDetail(r.siteId, true);
+    const b = d && d.backups;
+    if (!b || !b.on || !b.readable || !b.readableAllowed) {
+        // Off: the throttle still counts, so the next sync does not ask again at once.
+        const st0 = _readable.get(r.siteId);
+        if (st0) st0.last = _hooks.now();
+        return 'off';
+    }
+    const base = (await getDoc(cardId, 'base')) || {};
+    const doc = base.doc || await refetchBase(r);
+    if (!doc) return 'idle';
+    const card = libraryEntry(cardId);
+    const f = networkJsonFile((card && card.name) || '', cardId, (card && card.updated) || _hooks.now(), doc, todayISO(new Date(_hooks.now())), { rev: base.rev });
+    const st = _readable.get(r.siteId) || { timer: 0, last: 0, cardId };
+    _readable.set(r.siteId, st);
+    try {
+        await T().api('POST', `/api/sites/${r.siteId}/backups/readable`, { revN: r.baseN, fileName: f.fileName, file: withTopoSchema(f.payload) });
+        st.last = _hooks.now();
+        return 'sent';
+    } catch (e) {
+        // Someone pushed meanwhile: the next sync sends the newer one.
+        if (e.code === 'stale') return 'stale';
+        return e.code || 'error';
+    }
+}
+// The site owner's switch (Members, Backups), and Delete readable copies.
+async function setReadable(siteId, on) {
+    await T().api('PATCH', `/api/sites/${siteId}`, { backupReadable: !!on });
+    _members.delete(siteId);
+    const r = recBySite(siteId);
+    if (on && r) readableAfterSync(r);
+}
+async function deleteReadable(siteId) { await T().api('DELETE', `/api/sites/${siteId}/backups/readable`); }
+async function siteBackups(siteId) { return ((await T().api('GET', `/api/sites/${siteId}/backups`)) || {}).backups || []; }
 
 // ---- The provider on the server (D75) ----
 function onDocLoaded() {
@@ -923,6 +1002,7 @@ function _reset() {
     _index = null; _docs.clear(); _keys.clear(); _members.clear();
     _timers.forEach((t) => clearTimeout(t.timer)); _timers.clear();
     _running.clear(); _again.clear(); _open.clear();
+    _readable.forEach((st) => clearTimeout(st.timer)); _readable.clear();
 }
 
 window.serverCardIds = serverCardIds;
@@ -933,6 +1013,7 @@ window.TopoServerSync = {
     trust, walkRosters, siteKey, siteKeysRaw, siteDetail, pullHead, applyPull, pushCard, syncCard, syncAll, syncNow, afterSave, flushAll,
     onHead, onRoster, onGranted, onRemoved, signedOut, keysReset, putCard, openSite, reviewMerge, trustServerHistory, removeCard, unlinkCard,
     grant, setRole, removeMember, rotate, invite, setShowName, leave, siteName, deriveEvents, provider, history, onDocLoaded,
+    nameSlugOf, sendReadable, setReadable, deleteReadable, siteBackups, flushReadable,
     SERVER_REASON, dirty: (cardId) => { const r = rec(cardId); return !!r && dirty(r); }
 };
 })();

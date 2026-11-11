@@ -1,0 +1,2 @@
+virtual_machine,name,enabled,mode,untagged_vlan
+ris-01,ens18,true,access,10

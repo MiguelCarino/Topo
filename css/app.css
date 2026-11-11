@@ -11,6 +11,12 @@
 /* The map's grid. Its spacing follows the camera (applyCamera, js/app.js,
    sets --grid and --grid-major), thinned out as the map zooms out so the
    dots never crowd into noise: --grid is never under GRID_MIN_PX on screen. */
+/* Registered as not inherited: the camera rewrites them on every frame of a
+   zoom, and an inherited custom property changed on #canvasContainer sent the
+   whole drawing under it through a style pass (40 ms a step at 400 devices in
+   WebKitGTK, the Linux desktop app). Only the container itself reads them. */
+@property --grid { syntax: '<length>'; inherits: false; initial-value: 20px; }
+@property --grid-major { syntax: '<length>'; inherits: false; initial-value: 100px; }
 .grid-bg {
     background-color: #f8fafc;
     background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
@@ -105,6 +111,14 @@
    association itself showing through underneath. */
 .flow-wireless { stroke-dasharray: none; opacity: 0.3; }
 .flow-wave { pointer-events: none; }
+/* The trace's moving cables are drawn on #traceLayer, under the map, a layer
+   of its own (will-change), so a dash moving repaints that layer and not
+   every device on the map: a 300-device map at full HD did a third of the
+   work (drawTraceFlow, js/ui.js). The cable on the map stays for the press
+   and the hover, its ink hidden here; an export has no stylesheet, so it
+   draws the cable amber as the trace left it. */
+.trace-layer { pointer-events: none; will-change: transform; cursor: auto; }
+#layer-links > path.flow-under { stroke: transparent; }
 /* A wireless link's band chip (js/ui.js): a press on it selects the link,
    as a press on the line does; its tooltip is the SSID and the signal. */
 .wifi-band-chip { cursor: pointer; }
@@ -350,6 +364,16 @@ html, body { overscroll-behavior-y: none; }
 .unit-field > .input:focus, .unit-field > .tv-in:focus { box-shadow: none; }
 .unit-field:has(> .bad) { border-color: color-mix(in srgb, var(--err) 70%, transparent); background: color-mix(in srgb, var(--err) 12%, transparent); }
 .unit-field > .input.bad { background: transparent; }
+/* A phone number's country (js/phone.js): the unit pick's look, the
+   country's code and calling code shown, the system's list (a transparent
+   select over it) to pick from. Dim while it is only the default. */
+.phone-field .phone-cc { position: relative; flex: none; display: flex; align-items: center; padding: 0 18px 0 9px; min-width: 2.6em;
+    background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23888'/%3E%3C/svg%3E") no-repeat right 6px center;
+    color: var(--text-sec); border-right: 1px solid var(--border); font-family: var(--mono); font-size: 0.85em; white-space: nowrap; cursor: pointer; }
+.phone-field.phone-hint .phone-cc-txt { opacity: 0.55; }
+.phone-field .phone-cc:hover, .phone-field .phone-cc:focus-within { color: var(--accent); }
+.phone-field .phone-pick { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; border: 0; cursor: pointer; font-size: 16px; }
+.phone-field .phone-pick option { background: var(--bg-card); color: var(--text); }
 /* In a table cell: the cell editor's own accent frame, on the pair. */
 .unit-field.tv-unit { border-color: var(--accent); border-radius: 4px; min-width: 9rem; font: inherit; }
 .unit-field.tv-unit > .tv-in { padding: 3px 6px; }
@@ -3537,6 +3561,7 @@ body:not(.simple-mode) .inc-simple { display: none; }
 .modal.topo-server { max-width: 36rem; }
 .topo-server .srv-p { margin: 0 0 10px; overflow-wrap: anywhere; }
 .topo-server .srv-dim { color: var(--text-sec); font-size: var(--fs-sm); }
+.topo-server .srv-help { display: inline-flex; align-items: center; min-height: 44px; }
 .topo-server .srv-warn { color: var(--warn, #b45309); font-size: var(--fs-sm); }
 .topo-server .srv-email { font-weight: 700; margin: 0 0 10px; overflow-wrap: anywhere; }
 .topo-server .srv-field { display: grid; gap: 4px; margin: 0 0 10px; }
@@ -3572,6 +3597,31 @@ body:not(.simple-mode) .inc-simple { display: none; }
     #srvPrint h1 { font-size: 18pt; margin: 0 0 6px; }
     #srvPrint .srv-print-code { font-family: ui-monospace, monospace; font-size: 20pt; letter-spacing: 0.06em; margin: 18px 0; overflow-wrap: anywhere; }
 }
+/* Settings, This PC as the server (js/desktopserver.js, D113): the desktop
+   app only. Addresses and the fingerprint wrap anywhere, never widen the
+   dialog; the log scrolls inside its own box. */
+.topo-settings .ds-status.ds-err { color: var(--err, #b91c1c); }
+.topo-settings .ds-urls { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.topo-settings .ds-url { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.topo-settings .ds-url .ds-code { flex: 1 1 12rem; }
+.topo-settings .ds-more { flex-basis: 100%; font-size: 12px; }
+.topo-settings .ds-code { font-family: ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere; word-break: break-all; min-width: 0; }
+.topo-settings .ds-smtp { display: flex; flex-direction: column; gap: 10px; }
+.topo-settings .ds-smtp[hidden] { display: none; }
+.topo-settings .ds-logbox summary { cursor: pointer; font-size: 13px; }
+.topo-settings .ds-log { margin: 6px 0 0; max-height: 12rem; overflow: auto; font: 11px/1.45 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+    background: var(--surface-2, rgba(127, 127, 127, 0.08)); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+@media (pointer: coarse), (max-width: 640px) {
+    .topo-settings .ds-url .btn { min-height: 44px; }
+    .topo-settings .ds-logbox summary { min-height: 44px; display: flex; align-items: center; }
+    #setDsSec .input, #setDsSec .select { font-size: 16px; min-height: 44px; }
+}
+/* Settings, Back-ups (js/backupdir.js). */
+.set-acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.set-folder { overflow-wrap: anywhere; }
+@media (pointer: coarse), (max-width: 640px) {
+    .set-acts .btn { min-height: 44px; }
+}
 @media (max-width: 600px) {
     #serverSheet .modal.topo-server { width: 100%; max-width: none; max-height: calc(100dvh - 16px); }
 }
@@ -3598,3 +3648,41 @@ body:not(.simple-mode) .inc-simple { display: none; }
     .pb-scope-count { margin-left: 38px; font-size: var(--fs-sm); }
     .pb-scope .pb-radio input { width: 22px; height: 22px; margin: 0; }
 }
+
+/* ---- Import… (js/importui.js; docs/SCOPE.md step 6) ----
+   Phone first: one card per file, the format picker full width, warnings in
+   a box that scrolls on its own, never wider than the sheet. */
+.modal.topo-import { max-width: 44rem; }
+.topo-import .imp-never { font-size: var(--fs-label); color: var(--text-sec); }
+.imp-drop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px; margin: 8px 0; border: 1px dashed var(--border); border-radius: 8px; }
+.imp-drop .btn { min-height: 44px; }
+.imp-drop-hint { color: var(--text-sec); font-size: var(--fs-label); }
+.imp-files { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.imp-file { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; display: grid; gap: 6px; min-width: 0; }
+.imp-file.refused { border-color: var(--danger, #c0392b); }
+.imp-file-name { overflow-wrap: anywhere; font-weight: 600; }
+.imp-file-status { color: var(--text-sec); font-size: var(--fs-label); overflow-wrap: anywhere; }
+.imp-file .btn { min-height: 44px; justify-self: start; }
+.imp-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.imp-pick select { min-height: 44px; font-size: 16px; flex: 1 1 12rem; min-width: 0; max-width: 100%; }
+.imp-res { margin: 0 0 12px; min-width: 0; }
+.imp-res-head { font-size: 1rem; margin: 4px 0 6px; overflow-wrap: anywhere; }
+.imp-res-files { display: block; font-weight: 400; font-size: var(--fs-label); color: var(--text-sec); }
+.imp-counts { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 4px 12px; margin: 4px 0 8px; }
+.imp-count b { font-variant-numeric: tabular-nums; }
+.imp-warn-head { margin: 6px 0 4px; font-weight: 600; }
+.imp-warns { max-height: 12rem; overflow: auto; margin: 0 0 8px; padding: 6px 10px 6px 24px; border: 1px solid var(--border); border-radius: 6px; font-size: var(--fs-label); overflow-wrap: anywhere; }
+.imp-notes { margin: 0 0 8px; padding-left: 20px; font-size: var(--fs-label); overflow-wrap: anywhere; }
+.imp-more { list-style: none; color: var(--text-sec); }
+.imp-targets { border: 0; padding: 0; margin: 8px 0; display: grid; gap: 4px; min-width: 0; }
+.imp-target { display: flex; align-items: center; gap: 8px; min-height: 44px; overflow-wrap: anywhere; }
+.imp-target input { width: 20px; height: 20px; flex: none; margin: 0 0 0 12px; }
+/* Passing devices the import may leave out (wireless clients, DHCP leases),
+   and a Cisco capture's switch name when its prompt is missing. */
+.imp-parts { border: 0; padding: 0; margin: 8px 0; display: grid; gap: 4px; min-width: 0; }
+.imp-part { display: flex; align-items: center; gap: 8px; min-height: 44px; overflow-wrap: anywhere; }
+.imp-part input { width: 20px; height: 20px; flex: none; margin: 0 0 0 12px; }
+/* A finger's 44px box around a tick lands on its row: the browser's
+   default radio and checkbox margins put the box off centre (M60). */
+.imp-ask { display: grid; gap: 4px; margin: 8px 0; min-width: 0; }
+.imp-ask input { min-height: 44px; font-size: 16px; width: 100%; max-width: 24rem; box-sizing: border-box; }

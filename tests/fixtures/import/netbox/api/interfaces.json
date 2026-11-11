@@ -1,0 +1,11 @@
+{"count": 5, "next": "https://netbox.example.test/api/dcim/interfaces/?limit=3&offset=3", "previous": null, "results": [
+ {"id": 70, "url": "https://netbox.example.test/api/dcim/interfaces/70/", "device": {"id": 7, "name": "sw-floor2"}, "name": "Port 1", "label": "", "type": {"value": "1000base-t", "label": "1000BASE-T (1GE)"}, "enabled": true, "mgmt_only": false,
+  "mac_address": null, "mode": {"value": "access", "label": "Access"}, "untagged_vlan": {"id": 1, "vid": 100, "name": "Guests"}, "tagged_vlans": [], "lag": null, "poe_mode": {"value": "pse", "label": "PSE"}, "poe_type": {"value": "type1-ieee802.3af", "label": "802.3af"}},
+ {"id": 71, "url": "https://netbox.example.test/api/dcim/interfaces/71/", "device": {"id": 7, "name": "sw-floor2"}, "name": "Port 2", "type": {"value": "1000base-t"}, "enabled": true, "mgmt_only": false, "mode": null, "untagged_vlan": null, "tagged_vlans": []},
+ {"id": 72, "url": "https://netbox.example.test/api/dcim/interfaces/72/", "device": {"id": 7, "name": "sw-floor2"}, "name": "Port 24", "type": {"value": "1000base-t"}, "enabled": true, "mgmt_only": false, "mode": {"value": "tagged"}, "untagged_vlan": {"vid": 1}, "tagged_vlans": [{"id": 1, "vid": 100}, {"id": 2, "vid": 200}]}
+]}
+{"count": 5, "next": null, "previous": "https://netbox.example.test/api/dcim/interfaces/?limit=3", "results": [
+ {"id": 80, "url": "https://netbox.example.test/api/dcim/interfaces/80/", "device": {"id": 8, "name": "ap-201"}, "name": "eth0", "type": {"value": "1000base-t"}, "enabled": true, "mgmt_only": false},
+ {"id": 81, "url": "https://netbox.example.test/api/dcim/interfaces/81/", "device": {"id": 8, "name": "ap-201"}, "name": "wlan0", "type": {"value": "ieee802.11ax"}, "enabled": true, "mgmt_only": false},
+ {"id": 90, "url": "https://netbox.example.test/api/dcim/interfaces/90/", "device": {"id": 9, "name": "tv-201"}, "name": "eth0", "type": {"value": "100base-tx"}, "enabled": true, "mgmt_only": false}
+]}

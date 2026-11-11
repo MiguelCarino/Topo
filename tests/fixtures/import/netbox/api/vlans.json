@@ -1,0 +1,5 @@
+{"count": 3, "next": null, "previous": null, "results": [
+ {"id": 9, "url": "https://netbox.example.test/api/ipam/vlans/9/", "vid": 1, "name": "Management"},
+ {"id": 1, "url": "https://netbox.example.test/api/ipam/vlans/1/", "vid": 100, "name": "Guests"},
+ {"id": 2, "url": "https://netbox.example.test/api/ipam/vlans/2/", "vid": 200, "name": "IPTV"}
+]}

@@ -126,7 +126,7 @@ window.addEventListener('load', () => {
     fire(canvas, 'mousedown', x, y); fire(window, 'mousemove', x + 80, y + 40); fire(window, 'mouseup', x + 80, y + 40);
     ok('a pan while tracing keeps the device selected and the trace on', state.selectedId === 'r' && state.settings.traceMode === true, `${state.selectedId}`);
     ok('the map did pan', state.camera.x === cam.x + 80 && state.camera.y === cam.y + 40, `${state.camera.x - cam.x},${state.camera.y - cam.y}`);
-    ok('the trace is still drawn', !!document.querySelector('#layer-links path.flow-utp'));
+    ok('the trace is still drawn', !!document.querySelector('#traceLayer path.flow-utp'));
     fire(canvas, 'mousedown', x, y); fire(window, 'mouseup', x + 1, y);
     ok('a click on empty map still lets the device go', state.selectedId === null);
     state.settings.traceMode = false; select('r', 'node');

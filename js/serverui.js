@@ -351,7 +351,10 @@ async function openAccount() {
             st.devices = (await T().api('GET', '/api/devices')).devices || [];
             st.sessions = (await T().api('GET', '/api/me/sessions')).sessions || [];
             st.requests = await T().linkRequests().catch(() => []);
-            if (me.serverRole === 'owner') st.people = (await T().api('GET', '/api/admin/users')).users || [];
+            if (me.serverRole === 'owner') {
+                st.people = (await T().api('GET', '/api/admin/users')).users || [];
+                st.backups = await T().api('GET', '/api/admin/backups').catch(() => null);
+            }
         } catch (e) { st.err = errText(e); }
         st.loaded = true; rerender();
     };
@@ -406,6 +409,10 @@ async function openAccount() {
         })));
         // The server's people (the server owner).
         if (st.people) out.push(peopleBox(st, load));
+        // Backups (step 5b): the server owner's, one destination for the server.
+        if (st.backups) out.push(h('fieldset', { class: 'srv-group' }, h('legend', { text: t('Backups') }),
+            para(backupBrief(st.backups), 'srv-p srv-dim'),
+            h('div', { class: 'srv-acts' }, btn(t('Backups…'), () => openBackups(), 'btn'))));
         out.push(errBox(st.err), h('div', { class: 'srv-acts' },
             btn(t('Sign out'), async () => { closeSheet(); await T().signOut(); render(); }),
             m.keys ? btn(t('Reset my keys'), () => { closeSheet(); confirmReset(); }, 'btn danger') : null));
@@ -515,6 +522,10 @@ async function openMembers(siteId) {
                 h('label', { class: 'srv-tick' }, show, h('span', { text: t('Show the name in emails') })),
                 para(t('The server can then read the name. Everything else stays encrypted.'), 'srv-p srv-dim'),
                 h('div', { class: 'srv-acts' }, btn(t('Lock out anyone who left from new changes'), act(() => Y().rotate(siteId))))));
+            // Backups of this network, while the server makes them (D106, D107).
+            if (d.backups && d.backups.on) out.push(h('fieldset', { class: 'srv-group' }, h('legend', { text: t('Backups') }),
+                para(d.backups.readable ? t('The server backs this network up, encrypted, and keeps a readable copy too.') : t('The server backs this network up, encrypted.'), 'srv-p srv-dim'),
+                h('div', { class: 'srv-acts' }, btn(t('Backups…'), () => openSiteBackups(siteId), 'btn'))));
         }
         const mute = h('input', { type: 'checkbox', onchange: (e) => act(() => T().api('PATCH', `/api/sites/${siteId}/me`, { muted: e.target.checked }))() });
         mute.checked = !!d.site.muted;
@@ -567,6 +578,370 @@ async function openHistory(siteId) {
         out.push(list, h('div', { class: 'srv-acts' }, btn(t('Close'), () => closeSheet())));
         return out;
     });
+}
+
+// ---- Backups (docs/SCOPE.md step 5b, D99-D108) ----
+// The server owner's sheet (Account, Backups…): where the server backs every
+// network up, when, the readable-copy permission, Test / Save / Back up now /
+// Check now, and how it went. Passwords are sent once and never come back:
+// a saved one shows "Saved (type to replace)". A network owner's sheet
+// (Members, Backups…): the files of that network, each restored through the
+// merge (js/backupfile.js) or downloaded as it is, and the readable copy.
+const BACKUP_KINDS = { folder: 'A folder on the server', webdav: 'WebDAV (Nextcloud, ownCloud, Synology, QNAP)',
+    s3: 'S3-compatible (Backblaze B2, Wasabi, MinIO, AWS)', gdrive: 'Google Drive', onedrive: 'OneDrive' };
+const BACKUP_KIND_SHORT = { folder: 'a folder on the server', webdav: 'WebDAV', s3: 'S3', gdrive: 'Google Drive', onedrive: 'OneDrive' };
+// 5c (D110): these sign in at the provider (Connect) instead of a password.
+const BACKUP_OAUTH = { gdrive: 'Google', onedrive: 'Microsoft' };
+// The setup steps for each kind, in docs/SERVER.md (a plain link, not a fetch).
+const BACKUP_HELP_BASE = 'https://github.com/MiguelCarino/Topo/blob/main/docs/SERVER.md';
+const BACKUP_HELP = { webdav: '#webdav', s3: '#s3-compatible-storage', gdrive: '#google-drive', onedrive: '#onedrive' };
+// [name, label, input kind, hint]; 'secret' fields are never shown back.
+const BACKUP_FIELDS = {
+    folder: [['path', 'Folder', 'text', 'The full path of a folder that already exists on the server, inside one of the folders below.']],
+    webdav: [['url', 'Address', 'url', 'The WebDAV address of a folder, for example https://cloud.example.com/remote.php/dav/files/ana/Topo'],
+        ['user', 'User name', 'text', ''],
+        ['password', 'App password', 'secret', 'Make an app password for Topo in the cloud\'s settings rather than using your own.'],
+        ['fingerprint', 'Certificate fingerprint (SHA-256)', 'text', 'Only for a server with its own certificate (a NAS on the network). Empty: the usual checks.']],
+    s3: [['endpoint', 'Endpoint', 'url', 'For example https://s3.us-west-004.backblazeb2.com or https://minio.example.lan:9000'],
+        ['region', 'Region', 'text', 'For example us-east-1 or us-west-004. Empty: us-east-1.'],
+        ['bucket', 'Bucket', 'text', ''],
+        ['prefix', 'Folder in the bucket', 'text', 'Empty: topo/'],
+        ['keyId', 'Access key ID', 'text', 'Make a key for this bucket only, rather than one for the whole account.'],
+        ['secret', 'Secret access key', 'secret', ''],
+        ['pathStyle', 'Path-style addresses', 'tick', 'Needed for MinIO and most self-hosted stores.'],
+        ['fingerprint', 'Certificate fingerprint (SHA-256)', 'text', 'Only for a server with its own certificate (a NAS on the network). Empty: the usual checks.']],
+    gdrive: [['clientId', 'Client ID', 'text', 'From the OAuth app you made for Topo in Google Cloud.'],
+        ['clientSecret', 'Client secret', 'secret', '']],
+    onedrive: [['clientId', 'Application (client) ID', 'text', 'From the app you registered for Topo in Microsoft Entra.'],
+        ['clientSecret', 'Client secret', 'secret', 'Microsoft client secrets expire (24 months at most): make a new one in time.'],
+        ['tenant', 'Tenant', 'text', 'Empty: common (personal and work accounts). Or your organisation’s tenant ID.']]
+};
+// The destination's problem codes (server/internal/backup/dest.go), as the
+// emails say them.
+const BACKUP_WHY = {
+    unreachable: 'The destination did not answer.', refused: 'The destination refused the user name or password.',
+    'not-found': 'The backup folder is not there (is the disk connected?).', full: 'The destination is full.',
+    'too-large': 'A backup is larger than the destination accepts.', conflict: 'The destination refused the file because it is busy or locked.',
+    'bad-answer': 'The destination gave an answer Topo did not expect.', certificate: 'The destination’s certificate is not trusted.',
+    secrets: 'The saved passwords could not be read; enter them again.', mismatch: 'A backup read back is not the file that was written.',
+    damaged: 'A backup read back is damaged.', other: 'Something went wrong.',
+    connect: 'The drive’s sign-in ended: press Connect again in Account, Backups.',
+    'client-secret': 'The app’s client ID or client secret was refused (a client secret may have expired): make a new one and paste it.',
+    clock: 'This server’s clock is wrong, so the storage refused the request.'
+};
+const backupWhy = (code) => t(BACKUP_WHY[code] || BACKUP_WHY.other);
+// In the app's language (as js/restore.js restoreWhenText), with seconds:
+// two backups a minute apart must not read the same.
+const whenText = (ms) => {
+    try { return new Date(ms).toLocaleString(document.documentElement.lang || undefined, { dateStyle: 'medium', timeStyle: 'medium' }); }
+    catch (e) { return new Date(ms).toLocaleString(); }
+};
+function backupBrief(data) {
+    const c = data && data.config;
+    if (!c || !c.enabled || !c.kind) return t('Backups: off');
+    const last = data.status && data.status.lastOk ? t('last {time}', { time: whenText(data.status.lastOk) }) : t('none yet');
+    return t('Backups: to {where} · {last}', { where: t(BACKUP_KIND_SHORT[c.kind] || c.kind), last });
+}
+// A backup route's refusal, in words.
+function backupErrText(e) {
+    const code = e && e.code;
+    const d = (e && e.data) || {};
+    if (code === 'backup-dest') {
+        const fp = d.fingerprint ? ' ' + t('It showed this certificate: {fp}', { fp: d.fingerprint }) : '';
+        return backupWhy(d.code) + fp;
+    }
+    if (code === 'backup-folder-not-allowed') return t('The server may not write to that folder. It may write inside: {folders}', { folders: (d.allowed || []).join(', ') || '—' });
+    if (code === 'backup-off') return t('Backups are off. Turn them on first.');
+    if (code === 'readable-off') return t('Readable copies are not allowed on this server.');
+    if (code === 'oauth-state') return t('That sign-in took too long or was already used. Press Connect again.');
+    if (code === 'oauth-denied') return t('The drive did not allow Topo, or the sign-in was cancelled. Press Connect to try again.');
+    if (code === 'bad-request' && d.field) {
+        const f = Object.values(BACKUP_FIELDS).flat().find((x) => x[0] === d.field);
+        return t('Check “{field}”.', { field: f ? t(f[1]) : d.field });
+    }
+    return errText(e);
+}
+// A file's bytes as the server sends them (a download is the file itself).
+async function rawGet(path) {
+    const f = T()._hooks.fetch || window.fetch.bind(window);
+    let res;
+    try { res = await f(path, { method: 'GET', credentials: 'same-origin', headers: { 'X-Topo': '1' } }); }
+    catch (e) { throw new (T().ServerError)(0, 'offline'); }
+    if (!res.ok) {
+        let d = null;
+        try { d = await res.json(); } catch (e) { d = null; }
+        throw new (T().ServerError)(res.status, (d && d.error) || 'error', d);
+    }
+    return res.text();
+}
+// Opens the newest encrypted backup of a network here, to see that it
+// really opens (the server cannot: it holds no key, D104).
+async function openLatestBackup(siteId, check) {
+    const list = await Y().siteBackups(siteId);
+    const b = list.find((x) => x.kind === 'enc' && !x.missing && !x.previousDest);
+    if (!b) { showToast(t('This network has no backup yet.')); return false; }
+    return openBackupText(await rawGet(`/api/sites/${siteId}/backups/${b.id}`), b.name, check);
+}
+async function openBackupText(text, name, check) {
+    let parsed;
+    try { parsed = JSON.parse(text); } catch (e) { showToast(t('That file is not valid JSON.'), 'err'); return false; }
+    if (sheetOpen()) closeSheet();
+    return openBackupFile(parsed, { fileName: name, check: !!check });
+}
+function saveText(text, name) { saveBlob(new Blob([text], { type: 'application/json' }), name); }
+
+// Where the provider sends the browser back: on the server machine itself
+// http://localhost (Google and Microsoft take no LAN address), else the
+// public address (server/internal/api/backups_oauth.go oauthRedirect).
+function oauthRedirectHere(d) {
+    const host = location.hostname.replace(/^\[|\]$/g, '');
+    if (host === 'localhost' || /^127\./.test(host) || host === '::1') return location.protocol + '//localhost' + (location.port ? ':' + location.port : '') + '/api/backups/oauth/callback';
+    return (d && d.oauthRedirect) || location.origin + '/api/backups/oauth/callback';
+}
+function navigateTo(url) {
+    const nav = T()._hooks.navigate;
+    if (typeof nav === 'function') nav(url); else window.location.assign(url);
+}
+// Back from the provider with '#backup-connect=' (taken off the URL by the
+// boot): finish the sign-in, then show the Backups sheet with the result.
+async function backupConnectArrived(payload) {
+    let q;
+    try { q = new URLSearchParams(decodeURIComponent(payload)); } catch (e) { q = new URLSearchParams(); }
+    const me = T().me();
+    if (!me || me.serverRole !== 'owner') { showToast(t('Sign in as the server owner, then press Connect again.'), 'err'); return; }
+    let note = '', err = '';
+    try {
+        const r = await T().api('POST', '/api/admin/backups/oauth/finish', { state: q.get('state') || '', code: q.get('code') || '', error: q.get('error') || '' });
+        const c = r && r.connect || {};
+        note = c.account ? t('Connected as {account}.', { account: c.account }) : t('Connected.');
+        if (c.code) err = joinSentences([t('The test did not work:'), backupWhy(c.code)]);
+    } catch (e) { err = backupErrText(e); }
+    await openBackups({ note, err });
+}
+
+async function openBackups(arrived) {
+    if (!on() || !T().me() || T().me().serverRole !== 'owner') return;
+    const st = { data: null, err: (arrived && arrived.err) || '', note: (arrived && arrived.note) || '', busy: false, kind: '', fields: {}, secrets: {}, dailyAt: '02:30', readable: false, touched: false };
+    const fromData = () => {
+        const c = st.data.config;
+        st.kind = c.enabled ? c.kind : '';
+        st.savedKind = c.kind;
+        st.fields = Object.assign({}, c.fields || {});
+        st.secrets = {};
+        st.dailyAt = c.dailyAt || '02:30';
+        st.readable = !!c.readableAllowed;
+    };
+    const load = async (keep) => {
+        try { st.data = await T().api('GET', '/api/admin/backups'); if (!keep) fromData(); }
+        catch (e) { st.err = backupErrText(e); }
+        rerender();
+    };
+    const request = () => {
+        const out = { enabled: !!st.kind, dailyAt: st.dailyAt, readableAllowed: st.readable };
+        if (st.kind) {
+            out.kind = st.kind;
+            out.fields = {};
+            const secrets = {};
+            (BACKUP_FIELDS[st.kind] || []).forEach(([k, , kind]) => {
+                if (kind === 'secret') { if (st.secrets[k]) secrets[k] = st.secrets[k]; }
+                else if (kind === 'tick') out.fields[k] = st.fields[k] === '1' ? '1' : '';
+                else out.fields[k] = String(st.fields[k] || '').trim();
+            });
+            if (Object.keys(secrets).length) out.secrets = secrets;
+        }
+        return out;
+    };
+    const run = (fn) => async () => {
+        if (st.busy) return;
+        st.busy = true; st.err = ''; st.note = ''; rerender();
+        try { await fn(); } catch (e) { st.err = backupErrText(e); }
+        st.busy = false; rerender();
+    };
+    const save = run(async () => {
+        try { st.data = await T().api('PUT', '/api/admin/backups', request()); }
+        catch (e) {
+            if (e.code !== 'backup-dest') throw e;
+            const why = backupErrText(e);
+            if (!(await askConfirm(joinSentences([t('The test did not work:'), why, t('Save anyway? (For a disk that is not plugged in yet.)')]), { title: t('Backups'), ok: t('Save anyway') }))) { st.err = why; return; }
+            st.data = await T().api('PUT', '/api/admin/backups?force=1', request());
+        }
+        fromData();
+        st.note = t('Saved.');
+    });
+    const test = run(async () => { await T().api('POST', '/api/admin/backups/test', request()); st.note = t('The test worked: Topo wrote a file there, read it back and deleted it.'); });
+    // Connect (D110): the server keeps what was typed for 10 minutes and
+    // answers the provider's sign-in page; the provider brings the browser
+    // back to /#backup-connect=…, which backupConnectArrived() finishes.
+    const connect = run(async () => {
+        const r = await T().api('POST', '/api/admin/backups/oauth/start', request());
+        st.note = t('Opening the sign-in page of {provider}…', { provider: BACKUP_OAUTH[st.kind] || '' });
+        rerender();
+        navigateTo(r.url);
+    });
+    const backupNow = run(async () => { await T().api('POST', '/api/admin/backups/run'); st.note = t('Backing up now. The status below shows how it went.'); setTimeout(() => load(true), 2000); });
+    const checkNow = run(async () => { await T().api('POST', '/api/admin/backups/check'); st.note = t('Checking now. The status below shows how it went.'); setTimeout(() => load(true), 2000); });
+    showSheet(() => t('Backups'), () => {
+        const d = st.data;
+        if (!d) return [statusBox(t('Loading…')), errBox(st.err)];
+        const out = [para(t('The server keeps an encrypted copy of every network on a drive you choose: daily, and a few minutes after changes. The drive cannot read them; an owner opens one with their recovery key.'), 'srv-p srv-dim')];
+        const where = h('select', { class: 'select', 'data-k': 'kind', onchange: (e) => { st.kind = e.target.value; st.secrets = {}; st.fields = st.kind === st.savedKind ? Object.assign({}, st.data.config.fields || {}) : {}; rerender(); } },
+            h('option', { value: '', text: t('Off') }), (d.kinds || Object.keys(BACKUP_KINDS)).filter((k) => BACKUP_KINDS[k]).map((k) => h('option', { value: k, text: t(BACKUP_KINDS[k]) })));
+        where.value = st.kind;
+        out.push(field(t('Where'), where));
+        if (BACKUP_HELP[st.kind]) {
+            out.push(h('p', { class: 'srv-p srv-dim' }, h('a', { href: BACKUP_HELP_BASE + BACKUP_HELP[st.kind], class: 'srv-help', target: '_blank', rel: 'noopener noreferrer', 'data-k': 'help', text: t('How to set this up') })));
+        }
+        (BACKUP_FIELDS[st.kind] || []).forEach(([k, label, kind, hint]) => {
+            if (kind === 'tick') {
+                const tk = h('input', { type: 'checkbox', 'data-k': 'f-' + k, onchange: (e) => { st.fields[k] = e.target.checked ? '1' : ''; } });
+                tk.checked = st.fields[k] === '1';
+                out.push(h('label', { class: 'srv-tick' }, tk, h('span', { text: t(label) })));
+                if (hint) out.push(para(t(hint), 'srv-p srv-dim'));
+                return;
+            }
+            const secret = kind === 'secret';
+            const saved = secret && st.kind === st.savedKind && (d.config.secretsSet || []).includes(k);
+            const input = h('input', { type: secret ? 'password' : kind === 'url' ? 'url' : 'text', class: 'input', 'data-k': 'f-' + k,
+                autocomplete: secret ? 'new-password' : 'off', autocapitalize: 'none', spellcheck: 'false', inputmode: kind === 'url' ? 'url' : undefined,
+                placeholder: saved ? t('Saved (type to replace)') : undefined,
+                oninput: (e) => { if (secret) st.secrets[k] = e.target.value; else st.fields[k] = e.target.value; } });
+            input.value = secret ? (st.secrets[k] || '') : (st.fields[k] || '');
+            let hintText = hint ? t(hint) : '';
+            if (k === 'path' && (d.allowedFolders || []).length) hintText = joinSentences([hintText, t('Allowed: {folders}', { folders: d.allowedFolders.join(', ') })]);
+            out.push(field(t(label), input, hintText));
+        });
+        if (d.config.secretsError) out.push(para(backupWhy('secrets'), 'srv-p srv-warn'));
+        if (BACKUP_OAUTH[st.kind]) {
+            const linked = st.kind === st.savedKind && d.config.connected;
+            const box = h('fieldset', { class: 'srv-group', 'data-k': 'connect' }, h('legend', { text: t('Connection') }));
+            box.append(para(linked ? (d.config.account ? t('Connected as {account}.', { account: d.config.account }) : t('Connected.'))
+                : t('Not connected yet. Connect opens the sign-in page of {provider}; after you allow Topo, it brings you back here.', { provider: BACKUP_OAUTH[st.kind] }), 'srv-p'));
+            box.append(para(t('Topo asks only for its own folder: it cannot see your other files.'), 'srv-p srv-dim'));
+            box.append(para(t('Redirect address to register in the app: {url}', { url: oauthRedirectHere(d) }), 'srv-p srv-dim'));
+            box.append(h('div', { class: 'srv-acts' }, btn(linked ? t('Connect again') : t('Connect'), connect, linked ? 'btn' : 'btn primary')));
+            out.push(box);
+        }
+        if (st.kind) {
+            const time = h('input', { type: 'time', class: 'input', 'data-k': 'daily', value: st.dailyAt, oninput: (e) => { st.dailyAt = e.target.value || '02:30'; } });
+            time.value = st.dailyAt;
+            out.push(field(t('Every day at'), time, t('Networks that changed are backed up then, and a few minutes after each change.')));
+            const rd = h('input', { type: 'checkbox', 'data-k': 'readable', onchange: (e) => { st.readable = e.target.checked; rerender(); } });
+            rd.checked = st.readable;
+            out.push(h('label', { class: 'srv-tick' }, rd, h('span', { text: t('Also allow readable copies') })));
+            if (st.readable) out.push(para(t('A readable copy can be read by anyone with access to the drive, passwords in notes included. Each network\'s owner still has to turn it on.'), 'srv-p srv-warn'));
+        }
+        out.push(errBox(st.err), statusBox(st.note || (st.busy ? t('Working…') : '')));
+        out.push(h('div', { class: 'srv-acts' },
+            btn(t('Save'), save, 'btn primary'),
+            st.kind ? btn(t('Test'), test) : null,
+            d.config.enabled ? btn(t('Back up now'), backupNow) : null,
+            d.config.enabled ? btn(t('Check now'), checkNow) : null));
+        // How it went.
+        const s = d.status || {};
+        const lines = [];
+        if (d.config.enabled) {
+            lines.push(s.lastOk ? t('Last backup: {time}', { time: whenText(s.lastOk) }) : t('No backup yet.'));
+            if (s.lastError) lines.push(t('Last problem: {why} ({time})', { why: backupWhy(s.lastError.code), time: whenText(s.lastError.at) }));
+            if (s.nextRun) lines.push(t('Next daily backup: {time}', { time: whenText(s.nextRun) }));
+            if (s.backoffUntil && s.backoffUntil > Date.now()) lines.push(t('Trying again at {time}', { time: whenText(s.backoffUntil) }));
+            if (s.markerOwed) lines.push(t('Saved without a test: connect the disk, then press Save again to start backing up there.'));
+            if (s.dropNote === 'locked') lines.push(t('The bucket keeps files locked; Topo cannot delete old backups there.'));
+            if (s.lastCheck) lines.push(s.lastCheck.ok ? t('Last check: passed {time}', { time: whenText(s.lastCheck.at) }) : t('Last check: failed, {why} ({time})', { why: backupWhy(s.lastCheck.code), time: whenText(s.lastCheck.at) }));
+            const missing = (d.sites || []).reduce((n, x) => n + (x.missing || 0), 0);
+            if (missing) lines.push(t('{n} backups are missing from the destination.', { n: missing }));
+            if (d.previousDest) lines.push(t('{n} older backups are on an earlier destination.', { n: d.previousDest }));
+        }
+        if (lines.length) out.push(h('fieldset', { class: 'srv-group' }, h('legend', { text: t('Status') }), lines.map((l) => para(l, 'srv-p'))));
+        // Networks.
+        if ((d.sites || []).length) {
+            const box = h('fieldset', { class: 'srv-group' }, h('legend', { text: t('Networks') }));
+            d.sites.forEach((x) => {
+                const mine = T().site(x.site);
+                const owner = mine && mine.role === 'owner' && mine.status === 'granted';
+                box.append(h('div', { class: 'srv-row' },
+                    h('span', { class: 'srv-row-text' }, h('b', { text: x.name || t('A network') }),
+                        h('span', { class: 'srv-sub', text: [t(x.count === 1 ? '1 backup' : '{n} backups', { n: x.count }), x.last ? t('last {time}', { time: whenText(x.last) }) : ''].filter(Boolean).join(' · ') })),
+                    owner ? h('span', { class: 'srv-row-acts' }, btn(t('Open the latest backup here'), run(() => openLatestBackup(x.site, true)))) : null));
+            });
+            box.append(para(t('Opening a backup here is the full test: the server cannot open them itself.'), 'srv-p srv-dim'));
+            out.push(box);
+        }
+        if ((d.deleted || []).length) {
+            const box = h('fieldset', { class: 'srv-group' }, h('legend', { text: t('Deleted networks') }));
+            d.deleted.forEach((x) => box.append(h('div', { class: 'srv-row' },
+                h('span', { class: 'srv-row-text' }, h('b', { text: x.name || t('A network') }), h('span', { class: 'srv-sub', text: t(x.count === 1 ? '1 backup' : '{n} backups', { n: x.count }) })),
+                h('span', { class: 'srv-row-acts' },
+                    btn(t('Download the latest'), run(async () => {
+                        const list = ((await T().api('GET', `/api/admin/backups/deleted/${x.site}`)) || {}).backups || [];
+                        const b = list.find((y) => y.kind === 'enc' && !y.missing && !y.previousDest);
+                        if (!b) throw Object.assign(new Error('not-found'), { code: 'not-found' });
+                        saveText(await rawGet(`/api/admin/backups/files/${b.id}`), b.name);
+                    })),
+                    btn(t('Delete'), run(async () => {
+                        if (!(await askConfirm(t('Delete every backup of this deleted network? This cannot be undone.'), { ok: t('Delete'), danger: true }))) return;
+                        await T().api('DELETE', `/api/admin/backups/deleted/${x.site}`);
+                        await load(true);
+                    }), 'btn danger')))));
+            out.push(box);
+        }
+        out.push(h('div', { class: 'srv-acts' }, btn(t('Close'), () => closeSheet())));
+        return out;
+    });
+    load();
+}
+
+// A network's backups (its owners; Members, Backups…).
+async function openSiteBackups(siteId) {
+    if (!on() || !T().ready()) return;
+    const st = { list: null, d: null, err: '', busy: false };
+    const load = async () => {
+        try { st.d = await Y().siteDetail(siteId, true); st.list = await Y().siteBackups(siteId); }
+        catch (e) { st.err = backupErrText(e); }
+        rerender();
+    };
+    const run = (fn) => async () => {
+        if (st.busy) return;
+        st.busy = true; st.err = ''; rerender();
+        try { await fn(); } catch (e) { st.err = backupErrText(e); }
+        st.busy = false; rerender();
+    };
+    showSheet(() => t('Backups'), () => {
+        if (!st.list) return [statusBox(t('Loading…')), errBox(st.err)];
+        const b = (st.d && st.d.backups) || {};
+        const out = [para(t('Restoring goes through the merge, so you see every change first and a restore point is kept. To go back to how it was, choose Replace with this copy, or open it as a copy.'), 'srv-p srv-dim')];
+        const list = h('div', { class: 'srv-list' });
+        if (!st.list.length) list.append(para(t('No backups yet.'), 'srv-p'));
+        st.list.forEach((x) => {
+            const flags = [x.kind === 'readable' ? t('Readable') : t('Encrypted'), `${Math.max(1, Math.ceil((x.size || 0) / 1024))} KB`];
+            if (x.missing) flags.push(t('Missing'));
+            if (x.previousDest) flags.push(t('On an earlier destination'));
+            const can = !x.missing && !x.previousDest;
+            list.append(h('div', { class: 'srv-row' + (x.missing ? ' srv-danger' : '') },
+                h('span', { class: 'srv-row-text' }, h('b', { text: whenText(x.at) }), h('span', { class: 'srv-sub', text: flags.join(' · ') })),
+                can ? h('span', { class: 'srv-row-acts' },
+                    x.kind === 'enc' ? btn(t('Restore…'), run(async () => openBackupText(await rawGet(`/api/sites/${siteId}/backups/${x.id}`), x.name))) : null,
+                    btn(t('Download'), run(async () => saveText(await rawGet(`/api/sites/${siteId}/backups/${x.id}`), x.name)))) : null));
+        });
+        out.push(list);
+        if (b.readableAllowed || b.readable) {
+            const tick = h('input', { type: 'checkbox', 'data-k': 'readable', onchange: (e) => run(async () => {
+                const want = e.target.checked;
+                if (want && !(await askConfirm(joinSentences([t('A readable copy can be read by anyone with access to the drive, passwords in notes included.'),
+                    t('The server passes it to the drive, so whoever runs the server could read it too. It is made by an owner\'s browser after changes, so it is only as recent as the last time an owner opened this network.')]),
+                { title: t('Keep a readable copy too'), ok: t('Turn it on') }))) { e.target.checked = false; return; }
+                await Y().setReadable(siteId, want);
+                if (!want && (st.list || []).some((x) => x.kind === 'readable')
+                    && await askConfirm(t('Delete the readable copies already made? The encrypted backups stay.'), { ok: t('Delete'), danger: true })) await Y().deleteReadable(siteId);
+                await load();
+            })() });
+            tick.checked = !!b.readable;
+            out.push(h('label', { class: 'srv-tick' }, tick, h('span', { text: t('Keep a readable copy too') })));
+            out.push(para(t('Off by default: a readable copy is not end-to-end encrypted.'), 'srv-p srv-dim'));
+        }
+        out.push(errBox(st.err), h('div', { class: 'srv-acts' }, btn(t('Back'), () => openMembers(siteId)), btn(t('Close'), () => closeSheet())));
+        return out;
+    });
+    load();
 }
 
 // ---- Cards: the line and the tools ----
@@ -799,8 +1174,9 @@ window.TopoServerUI = {
     render: () => { if (on()) { wire(); render(); rerender(); } },
     linkArrived: (tok) => { wire(); linkArrived(tok); },
     inviteArrived: (tok) => { wire(); inviteArrived(tok); },
+    backupConnectArrived: (payload) => { wire(); return backupConnectArrived(payload); },
     showRecoveryCode, waitingArrived, linkRequested,
-    openSignIn, openAccount, openUnlock, openMembers, openHistory, openSyncSheet, putOnServer, pickToPut, openFromServer, closeSheet, sheetOpen,
+    openSignIn, openAccount, openUnlock, openMembers, openHistory, openBackups, openSiteBackups, openLatestBackup, backupErrText, backupBrief, BACKUP_WHY, openSyncSheet, putOnServer, pickToPut, openFromServer, closeSheet, sheetOpen,
     setServerResponder, errText, syncText, ERR, STATE_TEXT, NOTIFY
 };
 })();

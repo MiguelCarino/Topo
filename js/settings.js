@@ -59,6 +59,10 @@ function renderSettings() {
         if (f && document.activeElement !== f) f.value = rep[k] || '';
     });
     fillDocVersion();
+    // Back-ups: the folder (js/backupdir.js).
+    if (typeof renderBackupDirSettings === 'function') renderBackupDirSettings();
+    // This PC as the server: the desktop app only (js/desktopserver.js).
+    if (typeof renderDesktopServerSettings === 'function') renderDesktopServerSettings();
 }
 // The document format version, in the navbar's About window (index.html's
 // data-carino-about block): filled at start and again with each language.

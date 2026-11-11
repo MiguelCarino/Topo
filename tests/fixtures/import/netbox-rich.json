@@ -1,0 +1,86 @@
+{
+  "about": "A Topo network with every field the NetBox export carries filled in, written by hand for tests/suites/netboxroundtrip.js and formatschema.js (docs/SCOPE.md D117, D120). Not a real site.",
+  "doc": {
+    "v": 18,
+    "nodes": [
+      { "id": "isp", "type": "cloud", "name": "Internet", "x": 100, "y": 60, "gw": "", "dns": "", "os": "", "ports": "", "notes": "Fibre from the carrier", "nat": false,
+        "siteRef": { "id": "branch-2", "name": "Branch office" }, "interfaces": [{ "id": "i1", "name": "wan", "ip": "" }], "providers": ["pv_isp"] },
+      { "id": "fw", "type": "firewall", "name": "FW-01", "x": 300, "y": 60, "gw": "203.0.113.1", "dns": "1.1.1.1, 9.9.9.9", "vendor": "Fortinet", "model": "FortiGate 60F", "os": "FortiOS 7.4",
+        "ports": "443, 22", "notes": "Main firewall\nSecond line", "nat": true, "serial": "FGT60F0000001", "assetTag": "AT-0001", "location": "Comms room shelf",
+        "status": "active", "inService": "2022-03", "serviced": "2025-01-15", "serviceEvery": 12, "lifeYears": 7, "group": "rk1", "rackU": 40, "rackFace": "front",
+        "providers": ["pv_it"], "extra": { "c1": "Ops", "c2": 3, "c3": "2027-05-01", "c4": true },
+        "interfaces": [
+          { "id": "w0", "name": "wan1", "ip": "203.0.113.2/29", "mac": "00:09:0F:AA:00:01" },
+          { "id": "l0", "name": "lan1", "ip": "", "mac": "00:09:0F:AA:00:02" },
+          { "id": "l1", "name": "lan2", "ip": "", "mac": "00:09:0F:AA:00:03" },
+          { "id": "b0", "name": "trunk0", "ip": "192.168.10.1/24", "bond": { "mode": "802.3ad", "members": ["l0", "l1"] }, "vlan": 10, "tagged": "20,30-32" },
+          { "id": "x9", "name": "", "ip": "10.99.0.1", "wireless": false }
+        ] },
+      { "id": "sw", "type": "switch", "name": "SW-CORE", "x": 300, "y": 200, "gw": "192.168.10.1", "dns": "", "vendor": "Cisco", "model": "C9200-24P", "os": "IOS-XE 17.9",
+        "ports": "", "notes": "", "nat": false, "portCount": 24, "portScheme": { "prefix": "Gi1/0/", "start": 1 },
+        "portAttrs": { "p1": { "label": "Uplink" }, "p2": { "label": "Reception 2", "vlan": 20, "poe": "at" }, "p3": { "vlan": 30, "tagged": "all" }, "p4": { "tagged": "10,20", "poe": 15 } },
+        "poeBudget": 370, "group": "rk1", "rackU": 38, "rackHeight": 1, "rackFace": "rear", "rackDepth": "half", "portsFace": "front", "status": "planned",
+        "interfaces": [ { "id": "p5", "name": "", "ip": "", "mac": "70:1F:53:00:00:05" }, { "id": "v1", "name": "Vlan10", "ip": "192.168.10.2/24" } ] },
+      { "id": "ap1", "type": "ap", "name": "AP", "x": 500, "y": 200, "gw": "", "dns": "", "os": "", "ports": "", "notes": "", "nat": false, "poeDraw": 12.5, "group": "room1",
+        "interfaces": [ { "id": "w1", "name": "wlan0", "ip": "", "wireless": true, "radio": { "standard": "ax", "bands": [ { "band": "2.4", "channel": 6, "width": 20 }, { "band": "5", "channel": 36, "width": 80, "power": 17, "ssids": ["wf1"] } ] } },
+          { "id": "e0", "name": "eth0", "ip": "192.168.10.20/24", "mac": "AA:BB:CC:00:00:20" } ] },
+      { "id": "ap2", "type": "ap", "name": "AP", "x": 650, "y": 200, "gw": "", "dns": "", "os": "", "ports": "", "notes": "", "nat": false, "group": "room2", "status": "retired",
+        "interfaces": [ { "id": "w1", "name": "wlan0", "ip": "", "wireless": true } ] },
+      { "id": "srv", "type": "server", "name": "HV-01", "x": 100, "y": 300, "gw": "192.168.10.1", "dns": "192.168.10.1", "vendor": "Dell", "model": "PowerEdge R650", "os": "Proxmox VE 8",
+        "ports": "", "notes": "", "nat": false, "group": "rk2", "rackU": 10, "rackHeight": 2, "rackFace": "front", "serial": "7XK2ABC",
+        "interfaces": [ { "id": "n1", "name": "eno1", "ip": "192.168.10.10/24", "mac": "B0:26:28:00:00:01" } ] },
+      { "id": "vm1", "type": "vm", "name": "DC-01", "x": 60, "y": 420, "gw": "192.168.10.1", "dns": "", "os": "Windows Server 2022", "ports": "", "notes": "Domain controller", "nat": false,
+        "host": "srv", "serial": "VMW-42", "interfaces": [ { "id": "v0", "name": "Ethernet0", "ip": "192.168.10.11/24", "mac": "BC:24:11:00:00:01" } ] },
+      { "id": "ct1", "type": "container", "name": "pihole", "x": 160, "y": 420, "gw": "", "dns": "", "os": "", "ports": "53", "notes": "", "nat": false, "host": "srv",
+        "interfaces": [ { "id": "c0", "name": "eth0", "ip": "192.168.10.12/24" } ] },
+      { "id": "pc1", "type": "pc", "name": "Reception PC", "x": 500, "y": 320, "gw": "", "dns": "", "os": "Windows 11", "ports": "", "notes": "", "nat": false, "group": "room1",
+        "interfaces": [ { "id": "i1", "name": "eth0", "ip": "192.168.20.50/24", "mac": "3C:52:82:00:00:50", "vlan": 20 } ], "extra": { "c1": "Front desk" } },
+      { "id": "lap", "type": "pc", "name": "Laptop", "x": 650, "y": 320, "gw": "", "dns": "", "os": "", "ports": "", "notes": "", "nat": false,
+        "interfaces": [ { "id": "i1", "name": "wlan0", "ip": "", "wireless": true } ] },
+      { "id": "cam", "type": "camera", "name": "Unnamed Node", "x": 800, "y": 320, "gw": "", "dns": "", "os": "", "ports": "", "notes": "", "nat": false, "poeDraw": 6,
+        "interfaces": [ ] }
+    ],
+    "links": [
+      { "id": "L1", "source": "isp", "target": "fw", "sourceIface": "i1", "targetIface": "w0", "medium": "fiber", "cable": { "label": "WAN-1", "length": "15 m", "color": "yellow", "via": "Riser A" }, "providers": ["pv_isp"] },
+      { "id": "L2", "source": "fw", "target": "sw", "sourceIface": "l0", "targetIface": "p1", "medium": "utp", "cable": { "label": "C-001", "length": "about 2", "color": "blue" } },
+      { "id": "L3", "source": "fw", "target": "sw", "sourceIface": "l1", "targetIface": "p1", "medium": "utp" },
+      { "id": "L4", "source": "sw", "target": "ap1", "sourceIface": "p2", "targetIface": "e0", "attachment": "passthrough", "cable": { "length": "8 ft" } },
+      { "id": "L5", "source": "sw", "target": "srv", "sourceIface": "p3", "targetIface": "n1", "medium": "utp" },
+      { "id": "L6", "source": "sw", "target": "pc1", "medium": "utp" },
+      { "id": "L7", "source": "ap1", "target": "lap", "sourceIface": "w1", "targetIface": "i1", "medium": "wireless", "wifi": { "ssid": "wf1", "band": "5", "signal": -61 } },
+      { "id": "L8", "source": "ap1", "target": "ap2", "sourceIface": "w1", "targetIface": "w1", "medium": "wireless" },
+      { "id": "L9", "source": "fw", "target": "isp", "medium": "vpn" },
+      { "id": "L10", "source": "srv", "target": "vm1", "sourceIface": "n1", "targetIface": "v0" },
+      { "id": "L11", "source": "sw", "target": "cam", "sourceIface": "p4", "medium": "powerline" }
+    ],
+    "networks": [
+      { "id": "net_data", "cidr": "192.168.10.0/24", "name": "Data", "vlan": 10, "purpose": "Staff", "gateway": "192.168.10.1", "dns": "192.168.10.1", "dhcp": true, "dhcpFirst": "192.168.10.100", "dhcpLast": "192.168.10.199" },
+      { "id": "net_voice", "cidr": "192.168.20.0/24", "name": "Front", "vlan": 20, "drawZone": false },
+      { "id": "net_wan", "cidr": "203.0.113.0/29", "drawZone": true },
+      { "id": "net_v30", "cidr": "10.30.0.0/16", "vlan": 30 }
+    ],
+    "groups": [
+      { "id": "b1", "name": "HQ", "kind": "building", "providers": ["pv_it"] },
+      { "id": "f1", "name": "Floor 1", "kind": "floor", "parent": "b1" },
+      { "id": "room1", "name": "Reception", "kind": "room", "parent": "f1" },
+      { "id": "room2", "kind": "room", "parent": "f1" },
+      { "id": "cu", "name": "Reception", "kind": "custom", "parent": "b1" },
+      { "id": "rk1", "name": "Rack A", "kind": "rack", "parent": "f1", "uHeight": 42, "width": "19in", "depthMm": 1000, "numbering": "top" },
+      { "id": "rk2", "name": "Rack B", "kind": "rack", "parent": "f1", "uHeight": 24, "width": "10in" }
+    ],
+    "wifi": [
+      { "id": "wf1", "ssid": "Staff", "security": "wpa3", "bands": ["5"], "network": "net_data" },
+      { "id": "wf2", "ssid": "Guest", "security": "open", "hidden": true }
+    ],
+    "providers": [
+      { "id": "pv_isp", "name": "FibraNet", "service": "internet", "contact": "Ana Ruiz", "phone": "+52 55 0000 0000", "email": "noc@example.net", "account": "ACC-123", "hours": "24/7", "notes": "Call before visiting" },
+      { "id": "pv_it", "name": "IT Partner", "service": "it" }
+    ],
+    "columns": [
+      { "id": "c1", "name": "Department" },
+      { "id": "c2", "name": "Floor number", "kind": "number" },
+      { "id": "c3", "name": "Warranty ends", "kind": "date" },
+      { "id": "c4", "name": "Monitored", "kind": "yesno" }
+    ]
+  }
+}

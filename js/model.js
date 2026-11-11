@@ -829,28 +829,45 @@ function linkDetour(src, tgt) {
     const dx = tgt.x - src.x, dy = tgt.y - src.y, len = Math.hypot(dx, dy);
     if (len < 1) return 0;
     const ux = dx / len, uy = dy / len, nx = -uy, ny = ux;
+    const cap = Math.min(len * DETOUR_MAX, DETOUR_REACH);
+    // Only a device whose footprint reaches across the run no further than
+    // the largest bow can push its middle (cap / 2) can ever be hit, so one
+    // whose footprint lies further from the run's box than that, plus the
+    // footprint's own reach, is passed over before any projection: the same
+    // answer, without the four-corner sum for every device per cable (a
+    // redraw was cables × devices of it, most of a redraw at 400 devices).
+    const fx = (DETOUR_BOX.x1 + DETOUR_BOX.x2) / 2, fy = (DETOUR_BOX.y1 + DETOUR_BOX.y2) / 2;
+    const reach = cap / 2 + 2 * (Math.hypot((DETOUR_BOX.x2 - DETOUR_BOX.x1) / 2, (DETOUR_BOX.y2 - DETOUR_BOX.y1) / 2) + DETOUR_GAP);
+    const bx0 = Math.min(src.x, tgt.x) - reach, bx1 = Math.max(src.x, tgt.x) + reach;
+    const by0 = Math.min(src.y, tgt.y) - reach, by1 = Math.max(src.y, tgt.y) + reach;
     // Each device near the run: where along it (t, 0..1) and its footprint's
     // extent across it (lo..hi, signed along the normal).
     const near = [];
-    detourObstacles().forEach((n) => {
-        if (n === src || n === tgt || n.id === src.id || n.id === tgt.id) return;
+    const corners = [[DETOUR_BOX.x1, DETOUR_BOX.y1], [DETOUR_BOX.x2, DETOUR_BOX.y1], [DETOUR_BOX.x1, DETOUR_BOX.y2], [DETOUR_BOX.x2, DETOUR_BOX.y2]];
+    const obstacles = detourObstacles();
+    for (let k = 0; k < obstacles.length; k++) {
+        const n = obstacles[k];
+        const cx = n.x + fx, cy = n.y + fy;
+        if (cx < bx0 || cx > bx1 || cy < by0 || cy > by1) continue;
+        if (n === src || n === tgt || n.id === src.id || n.id === tgt.id) continue;
         let lo = Infinity, hi = -Infinity, a0 = Infinity, a1 = -Infinity;
-        [[DETOUR_BOX.x1, DETOUR_BOX.y1], [DETOUR_BOX.x2, DETOUR_BOX.y1], [DETOUR_BOX.x1, DETOUR_BOX.y2], [DETOUR_BOX.x2, DETOUR_BOX.y2]].forEach(([ox, oy]) => {
-            const rx = n.x + ox - src.x, ry = n.y + oy - src.y;
+        for (let c = 0; c < 4; c++) {
+            const rx = n.x + corners[c][0] - src.x, ry = n.y + corners[c][1] - src.y;
             const along = rx * ux + ry * uy, across = rx * nx + ry * ny;
-            a0 = Math.min(a0, along); a1 = Math.max(a1, along);
-            lo = Math.min(lo, across); hi = Math.max(hi, across);
-        });
+            if (along < a0) a0 = along;
+            if (along > a1) a1 = along;
+            if (across < lo) lo = across;
+            if (across > hi) hi = across;
+        }
         // Past either end, or tucked against one (a device stacked on an
         // end's own card): a bow cannot help there.
-        if (a1 < 24 || a0 > len - 24) return;
+        if (a1 < 24 || a0 > len - 24) continue;
         const t = Math.min(0.85, Math.max(0.15, ((n.x - src.x) * ux + (n.y - src.y) * uy) / len));
         near.push({ t, lo: lo - DETOUR_GAP, hi: hi + DETOUR_GAP });
-    });
+    }
     if (!near.length) return 0;
     const hits = (bow) => near.filter((o) => { const off = 2 * o.t * (1 - o.t) * bow; return off > o.lo && off < o.hi; });
     if (!hits(0).length) return 0;
-    const cap = Math.min(len * DETOUR_MAX, DETOUR_REACH);
     // Bow further one way until the run clears what it then crosses (a
     // device passed clear straight may be met on the bow), or it would bow
     // too far to read as this cable.
@@ -899,7 +916,11 @@ function linkSiblings(link) {
 }
 
 function applyLinkGeometry(el, geo) {
-    el.setAttribute('d', `M ${geo.src.x} ${geo.src.y} Q ${geo.ctrl.x} ${geo.ctrl.y} ${geo.tgt.x} ${geo.tgt.y}`);
+    const d = `M ${geo.src.x} ${geo.src.y} Q ${geo.ctrl.x} ${geo.ctrl.y} ${geo.tgt.x} ${geo.tgt.y}`;
+    el.setAttribute('d', d);
+    // A traced cable's moving twin on the trace layer (drawTraceFlow, js/ui.js) follows a drag.
+    const twin = el.id && el.id.startsWith('ui-link-') && typeof document !== 'undefined' ? document.getElementById('ui-flow-' + el.id.slice(8)) : null;
+    if (twin) twin.setAttribute('d', d);
 }
 
 // ---- L2 topology analysis ----

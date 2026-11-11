@@ -1,0 +1,3 @@
+ID,Name,Site,Parent,Status,Tenant,Description,Slug
+601,Planta 1,Oficina Centro,,Active,,,planta-1
+602,Recepción,Oficina Centro,Planta 1,Active,,,recepcion

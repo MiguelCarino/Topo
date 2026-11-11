@@ -546,7 +546,11 @@
             linkText.textContent = getAnnotation(src) ? tr('Tap a device to link this note')
                 : tr('Tap the device to connect to {name}', { name: (srcNode && srcNode.name) || tr('Unnamed device') });
         }
-        linkBanner.hidden = !showBanner;
+        // Each written only when it changes: this runs on every redraw, and
+        // WebKitGTK (the Linux desktop app) restyled the map's pane for an
+        // attribute written with the value it had, and laid out again what
+        // lies over the map with it: the table, 150 ms an edit at 400 devices.
+        if (linkBanner.hidden !== !showBanner) linkBanner.hidden = !showBanner;
 
         // Select more ends with the set (emptied, Esc, a Delete), in a
         // read-only document, past the breakpoint and off the map (the Table
@@ -565,9 +569,9 @@
             if (selName.textContent !== name) { selName.textContent = name; selName.title = name; }
             selBar.dataset.kind = list.length > 1 ? 'multi' : list[0].type;
         }
-        selBar.dataset.more = more ? 'on' : 'off';
+        if (selBar.dataset.more !== (more ? 'on' : 'off')) selBar.dataset.more = more ? 'on' : 'off';
         bodyFlag('select-more', more);
-        selBar.hidden = !showSel;
+        if (selBar.hidden !== !showSel) selBar.hidden = !showSel;
         // The labels go when the row would not fit, leaving the glyphs.
         // Edit's ✎ and Delete's ✕ read without words, so theirs go first;
         // Connect and Link keep theirs while they can.

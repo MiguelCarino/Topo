@@ -1,0 +1,17 @@
+# A backup folder outside /var/lib/topo for the packaged Topo server.
+#
+# The service sees the whole file system read-only (ProtectSystem=strict) and
+# no home folders (ProtectHome=yes). To let it write backups to a USB disk or
+# a mounted share:
+#
+#   sudo mkdir -p /mnt/backup/topo && sudo chown topo:topo /mnt/backup/topo
+#   sudo mkdir -p /etc/systemd/system/topo-server.service.d
+#   sudo cp backup-folder.conf.example /etc/systemd/system/topo-server.service.d/backup-folder.conf
+#   (edit the path below, and add it to TOPO_BACKUP_FOLDERS in /etc/topo/topo.env)
+#   sudo systemctl daemon-reload && sudo systemctl restart topo-server
+#
+# The "-" lets the server start while the disk is unplugged; Topo then
+# refuses to back up there (the folder lacks its .topo-backups marker)
+# rather than filling the root disk.
+[Service]
+ReadWritePaths=-/mnt/backup/topo

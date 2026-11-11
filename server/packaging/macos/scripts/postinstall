@@ -1,0 +1,60 @@
+#!/bin/sh
+# Topo server pkg postinstall (macOS). Build-tested only: written and
+# checked with `sh -n` on Linux, never run on a Mac (docs/SERVER.md says so).
+#
+# Makes the _topo user and group (a free id below 500, hidden), the data and
+# log folders, the first topo.conf (never overwritten), and loads the
+# LaunchDaemon. As shipped the server listens on 127.0.0.1 only.
+set -eu
+
+LABEL=systems.carino.topo-server
+PLIST=/Library/LaunchDaemons/$LABEL.plist
+BASE="/Library/Application Support/Topo"
+LOGS=/Library/Logs/Topo
+
+free_id() {
+    # The first id from 400 to 499 that no user or group has.
+    used="$( (dscl . -list /Users UniqueID; dscl . -list /Groups PrimaryGroupID) | awk '{print $2}')"
+    id=400
+    while [ "$id" -lt 500 ]; do
+        echo "$used" | grep -qx "$id" || { echo "$id"; return 0; }
+        id=$((id + 1))
+    done
+    return 1
+}
+
+if ! dscl . -read /Groups/_topo >/dev/null 2>&1; then
+    gid="$(free_id)"
+    dscl . -create /Groups/_topo
+    dscl . -create /Groups/_topo PrimaryGroupID "$gid"
+    dscl . -create /Groups/_topo RealName "Topo server"
+fi
+gid="$(dscl . -read /Groups/_topo PrimaryGroupID | awk '{print $2}')"
+if ! dscl . -read /Users/_topo >/dev/null 2>&1; then
+    uid="$(free_id)"
+    dscl . -create /Users/_topo
+    dscl . -create /Users/_topo UniqueID "$uid"
+    dscl . -create /Users/_topo PrimaryGroupID "$gid"
+    dscl . -create /Users/_topo UserShell /usr/bin/false
+    dscl . -create /Users/_topo NFSHomeDirectory /var/empty
+    dscl . -create /Users/_topo RealName "Topo server"
+    dscl . -create /Users/_topo IsHidden 1
+fi
+
+mkdir -p "$BASE/data" "$LOGS"
+chown root:_topo "$BASE"
+chmod 0750 "$BASE"
+chown _topo:_topo "$BASE/data" "$LOGS"
+chmod 0700 "$BASE/data"
+chmod 0750 "$LOGS"
+if [ ! -f "$BASE/topo.conf" ]; then
+    cp "$BASE/topo.conf.default" "$BASE/topo.conf"
+fi
+chown root:_topo "$BASE/topo.conf"
+chmod 0640 "$BASE/topo.conf"
+
+chown root:wheel "$PLIST"
+chmod 0644 "$PLIST"
+launchctl bootout "system/$LABEL" >/dev/null 2>&1 || true
+launchctl bootstrap system "$PLIST"
+exit 0

@@ -827,14 +827,45 @@ function gridSpacing(zoom) {
     const step = GRID_STEPS.find((k) => unit * k >= GRID_MIN_PX) || GRID_STEPS[GRID_STEPS.length - 1];
     return { minor: unit * step, major: unit * step * 5, step };
 }
+// Every frame of a pan or a zoom comes here, so only what changed is written:
+// a write of the same grid spacing still sent the container through a style
+// pass in WebKitGTK.
 function applyCamera() {
-    document.getElementById('workspace').setAttribute('transform', `translate(${state.camera.x}, ${state.camera.y}) scale(${state.camera.zoom})`);
+    const cam = `translate(${state.camera.x}, ${state.camera.y}) scale(${state.camera.zoom})`;
+    document.getElementById('workspace').setAttribute('transform', cam);
+    document.getElementById('traceWorkspace').setAttribute('transform', cam);   // the trace's layer (drawTraceFlow, js/ui.js)
     const grid = gridSpacing(state.camera.zoom), canvasContainer = document.getElementById('canvasContainer');
-    canvasContainer.style.setProperty('--grid', `${grid.minor}px`);
-    canvasContainer.style.setProperty('--grid-major', `${grid.major}px`);
-    canvasContainer.style.backgroundPosition = `${state.camera.x}px ${state.camera.y}px`;
+    const st = canvasContainer.style, minor = `${grid.minor}px`, major = `${grid.major}px`;
+    if (st.getPropertyValue('--grid') !== minor) st.setProperty('--grid', minor);
+    if (st.getPropertyValue('--grid-major') !== major) st.setProperty('--grid-major', major);
+    st.backgroundPosition = `${state.camera.x}px ${state.camera.y}px`;
     applyMapDetail(canvasContainer);
 }
+
+// ---- The map's size, in pixels ----
+// The drawing is sized 100% of its pane by the stylesheet. WebKitGTK (the
+// Linux desktop app) lays an SVG root sized in percent out again, every text
+// in it, whenever anything beside it in the workspace is laid out: each
+// keystroke in a rail field cost 27 ms of layout at 400 devices, and nothing
+// on the map had changed. Pinned to its pane's size in pixels it is left
+// alone. A ResizeObserver keeps the pin true (it runs after layout and before
+// paint, so no frame shows a stale size); a hidden pane (the table view)
+// drops the pin, so the drawing is 100% again the moment it shows. The
+// exports drop it from their copy (canvasSvgMarkup).
+(function pinCanvasSize() {
+    const pane = document.getElementById('canvasContainer'), svg = document.getElementById('networkCanvas'), trace = document.getElementById('traceLayer');
+    if (!pane || !svg || typeof ResizeObserver !== 'function') return;
+    const pin = () => {
+        const w = pane.clientWidth, h = pane.clientHeight, on = w > 0 && h > 0;
+        const ws = on ? `${w}px` : '', hs = on ? `${h}px` : '';
+        [svg, trace].forEach((el) => {   // the trace's layer is pinned the same (drawTraceFlow, js/ui.js)
+            if (!el) return;
+            if (el.style.width !== ws) el.style.width = ws;
+            if (el.style.height !== hs) el.style.height = hs;
+        });
+    };
+    new ResizeObserver(pin).observe(pane);
+})();
 
 // ---- Address lines at a phone's zoom (Mobile review M38) ----
 // Under each device its first two addresses are 8 map units: at a phone's
@@ -3463,7 +3494,10 @@ function exportJsonFile() {
     if (!state.nodes.length) { showToast(t('Nothing to export. Add at least one node first.')); return; }
     const doc = state.readOnly ? outgoingDoc() : identifiedDoc(serializeDoc());
     const name = docDisplayName();
-    downloadJson(Object.assign({ kind: 'nettopology', version: 1 }, name ? { name } : {}, { doc }), `${docFileStem()}.json`);
+    const payload = Object.assign({ kind: 'nettopology', version: 1 }, name ? { name } : {}, { doc });
+    // A back-up folder picked in Settings takes it (js/backupdir.js); else the download.
+    if (typeof saveBackupJson === 'function') saveBackupJson(payload, `${docFileStem()}.json`);
+    else downloadJson(payload, `${docFileStem()}.json`);
     // Backed up: the landing stops counting it as changed, and what went into
     // the file is the card's new baseline for "changes since" (js/changes.js).
     if (isKept()) { recordBuildExport(state.libraryId, doc.updated); takeSnapshot(state.libraryId, 'backup', doc); }
@@ -3499,6 +3533,9 @@ async function applyImportedDoc(parsed, opts = {}) {
     // points first, the clean three-way merges on their own, the rest asked
     // about in one summary.
     if (binder) return applyImportedBinder(parsed, { fileName: opts.fileName });
+    // A Topo server's backup (js/backupfile.js): it is unlocked first, then
+    // comes back here as a network, with opts.backup set.
+    if (typeof isBackupFile === 'function' && isBackupFile(parsed)) return openBackupFile(parsed, { fileName: opts.fileName });
     const doc = docFromImported(parsed);
     if (!doc) { showToast(t('That file does not look like a Topo build or binder.'), 'err'); return false; }
     const ident = docIdentity(doc);
@@ -3519,10 +3556,12 @@ async function applyImportedDoc(parsed, opts = {}) {
         // template's or a block's card, or one from a newer Topo.
         const mergeable = !known.template && !known.block && !migrateDoc(known.doc).newer;
         const ctx = mergeable ? await mergeContext(known.id, doc, ident) : null;
-        const choice = await askAboutKnownCopy({ doc, updated: ident.updated }, known, { title: t('Open a file'), history: true, ctx });
+        // A backup (opts.backup) is not read into the address history: the
+        // question is restoring it.
+        const choice = await askAboutKnownCopy({ doc, updated: ident.updated }, known, { title: opts.backup ? t('Restore a backup') : t('Open a file'), history: !opts.backup, ctx });
         if (!choice) return false;
         if (choice === 'merge') {
-            const res = await mergeCopyInto(known.id, doc, { ident, ctx, source: opts.fileName || '', fileName: opts.fileName, replaceAsked: true });
+            const res = await mergeCopyInto(known.id, doc, { ident, ctx, source: opts.source || opts.fileName || '', fileName: opts.fileName, reason: opts.reason, note: opts.note, replaceAsked: true });
             if (res && res.ok && landingIsOpen()) landingHandledDocument();
             return !!(res && res.ok);
         }
@@ -3537,7 +3576,7 @@ async function applyImportedDoc(parsed, opts = {}) {
         if (choice === 'update') {
             // What it held is kept first (js/restore.js); Cancel, when that
             // cannot be stored, leaves everything as it was.
-            if (!(await keepRestorePoints([known.id], opts.fileName ? 'Before opening {file}' : 'Before opening a file', { fileName: opts.fileName }))) return false;
+            if (!(await keepRestorePoints([known.id], opts.reason || (opts.fileName ? 'Before opening {file}' : 'Before opening a file'), { fileName: opts.fileName }))) return false;
             // The card stays what it was: a template's file brought back
             // updates the template, it does not turn it into a network.
             const result = importBinderSites([Object.assign({ id: known.id, name: known.name, created: known.created, updated: ident.updated }, revisionFields(ident), { doc: stripIdentity(doc) },
@@ -3562,7 +3601,7 @@ async function applyImportedDoc(parsed, opts = {}) {
             if (how === 'merge') {
                 const target = await pickMergeTarget(null);
                 if (!target) return false;
-                const res = await mergeCopyInto(target, doc, { ident, source: opts.fileName || '', fileName: opts.fileName, replaceAsked: true });
+                const res = await mergeCopyInto(target, doc, { ident, source: opts.source || opts.fileName || '', fileName: opts.fileName, reason: opts.reason, note: opts.note, replaceAsked: true });
                 if (res && res.ok && landingIsOpen()) landingHandledDocument();
                 return !!(res && res.ok);
             }
@@ -3607,11 +3646,19 @@ function openImportedAsNewCard(doc, name, id, updated, nameAuto = false) {
     return true;
 }
 
+// A file that is not Topo's own (a NetBox export, a CSV, a zip) goes to
+// Import… instead of failing to parse (js/importui.js, docs/SCOPE.md D114).
+const isTopoParsed = (p) => !!(docFromImported(p) || binderFromImported(p) || (typeof isBackupFile === 'function' && isBackupFile(p)));
 function importJsonFile(file) {
+    if (window.TopoImportUI && /\.(csv|tsv|txt|xml|zip|rsc|unf|cfg)$/i.test(file.name || '')) { TopoImportUI.openImport([file]); return; }
     const reader = new FileReader();
     reader.onload = () => {
         let parsed;
-        try { parsed = JSON.parse(reader.result); } catch (e) { showToast(t('That file is not valid JSON.'), 'err'); return; }
+        try { parsed = JSON.parse(reader.result); } catch (e) {
+            if (window.TopoImportUI) { TopoImportUI.openImport([file]); return; }
+            showToast(t('That file is not valid JSON.'), 'err'); return;
+        }
+        if (window.TopoImportUI && !isTopoParsed(parsed)) { TopoImportUI.openImport([file]); return; }
         applyImportedDoc(parsed, { fileName: file.name });
     };
     reader.onerror = () => showToast(t('Could not read that file.'), 'err');
@@ -3707,6 +3754,9 @@ function canvasSvgMarkup(scale = 1) {
     scale = Number.isFinite(asked) && asked > 0 ? asked : 1;
 
     const svg = document.getElementById('networkCanvas').cloneNode(true);
+    // The page's pixel pin (pinCanvasSize) is not the file's size.
+    svg.style.removeProperty('width'); svg.style.removeProperty('height');
+    if (!svg.getAttribute('style')) svg.removeAttribute('style');
     svg.querySelector('#workspace').setAttribute('transform', `translate(${-minX}, ${-minY}) scale(1)`);
     svg.setAttribute('width', exportWidth * scale); svg.setAttribute('height', exportHeight * scale); svg.setAttribute('viewBox', `0 0 ${exportWidth} ${exportHeight}`);
     // A group's ▾ and a collapsed rack's Open rack (js/groupmap.js) are
@@ -3850,8 +3900,10 @@ document.getElementById('landingExampleBtn').onclick = () => {
     zone.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) paint(false); });
     zone.addEventListener('drop', (e) => {
         e.preventDefault(); depth = 0; paint(false);
-        const file = e.dataTransfer.files && e.dataTransfer.files[0];
-        if (file) importJsonFile(file);   // owns the parse, the alerts and the swap
+        const files = e.dataTransfer.files ? [...e.dataTransfer.files] : [];
+        // Several files at once are an export set: Import… reads them together.
+        if (files.length > 1 && window.TopoImportUI) TopoImportUI.openImport(files);
+        else if (files[0]) importJsonFile(files[0]);   // owns the parse, the alerts and the swap
     });
 })();
 

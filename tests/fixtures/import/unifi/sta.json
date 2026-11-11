@@ -1,0 +1,8 @@
+{"meta":{"rc":"ok"},"data":[
+{"_id":"6512a0c1e4b0a1b2c3d4c001","mac":"d0:67:e5:aa:00:01","hostname":"RECEPCION-PC","name":"Recepción PC","oui":"Dell Inc.","ip":"192.168.1.120","is_wired":true,"sw_mac":"74:ac:b9:10:00:02","sw_port":1,"network":"Oficina","network_id":"6512a0c1e4b0a1b2c3d4a001","first_seen":1790000000,"last_seen":1794300000},
+{"_id":"6512a0c1e4b0a1b2c3d4c002","mac":"00:14:38:aa:00:02","hostname":"NPI0A1B2C","oui":"Hewlett Packard","ip":"192.168.1.30","use_fixedip":true,"fixed_ip":"192.168.1.30","is_wired":true,"sw_mac":"74:ac:b9:10:00:02","sw_port":8,"network_id":"6512a0c1e4b0a1b2c3d4a001"},
+{"_id":"6512a0c1e4b0a1b2c3d4c003","mac":"00:0b:82:20:00:03","hostname":"GXP2170","oui":"Grandstream","ip":"10.10.20.51","is_wired":true,"sw_mac":"74:ac:b9:10:00:02","sw_port":2,"vlan":20,"network_id":"6512a0c1e4b0a1b2c3d4a002"},
+{"_id":"6512a0c1e4b0a1b2c3d4c004","mac":"a4:5e:60:00:00:04","hostname":"iPhone-de-Ana","oui":"Apple, Inc.","ip":"192.168.1.150","is_wired":false,"ap_mac":"74:ac:b9:10:00:03","essid":"Oficina-WiFi","radio":"na","signal":-58,"network_id":"6512a0c1e4b0a1b2c3d4a001"},
+{"_id":"6512a0c1e4b0a1b2c3d4c005","mac":"5c:0a:5b:00:00:05","hostname":"Galaxy-Tab","oui":"Samsung","ip":"10.10.99.23","is_wired":false,"ap_mac":"74:ac:b9:10:00:04","essid":"Invitados","radio":"ng","signal":-71,"network_id":"6512a0c1e4b0a1b2c3d4a003"},
+{"_id":"6512a0c1e4b0a1b2c3d4c006","hostname":"broken-entry","ip":"192.168.1.199","is_wired":true}
+]}

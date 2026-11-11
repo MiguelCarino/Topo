@@ -1,0 +1,4 @@
+{"count": 2, "next": null, "previous": null, "results": [
+ {"id": 3, "url": "https://netbox.example.test/api/ipam/prefixes/3/", "prefix": "10.0.2.0/24", "vlan": {"id": 9, "vid": 1, "name": "Management"}, "status": {"value": "active"}, "role": {"id": 1, "name": "Management"}, "description": "Floor 2 management"},
+ {"id": 4, "url": "https://netbox.example.test/api/ipam/prefixes/4/", "prefix": "10.100.0.0/22", "vlan": {"id": 1, "vid": 100, "name": "Guests"}, "status": {"value": "active"}, "description": ""}
+]}

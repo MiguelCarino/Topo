@@ -1,0 +1,9 @@
+AssetID,AssetName,AssetType,IPAddress,Mac,Manufacturer,Model,Serialnumber,OSname,Version,Description,Building,Location,Department,State,Purchasedate,Warrantydate,Lastseen,Site,Username,LocalAdminPassword
+1001,CONTA-PC03,Windows,192.168.50.33,3C:A9:F4:00:33:01,Dell Inc.,OptiPlex 7010,7XK2M93,Windows 11 Pro,23H2,Contabilidad,Edificio A,Piso 2,Finanzas,Active,15/03/2024,15/03/2027,10/11/2026,Oficina Centro,ana.ruiz,Sup3rS3cret!
+1002,SRV-FILES,Windows,10.20.0.5,D0:67:E5:00:00:05,Dell Inc.,PowerEdge R650,9QW1ZX2,Windows Server 2022 Standard,21H2,Servidor de archivos,Edificio A,Site / Planta Baja / Cuarto de servidores,TI,Active,01/02/2023,01/02/2028,10/11/2026,Oficina Centro,,
+1003,IMPRESORA-RECEPCION,Printer,192.168.50.20,00:14:38:AA:BB:20,HP,LaserJet Pro M404dn,VNB3K01234,,,Recepción planta baja,Edificio A,Recepción,,Active,20/06/2022,,09/11/2026,Oficina Centro,,
+1004,LAPTOP-VIEJA,Windows,,,Lenovo,ThinkPad T470,PF0ABCDE,Windows 10 Pro,22H2,,,,Ventas,Stock,05/09/2018,05/09/2021,02/01/2025,Oficina Centro,,
+1005,ESXI-01,VMware,10.20.0.10,,Dell Inc.,PowerEdge R740,To be filled by O.E.M.,VMware ESXi,8.0.2,Host de virtualización,Edificio A,Cuarto de servidores,TI,Broken,11/12/2020,11/12/2025,30/10/2026,Oficina Centro,,
+1006,,Windows,192.168.50.99,,,,,,,,,,,Active,,,,Oficina Centro,,
+1007,TEL-RECEPCION,IP Phone,10.10.20.51,00:0B:82:20:00:03,Grandstream,GXP2170,,,,,,Bodega,,Planned,,,,Oficina Centro,,
+1008,CAMARA-PATIO,Camera,not-an-ip,,Hikvision,DS-2CD2143G2,,,,,,,,Active,,,,Oficina Centro,,

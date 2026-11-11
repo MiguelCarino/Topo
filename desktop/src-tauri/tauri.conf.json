@@ -16,6 +16,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": [
+      "binaries/topo-desktop-server"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,6 +42,39 @@
       "webviewInstallMode": {
         "type": "offlineInstaller",
         "silent": true
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "installerHooks": "windows/hooks.nsh",
+        "languages": [
+          "English",
+          "Spanish",
+          "PortugueseBR",
+          "Japanese",
+          "Russian"
+        ]
+      }
+    },
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/systemd/system/topo-desktop-server.service": "linux/topo-desktop-server.service",
+          "/usr/lib/sysusers.d/topo-desktop-server.conf": "linux/topo-desktop-server.sysusers",
+          "/usr/share/polkit-1/actions/systems.carino.topo.policy": "linux/systems.carino.topo.policy"
+        },
+        "postInstallScript": "linux/postinst.sh",
+        "preRemoveScript": "linux/prerm.sh",
+        "postRemoveScript": "linux/postrm.sh"
+      },
+      "rpm": {
+        "files": {
+          "/usr/lib/systemd/system/topo-desktop-server.service": "linux/topo-desktop-server.service",
+          "/usr/lib/sysusers.d/topo-desktop-server.conf": "linux/topo-desktop-server.sysusers",
+          "/usr/share/polkit-1/actions/systems.carino.topo.policy": "linux/systems.carino.topo.policy"
+        },
+        "postInstallScript": "linux/postinst.sh",
+        "preRemoveScript": "linux/prerm.sh",
+        "postRemoveScript": "linux/postrm.sh"
       }
     },
     "macOS": {

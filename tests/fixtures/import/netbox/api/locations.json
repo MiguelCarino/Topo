@@ -1,0 +1,4 @@
+{"count": 2, "next": null, "previous": null, "results": [
+ {"id": 4, "url": "https://netbox.example.test/api/dcim/locations/4/", "name": "Floor 2", "slug": "floor-2", "site": {"id": 1, "name": "Hotel Mar"}, "parent": null},
+ {"id": 5, "url": "https://netbox.example.test/api/dcim/locations/5/", "name": "Room 201", "slug": "room-201", "site": {"id": 1, "name": "Hotel Mar"}, "parent": {"id": 4, "name": "Floor 2"}}
+]}

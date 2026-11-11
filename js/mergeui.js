@@ -143,6 +143,12 @@ function mergeValueText(kind, field, v, ctx) {
     if (kind === 'incidents' && field === 'visits' && Array.isArray(v)) return v.length === 1 ? t('One visit') : t('Visits: {n}', { n: v.length });
     if (kind === 'incidents' && (field === 'sentAt' || field === 'at') && Number.isFinite(v)) return new Date(v).toISOString().slice(0, 16).replace('T', ' ');
     if (typeof v === 'boolean') return v ? t('Yes') : t('No');
+    // Port names as the box shows its first ports (GigabitEthernet1, …), not
+    // the scheme's JSON (an import sets it from the interface names).
+    if (field === 'portScheme' && v && typeof v === 'object' && !Array.isArray(v) && typeof portNameOf === 'function') {
+        const node = { portScheme: v };
+        return `${portNameOf(node, 1)}, ${portNameOf(node, 2)}, …`;
+    }
     if (typeof v === 'string' || typeof v === 'number') return String(v);
     if (Array.isArray(v) && v.every((x) => x === null || typeof x !== 'object')) return v.join(', ');
     return JSON.stringify(v);
@@ -539,10 +545,12 @@ function showMergeReview(req) {
         // "a link", "a binder", "a copy" are words of this language and take
         // the title's capitals; only a file's name keeps its own.
         const src = mergeSourceName(req.source);
-        mergeTitleInto(mrEl('mergeTitle'), req.sourceText, req.name, !!src && src !== 'link' && src !== 'binder' && src !== 'server');
-        mrEl('mergeMode').textContent = req.plan.mode === 'three-way'
+        mergeTitleInto(mrEl('mergeTitle'), req.sourceText, req.name, !!src && src !== 'link' && src !== 'binder' && src !== 'server' && src !== 'backup');
+        // req.note: what the door has to say first (a backup whose author's
+        // signature could not be checked, js/backupfile.js).
+        mrEl('mergeMode').textContent = joinSentences([req.note || '', req.plan.mode === 'three-way'
             ? t('Three-way: compared with the copy both started from. An edit made on one side only is taken; an edit made on both sides to the same thing asks.')
-            : t('Two-way: no copy both started from was found, so nothing is removed. Where the two differ, yours is kept unless you choose theirs; a blank of yours is filled from theirs.');
+            : t('Two-way: no copy both started from was found, so nothing is removed. Where the two differ, yours is kept unless you choose theirs; a blank of yours is filled from theirs.')]);
         try { _mr.before = mergeFindingsOf(req.mine); } catch (e) { _mr.before = []; }
         renderMergeList();
         mrEl('mergeDelta').textContent = '';
@@ -604,7 +612,7 @@ async function openMergeReview(opts = {}) {
             if (e.reason === 'newer') showToast(t('This copy was made by a newer version of Topo, so it cannot be merged. Open it as a copy to read it.'));
             return { ok: false, reason: e.reason };
         }
-        const answer = await showMergeReview({ plan, mine, targetId: opts.targetId, name: card.name, source: opts.source, sourceText, choices });
+        const answer = await showMergeReview({ plan, mine, targetId: opts.targetId, name: card.name, source: opts.source, sourceText, choices, note: opts.note || '' });
         if (!answer) return { ok: false, reason: 'cancelled' };
         choices = answer;
         const res = await commitMerge(Object.assign({}, opts, { plan, choices }));

@@ -46,9 +46,13 @@ type Config struct {
 	PublicURL       *url.URL
 	PublicDefaulted bool
 
-	AllowedHosts   []string
-	TLSCert        string
-	TLSKey         string
+	AllowedHosts []string
+	TLSCert      string
+	TLSKey       string
+	// TLSSelf is TOPO_TLS_SELF: the server makes its own self-signed
+	// certificate in <data>/tls (the desktop app's LAN server, D113).
+	// TLSCert and TLSKey then name those files.
+	TLSSelf        bool
 	TrustedProxies []netip.Prefix
 	OwnerEmail     string
 
@@ -73,6 +77,18 @@ type Config struct {
 
 	LogLevel  slog.Level
 	LogFormat string // text | json
+
+	// Backups (step 5b). The destination itself is set in the app
+	// (Account, Backups) and kept in the database (D99); these say where a
+	// folder destination may be (whoever installs the server decides) and
+	// how quickly the engine runs.
+	BackupFolders          []string      // TOPO_BACKUP_FOLDERS; default <data>/backups
+	BackupFoldersDefaulted bool          // the default above (serve creates it)
+	BackupDebounce         time.Duration // TOPO_BACKUP_DEBOUNCE, default 2m (0 = at once)
+	BackupTick             time.Duration // TOPO_BACKUP_TICK, default 30s
+	// ServerKeyPath is TOPO_SERVER_KEY: server.key somewhere else. Set, the
+	// file must exist (it is never created there, amendment 21).
+	ServerKeyPath string
 
 	// Reserved holds keys that a later step uses (backups, Postgres, blob
 	// stores). They are accepted so a config written ahead of time loads,
@@ -128,6 +144,7 @@ var known = []key{
 	{"TOPO_ALLOWED_HOSTS", false},
 	{"TOPO_TLS_CERT", false},
 	{"TOPO_TLS_KEY", false},
+	{"TOPO_TLS_SELF", false},
 	{"TOPO_TRUSTED_PROXIES", false},
 	{"TOPO_OWNER_EMAIL", true},
 	{"TOPO_MAIL", false},
@@ -151,18 +168,41 @@ var known = []key{
 	{"TOPO_NOTIFY_EVENT_SECONDS", false},
 	{"TOPO_LOG_LEVEL", false},
 	{"TOPO_LOG_FORMAT", false},
+	{"TOPO_BACKUP_FOLDERS", false},
+	{"TOPO_BACKUP_DEBOUNCE", false},
+	{"TOPO_BACKUP_TICK", false},
+	{"TOPO_SERVER_KEY", false},
 }
 
-// reservedExact and reservedPrefix are the 5b/5c keys (backups, Postgres,
-// blob stores): accepted, logged as "not yet used".
+// reservedExact are keys for a later step (Postgres, blob stores):
+// accepted, logged as "not yet used".
 var reservedExact = map[string]bool{
-	"TOPO_DB":              true,
-	"TOPO_BLOBS":           true,
+	"TOPO_DB":    true,
+	"TOPO_BLOBS": true,
+}
+var reservedPrefix = []string{}
+
+// retiredExact and retiredPrefix were reserved for backups before 5b; the
+// destination is now set in the app. Accepted (an old config file still
+// loads) and logged as ignored.
+var retiredExact = map[string]bool{
 	"TOPO_BACKUP_DEST":     true,
 	"TOPO_BACKUP_SCHEDULE": true,
 	"TOPO_BACKUP_KEEP":     true,
 }
-var reservedPrefix = []string{"TOPO_BACKUP_WEBDAV_", "TOPO_BACKUP_S3_"}
+var retiredPrefix = []string{"TOPO_BACKUP_WEBDAV_", "TOPO_BACKUP_S3_"}
+
+func isRetired(k string) bool {
+	if retiredExact[k] {
+		return true
+	}
+	for _, p := range retiredPrefix {
+		if strings.HasPrefix(k, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // ignoredPrefix are TOPO_* variables that belong to tools around the server
 // (the e2e runner), never to the server itself.
@@ -201,6 +241,10 @@ type Options struct {
 	// Home is the user's home folder for the default data folder; empty means
 	// os.UserHomeDir().
 	Home string
+	// Service is true when the binary runs as a Windows service: the
+	// default data folder is then %ProgramData%\Topo, never the service
+	// account's own profile (D112).
+	Service bool
 }
 
 // Result is a loaded config plus the warnings to log once the logger exists.
@@ -257,12 +301,15 @@ func Load(o Options) (*Result, error) {
 		knownSet[k.name] = true
 	}
 	reserved := map[string]string{}
-	var unknown []string
+	var unknown, retired []string
 	for k, v := range vals {
 		switch {
 		case knownSet[k]:
 		case isReserved(k):
 			reserved[k] = v
+		case isRetired(k):
+			retired = append(retired, k)
+			delete(vals, k)
 		case isIgnored(k):
 			delete(vals, k)
 		default:
@@ -280,6 +327,10 @@ func Load(o Options) (*Result, error) {
 		}
 		sort.Strings(names)
 		warnings = append(warnings, "settings for a later Topo server are not used yet: "+strings.Join(names, ", "))
+	}
+	if len(retired) > 0 {
+		sort.Strings(retired)
+		warnings = append(warnings, "backups are set in the app (Account, Backups); ignored: "+strings.Join(retired, ", "))
 	}
 
 	c, w, err := build(vals, o)
@@ -371,6 +422,11 @@ func parseFile(path string, b []byte) (map[string]string, []string, error) {
 // container (the container sets TOPO_DATA=/data).
 func DefaultDataDir(goos, home string, env map[string]string) string {
 	switch goos {
+	case "windows-service":
+		if v := env["ProgramData"]; v != "" {
+			return filepath.Join(v, "Topo")
+		}
+		return `C:\ProgramData\Topo`
 	case "windows":
 		if v := env["LOCALAPPDATA"]; v != "" {
 			return filepath.Join(v, "Topo")
@@ -410,7 +466,17 @@ func build(v map[string]string, o Options) (*Config, []string, error) {
 				env[k] = val
 			}
 		}
-		if home == "" && env["LOCALAPPDATA"] == "" && env["XDG_DATA_HOME"] == "" {
+		if o.Service && goos == "windows" {
+			goos = "windows-service"
+		}
+		// An admin command run from a prompt with the service's settings
+		// file (backup-now --config C:\ProgramData\Topo\topo.conf) uses
+		// the service's data, not the admin's own profile.
+		if goos == "windows" && o.File != "" &&
+			strings.EqualFold(filepath.Clean(filepath.Dir(o.File)), filepath.Clean(DefaultDataDir("windows-service", home, env))) {
+			goos = "windows-service"
+		}
+		if home == "" && env["LOCALAPPDATA"] == "" && env["XDG_DATA_HOME"] == "" && goos != "windows-service" {
 			fail("TOPO_DATA is not set and there is no home folder to put the data in")
 		} else {
 			c.DataDir = DefaultDataDir(goos, home, env)
@@ -435,6 +501,20 @@ func build(v map[string]string, o Options) (*Config, []string, error) {
 	c.TLSCert, c.TLSKey = v["TOPO_TLS_CERT"], v["TOPO_TLS_KEY"]
 	if (c.TLSCert == "") != (c.TLSKey == "") {
 		fail("set both TOPO_TLS_CERT and TOPO_TLS_KEY, or neither")
+	}
+	switch strings.ToLower(strings.TrimSpace(v["TOPO_TLS_SELF"])) {
+	case "", "0", "false", "no", "off":
+	case "1", "true", "yes", "on":
+		if c.TLSCert != "" {
+			fail("set TOPO_TLS_SELF or TOPO_TLS_CERT and TOPO_TLS_KEY, not both")
+		} else if c.DataDir != "" {
+			// The files the server makes at start (tlsself.go).
+			c.TLSSelf = true
+			c.TLSCert = filepath.Join(c.DataDir, "tls", "cert.pem")
+			c.TLSKey = filepath.Join(c.DataDir, "tls", "key.pem")
+		}
+	default:
+		fail("TOPO_TLS_SELF %q: want 1 or 0", v["TOPO_TLS_SELF"])
 	}
 
 	// Public URL.
@@ -627,6 +707,46 @@ func build(v map[string]string, o Options) (*Config, []string, error) {
 	c.LogFormat = strings.ToLower(orDefault(v["TOPO_LOG_FORMAT"], "text"))
 	if c.LogFormat != "text" && c.LogFormat != "json" {
 		fail("TOPO_LOG_FORMAT %q: want text or json", c.LogFormat)
+	}
+
+	// Backups.
+	if c.DataDir != "" {
+		if lst := v["TOPO_BACKUP_FOLDERS"]; lst != "" {
+			for _, p := range filepath.SplitList(lst) {
+				p = strings.TrimSpace(p)
+				if p == "" {
+					continue
+				}
+				if !filepath.IsAbs(p) {
+					fail("TOPO_BACKUP_FOLDERS: %q is not an absolute path", p)
+					continue
+				}
+				c.BackupFolders = append(c.BackupFolders, filepath.Clean(p))
+			}
+		} else {
+			c.BackupFolders = []string{filepath.Join(c.DataDir, "backups")}
+			c.BackupFoldersDefaulted = true
+		}
+	}
+	c.BackupDebounce = 2 * time.Minute
+	if s := v["TOPO_BACKUP_DEBOUNCE"]; s != "" {
+		d, err := time.ParseDuration(s)
+		if err != nil || d < 0 || d > 24*time.Hour {
+			fail("TOPO_BACKUP_DEBOUNCE %q: want a duration from 0s to 24h, such as 2m", s)
+		} else {
+			c.BackupDebounce = d
+		}
+	}
+	c.BackupTick = durKey(v, "TOPO_BACKUP_TICK", 30*time.Second, fail)
+	if c.BackupTick < time.Second || c.BackupTick > time.Hour {
+		fail("TOPO_BACKUP_TICK %s: want 1s to 1h", c.BackupTick)
+	}
+	if p := v["TOPO_SERVER_KEY"]; p != "" {
+		if !filepath.IsAbs(p) {
+			fail("TOPO_SERVER_KEY %q: want an absolute path", p)
+		} else {
+			c.ServerKeyPath = filepath.Clean(p)
+		}
 	}
 
 	// A real deployment (https, built in or behind a proxy) with no mail

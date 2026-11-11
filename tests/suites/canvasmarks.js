@@ -114,9 +114,12 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('and has no ✕ in it', svgSel.querySelectorAll('.node-delete').length === 0 && document.querySelectorAll('#networkCanvas .node-delete').length === 1);
     state.settings.traceMode = true;
     select('f', 'node');
-    const traced = el('ui-link-lf');
+    // The cable on the map is drawn as traced (the export's look); its
+    // moving twin on the trace layer flows (drawTraceFlow, js/ui.js).
+    const traced = el('ui-link-lf'), flowing = el('ui-flow-lf');
     ok('a traced fiber flows in its own pattern', traced.getAttribute('stroke') === '#f59e0b' && traced.getAttribute('stroke-dasharray') === FLOW_DASH.fiber
-      && traced.getAttribute('stroke-width') === '3.5' && traced.classList.contains(FLOW_CLASS.fiber), look(traced) + ' ' + traced.getAttribute('class'));
+      && traced.getAttribute('stroke-width') === '3.5' && !!flowing && flowing.classList.contains(FLOW_CLASS.fiber)
+      && flowing.getAttribute('stroke-dasharray') === FLOW_DASH.fiber, look(traced) + ' ' + (flowing && flowing.getAttribute('class')));
     state.settings.traceMode = false;
     select(null);
 

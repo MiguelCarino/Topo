@@ -1,0 +1,20 @@
+{"meta":{"rc":"ok"},"data":[
+{"_id":"6512a0c1e4b0a1b2c3d40001","mac":"74:ac:b9:10:00:01","ip":"192.168.1.1","name":"UDM Oficina","model":"UDMPRO","type":"udm","version":"4.0.21.22412","serial":"74acb9100001","adopted":true,"state":1,
+ "port_table":[{"port_idx":1,"name":"Port 1","up":true,"speed":1000},{"port_idx":9,"name":"WAN","up":true,"speed":1000,"ip":"203.0.113.10","netmask":"255.255.255.248"},{"port_idx":11,"name":"SFP+ LAN","up":true,"speed":10000}]},
+{"_id":"6512a0c1e4b0a1b2c3d40002","mac":"74:ac:b9:10:00:02","ip":"192.168.1.2","name":"USW-24-PoE Rack","model":"USL24P","type":"usw","version":"7.0.50.15116","serial":"74acb9100002","adopted":true,"state":1,
+ "uplink":{"uplink_mac":"74:ac:b9:10:00:01","uplink_remote_port":11,"port_idx":25,"type":"wire","speed":10000,"media":"SFP+"},
+ "port_table":[
+  {"port_idx":1,"name":"Recepcion PC","poe_enable":false,"native_networkconf_id":"6512a0c1e4b0a1b2c3d4a001"},
+  {"port_idx":2,"name":"Port 2","poe_enable":true,"poe_mode":"auto","port_poe":true,"native_networkconf_id":"6512a0c1e4b0a1b2c3d4a002"},
+  {"port_idx":3,"name":"AP Sala","poe_enable":true,"poe_mode":"auto","port_poe":true},
+  {"port_idx":8,"name":"Port 8"},
+  {"port_idx":25,"name":"SFP+ 1"}]},
+{"_id":"6512a0c1e4b0a1b2c3d40003","mac":"74:ac:b9:10:00:03","ip":"192.168.1.3","name":"U6 Lite Sala","model":"UAL6","type":"uap","version":"6.6.65.15248","serial":"74acb9100003","adopted":true,"state":1,
+ "uplink":{"uplink_mac":"74:ac:b9:10:00:02","uplink_remote_port":3,"type":"wire"},
+ "port_table":[{"port_idx":1,"name":"Port 1"}]},
+{"_id":"6512a0c1e4b0a1b2c3d40004","mac":"74:ac:b9:10:00:04","ip":"192.168.1.4","name":"U6 Mesh Patio","model":"UAM6","type":"uap","version":"6.6.65.15248","serial":"74acb9100004","adopted":true,"state":1,
+ "uplink":{"uplink_mac":"74:ac:b9:10:00:03","type":"wireless"}},
+{"_id":"6512a0c1e4b0a1b2c3d40005","mac":"74:ac:b9:10:00:05","ip":"192.168.1.5","name":"USW Flex Bodega","model":"USF5P","type":"usw","version":"7.0.50.15116","adopted":true,"state":1,
+ "uplink":{"uplink_mac":"74:ac:b9:99:99:99","uplink_remote_port":4,"type":"wire"},
+ "port_table":[{"port_idx":1,"name":"Port 1"},{"port_idx":5,"name":"Port 5"}]}
+]}

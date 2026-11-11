@@ -30,7 +30,12 @@ import (
 // Kinds are the messages the server sends. "none" is the decoy outbox row of
 // a sign-in request for an address that may not sign in (amendment B3); it is
 // never rendered or sent.
-var Kinds = []string{"signin", "invite", "welcome", "member-joined", "granted", "incident-sent", "visit-recorded", "incident-closed", "revision", "link-request", "test", "report"}
+var Kinds = []string{"signin", "invite", "welcome", "member-joined", "granted", "incident-sent", "visit-recorded", "incident-closed", "revision", "link-request", "test", "report", "backup-failed", "backup-check-failed"}
+
+// backupKinds go to the server owners when a backup or its weekly check
+// fails (D104). They never name a network (even one shown in clear) and
+// carry the reason as a code, "why", turned into a sentence here.
+var backupKinds = map[string]bool{"backup-failed": true, "backup-check-failed": true}
 
 // notifyKinds end with the "change them under Notifications" footer; the
 // others (the person concerned, not opt-out-able) with the plain one.
@@ -228,6 +233,14 @@ func Render(kind, lang string, d Data) (*Message, error) {
 	}
 	if kind == "report" {
 		return renderReport(lang, v)
+	}
+	if backupKinds[kind] {
+		delete(v, "name")
+		why, ok := lookup(lang, "backup.why."+v["why"])
+		if !ok {
+			why, _ = lookup(lang, "backup.why.other")
+		}
+		v["reason"] = why
 	}
 	if r, ok := v["role"]; ok {
 		if t, ok := lookup(lang, "role."+r); ok {

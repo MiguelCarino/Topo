@@ -1,0 +1,5 @@
+{"meta":{"rc":"ok"},"data":[
+{"_id":"6512a0c1e4b0a1b2c3d4b001","name":"Oficina-WiFi","security":"wpapsk","wpa_mode":"wpa2","wpa3_support":true,"wpa3_transition":true,"x_passphrase":"Clave-Super-Secreta-2026","hide_ssid":false,"networkconf_id":"6512a0c1e4b0a1b2c3d4a001","enabled":true},
+{"_id":"6512a0c1e4b0a1b2c3d4b002","name":"Invitados","security":"open","hide_ssid":false,"networkconf_id":"6512a0c1e4b0a1b2c3d4a003","is_guest":true,"enabled":true},
+{"_id":"6512a0c1e4b0a1b2c3d4b003","name":"Cam-IoT","security":"wpapsk","wpa_mode":"wpa2","x_passphrase":"iot-key-77","hide_ssid":true,"networkconf_id":"6512a0c1e4b0a1b2c3d4a001","wlan_band":"2g"}
+]}

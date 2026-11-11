@@ -74,11 +74,21 @@ func WritePrivate(path string, data []byte) error {
 const KeySize = 32
 
 // ServerKey loads <dir>/server.key, creating it with 32 random bytes the
-// first time. It keys the HMACs of sign-in codes, so losing it only voids
-// codes still outstanding.
+// first time. It keys the HMACs of sign-in codes and seals the backup
+// destination's passwords (D105), so losing it voids codes still
+// outstanding and means typing those passwords again.
 func ServerKey(dir string) ([]byte, error) {
-	path := filepath.Join(dir, "server.key")
+	return ServerKeyAt(filepath.Join(dir, "server.key"), true)
+}
+
+// ServerKeyAt loads the key at path. create makes it when missing; without
+// create a missing file is an error (TOPO_SERVER_KEY set explicitly: a disk
+// that is not mounted must never mint a new key, amendment 21).
+func ServerKeyAt(path string, create bool) ([]byte, error) {
 	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) && !create {
+		return nil, fmt.Errorf("%s does not exist (TOPO_SERVER_KEY names it, so a new one is not made: mount or restore it, or unset TOPO_SERVER_KEY)", path)
+	}
 	if err == nil {
 		if len(b) != KeySize {
 			return nil, fmt.Errorf("%s is %d bytes, want %d (move it away to make a new one; outstanding sign-in codes stop working)", path, len(b), KeySize)

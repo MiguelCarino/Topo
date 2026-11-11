@@ -1,0 +1,4 @@
+Name,MAC Address,IP Address,Network,Connection,Uplink,Port,Manufacturer,WiFi Experience,Signal
+Sala TV,dc:2b:2a:00:01:01,192.168.1.160,Oficina,Wireless,U6 Lite Sala,,Apple,92%,-61
+Contabilidad,3c:a9:f4:00:33:01,192.168.1.133,Oficina,Wired,USW-24-PoE Rack,6,Intel,,
+Sin MAC,,192.168.1.199,Oficina,Wired,USW-24-PoE Rack,7,,,

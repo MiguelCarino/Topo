@@ -67,6 +67,27 @@ func TestDefaultDataDir(t *testing.T) {
 	}
 }
 
+// An admin command on Windows given the service's topo.conf uses the
+// service's data folder, not the admin's %LOCALAPPDATA%.
+func TestWindowsAdminCommandUsesServiceData(t *testing.T) {
+	pd := t.TempDir()
+	dir := filepath.Join(pd, "Topo")
+	os.Mkdir(dir, 0o700)
+	f := filepath.Join(dir, "topo.conf")
+	os.WriteFile(f, []byte("# all comments\n"), 0o600)
+	env := []string{"ProgramData=" + pd, "LOCALAPPDATA=" + filepath.Join(pd, "local")}
+	r, err := Load(Options{File: f, Environ: env, GOOS: "windows", Home: "/h"})
+	if err != nil || r.Config.DataDir != dir {
+		t.Fatalf("with the service's topo.conf: %v %+v", err, r)
+	}
+	other := filepath.Join(t.TempDir(), "topo.conf")
+	os.WriteFile(other, []byte("\n"), 0o600)
+	r, err = Load(Options{File: other, Environ: env, GOOS: "windows", Home: "/h"})
+	if err != nil || r.Config.DataDir != filepath.Join(pd, "local", "Topo") {
+		t.Fatalf("another topo.conf: %v %+v", err, r)
+	}
+}
+
 func TestFileThenEnv(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "topo.env")
@@ -113,14 +134,38 @@ func TestUnknownAndReserved(t *testing.T) {
 		t.Fatalf("unknown key: %v", err)
 	}
 	r := mustLoad(t, "TOPO_BACKUP_DEST=dir:/b", "TOPO_BACKUP_S3_BUCKET=x", "TOPO_DB=sqlite", "TOPO_E2E_BIN=/x")
-	if len(r.Config.Reserved) != 3 {
+	if len(r.Config.Reserved) != 1 || r.Config.Reserved["TOPO_DB"] != "sqlite" {
 		t.Fatalf("reserved %v", r.Config.Reserved)
 	}
-	if len(r.Warnings) != 1 || !strings.Contains(r.Warnings[0], "TOPO_BACKUP_DEST") {
+	// The keys reserved for backups before 5b are retired: accepted, and
+	// logged as set in the app instead.
+	if len(r.Warnings) != 2 || !strings.Contains(r.Warnings[0], "TOPO_DB") ||
+		!strings.Contains(r.Warnings[1], "Account, Backups") || !strings.Contains(r.Warnings[1], "TOPO_BACKUP_DEST, TOPO_BACKUP_S3_BUCKET") {
 		t.Fatalf("warnings %v", r.Warnings)
 	}
 	// Non-TOPO variables in the environment are not ours to judge.
 	mustLoad(t, "HOME=/x", "PATH=/bin")
+}
+
+func TestBackupKeys(t *testing.T) {
+	r := mustLoad(t)
+	c := r.Config
+	if len(c.BackupFolders) != 1 || c.BackupFolders[0] != filepath.Join(c.DataDir, "backups") || !c.BackupFoldersDefaulted {
+		t.Fatalf("default folders %v", c.BackupFolders)
+	}
+	if c.BackupDebounce != 2*time.Minute || c.BackupTick != 30*time.Second || c.ServerKeyPath != "" {
+		t.Fatalf("defaults %v %v %q", c.BackupDebounce, c.BackupTick, c.ServerKeyPath)
+	}
+	list := "/mnt/usb" + string(filepath.ListSeparator) + "/srv/share/"
+	c = mustLoad(t, "TOPO_BACKUP_FOLDERS="+list, "TOPO_BACKUP_DEBOUNCE=0s", "TOPO_BACKUP_TICK=1s", "TOPO_SERVER_KEY=/keys/server.key").Config
+	if len(c.BackupFolders) != 2 || c.BackupFolders[1] != "/srv/share" || c.BackupFoldersDefaulted || c.BackupDebounce != 0 || c.BackupTick != time.Second || c.ServerKeyPath != "/keys/server.key" {
+		t.Fatalf("set: %+v", c)
+	}
+	for _, bad := range []string{"TOPO_BACKUP_FOLDERS=relative/dir", "TOPO_BACKUP_DEBOUNCE=-1s", "TOPO_BACKUP_DEBOUNCE=48h", "TOPO_BACKUP_TICK=10ms", "TOPO_SERVER_KEY=server.key"} {
+		if _, err := load(t, bad); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
 }
 
 func TestFileVariants(t *testing.T) {

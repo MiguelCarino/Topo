@@ -38,7 +38,30 @@ const paletteDefs = [
     { type: 'custom', name: 'Custom Node' }
 ];
 
+const lTrace = document.getElementById('traceWorkspace');
 const lZones = document.getElementById('layer-zones'), lLinks = document.getElementById('layer-links'), lNodes = document.getElementById('layer-nodes'), lAnn = document.getElementById('layer-annotations'), lLabels = document.getElementById('layer-labels');
+
+// ---- A finger's press on the map's cards, heard once ----
+// Each card a finger can drag (a device, a note, a frame's tab, a collapsed
+// group) used to get its own touchstart listener on every redraw. WebKitGTK
+// (the Linux desktop app) answers the first touch listener added after a
+// change with a restyle and layout of the whole page, 100 ms with the table
+// open, on every redraw. So the cards are only noted here, and one listener
+// on the map, in the capture phase (ahead of the map's own pan and pinch, as
+// the cards' listeners were), calls theirs for each card under the finger,
+// innermost first, as the bubbling did. Passive, as theirs were.
+const _mapTouchPress = new WeakMap();
+function onMapTouch(el, fn) { _mapTouchPress.set(el, fn); }
+(function () {
+    const svg = document.getElementById('networkCanvas');
+    if (!svg) return;
+    svg.addEventListener('touchstart', (e) => {
+        for (let el = e.target; el && el !== svg; el = el.parentNode) {
+            const fn = _mapTouchPress.get(el);
+            if (fn) fn(e);
+        }
+    }, { capture: true, passive: true });
+})();
 let isDraggingCanvas = false, isDraggingNode = false, draggedNode = null, dragOffset = { x: 0, y: 0 }, lastMouse = { x: 0, y: 0 };
 // dragGroup: everything a press moves, each with its offset from the pointer
 // and where it started — the pressed device alone, or every selected device
@@ -365,7 +388,7 @@ function renderAnnotation(a) {
     g.appendChild(rect); g.appendChild(text);
     lAnn.appendChild(g);   // must be in the DOM before getBBox works
 
-    const bb = text.getBBox();
+    const bb = measuredTextBox(text);
     const cardW = Math.max(bb.width + 20, 44), cardH = Math.max(bb.height + 12, 26);
     a._w = cardW; a._h = cardH;   // transient, for live leader updates during drags
     rect.setAttribute('x', 0); rect.setAttribute('y', 0); rect.setAttribute('rx', 4);
@@ -422,7 +445,7 @@ function renderAnnotation(a) {
     // the mousemove handler finds this group via the ui-ann-<id> fallback.
     g.addEventListener('mousedown', (event) => pressAnnotation(event, a));
     // A finger drags it too, past the tap margin (touchPress, js/app.js).
-    g.addEventListener('touchstart', (e) => touchPress(e, (ev) => pressAnnotation(ev, a), () => !!getAnnotation(a.id)), { passive: true });
+    onMapTouch(g, (e) => touchPress(e, (ev) => pressAnnotation(ev, a), () => !!getAnnotation(a.id)));
     // Right-click arms link mode from this note, mirroring nodes: the next
     // node clicked gets (or loses) the red leader.
     g.addEventListener('contextmenu', (event) => {
@@ -678,8 +701,12 @@ function zonesNow(gv) {
 // anything has saved; null itself under batch(). Resolve it where it is
 // used (drawnDiag), not before more panels are rebuilt.
 let _canvasRendering = 0;
+// How long the last whole redraw took (ms): the typing's coalescer reads it,
+// so the first keystroke on a big site already waits for a pause.
+let _lastCanvasMs = 0;
 function renderCanvasOnly() {
     if (holdRender()) return null;   // inside batch() (js/app.js): drawn once, when it ends
+    const t0 = _canvasRendering ? 0 : performance.now();
     _canvasRendering++;
     try {
         const seq = _docSeq;
@@ -696,7 +723,10 @@ function renderCanvasOnly() {
         renderRackView(false, live());    // js/rackview.js: and the rack view, and the switch's Rack
         if (typeof updateQueryBar === 'function') updateQueryBar();   // js/query.js: the match count
         return live;
-    } finally { _canvasRendering--; }
+    } finally {
+        _canvasRendering--;
+        if (t0) _lastCanvasMs = performance.now() - t0;
+    }
 }
 // renderCanvasOnly()'s answer -> the drawing's diagnosis, if still true now.
 const drawnDiag = (live) => (live ? live() : null);
@@ -709,11 +739,26 @@ const drawnDiag = (live) => (live ? live() : null);
 // loan it stays pending. A flush asked while a drawing is under way (a
 // rebuilt panel's focusout), or inside a lookup pass, leaves it to the
 // coalescer's timer: a nested render there would write under open indexes.
+// On a big site the whole redraw waits for a pause in the typing (settle,
+// redrawCoalescer), so what a keystroke must show at once is written here
+// straight onto the drawing: the name under each selected device, the one
+// thing on the map that follows the keys. The next whole redraw writes the
+// same words.
+const TYPED_SETTLE_MS = 300;
 const typedDraw = redrawCoalescer(() => {
     if (canvasIsBorrowed()) return false;
     refreshSelectedNodeDiagnostics(drawnDiag(renderCanvasOnly()));
-});
-function renderTyped() { typedDraw.ask(); }
+}, { settle: TYPED_SETTLE_MS, slow: () => _lastCanvasMs > REDRAW_SLOW_MS });
+const _nodeNameLabels = new Map();   // node id -> its name's <text>, as last drawn (drawCanvas)
+function patchTypedLabels() {
+    selectedOf('node').forEach((id) => {
+        const node = getNode(id), label = _nodeNameLabels.get(id);
+        if (!node || !label || !label.isConnected) return;
+        const name = node.name == null ? '' : String(node.name);
+        if (label.textContent !== name) label.textContent = name;
+    });
+}
+function renderTyped() { patchTypedLabels(); typedDraw.ask(); }
 function flushTypedRender() { if (!_canvasRendering && !lookupPass) typedDraw.flush(); }
 function cancelTypedRender() { typedDraw.cancel(); }
 
@@ -729,6 +774,37 @@ function canvasIcon(type) {
         _canvasIcons.set(key, holder.firstChild);
     }
     return _canvasIcons.get(key).cloneNode(true);
+}
+
+// ---- Text measured once ----
+// A label's box (a zone's tab, a group frame's tab, a note's card) was read
+// with getBBox() as each was drawn, between writes, so every one forced the
+// whole map to be laid out again: in WebKitGTK (the Linux desktop app) that
+// is 60 ms a call at 400 devices, a dozen per redraw and ten per drag step.
+// The same words in the same font measure the same, so the box is kept by
+// what decides it (the text, line by line, and the attributes and class that
+// set its font and anchor) relative to the text's own x and y, and only new
+// words are measured. A box read while the map is not laid out (zero wide)
+// is handed back and not kept. Web fonts arriving can change widths: the
+// cache is dropped then.
+const _textBoxes = new Map();
+const TEXT_BOX_KEEP = 4000;
+try { if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', () => _textBoxes.clear()); } catch (e) { /* no font loading API */ }
+function measuredTextBox(text) {
+    const a = (k) => text.getAttribute(k) || '';
+    const parent = text.parentNode && text.parentNode.getAttribute ? text.parentNode.getAttribute('class') || '' : '';
+    const lines = text.childElementCount ? Array.from(text.childNodes, (n) => n.textContent).join('\u0001') : text.textContent;
+    const key = [a('class'), parent, a('font-size'), a('font-family'), a('font-weight'), a('font-style'), a('text-anchor'), a('dominant-baseline'), lines].join('\u0002');
+    const x = parseFloat(a('x')) || 0, y = parseFloat(a('y')) || 0;
+    let box = _textBoxes.get(key);
+    if (!box) {
+        const bb = text.getBBox();
+        if (!bb.width) return bb;
+        if (_textBoxes.size >= TEXT_BOX_KEEP) _textBoxes.clear();
+        box = { dx: bb.x - x, dy: bb.y - y, width: bb.width, height: bb.height };
+        _textBoxes.set(key, box);
+    }
+    return { x: x + box.dx, y: y + box.dy, width: box.width, height: box.height };
 }
 
 // The map's Wi-Fi colours are tokens (css/app.css, --topo-wifi*), read here
@@ -893,14 +969,42 @@ function textHalo(el) {
 // data-sel-only instead, and the export drops it.
 function restLook(el, rest) { el.setAttribute('data-rest', JSON.stringify(rest)); }
 
+// ---- The trace's moving cables ----
+// A traced cable's moving dashes are drawn by a twin on #traceLayer, an SVG of
+// its own under the map (css/app.css .trace-layer). An animation inside the
+// map's SVG had the browser paint the whole map again every frame, every
+// device and label under the moving cables: 300 devices at full HD kept two
+// cores busy. On its own layer, only the dashes are painted again. The cable
+// on the map stays, its ink hidden by the stylesheet, for the press, the
+// hover and the exports. A radio link's twin draws nothing: its ))) ride it.
+// -> the twin.
+function drawTraceFlow(line, linkId, medium) {
+    const twin = line.cloneNode(false);
+    twin.id = `ui-flow-${linkId}`;
+    twin.removeAttribute('data-rest');
+    twin.setAttribute('class', (FLOW_CLASS[medium] || FLOW_CLASS.utp) + (line.classList.contains('q-dim') ? ' q-dim' : ''));
+    if (medium === 'wireless') twin.setAttribute('stroke', 'none');
+    lTrace.appendChild(twin);
+    return twin;
+}
+
 function drawCanvas() {
+    lTrace.innerHTML = '';
     lZones.innerHTML = ''; lLinks.innerHTML = ''; lLabels.innerHTML = ''; lNodes.innerHTML = ''; lAnn.innerHTML = '';
+    _nodeNameLabels.clear();
     state.annotations.forEach(renderAnnotation);
     renderNoteLeaders();
     // setAttribute: the canvas is an <svg>, whose className is not a string
     // and took no assignment, so link mode's crosshair never showed. The
     // phone's connect banner (js/mobile.js) watches this attribute too.
-    document.getElementById('networkCanvas').setAttribute('class', `topo-svg${state.linkSourceId ? ' linking' : ''}`);
+    // Only when it changes: WebKitGTK (the Linux desktop app) restyled the
+    // map's pane for a class written with the value it already had, and laid
+    // out again what lies over it: with the table over the map, 150 ms of
+    // every edit at 400 devices. The selection bar heard every redraw through
+    // this write (js/mobile.js), so a redraw that leaves it says so instead.
+    const svgEl = document.getElementById('networkCanvas'), svgClass = `topo-svg${state.linkSourceId ? ' linking' : ''}`;
+    if (svgEl.getAttribute('class') !== svgClass) svgEl.setAttribute('class', svgClass);
+    else queueMicrotask(() => document.dispatchEvent(new Event('topo:redrawn')));
 
     // Groups on the map (js/groupmap.js): which devices a collapsed group
     // folds out of sight and which cables it stands for. Null with no groups.
@@ -988,7 +1092,7 @@ function drawCanvas() {
         lLabels.appendChild(tagG);
         // Backdrop behind the text so crossing links don't bleed through it.
         try {
-            const bb = text.getBBox();
+            const bb = measuredTextBox(text);
             const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
             bg.setAttribute('x', bb.x - 5); bg.setAttribute('y', bb.y - 2);
             bg.setAttribute('width', bb.width + 10); bg.setAttribute('height', bb.height + 4);
@@ -1077,7 +1181,9 @@ function drawCanvas() {
             line.setAttribute('stroke', '#f59e0b');
             line.setAttribute('stroke-width', medium === 'fiber' ? '3.5' : medium === 'wireless' ? '2.5' : '3');
             line.setAttribute('stroke-dasharray', FLOW_DASH[medium] || FLOW_DASH.utp);
-            line.setAttribute('class', `${FLOW_CLASS[medium] || FLOW_CLASS.utp} cursor-pointer`);
+            // The moving dashes are its twin's on the trace layer (drawTraceFlow);
+            // a radio link's faint base line stays here, it does not move.
+            line.setAttribute('class', `${medium === 'wireless' ? FLOW_CLASS.wireless : 'flow-under'} cursor-pointer`);
         } else {
             line.setAttribute('stroke', isSelected ? '#eab308' : defaultColor);
             line.setAttribute('stroke-width', isSelected ? '3' : baseWidth);
@@ -1090,6 +1196,7 @@ function drawCanvas() {
             if (addsToSelection(event) || selectMoreTap(event)) toggleSelected('link', link.id); else select(link.id, 'link');
         });
         if (qm && !qm.links.has(link.id)) line.classList.add('q-dim');
+        const flow = reach && reach.reachableLinks.has(link.id) ? drawTraceFlow(line, link.id, medium) : null;
         // Who is responsible for the run, on hover, when Settings says so.
         if (state.settings.providerHover === true && linkProviders(link).length) {
             const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
@@ -1214,7 +1321,7 @@ function drawCanvas() {
             waves.setAttribute('dominant-baseline', 'middle');
 
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'textPath');
-            path.setAttribute('href', `#ui-link-${link.id}`);
+            path.setAttribute('href', `#${flow.id}`);
 
             // Measure the glyph advance once rather than assuming it: the loop has
             // to close on exactly one repeat or the arcs visibly jump. It only
@@ -1224,7 +1331,7 @@ function drawCanvas() {
             const reps = waveAdvance ? Math.ceil(total / waveAdvance) + 2 : Math.max(3, Math.ceil(total / 8) + 3);
             path.textContent = WAVE_UNIT.repeat(reps);
             waves.appendChild(path);
-            lLinks.appendChild(waves);
+            lTrace.appendChild(waves);
 
             if (!waveAdvance) waveAdvance = waves.getComputedTextLength() / reps;
             const advance = waveAdvance;
@@ -1363,6 +1470,7 @@ function drawCanvas() {
         // page's CSS — renders in sans, not each engine's default serif.
         label.setAttribute('font-family', 'sans-serif');
         label.setAttribute('font-weight', '600'); label.setAttribute('fill', '#334155'); label.textContent = node.name; label.style.pointerEvents = 'none';
+        _nodeNameLabels.set(node.id, label);
         // A halo of the map's own ground round the words, as the cable labels
         // have: a cable leaving the card downward (every one in a rack's
         // column) ran through the name and the address under it. An attribute,
@@ -1480,7 +1588,7 @@ function drawCanvas() {
         g.addEventListener('mousedown', (event) => pressNode(event, node));
         // A finger that drags it: the same press, once it has travelled
         // (touchPressNode, js/app.js). Passive: a tap stays the browser's.
-        g.addEventListener('touchstart', (event) => touchPressNode(event, node), { passive: true });
+        onMapTouch(g, (event) => touchPressNode(event, node));
 
         g.addEventListener('click', (event) => {
             event.stopPropagation();

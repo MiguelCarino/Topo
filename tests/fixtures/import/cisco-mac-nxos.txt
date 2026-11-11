@@ -1,0 +1,37 @@
+----------------------------------------
+Device ID:LEAF-02(FDO24210ABC)
+System Name: LEAF-02
+
+Interface address(es):
+    IPv4 Address: 10.9.0.12
+Platform: N9K-C93180YC-FX, Capabilities: Router Switch IGMP Filtering Supports-STP-Dispute
+Interface: Ethernet1/54, Port ID (outgoing port): Ethernet1/54
+Holdtime: 171 sec
+
+Version:
+Cisco Nexus Operating System (NX-OS) Software, Version 10.3(4a)
+
+Advertisement Version: 2
+
+Native VLAN: 1
+Duplex: full
+
+MTU: 9216
+Physical Location: Rack B2
+Mgmt address(es):
+    IPv4 Address: 10.0.0.12
+
+Legend:
+        * - primary entry, G - Gateway MAC, (R) - Routed MAC, O - Overlay MAC
+        age - seconds since last seen,+ - primary entry using vPC Peer-Link,
+        (T) - True, (F) - False, C - ControlPlane MAC, ~ - vsan
+   VLAN     MAC Address      Type      age     Secure NTFY Ports
+---------+-----------------+--------+---------+------+----+------------------
+*  110     0050.56b1.0a01   dynamic  0         F      F    Eth1/1
+*  110     0050.56b1.0a02   dynamic  0         F      F    Eth1/2
++  110     0050.56b1.0a03   dynamic  0         F      F    vPC Peer-Link
+*  120     d067.e5b1.0b01   dynamic  0         F      F    Eth1/3
+*  120     d067.e5b1.0b02   dynamic  30        F      F    Po10
+*  120     d067.e5b1.0b09   dynamic  0         F      F    Eth1/54
+G    -     00de.fb00.1234   static   -         F      F    sup-eth1(R)
+C  130     3ca9.f4b1.0c01   dynamic  0         F      F    Eth1/4

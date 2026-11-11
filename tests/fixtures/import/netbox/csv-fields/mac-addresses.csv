@@ -1,0 +1,4 @@
+mac_address,device,virtual_machine,interface
+48:A9:8A:00:00:01,edge-rtr,,ether1
+d8:5e:d3:00:00:07,lab-pc,,eth0
+BC:24:11:AA:BB:01,,ris-01,ens18

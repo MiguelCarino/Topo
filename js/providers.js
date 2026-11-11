@@ -69,6 +69,7 @@ function renderProvidersPanel(force) {
     const list = pvEl('providerList');
     const all = state.providers || [];
     list.innerHTML = all.length ? withLookupPass(() => all.map(providerCardHtml).join('')) + providerMorePresetsHtml(all) : providerEmptyHtml();
+    phoneFields(list);   // the phone's country pick (js/phone.js)
     if (refocus) { const again = panel.querySelector(refocus); if (again) again.focus(); }
 }
 

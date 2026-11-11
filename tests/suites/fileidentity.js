@@ -225,7 +225,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     try { schema = JSON.parse(await res.text()); } catch (e) { /* asserted below */ }
     ok('schema/topo-v<DOC_VERSION>.json is there and parses', res.ok && !!schema);
     ok('its $id is the helper\'s address, draft 2020-12', !!schema && schema.$id === topoSchemaUrl() && schema.$schema === 'https://json-schema.org/draft/2020-12/schema');
-    ok('titled, and says it is a draft pointing at SCOPE step 6', !!schema && schema.title === 'Topo network file' && /DRAFT/.test(schema.description) && /step 6 of docs\/SCOPE\.md/.test(schema.description));
+    ok('titled, no longer a draft, and names docs/FORMAT.md (docs/SCOPE.md D120)', !!schema && schema.title === 'Topo network file' && !/DRAFT/.test(schema.description) && /docs\/FORMAT\.md/.test(schema.description));
     // A small validator: enough of 2020-12 for this schema.
     const typeOk = (t, v) => (Array.isArray(t) ? t : [t]).some((x) => (x === 'integer' ? Number.isInteger(v) : x === 'array' ? Array.isArray(v)
       : x === 'object' ? !!v && typeof v === 'object' && !Array.isArray(v) : x === 'null' ? v === null : typeof v === x));

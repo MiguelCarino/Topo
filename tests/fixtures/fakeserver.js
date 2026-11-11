@@ -19,6 +19,14 @@
 //   fake.mails            [{ kind, to }]
 //   fake.remote(email)    another browser: its own keys, pushes and grants
 //                         through the fake's state (see Remote below)
+//   Backups (step 5b): fake.backup is the server owner's settings and
+//   status; fake.backupFile(siteId) builds a topo-backup file of the head
+//   as server/internal/backup/snapshot.go does, fake.addBackup(siteId)
+//   lists one; fake.backupFails = 'refused' makes Test and Save fail.
+//   5c: oauth/start answers https://provider.example.test/auth?state=…;
+//   fake.oauthBack(url) is the provider's answer (the fragment the app
+//   gets back); finish checks the state once and connects as
+//   fake.oauthAccount.
 (function () {
 'use strict';
 const C = () => window.TopoServerCrypto;
@@ -29,6 +37,16 @@ window.FakeTopoServer = function (opts = {}) {
         session: null, challenges: new Map(), linkRequests: new Map(), seq: 0
     };
     const fake = { code: '123456', offline: false, calls: [], mails: [], state: S, ownerEmail: opts.ownerEmail || 'owner@example.test', health: { setup: false, maxRevBytes: 8 << 20 } };
+    fake.backup = { config: { enabled: false, kind: '', fields: {}, secrets: {}, dailyAt: '02:30', readableAllowed: false, updated: 0 },
+        status: { lastOk: 0, lastError: null, lastCheck: null, nextRun: null, backoffUntil: 0 }, files: [], readables: [], runs: 0, checks: 0, allowed: ['/srv/topo/backups'] };
+    fake.backupFails = null;
+    fake.oauthAccount = 'ana@example.test';
+    // The provider said yes: the fragment the app is sent back with.
+    fake.oauthBack = (url, error) => {
+        const st = new URL(url).searchParams.get('state');
+        const inner = new URLSearchParams(error ? { state: st, error } : { state: st, code: 'c' + Math.random().toString(36).slice(2, 10) }).toString();
+        return 'backup-connect=' + encodeURIComponent(inner);
+    };
     const id = (p) => p + C().b64u(C().random(16));
     const now = () => Date.now();
     function user(email) {
@@ -148,6 +166,74 @@ window.FakeTopoServer = function (opts = {}) {
             for (const s of S.sites.values()) { const i = s.invites.find((x) => x.token === body.token && x.status === 'pending'); if (i) return ok({ email: i.email, role: i.role, site: s.id, nameClear: null, inviter: i.inviter }); }
             return err(400, 'bad-invite');
         }
+        if (p === '/api/admin/users' && method === 'GET') {
+            if (me.serverRole !== 'owner') return err(403, 'forbidden');
+            return ok({ users: [...S.users.values()].map((u) => ({ id: u.id, email: u.email, serverRole: u.serverRole, disabled: false })) });
+        }
+        // ---- Backups: the server owner's (step 5b) ----
+        if (p.startsWith('/api/admin/backups')) {
+            if (me.serverRole !== 'owner') return err(403, 'forbidden');
+            const B = fake.backup, c = B.config;
+            const view = () => {
+                const sites = [];
+                S.sites.forEach((x) => { const f = B.files.filter((y) => y.site === x.id && y.kind === 'enc'); if (f.length) sites.push({ site: x.id, name: x.showName ? x.nameClear : '', count: f.length, last: Math.max(...f.map((y) => y.at)), missing: f.filter((y) => y.missing).length }); });
+                return { config: { enabled: c.enabled, kind: c.kind, fields: Object.assign({}, c.fields), secretsSet: Object.keys(c.secrets).filter((k) => k !== 'refreshToken').sort(), dailyAt: c.dailyAt, readableAllowed: c.readableAllowed, updated: c.updated,
+                    connected: !!c.secrets.refreshToken || undefined, account: c.secrets.refreshToken ? c.account : undefined },
+                    kinds: ['folder', 'gdrive', 'onedrive', 's3', 'webdav'], allowedFolders: B.allowed.slice(), status: Object.assign({}, B.status, { nextRun: c.enabled ? now() + 3600e3 : null }), sites, deleted: [], previousDest: 0,
+                    oauthRedirect: 'https://topo.example.test/api/backups/oauth/callback' };
+            };
+            const merged = () => {
+                const next = { enabled: body.enabled !== undefined ? !!body.enabled : c.enabled, kind: body.kind !== undefined ? body.kind : c.kind, dailyAt: body.dailyAt || c.dailyAt,
+                    readableAllowed: body.readableAllowed !== undefined ? !!body.readableAllowed : c.readableAllowed };
+                next.fields = body.fields || (next.kind === c.kind ? c.fields : {});
+                const host = (f) => [f.url, f.endpoint, f.keyId, f.clientId, f.tenant].map((x) => x || '').join('|');
+                next.secrets = next.kind === c.kind && host(next.fields) === host(c.fields) ? Object.assign({}, c.secrets) : {};
+                Object.entries(body.secrets || {}).forEach(([k, v]) => { if (v === '') delete next.secrets[k]; else if (v) next.secrets[k] = v; });
+                if (next.kind === 'folder' && !B.allowed.some((r) => String(next.fields.path || '').startsWith(r))) return { bad: err(422, 'backup-folder-not-allowed', { field: 'path', allowed: B.allowed }) };
+                if (next.kind === 'webdav' && !/^https?:\/\//.test(next.fields.url || '')) return { bad: err(400, 'bad-request', { field: 'url', code: 'bad' }) };
+                return { next };
+            };
+            if (method === 'GET' && p === '/api/admin/backups') return ok(view());
+            if (method === 'PUT' && p.startsWith('/api/admin/backups')) {
+                const r = merged(); if (r.bad) return r.bad;
+                if (r.next.enabled && fake.backupFails && !q.get('force')) return err(422, 'backup-dest', { code: fake.backupFails });
+                Object.assign(c, r.next, { updated: now() });
+                fake.backup.saves = (fake.backup.saves || 0) + 1;
+                return ok(view());
+            }
+            if (method === 'POST' && p === '/api/admin/backups/test') {
+                const r = merged(); if (r.bad) return r.bad;
+                if (!r.next.kind) return err(409, 'backup-off');
+                if (fake.backupFails) return err(422, 'backup-dest', { code: fake.backupFails });
+                return ok({ ok: true });
+            }
+            if (method === 'POST' && p === '/api/admin/backups/oauth/start') {
+                const r = merged(); if (r.bad) return r.bad;
+                if (r.next.kind !== 'gdrive' && r.next.kind !== 'onedrive') return err(400, 'oauth-kind');
+                if (!r.next.secrets.clientSecret) return err(400, 'bad-request', { field: 'clientSecret', code: 'missing' });
+                const state = id('st_');
+                B.oauth = B.oauth || new Map();
+                B.oauth.set(state, { next: r.next, session: S.session });
+                B.starts = (B.starts || 0) + 1;
+                return ok({ url: 'https://provider.example.test/auth?state=' + state, redirect: 'http://localhost/api/backups/oauth/callback' });
+            }
+            if (method === 'POST' && p === '/api/admin/backups/oauth/finish') {
+                const o = B.oauth && B.oauth.get(body.state);
+                if (B.oauth) B.oauth.delete(body.state);
+                if (!o || o.session !== S.session) return err(400, 'oauth-state');
+                if (body.error || !body.code) return err(422, 'oauth-denied');
+                o.next.secrets = Object.assign({}, o.next.secrets, { refreshToken: 'rt-' + body.code });
+                Object.assign(c, o.next, { account: fake.oauthAccount, updated: now() });
+                B.finishes = (B.finishes || 0) + 1;
+                return ok(Object.assign(view(), { connect: { account: fake.oauthAccount } }));
+            }
+            if (method === 'POST' && (p === '/api/admin/backups/run' || p === '/api/admin/backups/check')) {
+                if (!c.enabled) return err(409, 'backup-off');
+                if (p.endsWith('/run')) { B.runs++; B.status.lastOk = now(); } else { B.checks++; B.status.lastCheck = { at: now(), ok: true }; }
+                return ok({ ok: true }, 202);
+            }
+            return err(404, 'not-found');
+        }
         if (!(m = /^\/api\/sites\/([^/]+)(\/.*)?$/.exec(p))) return err(404, 'not-found');
         const s = S.sites.get(m[1]);
         const rest = m[2] || '';
@@ -159,12 +245,16 @@ window.FakeTopoServer = function (opts = {}) {
             const members = [...s.members.values()].filter((x) => granted || x.user === me.id).map((x) => { const u = S.users.get(x.user); return { user: u.id, email: u.email, role: x.role, status: x.status, encPub: u.encPub, sigPub: u.sigPub, keysAt: u.keysAt, added: x.added }; });
             const out = { site: siteJSON(s, me), members };
             if (owner) out.invites = s.invites.filter((i) => i.status === 'pending').map((i) => ({ id: i.id, email: i.email, role: i.role, status: i.status, created: i.created, expires: i.expires }));
+            if (owner) out.backups = { on: fake.backup.config.enabled && !!fake.backup.config.kind, readableAllowed: fake.backup.config.readableAllowed, readable: !!s.backupReadable };
             return ok(out);
         }
         if (rest === '' && method === 'DELETE') { if (!owner) return err(403, 'forbidden'); S.sites.delete(s.id); return { status: 204 }; }
         if (rest === '' && method === 'PATCH') {
             if (!owner) return err(403, 'forbidden');
             if (body.showName !== undefined) { s.showName = !!body.showName; s.nameClear = body.showName ? body.nameClear || null : null; }
+            if (body.nameSlug !== undefined) { if (body.nameSlug && !/^[\p{L}\p{M}\p{N}]+(-[\p{L}\p{M}\p{N}]+)*$/u.test(body.nameSlug)) return err(400, 'bad-request', { field: 'nameSlug' }); s.nameSlug = s.showName ? body.nameSlug : ''; }
+            if (!s.showName) s.nameSlug = '';
+            if (body.backupReadable !== undefined) { if (body.backupReadable && !fake.backup.config.readableAllowed) return err(409, 'readable-off'); s.backupReadable = !!body.backupReadable; }
             return ok({ site: siteJSON(s, me) });
         }
         if (rest === '/me' && method === 'PATCH') { mem.muted = !!body.muted; return ok({ site: siteJSON(s, me) }); }
@@ -215,6 +305,28 @@ window.FakeTopoServer = function (opts = {}) {
             return ok({ site: siteJSON(s, me) });
         }
         if (rest === '/leave') { s.members.delete(me.id); return { status: 204 }; }
+        // ---- Backups: a network's owners (step 5b) ----
+        if (rest.startsWith('/backups')) {
+            if (!owner) return err(403, 'forbidden');
+            const files = fake.backup.files.filter((f) => f.site === s.id);
+            if (rest === '/backups' && method === 'GET') return ok({ backups: files.slice().sort((a, b) => b.at - a.at).map((f) => ({ id: f.id, name: f.name, kind: f.kind, at: f.at, revN: f.revN, size: f.body.length, missing: !!f.missing, previousDest: false })) });
+            if (rest === '/backups/readable' && method === 'POST') {
+                if (!fake.backup.config.enabled || !fake.backup.config.readableAllowed || !s.backupReadable) return err(409, 'readable-off');
+                if (body.revN !== s.revs.length) return err(409, 'stale', { head: s.revs.length });
+                if (!/^topo_[^/\\]+\.json$/.test(body.fileName || '')) return err(400, 'bad-request', { field: 'file' });
+                fake.backup.readables.push({ site: s.id, revN: body.revN, fileName: body.fileName, file: body.file });
+                fake.backup.files.push({ id: id('b_'), site: s.id, name: body.fileName, kind: 'readable', at: now(), revN: body.revN, body: JSON.stringify(body.file) });
+                return ok({ ok: true }, 202);
+            }
+            if (rest === '/backups/readable' && method === 'DELETE') { fake.backup.files = fake.backup.files.filter((f) => !(f.site === s.id && f.kind === 'readable')); return { status: 204 }; }
+            if ((m = /^\/backups\/([^/]+)$/.exec(rest)) && method === 'GET') {
+                const f = files.find((x) => x.id === m[1]);
+                if (!f) return err(404, 'not-found');
+                if (f.missing) return err(404, 'not-found', { missing: true });
+                return { status: 200, raw: f.body };
+            }
+            return err(404, 'not-found');
+        }
         if (rest === '/invites' && method === 'POST') {
             if (!owner) return err(403, 'forbidden');
             const i = { id: id('i_'), email: String(body.email).toLowerCase(), role: body.role, status: 'pending', token: id('t_'), inviter: me.email, created: now(), expires: now() + 14 * 864e5 };
@@ -263,7 +375,9 @@ window.FakeTopoServer = function (opts = {}) {
         if (fake.loseNextPushAnswer && method === 'POST' && /\/revs$/.test(path) && res.status === 201) { fake.loseNextPushAnswer = false; throw new TypeError('Failed to fetch'); }
         return response(res);
     };
-    const response = (res) => ({ ok: res.status >= 200 && res.status < 300, status: res.status, json: async () => (res.body === undefined ? null : JSON.parse(JSON.stringify(res.body))) });
+    const response = (res) => ({ ok: res.status >= 200 && res.status < 300, status: res.status,
+        json: async () => (res.raw !== undefined ? JSON.parse(res.raw) : res.body === undefined ? null : JSON.parse(JSON.stringify(res.body))),
+        text: async () => (res.raw !== undefined ? res.raw : res.body === undefined ? '' : JSON.stringify(res.body)) });
 
     // ---- Another browser: its own person and keys, acting through the state ----
     fake.remote = async (email) => {
@@ -309,6 +423,46 @@ window.FakeTopoServer = function (opts = {}) {
             return sealed.h;
         };
         return R;
+    };
+    // ---- A backup file of a site's head (server/internal/backup/snapshot.go) ----
+    // o: { originHash, name (shown in clear), dropPubs: [user ids] (keys reset
+    // since), at }.
+    fake.backupFile = async (siteId, o = {}) => {
+        const s = S.sites.get(siteId);
+        const r = s.revs[s.revs.length - 1];
+        const hd = r.hdr;
+        const rosters = [s.rosters[hd.rseq - 1]];
+        const newest = s.rosters[s.rosters.length - 1];
+        if (newest !== rosters[0]) rosters.push(newest);
+        const pubs = {};
+        for (const ro of rosters) for (const mm of ro.members) {
+            const u = S.users.get(mm.u);
+            if (!u || !u.encPub || (o.dropPubs || []).includes(u.id)) continue;
+            if ((await C().fp(u.encPub)) === mm.enc && (await C().fp(u.sigPub)) === mm.sig) pubs[u.id] = { encPub: u.encPub, sigPub: u.sigPub };
+        }
+        const owners = [];
+        s.members.forEach((mm) => {
+            if (mm.role !== 'owner' || mm.status !== 'granted') return;
+            const w = s.wraps[hd.epoch + '|' + mm.user];
+            if (!w) return;
+            owners.push({ u: mm.user, wrap: w, escrow: S.users.get(mm.user).escrow || null });
+        });
+        return {
+            $schema: 'https://topo.carino.systems/schema/topo-backup-v1.json', kind: 'topo-backup', v: 1, site: siteId, made: new Date(o.at || now()).toISOString(),
+            originHash: o.originHash || C().b64u(await C().sha256(C().utf8(location.origin))), name: o.name || null, nameCt: s.nameCt || null,
+            rev: { n: hd.n, base: hd.base, prev: hd.prev, epoch: hd.epoch, rseq: hd.rseq, author: hd.author, dev: hd.dev, at: hd.at, ctHash: hd.ctHash, sig: hd.sig, h: hd.h, iv: r.body.iv, ct: r.body.ct },
+            rosters, pubs, owners
+        };
+    };
+    // Lists a backup of the head (as the engine would after a push).
+    fake.addBackup = async (siteId, o = {}) => {
+        const file = await fake.backupFile(siteId, o);
+        const at = o.at || now();
+        const day = new Date(at).toISOString().slice(0, 10);
+        const taken = fake.backup.files.filter((f) => f.site === siteId && f.name.startsWith('topo_network-x_' + day)).length;
+        const f = { id: id('b_'), site: siteId, name: 'topo_network-x_' + day + (taken ? '_' + String(taken).padStart(4, '0') : '') + '.json', kind: 'enc', at, revN: file.rev.n, body: JSON.stringify(file) };
+        fake.backup.files.push(f);
+        return f;
     };
     // Tests: roll the history back, or tamper with a body.
     fake.rollback = (siteId, n) => { const s = S.sites.get(siteId); s.revs = s.revs.slice(0, n); s.headH = s.revs.length ? s.revs[s.revs.length - 1].hdr.h : s.headH0 || s.headH; };

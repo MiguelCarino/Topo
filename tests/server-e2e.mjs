@@ -28,7 +28,7 @@
 // The child server is spawned in its own process group, and only it is
 // stopped at the end (SIGTERM, then SIGKILL after 5 s).
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, existsSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,11 +65,16 @@ if (BUILD) {
 if (!existsSync(BIN)) { console.error('no binary at ' + BIN); process.exit(2); }
 
 const data = mkdtempSync(join(tmpdir(), 'topo-e2e-'));
+// Step 5b: the folder backups may go to (TOPO_BACKUP_FOLDERS) and the
+// folder the owner picks inside it (it must exist: the server never makes
+// the chosen folder, amendment 13).
+const bkRoot = join(data, 'bkroot'), bk = join(bkRoot, 'usb');
+mkdirSync(bk, { recursive: true, mode: 0o700 });
 const child = spawn(BIN, ['serve'], {
     env: {
         PATH: process.env.PATH, HOME: process.env.HOME, TOPO_DATA: data, TOPO_LISTEN: `127.0.0.1:${PORT}`, TOPO_PUBLIC_URL: ORIGIN,
         TOPO_MAIL: 'file', TOPO_OWNER_EMAIL: OWNER, TOPO_NOTIFY_REVISION_MINUTES: '0', TOPO_NOTIFY_EVENT_SECONDS: '0', TOPO_LOG_LEVEL: 'warn',
-        TOPO_MAIL_PER_MINUTE: '1000'
+        TOPO_MAIL_PER_MINUTE: '1000', TOPO_BACKUP_FOLDERS: bkRoot, TOPO_BACKUP_DEBOUNCE: '0s', TOPO_BACKUP_TICK: '1s'
     },
     stdio: ['ignore', 'inherit', 'inherit'], detached: true
 });
@@ -186,6 +191,8 @@ try {
     await A.p.waitForSelector('#serverSheetBody input[inputmode=numeric]');
     await A.p.fill('#serverSheetBody input[inputmode=numeric]', m1.code);
     ok('2. the recovery key is shown once', await until(A.p, () => /^[a-z2-9]{4}(-[a-z2-9]{4}){6}$/.test((document.getElementById('serverRecoveryCode') || {}).textContent || '')));
+    // Kept for step 14c: a backup opened with no server takes it.
+    const recoveryA = await A.p.evaluate(() => document.getElementById('serverRecoveryCode').textContent);
     ok('2. an owner cannot skip it', !(await A.p.$('#serverSheetBody button:has-text("Skip")')));
     await A.p.check('#serverSheetBody input[type=checkbox]');
     await A.p.click('#serverSheetBody button.primary');
@@ -512,6 +519,185 @@ try {
         const lib = loadLibrary(); lib[id].doc.nodes[0].name = 'After'; lib[id].updated = Date.now(); persistLibrary(lib); return TopoServerSync.syncNow(id);
     }, cardId)) === 'pushed', await head(siteId));
     ok('11. the server took it under epoch 2', (await head(siteId)) === (Number(before) + 1) + ' 2', await head(siteId));
+
+    // 14. Backups (step 5b): the server owner turns on a folder backup; the
+    //     network's encrypted head appears in it, another after the next
+    //     push; the owner lists and downloads it; a broken folder and a
+    //     tampered file each send one email. 14b and 14c: the sheets, a
+    //     restore through the merge, and a file opened with no server.
+    const api = (method, path, body) => A.p.evaluate(async ([m, u, b]) => {
+        const r = await fetch(u, { method: m, headers: b === undefined ? { 'X-Topo': '1' } : { 'X-Topo': '1', 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) });
+        const text = await r.text();
+        let json = null; try { json = JSON.parse(text); } catch (e) { /* bytes */ }
+        return { status: r.status, json, text, sha: r.headers.get('X-Topo-Backup-Sha256') };
+    }, [method, path, body]);
+    const bkFiles = () => { try { return readdirSync(join(bk, siteId)).filter((n) => n.endsWith('.json')).sort(); } catch (e) { return []; } };
+    const waitFor = async (fn, ms = 10000) => { for (let i = 0; i < ms / 200; i++) { const v = await fn(); if (v) return v; await sleep(200); } return null; };
+    const status = async () => (await api('GET', '/api/admin/backups')).json.status;
+    const outside = await api('PUT', '/api/admin/backups', { enabled: true, kind: 'folder', fields: { path: data } });
+    ok('14. a folder outside TOPO_BACKUP_FOLDERS is refused', outside.status === 422 && outside.json.error === 'backup-folder-not-allowed', outside.json);
+    const saved = await api('PUT', '/api/admin/backups', { enabled: true, kind: 'folder', fields: { path: bk } });
+    ok('14. the server owner saves a folder backup (checked first)', saved.status === 200 && saved.json.config.enabled === true && existsSync(join(bk, '.topo-backups')), saved.json);
+    const first = await waitFor(() => bkFiles().length >= 1 && bkFiles());
+    ok('14. the network\'s backup appears in the folder', !!first && /^topo_network-[a-z0-9-]{8}_\d{4}-\d{2}-\d{2}\.json$/.test(first[0]), first);
+    const bytes1 = first ? readFileSync(join(bk, siteId, first[0]), 'utf8') : '';
+    let parsed1 = null; try { parsed1 = JSON.parse(bytes1); } catch (e) { /* checked below */ }
+    ok('14. it is the encrypted revision with the owners\' locked keys', !!parsed1 && parsed1.kind === 'topo-backup' && parsed1.v === 1 && parsed1.site === siteId
+        && typeof parsed1.rev.ct === 'string' && parsed1.owners.length === 1 && !!parsed1.owners[0].escrow && parsed1.name === null, parsed1 && Object.keys(parsed1));
+    const docWords = await A.p.evaluate((id) => { const d = libraryEntry(id).doc; return [...d.nodes.map((n) => n.name), ...d.nodes.map((n) => n.ip).filter(Boolean), 'Acme IT', 'Office'].filter((w) => String(w).length >= 6); }, cardId);
+    ok('14. no device name, address or network name in the bytes', docWords.length > 3 && docWords.every((w) => !bytes1.includes(w)), docWords.filter((w) => bytes1.includes(w)));
+    await A.p.evaluate((id) => { const lib = loadLibrary(); lib[id].doc.nodes[0].name = 'Backed up twice'; lib[id].updated = Date.now(); persistLibrary(lib); return TopoServerSync.syncNow(id); }, cardId);
+    const second = await waitFor(() => bkFiles().length >= 2 && bkFiles());
+    ok('14. the next push writes a second file with the time', !!second && second.some((n) => /_\d{4}-\d{2}-\d{2}_\d{4}(\d{2})?(-\d+)?\.json$/.test(n)), second || bkFiles());
+    const list = await api('GET', '/api/sites/' + siteId + '/backups');
+    ok('14. the owner lists the network\'s backups', list.status === 200 && list.json.backups.length === 2 && list.json.backups.every((b) => b.kind === 'enc' && !b.missing), list.json);
+    const oldest = list.json.backups[list.json.backups.length - 1];
+    const dl = await api('GET', '/api/sites/' + siteId + '/backups/' + oldest.id);
+    ok('14. downloading it gives the file byte for byte', dl.status === 200 && dl.text === readFileSync(join(bk, siteId, oldest.name), 'utf8') && !!dl.sha, [dl.status, oldest.name]);
+    // A folder the server cannot write to.
+    chmodSync(join(bk, siteId), 0o500);
+    await A.p.evaluate((id) => { const lib = loadLibrary(); lib[id].doc.nodes[0].name = 'Not backed up'; lib[id].updated = Date.now(); persistLibrary(lib); return TopoServerSync.syncNow(id); }, cardId);
+    const failed = await waitFor(async () => { const s = await status(); return s.lastError && s; });
+    ok('14. a failed backup shows in the status', !!failed && failed.lastError.code === 'refused', failed);
+    const fm = await readMail(OWNER, 'backup-failed');
+    ok('14. the owner gets one backup-failed email with no network detail', !!fm && !/Office|Acme|Backed up|network-|bkroot/.test(emlOf(fm)) && countMail(OWNER, 'backup-failed') === 1, fm && emlOf(fm).slice(0, 300));
+    chmodSync(join(bk, siteId), 0o700);
+    const run = await api('POST', '/api/admin/backups/run');
+    const cleared = await waitFor(async () => { const s = await status(); return !s.lastError && s.lastOk > 0 && bkFiles().length === 3 && s; });
+    ok('14. Back up now after the fix clears the status', run.status === 202 && !!cleared, [run.status, await status(), bkFiles()]);
+    // One byte changed in the newest file: the check finds it.
+    const newest = (await api('GET', '/api/sites/' + siteId + '/backups')).json.backups[0];
+    const p3 = join(bk, siteId, newest.name);
+    const b3 = readFileSync(p3);
+    b3[Math.floor(b3.length / 2)] ^= 1;
+    writeFileSync(p3, b3);
+    const chk = await api('POST', '/api/admin/backups/check');
+    const checkFailed = await waitFor(async () => { const s = await status(); return s.lastCheck && s.lastCheck.ok === false && s; });
+    ok('14. Check now finds the tampered file', chk.status === 202 && !!checkFailed && checkFailed.lastCheck.code === 'mismatch', checkFailed || await status());
+    const cm = await readMail(OWNER, 'backup-check-failed');
+    ok('14. the owner gets one backup-check-failed email', !!cm && countMail(OWNER, 'backup-check-failed') === 1 && !/Office|Acme|network-/.test(emlOf(cm)));
+
+    // 14b. The server owner's Backups sheet, then a restore from the list
+    //      (Members, Backups, Restore…): opened with A's own keys, Replace
+    //      with this copy after a restore point, pushed on top of the head.
+    await A.p.evaluate(() => TopoServerUI.openAccount());
+    ok('14b. Account has Backups for the server owner', await until(A.p, () => [...document.querySelectorAll('#serverSheetBody button')].some((b) => b.textContent === 'Backups…')));
+    await A.p.click('#serverSheetBody button:has-text("Backups…")');
+    ok('14b. the Backups sheet shows the folder and how it went', await until(A.p, () => {
+        const b = document.getElementById('serverSheetBody');
+        const k = b && b.querySelector('[data-k="kind"]');
+        return !!k && k.value === 'folder' && /Last backup:/.test(b.textContent) && /Last check: failed/.test(b.textContent);
+    }), (await sheetText(A.p)).slice(0, 400));
+    await audit(A.p, '14b. the Backups sheet');
+    // The tampered file is replaced by a good one before restoring.
+    await api('POST', '/api/admin/backups/run');
+    await A.p.evaluate(() => TopoServerUI.closeSheet());
+    const files14 = (await api('GET', '/api/sites/' + siteId + '/backups')).json.backups.filter((b) => b.kind === 'enc');
+    const oldest14 = files14[files14.length - 1];
+    const oldDoc = await A.p.evaluate(async ([s, id]) => {
+        const text = await (await fetch('/api/sites/' + s + '/backups/' + id, { headers: { 'X-Topo': '1' } })).text();
+        const r = await TopoBackupFile.unlockBackup(JSON.parse(text));
+        return { name: r.env.doc.nodes[0].name, how: r.how };
+    }, [siteId, oldest14.id]);
+    ok('14b. the oldest backup opens with A\'s own keys', oldDoc.how === 'own' && typeof oldDoc.name === 'string', oldDoc);
+    const headBefore14 = (await head(siteId)).split(' ')[0];
+    await A.p.evaluate(() => {
+        setDialogResponder((q) => (q.kind === 'choice' ? (q.choices.some((c) => c.id === 'update') ? 'update' : null) : q.kind === 'confirm' ? true : undefined));
+    });
+    await A.p.evaluate((s) => TopoServerUI.openSiteBackups(s), siteId);
+    ok('14b. the network\'s Backups lists the files with Restore…', await until(A.p, () => [...document.querySelectorAll('#serverSheetBody button')].filter((b) => b.textContent === 'Restore…').length >= 2));
+    await audit(A.p, '14b. a network\'s Backups');
+    await A.p.evaluate(() => { const r = [...document.querySelectorAll('#serverSheetBody button')].filter((b) => b.textContent === 'Restore…'); r[r.length - 1].click(); });
+    ok('14b. Restore… then Replace with this copy brings the old copy back', await until(A.p, (n) => Object.values(loadLibrary()).some((c) => c.doc.nodes[0].name === n), oldDoc.name), oldDoc.name);
+    ok('14b. after a restore point "Before restoring a backup"', await A.p.evaluate((id) => CarinoRestore.restorePointsOf(id).some((p) => p.reason === 'Before restoring a backup'), cardId));
+    ok('14b. and the restore is pushed as one new revision on top of the head', (await A.p.evaluate((id) => TopoServerSync.syncNow(id), cardId)) === 'pushed'
+        && Number((await head(siteId)).split(' ')[0]) === Number(headBefore14) + 1, [headBefore14, await head(siteId)]);
+    await A.p.evaluate(() => setDialogResponder(null));
+
+    // 14c. The newest backup file, opened in Topo with no server at all (a
+    //      context serving the repository's static files; a localhost
+    //      address, so WebCrypto is there), with A's recovery key.
+    // The backup of the restore's push (the newest file before it is the
+    // one 14 tampered with, which must not open).
+    const headNow = Number((await head(siteId)).split(' ')[0]);
+    const newestFile = await waitFor(async () => (await api('GET', '/api/sites/' + siteId + '/backups')).json.backups.find((b) => b.kind === 'enc' && b.revN === headNow));
+    ok('14c. the restore\'s push was backed up too', !!newestFile);
+    const tamperedText = (await api('GET', '/api/sites/' + siteId + '/backups/' + newest.id)).text;
+    const fileText = (await api('GET', '/api/sites/' + siteId + '/backups/' + newestFile.id)).text;
+    errors.S = [];
+    const S = await ctx('S', { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const STATIC = 'http://localhost:9';
+    await S.c.route(STATIC + '/**', (route) => {
+        const u = new URL(route.request().url());
+        const rel = decodeURIComponent(u.pathname).replace(/^\/+/, '') || 'index.html';
+        const file = join(ROOT, rel);
+        if (!file.startsWith(ROOT) || !existsSync(file)) return route.fulfill({ status: 404, body: '' });
+        const ext = rel.split('.').pop();
+        const type = { html: 'text/html', js: 'text/javascript', css: 'text/css', json: 'application/json', svg: 'image/svg+xml', woff2: 'font/woff2', png: 'image/png' }[ext] || 'application/octet-stream';
+        return route.fulfill({ status: 200, body: readFileSync(file), contentType: type });
+    });
+    await S.p.goto(STATIC + '/index.html?lang=en#advanced');
+    ok('14c. the app with no server', await until(S.p, () => typeof openBackupFile === 'function' && !TopoServer.state.on));
+    const opened = await S.p.evaluate(async ([text, code]) => {
+        const asked = [];
+        setDialogResponder((q) => { asked.push(q.kind); return q.kind === 'prompt' ? code : q.kind === 'choice' ? (q.choices.some((c) => c.id === 'open') ? 'open' : null) : q.kind === 'confirm' ? true : undefined; });
+        const okd = await applyImportedDoc(JSON.parse(text), { fileName: 'topo_network-x_2026-11-10.json' });
+        setDialogResponder(null);
+        return { okd, asked, names: Object.values(loadLibrary()).map((c) => c.doc.nodes.map((n) => n.name)).flat() };
+    }, [fileText, recoveryA]);
+    ok('14c. it asks for the recovery key and opens as its own network', opened.okd === true && opened.asked.includes('prompt') && opened.names.includes(oldDoc.name), opened);
+    const wrongKey = await S.p.evaluate(async (text) => {
+        try { await TopoBackupFile.unlockBackup(JSON.parse(text), { ask: (b, r, problem) => (problem ? null : 'abcd-efgh-jkmn-pqrs-tuvw-xyz2-3456') }); return 'opened'; }
+        catch (e) { return e.code; }
+    }, fileText);
+    ok('14c. a wrong recovery key opens nothing', wrongKey === 'cancelled', wrongKey);
+    const tamperedCode = await S.p.evaluate(async ([text, code]) => {
+        try { await TopoBackupFile.unlockBackup(JSON.parse(text), { ask: () => code }); return 'opened'; } catch (e) { return e.code; }
+    }, [tamperedText, recoveryA]);
+    ok('14c. the file 14 tampered with is refused as damaged', tamperedCode === 'damaged', tamperedCode);
+    ok('14c. no CSP violation with no server', (await S.p.evaluate(() => (window.__cspViolations || []).length)) === 0);
+    ok('14c. no console errors with no server', errors.S.filter((x) => !/^Failed to load resource/.test(x)).length === 0, errors.S);
+    await S.c.close();
+
+    // 14d. An S3-compatible bucket (5c, D111), a local fake that checks every
+    //      request's SigV4 signature with its own code (tests/fixtures/
+    //      fakes3.mjs): a wrong secret is refused by the check; saved, the
+    //      next push puts the encrypted backup in the bucket under topo/;
+    //      the secret never comes back; the file downloads through the
+    //      server byte for byte and opens with A's own keys.
+    const { startFakeS3 } = await import(join(ROOT, 'tests/fixtures/fakes3.mjs'));
+    const s3 = await startFakeS3({ keyId: 'AKIDE2E', secret: 'e2e-s3-secret', region: 'us-east-1', bucket: 'topo-e2e' });
+    try {
+        const s3body = (secret) => ({ enabled: true, kind: 's3', fields: { endpoint: s3.url, bucket: 'topo-e2e', keyId: 'AKIDE2E', pathStyle: '1', region: 'us-east-1' }, secrets: { secret } });
+        const wrong = await api('PUT', '/api/admin/backups', s3body('not-it'));
+        ok('14d. a wrong S3 secret fails the check (the fake checks the signature)', wrong.status === 422 && wrong.json.error === 'backup-dest' && wrong.json.code === 'refused' && s3.state.refused > 0, wrong.json);
+        const s3saved = await api('PUT', '/api/admin/backups', s3body('e2e-s3-secret'));
+        ok('14d. S3 saved after the check; the secret never comes back', s3saved.status === 200 && s3saved.json.config.kind === 's3' && s3saved.json.config.fields.prefix === 'topo/'
+            && !s3saved.text.includes('e2e-s3-secret') && !(await api('GET', '/api/admin/backups')).text.includes('e2e-s3-secret'), s3saved.json);
+        await A.p.evaluate((id) => { const lib = loadLibrary(); lib[id].doc.nodes[0].name = 'Into the bucket'; lib[id].updated = Date.now(); persistLibrary(lib); return TopoServerSync.syncNow(id); }, cardId);
+        const s3keys = () => [...s3.objects.keys()].filter((k) => k.startsWith('topo/' + siteId + '/') && k.endsWith('.json'));
+        const s3first = await waitFor(() => s3keys().length >= 1 && s3keys());
+        ok('14d. the backup lands in the bucket under topo/<network>/', !!s3first && /^topo\/[^/]+\/topo_network-[a-z0-9-]{8}_\d{4}-\d{2}-\d{2}(_\d{4})?\.json$/.test(s3first[0]), s3first || [...s3.objects.keys()]);
+
+        // Saving wrote the head at once (a new destination catches up); the
+        // push above is written a moment later: wait for the head's file.
+        const s3headNow = (await head(siteId)).split(' ')[0];
+        const s3list = (await waitFor(async () => { const l = (await api('GET', '/api/sites/' + siteId + '/backups')).json.backups.filter((b) => !b.previousDest && b.kind === 'enc'); return l.length && String(l[0].revN) === s3headNow && l; })) || [];
+        const s3dl = s3list.length ? await api('GET', '/api/sites/' + siteId + '/backups/' + s3list[0].id) : { status: 0 };
+        const s3bytes = s3list.length ? (s3.objects.get('topo/' + siteId + '/' + s3list[0].name) || '').toString('utf8') : '';
+        ok('14d. encrypted: no device name, address or network name in the object', s3bytes.includes('"topo-backup"') && !s3bytes.includes('Into the bucket') && docWords.every((w) => !s3bytes.includes(w)));
+        ok('14d. it downloads through the server byte for byte', s3dl.status === 200 && s3dl.text === s3bytes, [s3dl.status, s3list.length]);
+        const s3open = await A.p.evaluate(async (text) => { const r = await TopoBackupFile.unlockBackup(JSON.parse(text)); return { how: r.how, name: r.env.doc.nodes[0].name }; }, s3dl.text || '{}').catch((e) => ({ err: String(e) }));
+        const s3head = (await head(siteId)).split(' ')[0];
+        ok('14d. and opens with A\'s own keys: the head, with the push in it', s3open.how === 'own' && s3open.name === 'Into the bucket' && s3list.length > 0 && String(s3list[0].revN) === s3head, [s3open, s3list[0] && s3list[0].revN, s3head]);
+        const checkedBefore = ((await status()).lastCheck || { at: 0 }).at;
+        await sleep(20);
+        const s3chk = await api('POST', '/api/admin/backups/check');
+        const s3checked = await waitFor(async () => { const s = await status(); return s.lastCheck && s.lastCheck.ok && s.lastCheck.at > checkedBefore && s; });
+        ok('14d. Check now passes on the bucket', s3chk.status === 202 && !!s3checked, await status());
+    } finally {
+        await s3.close();
+    }
 
     // 12. Sign out on both.
     for (const [n, p] of [['A', A.p], ['B', B.p]]) {

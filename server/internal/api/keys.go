@@ -307,6 +307,7 @@ func (s *Server) putKeys(w http.ResponseWriter, r *http.Request) {
 	s.closeSessions(closed)
 	s.flush(evs)
 	s.wake()
+	s.touchOwned(ctx, sess.UserID)
 	s.getMe(w, r)
 }
 
@@ -362,6 +363,7 @@ func (s *Server) putEscrow(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "escrow", err)
 		return
 	}
+	s.touchOwned(r.Context(), sess.UserID)
 	noContent(w)
 }
 
@@ -558,4 +560,19 @@ func (s *Server) denyLink(w http.ResponseWriter, r *http.Request) {
 	}
 	s.publish([]string{sess.UserID}, "link-denied", map[string]string{"id": id})
 	noContent(w)
+}
+
+// touchOwned writes a fresh backup of every network the user owns: after a
+// key reset or a new recovery key, older backups open only with the old
+// recovery key, so the next file must carry the new one (amendment 2).
+func (s *Server) touchOwned(ctx context.Context, user string) {
+	if s.d.Backups == nil {
+		return
+	}
+	sites, err := store.OwnedSites(ctx, s.d.Store.R, user)
+	if err != nil {
+		s.d.Log.Warn("backups: owned sites", "err", err)
+		return
+	}
+	s.d.Backups.TouchNow(sites...)
 }

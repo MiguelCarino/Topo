@@ -1,0 +1,6 @@
+{"errorCode":0,"msg":"Success.","result":{"totalRows":4,"currentPage":1,"data":[
+{"id":"64f0c2a1b2c3d4e5f6a7c001","mac":"D0-67-E5-BB-00-01","name":"PC-Consultorio1","hostName":"PC-CONSULTORIO1","ip":"192.168.0.101","wireless":false,"switchMac":"50-91-E3-00-00-02","switchName":"SG2210MP Consultorios","port":1,"vid":1,"connectType":1},
+{"id":"64f0c2a1b2c3d4e5f6a7c002","mac":"00-0E-C6-00-00-02","name":"Equipo RX","hostName":"rx-modalidad","ip":"192.168.30.20","wireless":false,"switchMac":"50-91-E3-00-00-02","port":2,"vid":30},
+{"id":"64f0c2a1b2c3d4e5f6a7c003","mac":"A4-5E-60-00-00-03","name":"A4-5E-60-00-00-03","hostName":"iPad-Recepcion","ip":"192.168.0.150","wireless":true,"ssid":"Clinica","apMac":"50-91-E3-00-00-03","apName":"EAP225 Recepcion","radioId":1,"rssi":-62,"vid":1},
+{"id":"64f0c2a1b2c3d4e5f6a7c004","mac":"","name":"sin-mac","ip":"192.168.0.199","wireless":false}
+]}}

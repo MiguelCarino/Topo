@@ -1,0 +1,4 @@
+{"count": 2, "next": null, "previous": null, "results": [
+ {"id": 1, "url": "https://netbox.example.test/api/dcim/mac-addresses/1/", "mac_address": "74:83:C2:11:22:33", "assigned_object_type": "dcim.interface", "assigned_object_id": 80, "assigned_object": {"id": 80, "name": "eth0", "device": {"id": 8, "name": "ap-201"}}},
+ {"id": 2, "url": "https://netbox.example.test/api/dcim/mac-addresses/2/", "mac_address": "F4:E2:C6:00:00:02", "assigned_object_type": "dcim.interface", "assigned_object_id": 72, "assigned_object": {"id": 72, "name": "Port 24", "device": {"id": 7, "name": "sw-floor2"}}}
+]}

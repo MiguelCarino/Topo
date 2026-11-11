@@ -1,0 +1,6 @@
+ID,Name,Status,Tenant,Site,Location,Rack,Role,Manufacturer,Type,Platform,Serial number,Asset tag,Position (U),Face,Tags,Comments,Description,cf_department,cf_warranty_end
+12,core-sw-01,Active,,Oficina Centro,Planta 1,R01,Access Switch,Cisco,C9200L-24P-4G,IOS-XE,FOC2345X0AB,INV-0042,40,Front,"core, monitored",Core switch,Main floor,IT,2027-06-30
+13,fw-01,Active,,Oficina Centro,Planta 1,R01,Firewall,Fortinet,FortiGate 60F,FortiOS,FGT60FTK0000123,INV-0043,38,Front,monitored,,,,2026-12-31
+14,ap-recepcion,Planned,,Oficina Centro,Recepción,,Access Point,Ubiquiti,U6-Pro,,,,,,,,,Reception,
+15,srv-files,Offline,,Oficina Centro,Planta 1,R01,Server,Dell,PowerEdge T150,Windows Server,,INV-0044,10,Front,,Old file server,,IT,
+16,,Active,,Oficina Centro,,,Printer,HP,LaserJet,,,,,,,,,,

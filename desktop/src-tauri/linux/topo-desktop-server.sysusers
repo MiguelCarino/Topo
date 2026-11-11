@@ -1,0 +1,3 @@
+# The user the Topo server runs as (installed as /usr/lib/sysusers.d/topo-desktop-server.conf;
+# the same line as the server package's topo.conf, so either makes the same user).
+u topo - "Topo server" /var/lib/topo /usr/sbin/nologin

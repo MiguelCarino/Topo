@@ -168,6 +168,11 @@
                          sheet imported back with a column mapping and a review
                          (js/csv.js). The full editor's: a register's tool. -->
                     <button id="csvMenuBtn" data-adv class="cs-menu-item" role="menuitem">📊 Spreadsheet <span class="cs-menu-note">CSV · TSV</span></button>
+                    <!-- Files from other tools (NetBox, ...), read by js/importers/*.js and
+                         merged as a copy (js/importui.js; docs/SCOPE.md step 6, D114). -->
+                    <button id="importAnyBtn" data-adv class="cs-menu-item" role="menuitem" data-i18n>⇩ Import…</button>
+                    <!-- The network as NetBox's bulk-import CSV files, zipped (js/netboxexport.js, D117). -->
+                    <button id="exportNetboxBtn" data-adv class="cs-menu-item" role="menuitem" data-i18n>⇧ Export to NetBox…</button>
                     <div class="cs-menu-div" data-adv></div>
                     <button id="importFileBtn" data-adv class="cs-menu-item" role="menuitem" data-i18n>📂 Open a file…</button>
                     <button id="saveTemplateBtn" data-adv class="cs-menu-item" role="menuitem">📐 Save as template <span class="cs-menu-note">reusable</span></button>
@@ -958,6 +963,7 @@
                 <p data-i18n>Topo documents a network: its devices, cables, addressing, racks and who is responsible for what, and prints it as a report.</p>
                 <p><span data-i18n>Runs in your browser. Nothing you add here is uploaded.</span></p>
                 <p id="setVersion" class="mono"></p>
+                <p><span data-i18n>The file format is published:</span> <a href="https://github.com/MiguelCarino/Topo/blob/main/docs/FORMAT.md" target="_blank" rel="noopener">docs/FORMAT.md</a></p>
             </div>
         </aside>
 
@@ -1009,7 +1015,11 @@
                 <button id="zoomFitBtn" type="button" class="zoom-fit" data-i18n-title data-i18n-aria-label title="Fit the diagram to the view" aria-label="Fit the diagram to the view">⤢</button>
                 <button id="mapInkBtn" type="button" class="map-ink-btn" aria-pressed="false" data-i18n-title data-i18n-aria-label title="Dark background" aria-label="Dark background">◐</button>
             </div>
-            
+
+            <!-- The trace's moving cables (js/ui.js drawTraceFlow), under the
+                 map on a layer of their own: the moving dashes repaint this
+                 layer only, not every device on the map, each frame. -->
+            <svg id="traceLayer" class="topo-svg trace-layer" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g id="traceWorkspace"></g></svg>
             <svg id="networkCanvas" class="topo-svg" xmlns="http://www.w3.org/2000/svg">
                 <g id="workspace">
                     <g id="layer-zones" data-adv></g>
@@ -1427,6 +1437,110 @@
                                 <input type="checkbox" id="setTrailSimple">
                                 <span><span data-i18n>Show address history in Simple view</span><br><span class="dlg-dim" data-i18n>A few plain lines under the selected device: the addresses, names and sockets it had at earlier back-ups and reports. Read only. Off by default.</span></span>
                             </label>
+                        </section>
+                        <!-- A back-up folder (js/backupdir.js, D108): Chrome and
+                             Edge only (the File System Access API); hidden
+                             elsewhere, where Download a back-up stays a download. -->
+                        <section class="set-sec" id="setBackupSec" aria-labelledby="setBackupHead" hidden>
+                            <h3 id="setBackupHead" class="set-head" data-i18n>Back-ups</h3>
+                            <p class="set-note"><span data-i18n>Back-up folder:</span> <b id="setBackupDirName" class="set-folder"></b></p>
+                            <div class="set-acts">
+                                <button type="button" id="setBackupDirPick" class="btn">Choose a folder…</button>
+                                <button type="button" id="setBackupDirStop" class="btn" data-i18n hidden>Stop using it</button>
+                            </div>
+                            <p class="dlg-dim set-note" data-i18n>Download a back-up saves there instead. Pick a OneDrive, Google Drive or Nextcloud folder and its own app uploads the files.</p>
+                            <label class="set-row">
+                                <input type="checkbox" id="setBackupDirAuto">
+                                <span><span data-i18n>Also back up a network I change, once a day</span><br><span class="dlg-dim" data-i18n>A minute after your last edit, while the browser still lets Topo use the folder. Topo keeps the last day, then one a day for a week, one a week for a month and one a month for a year, and deletes only files it wrote.</span></span>
+                            </label>
+                        </section>
+                        <!-- This PC as the server (js/desktopserver.js, D113, D125):
+                             the desktop app only, where the bundled topo-server
+                             answers; hidden on the website and the offline zip.
+                             As a service from startup, or only while Topo is open. -->
+                        <section class="set-sec" id="setDsSec" aria-labelledby="setDsHead" hidden>
+                            <h3 id="setDsHead" class="set-head" data-i18n>This PC as the server</h3>
+                            <p class="dlg-dim set-note" data-i18n>Other PCs on site sign in and sync with this one.</p>
+                            <p class="dlg-dim set-note" id="setDsHow"></p>
+                            <p class="set-note ds-status" id="setDsStatus" role="status" aria-live="polite"></p>
+                            <ul class="ds-urls" id="setDsUrls" hidden></ul>
+                            <p class="set-note ds-fp" id="setDsFpRow" hidden><span data-i18n>Certificate fingerprint (SHA-256):</span> <code id="setDsFp" class="ds-code"></code><br><span class="dlg-dim" data-i18n>Each other PC's browser warns about the certificate once. Check that it shows this fingerprint, then go on to the page.</span></p>
+                            <div class="set-acts">
+                                <button type="button" id="setDsStart" class="btn btn-primary" data-i18n>Start</button>
+                                <button type="button" id="setDsStop" class="btn" data-i18n hidden>Stop</button>
+                            </div>
+                            <label class="set-row" id="setDsEnabledRow">
+                                <input type="checkbox" id="setDsEnabled">
+                                <span data-i18n>Start it when Topo opens</span>
+                            </label>
+                            <div class="set-field">
+                                <label class="prop-lbl" for="setDsWho" data-i18n>Who can open it</label>
+                                <select id="setDsWho" class="select">
+                                    <option value="pc" data-i18n>This PC only</option>
+                                    <option value="lan" data-i18n>Other PCs on this network</option>
+                                </select>
+                            </div>
+                            <div class="set-field" id="setDsShareRow" hidden>
+                                <label class="prop-lbl" for="setDsShare" data-i18n>Address to give people</label>
+                                <select id="setDsShare" class="select">
+                                    <option value="" data-i18n>Automatic</option>
+                                </select>
+                            </div>
+                            <p class="dlg-dim set-note" id="setDsLanNote" data-i18n hidden>Other PCs reach it over https with a certificate this PC makes. Give this PC a fixed address (a DHCP reservation): the address is in every sign-in link. The firewall may ask to let Topo server in.</p>
+                            <div class="set-field">
+                                <label class="prop-lbl" for="setDsPort" data-i18n>Port</label>
+                                <input type="number" id="setDsPort" data-keys="int" class="input" min="1024" max="65535" inputmode="numeric" autocomplete="off">
+                            </div>
+                            <div class="set-field">
+                                <label class="prop-lbl" for="setDsOwner" data-i18n>Owner's email</label>
+                                <input type="email" id="setDsOwner" data-keys="email" class="input" maxlength="200" autocomplete="off">
+                            </div>
+                            <div class="set-field">
+                                <label class="prop-lbl" for="setDsMail" data-i18n>Sign-in codes</label>
+                                <select id="setDsMail" class="select">
+                                    <option value="smtp" data-i18n>Sent by email (SMTP)</option>
+                                    <option value="none" data-i18n>Shown in the log below (this PC only)</option>
+                                </select>
+                            </div>
+                            <div class="ds-smtp" id="setDsSmtp">
+                                <div class="set-field">
+                                    <label class="prop-lbl" for="setDsSmtpHost" data-i18n>SMTP server</label>
+                                    <input type="text" id="setDsSmtpHost" data-keys="code" class="input" maxlength="200" autocomplete="off" spellcheck="false" placeholder="smtp.office365.com">
+                                </div>
+                                <div class="set-field">
+                                    <label class="prop-lbl" for="setDsSmtpPort" data-i18n>SMTP port</label>
+                                    <input type="number" id="setDsSmtpPort" data-keys="int" class="input" min="1" max="65535" inputmode="numeric" autocomplete="off">
+                                </div>
+                                <div class="set-field">
+                                    <label class="prop-lbl" for="setDsSmtpSec" data-i18n>Security</label>
+                                    <select id="setDsSmtpSec" class="select">
+                                        <option value="starttls">STARTTLS</option>
+                                        <option value="tls">TLS</option>
+                                        <option value="none" data-i18n>None (a relay on this PC)</option>
+                                    </select>
+                                </div>
+                                <div class="set-field">
+                                    <label class="prop-lbl" for="setDsSmtpUser" data-i18n>SMTP user</label>
+                                    <input type="text" id="setDsSmtpUser" data-keys="code" class="input" maxlength="200" autocomplete="off" spellcheck="false">
+                                </div>
+                                <div class="set-field">
+                                    <label class="prop-lbl" for="setDsSmtpPass" data-i18n>SMTP password</label>
+                                    <input type="password" id="setDsSmtpPass" class="input" maxlength="500" autocomplete="new-password">
+                                </div>
+                                <div class="set-field">
+                                    <label class="prop-lbl" for="setDsSmtpFrom" data-i18n>Send from</label>
+                                    <input type="text" id="setDsSmtpFrom" data-keys="email" class="input" maxlength="200" autocomplete="off" spellcheck="false" placeholder="Topo &lt;topo@example.com&gt;">
+                                </div>
+                            </div>
+                            <div class="set-acts">
+                                <button type="button" id="setDsService" class="btn btn-primary" data-i18n hidden>Run it in the background from startup</button>
+                                <button type="button" id="setDsSave" class="btn" data-i18n>Save</button>
+                                <button type="button" id="setDsRemove" class="btn" data-i18n hidden>Stop using this PC as the server</button>
+                            </div>
+                            <details class="ds-logbox">
+                                <summary data-i18n>Log</summary>
+                                <pre id="setDsLog" class="ds-log" tabindex="0"></pre>
+                            </details>
                         </section>
                         <!-- Who reports a problem from this browser (js/incidents.js):
                              filled in on Report a problem, kept here only. -->
@@ -2243,6 +2357,24 @@
                 </div>
             </div>
 
+            <!-- Import… (js/importui.js): files from other tools, what was
+                 understood, then the merge review. -->
+            <div id="importDialog" class="modal-scrim" hidden>
+                <div class="modal topo-import" role="dialog" aria-modal="true" aria-labelledby="importTitle">
+                    <div class="modal-head">
+                        <h2 id="importTitle" class="modal-title" data-i18n>Import from another tool</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div id="importBody" class="modal-body"></div>
+                    <div class="modal-foot">
+                        <button type="button" id="importCloseBtn" class="btn" data-close data-i18n>Close</button>
+                        <button type="button" id="importBackBtn" class="btn hidden" data-i18n>Back</button>
+                        <button type="button" id="importNextBtn" class="btn btn-primary">Read the files</button>
+                    </div>
+                    <input type="file" id="importAnyInput" multiple hidden>
+                </div>
+            </div>
+
             <!-- How to use: the navbar moves this into its About window (the How
                  to use tab); js/app.js fills it and ? opens it there. -->
             <div data-carino-howto hidden>
@@ -2258,6 +2390,7 @@
     <script src="js/data.js"></script>
     <script src="js/diagnostics.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/phone.js"></script>
     <script src="js/dialog.js"></script>
     <script src="js/report.js"></script>
     <script src="js/sheetpreview.js"></script>
@@ -2265,6 +2398,8 @@
     <script src="js/changes.js"></script>
     <script src="js/trail.js"></script>
     <script src="js/restore.js"></script>
+    <script src="js/backupdir.js"></script>
+    <script src="js/desktopserver.js"></script>
     <script src="js/revisions.js"></script>
     <script src="js/share.js"></script>
     <script src="js/networks.js"></script>
@@ -2296,6 +2431,19 @@
     <script src="js/server.js"></script>
     <script src="js/serversync.js"></script>
     <script src="js/serverui.js"></script>
+    <script src="js/backupfile.js"></script>
+    <script src="js/importers/common.js"></script>
+    <script src="js/importers/registry.js"></script>
+    <script src="js/importers/netbox.js"></script>
+    <script src="js/importers/nmap.js"></script>
+    <script src="js/importers/unifi.js"></script>
+    <script src="js/importers/omada.js"></script>
+    <script src="js/importers/mikrotik.js"></script>
+    <script src="js/importers/cisco.js"></script>
+    <script src="js/importers/lansweeper.js"></script>
+    <script src="js/importers/phpipam.js"></script>
+    <script src="js/netboxexport.js"></script>
+    <script src="js/importui.js"></script>
     <script src="js/app.js"></script>
     <script src="js/settings.js"></script>
 <script src="carino-navbar.js" data-app="Topo" data-repo="Topo" data-license="AGPL-3.0" defer></script>

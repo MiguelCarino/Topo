@@ -1,0 +1,21 @@
+#!/bin/sh
+# topo-server postinst: the user, the settings file's group, systemd.
+# Not enabled or started on install (it needs its settings first).
+set -e
+if [ "$1" = configure ]; then
+    if ! getent passwd topo >/dev/null; then
+        adduser --system --group --home /var/lib/topo --no-create-home \
+            --shell /usr/sbin/nologin --gecos "Topo server" topo >/dev/null
+    fi
+    chgrp topo /etc/topo /etc/topo/topo.env
+    chmod 0750 /etc/topo
+    chmod 0640 /etc/topo/topo.env
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        # An upgrade restarts a running server on the new binary.
+        if [ -n "$2" ]; then
+            systemctl try-restart topo-server.service >/dev/null 2>&1 || true
+        fi
+    fi
+fi
+exit 0

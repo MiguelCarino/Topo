@@ -138,8 +138,15 @@ function mintMergeId(id, taken) {
 
 // ---- The inputs ----
 // The ids each record carried as given, before canonicalDoc mints any (A6).
+// An id an importer made up for a record its source has no key for
+// (js/importers/common.js, docs/SCOPE.md D115): never an identity, and never
+// kept when the record is added (mergeAssignIds gives it one of its own).
+const TRANSIENT_ID_RE = /^imp-/;
+const isTransientId = (id) => typeof id === 'string' && TRANSIENT_ID_RE.test(id);
+// Its id once adopted: the prefix off, or a fresh one when that is taken.
+const adoptedId = (id, taken) => { const s = id.slice(4) || 'x'; return taken.has(s) ? mintMergeId(s, taken) : s; };
 function mergeRawIds(doc) {
-    const ids = (list) => new Set((Array.isArray(list) ? list : []).filter((r) => r && typeof r === 'object' && typeof r.id === 'string' && r.id).map((r) => r.id));
+    const ids = (list) => new Set((Array.isArray(list) ? list : []).filter((r) => r && typeof r === 'object' && typeof r.id === 'string' && r.id && !isTransientId(r.id)).map((r) => r.id));
     const out = {};
     MERGE_LIST_KINDS.forEach((k) => { out[k] = ids(doc[k]); });
     out.ifaces = new Map();
@@ -377,10 +384,11 @@ function mergeAssignIds(kind, mine, theirs, match, extraTaken) {
     });
     const later = [];
     rest.forEach((t) => {
+        if (isTransientId(t.id) && kind !== 'columns') { later.push(t); return; }
         if (!taken.has(t.id) && !(kind === 'columns' && !CUSTOM_ID_RE.test(t.id))) { map[t.id] = t.id; taken.add(t.id); } else later.push(t);
     });
     later.forEach((t) => {
-        const id = kind === 'columns' ? nextCustomId([...taken].map((x) => ({ id: x }))) : mintMergeId(t.id, taken);
+        const id = kind === 'columns' ? nextCustomId([...taken].map((x) => ({ id: x }))) : isTransientId(t.id) ? adoptedId(t.id, taken) : mintMergeId(t.id, taken);
         map[t.id] = id; taken.add(id);
     });
     return map;
@@ -545,7 +553,11 @@ function planMerge(mine, theirs, base, opts = {}) {
         theirsL.forEach((t) => {
             const p = matches.nodes.pair.get(t);
             const map = {};
-            if (!p) { (t.interfaces || []).forEach((i) => { map[i.id] = i.id; }); ctx.ifaceMaps.set(t.id, map); return; }
+            if (!p) {
+                const own = new Set((t.interfaces || []).map((i) => i.id).filter((id) => !isTransientId(id)));
+                (t.interfaces || []).forEach((i) => { if (isTransientId(i.id)) { map[i.id] = adoptedId(i.id, own); own.add(map[i.id]); } else map[i.id] = i.id; });
+                ctx.ifaceMaps.set(t.id, map); return;
+            }
             const im = mergeMatchIfaces(ctx, p.mine, t, p.base || null);
             p.ifaceMatch = im;
             ctx.ifaceMaps.set(t.id, mergeAssignIds('ifaces', p.mine.interfaces || [], t.interfaces || [], im));

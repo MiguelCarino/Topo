@@ -149,19 +149,46 @@ const coalesceOn = () => {
     if (typeof window.TOPO_COALESCE === 'boolean') return window.TOPO_COALESCE;
     return !navigator.webdriver;
 };
-function redrawCoalescer(draw) {
-    let timer = null, pending = false, drawing = false;
-    const arm = () => { if (timer === null) timer = setTimeout(end, REDRAW_WAIT_MS); };
+// opts.settle (ms), for the fields' redraw: once a draw has been slow, a
+// keystroke no longer draws at once and the window does not end while the
+// keys keep coming: the draw waits until typing has paused for settle ms,
+// and never longer than settle × SETTLE_MAX_FACTOR since the first key it
+// holds. A whole redraw of a big site (its findings with it) is 100-200 ms;
+// drawn on the leading edge and then every window, it took the main thread
+// from under the typing, and the keys came out in bursts. The caller shows
+// what must follow each key at once (renderTyped, js/ui.js). A fast draw
+// clears the slow mark, so a small map draws on every key as before.
+// opts.slow(), when given, says whether the map's last redraw of any kind was
+// slow, so the first key of a burst waits too.
+const SETTLE_MAX_FACTOR = 10;
+function redrawCoalescer(draw, opts = {}) {
+    let timer = null, pending = false, drawing = false, slow = false, heldSince = 0;
+    const settle = opts.settle > 0 ? opts.settle : 0;
+    const wait = () => {
+        if (!settle || !slow) return REDRAW_WAIT_MS;
+        const left = heldSince ? heldSince + settle * SETTLE_MAX_FACTOR - performance.now() : Infinity;
+        return Math.max(0, Math.min(Math.max(REDRAW_WAIT_MS, settle), left));
+    };
+    const arm = () => { if (timer === null) timer = setTimeout(end, wait()); };
     const close = () => { if (timer !== null) { clearTimeout(timer); timer = null; } };
     // One draw. -> whether it was slow enough (or forced) to hold the window.
     const run = () => {
         pending = false;
+        heldSince = 0;
         drawing = true;
         const t0 = performance.now();
         let out;
         try { out = draw(); } finally { drawing = false; }
         if (out === false) pending = true;
-        return coalesceOn() && (window.TOPO_COALESCE === true || performance.now() - t0 > REDRAW_SLOW_MS);
+        const held = coalesceOn() && (window.TOPO_COALESCE === true || performance.now() - t0 > REDRAW_SLOW_MS);
+        slow = held;
+        return held;
+    };
+    // Settling: the draw is held, and its timer starts again from this key.
+    const hold = () => {
+        pending = true;
+        if (!heldSince) heldSince = performance.now();
+        close(); arm();
     };
     function end() {
         timer = null;
@@ -170,7 +197,9 @@ function redrawCoalescer(draw) {
     }
     return {
         ask() {
-            if (drawing || timer !== null) { pending = true; return; }
+            if (drawing) { pending = true; return; }
+            if (settle && coalesceOn() && (slow || (opts.slow && opts.slow()))) { slow = true; hold(); return; }
+            if (timer !== null) { pending = true; return; }
             if (run() || pending) arm();
         },
         flush() {
@@ -180,7 +209,7 @@ function redrawCoalescer(draw) {
             run();
             if (pending) arm();
         },
-        cancel() { pending = false; close(); },
+        cancel() { pending = false; heldSince = 0; close(); },
         waiting: () => pending
     };
 }

@@ -171,7 +171,7 @@ function mapMotionPlay(before, opts = {}) {
     // devices arrive rather than waiting there ahead of them.
     // So do the subnets' bubbles, which are drawn round where they end up.
     if (moved) {
-        ['layer-links', 'layer-labels', 'layer-zones'].forEach((id) => {
+        ['layer-links', 'layer-labels', 'layer-zones', 'traceWorkspace'].forEach((id) => {
             const layer = document.getElementById(id);
             if (layer) motionAnimate(layer, [{ opacity: 0.15 }, { opacity: 1 }], { duration: MOTION_MS * 1.2, easing: 'ease-in' });
         });

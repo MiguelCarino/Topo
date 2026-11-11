@@ -7,7 +7,7 @@ The architecture is in each file name: `x64`, `amd64` or `x86_64` is for Intel a
 | You have | Download |
 | --- | --- |
 | Any computer, nothing to install | `Topo-<version>-offline.zip`: unzip, open `index.html` in Chrome, Edge, Firefox or Safari |
-| Windows | the `-setup.exe` (or the `.msi`) for `x64` or `arm64`; needs no internet to install |
+| Windows | the `-setup.exe` for `x64` or `arm64`; needs no internet to install |
 | Mac with Apple silicon (M1 and later) | the `aarch64` `.dmg` |
 | Mac with Intel | the `x64` `.dmg` |
 | Debian, Ubuntu, Mint | the `amd64` or `arm64` `.deb` |
@@ -15,6 +15,10 @@ The architecture is in each file name: `x64`, `amd64` or `x86_64` is for Intel a
 | Any other Linux | the `.AppImage` for your architecture |
 
 The `.app.tar.gz` files are the macOS app without the disk image.
+
+## This PC as the server
+
+Install Topo on one PC and it can be the Topo server for the others on site, running in the background from startup, even when Topo is closed. On Windows, tick **Use this PC as the server for your network** on the installer's first page (silent installs: `/S /SERVER`). With the `.deb`, `.rpm` or the Mac app (in Applications), Topo asks the first time it opens. Then fill in the owner's email in Settings, **This PC as the server**. The AppImage can run the server only while Topo is open.
 
 Phones and tablets: use the website. iOS Files and Android cannot run a local `index.html`, and there is no mobile app.
 
