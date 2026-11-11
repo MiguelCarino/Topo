@@ -234,6 +234,9 @@ jobs:
           projectPath: desktop
           tauriScript: tauri
           releaseId: ${{ needs.release.outputs.release_id }}
+          # v1 sets the release's draft flag to this on every upload, and its
+          # default (false) published v0.0.1: the owner publishes, never a build.
+          releaseDraft: true
           args: ${{ matrix.args }}
           retryAttempts: 1
 
