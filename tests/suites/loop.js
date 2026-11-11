@@ -337,6 +337,243 @@ window.addEventListener('load', async () => {
     ok('6.11 the first report untouched by them: still open, reopened once', incOf(incId).status === 'open' && incOf(incId).reopened === 1);
     ok('6.12 the second review lists the new visit only', !!mB.review && mB.review.notes.filter((n) => n.startsWith('Visit by ')).length === 1 && mB.review.notes.some((n) => n.startsWith('Visit by Beto Fibra (Fibra Norte)')), show(mB.review && mB.review.notes));
 
+    // ---- 7. Only their part (D91-D95) ----
+    // The client's network grows past Andes IT's reach: a distribution
+    // switch beside their switch (a linked device, hop 1, with a port facing
+    // it), a camera behind it (hop 2), and further off an NVR and a server
+    // (three hops: outside the part).
+    {
+      const cl = () => CarinoLibrary.loadLibrary();
+      batch(() => {
+        state.nodes.push(N('dist', 'switch', { name: 'Distribution', x: 200, y: 200, portCount: 8, notes: 'dist secret', serial: 'D-1',
+          portAttrs: { p1: { label: 'to Switch A' }, p8: { label: 'uplink secret' } } }));
+        state.nodes.push(N('iot', 'camera', { name: 'Hall cam', x: 300, y: 300, notes: 'iot secret', serial: 'CAM-9' }));
+        state.nodes.push(N('nvr', 'nas', { name: 'NVR', x: 400, y: 300, notes: 'nvr notes' }));
+        state.nodes.push(N('far1', 'server', { name: 'Far server', x: 100, y: -100 }));
+        state.links.push({ id: 'l7a', source: 'sw', target: 'dist', targetIface: 'p1' });
+        state.links.push({ id: 'l7b', source: 'dist', target: 'iot', sourceIface: 'p5' });
+        state.links.push({ id: 'l7c', source: 'iot', target: 'nvr' });
+        state.links.push({ id: 'l7d', source: 'isp', target: 'far1' });
+        getNode('rt').notes = 'router private notes';
+        state.providers.find((p) => p.id === 'pT').notes = 'our notes about Andes';
+        save();
+      });
+      flushAutosave();
+      const outsideIds = ['nvr', 'far1'];
+      const outsideOf = () => {
+        const sd = serializeDoc();
+        return show({ nodes: outsideIds.map((id) => sd.nodes.find((n) => n.id === id)), links: sd.links.filter((l) => ['l7c', 'l7d'].includes(l.id)),
+          rt: getNode('rt').notes, pI: sd.providers.find((p) => p.id === 'pI'), isp: getNode('isp').providers });
+      };
+      const outsideBefore = outsideOf();
+      const inc3 = await TI.createIncident({ symptom: 'phone', nodeIds: ['pc'], text: 'Phone dead again.', name: 'Ana', phone: '555-1', email: 'ana@x.example', routedTo: ['pT'] });
+      const sent3 = await TI.sendIncident(inc3, { providerIds: ['pT'], passphrase: PASS, scope: 'part' });
+      const part3 = await unseal(sent3.url);
+      const partDoc3 = JSON.parse(part3);
+      const lib3 = cl();
+      ok('7.1 the part leaves: their devices and the ones around them, not the far ones', sent3.ok && sent3.scope === 'part'
+         && ['sw', 'pc', 'dist', 'iot'].every((id) => partDoc3.nodes.some((n) => n.id === id)) && !partDoc3.nodes.some((n) => outsideIds.includes(n.id)), show(partDoc3.nodes.map((n) => n.id)));
+      ok('7.2 held here as a part, named on the card; the card\'s own revision untouched', RV.revisionWhy(K, partDoc3.rev) === 'part' && (lib3[K].partRevs || []).includes(partDoc3.rev)
+         && lib3[K].rev !== partDoc3.rev && show(partDoc3.prior || []).includes(lib3[K].rev), show([lib3[K].rev, partDoc3.rev, partDoc3.prior]));
+      ok('7.3 the linked devices go without their notes and serials, the client\'s notes about Andes stay home', !partDoc3.nodes.find((n) => n.id === 'dist').notes
+         && !partDoc3.nodes.find((n) => n.id === 'iot').serial && !partDoc3.providers.find((p) => p.id === 'pT').notes && !partDoc3.providers.some((p) => p.id === 'pI'));
+
+      // The provider, fresh: edits one of theirs and a linked device, sets
+      // a VLAN on the port facing them, records the visit, sends it back.
+      const A = await providerVisit(sent3.url, inc3, 'pT', 'Tina Andes', () => {
+        getNode('pc').name = 'PC front';
+        getNode('iot').name = 'Cam hall';
+        const d = getNode('dist');
+        d.portAttrs = Object.assign({}, d.portAttrs, { p1: Object.assign({}, d.portAttrs.p1, { vlan: 20 }) });
+      });
+      ok('7.4 the provider worked on the part and sent it back', A.fresh && !!A.url && !!A.entry);
+      const backA = JSON.parse(await unseal(A.url));
+      const mA7 = await clientMerges(lib3, A.url);
+      ok('7.5 merged three-way on the part', mA7.ctx.isPart && mA7.ctx.via === 'rev' && mA7.ctx.baseRev === partDoc3.rev && !!mA7.review && mA7.review.mode === 'three-way',
+         show([mA7.ctx.isPart, mA7.ctx.via, mA7.ctx.baseRev, mA7.review && mA7.review.mode]));
+      ok('7.6 their edits in: the PC, the linked camera\'s name, the VLAN on the facing port', getNode('pc').name === 'PC front' && getNode('iot').name === 'Cam hall'
+         && getNode('dist').portAttrs.p1.vlan === 20 && getNode('dist').portAttrs.p1.label === 'to Switch A');
+      ok('7.7 what the part did not carry is intact: the other port, the notes, the serials', getNode('dist').portAttrs.p8 && getNode('dist').portAttrs.p8.label === 'uplink secret'
+         && getNode('dist').notes === 'dist secret' && getNode('iot').notes === 'iot secret' && getNode('iot').serial === 'CAM-9'
+         && state.providers.find((p) => p.id === 'pT').notes === 'our notes about Andes', show(getNode('dist')));
+      ok('7.8 nothing outside the part changed: not removed, not touched', outsideOf() === outsideBefore && lastLog(K).kind === 'merge' && lastLog(K).counts.removed === 0, show(lastLog(K).counts) + ' ' + outsideBefore + ' || ' + outsideOf());
+      ok('7.9 the visit arrived', incOf(inc3).status === 'visited' && (incOf(inc3).visits || []).includes(A.entry.id) && state.log.some((e) => e.id === A.entry.id));
+      ok('7.10 the copy merged back is held as a part, the base of their next return', RV.revisionWhy(K, backA.rev) === 'part', `${backA.rev} ${RV.revisionWhy(K, backA.rev)}`);
+      ok('7.11 the log still verifies', (await TopoMerge.verifyLog(state.log)) === -1);
+
+      // The next whole-network link names a full base, never a part.
+      const whole = await TI.incidentLinkFor(inc3, { providerIds: ['pT'], passphrase: PASS, scope: 'whole' });
+      const wholeDoc = JSON.parse(await unseal(whole.url));
+      ok('7.12 a whole link after a part came back: its base is not a part', whole.scope === 'whole' && !!wholeDoc.base && RV.revisionWhy(K, wholeDoc.base) !== 'part'
+         && RV.revisionWhy(K, wholeDoc.rev) !== 'part', show([wholeDoc.base, RV.revisionWhy(K, wholeDoc.base)]));
+
+      // A second return merges against the first: the provider goes on from
+      // the copy they sent back.
+      const lib4 = cl();
+      // They also fill in fields the linked devices went without: the
+      // distribution switch's serial (the client has one) and the camera's
+      // model (the client has none).
+      const B = await providerVisit(A.url, inc3, 'pT', 'Tina Andes', () => {
+        getNode('sw').name = 'Switch B';
+        getNode('dist').serial = 'D-PROV';
+        getNode('iot').model = 'Axis Q';
+      });
+      const mB7 = await clientMerges(lib4, B.url);
+      ok('7.13 a second return: three-way against the first one merged back', mB7.ctx.isPart && mB7.ctx.baseRev === backA.rev && mB7.review && mB7.review.mode === 'three-way'
+         && getNode('sw').name === 'Switch B' && getNode('pc').name === 'PC front' && outsideOf() === outsideBefore, show([mB7.ctx.baseRev, backA.rev]));
+      const distItem = mB7.review && mB7.review.req.plan.items.find((it) => it.kind === 'nodes' && it.mineId === 'dist');
+      ok('7.13b a field the linked device went without, set by the provider over the client\'s own: asked, the client\'s kept by default (D93)',
+         !!distItem && (distItem.fields || []).some((f) => f.field === 'serial' && f.conflict && f.take === 'mine') && getNode('dist').serial === 'D-1', show(distItem && distItem.fields));
+      ok('7.13c one the client never filled: the provider\'s taken', getNode('iot').model === 'Axis Q' && getNode('iot').serial === 'CAM-9', show([getNode('iot').model, getNode('iot').serial]));
+
+      // A linked device removed by the provider is asked, kept by default,
+      // and its cable to a device they never saw stays; a record the
+      // client deleted since does not come back from the provider's copy.
+      const sent5 = await TI.incidentLinkFor(inc3, { providerIds: ['pT'], passphrase: PASS, scope: 'part' });
+      batch(() => { state.nodes = state.nodes.filter((n) => n.id !== 'far1'); state.links = state.links.filter((l) => l.id !== 'l7d'); save(); });
+      flushAutosave();
+      const lib5 = cl();
+      const C = await providerVisit(sent5.url, inc3, 'pT', 'Tina Andes', () => {
+        state.nodes = state.nodes.filter((n) => n.id !== 'iot');
+        state.links = state.links.filter((l) => l.source !== 'iot' && l.target !== 'iot');
+        state.nodes.push(N('far1', 'server', { name: 'Far server (stale)', x: 100, y: -100 }));
+      });
+      const mC7 = await clientMerges(lib5, C.url);
+      const iotItem = mC7.review && mC7.review.req.plan.items.find((it) => it.kind === 'nodes' && it.mineId === 'iot');
+      ok('7.14 a linked device the provider removed: asked, kept by default', !!iotItem && iotItem.status === 'conflict' && iotItem.conflict.type === 'removed-theirs-edited-mine'
+         && !!getNode('iot') && getNode('iot').notes === 'iot secret', show(iotItem && [iotItem.status, iotItem.conflict]));
+      ok('7.15 and its cables stay, the one to the NVR they never saw too', state.links.some((l) => l.id === 'l7c') && state.links.some((l) => l.id === 'l7b'));
+      ok('7.16 a device deleted here since does not come back from their copy', !getNode('far1') && !state.nodes.some((n) => n.name === 'Far server (stale)'), show(state.nodes.map((n) => n.id)));
+
+      // The part's own revision dropped here: two-way, nothing removed.
+      const sent6 = await TI.incidentLinkFor(inc3, { providerIds: ['pT'], passphrase: PASS, scope: 'part' });
+      const part6 = JSON.parse(await unseal(sent6.url));
+      const lib6 = cl();
+      const D = await providerVisit(sent6.url, inc3, 'pT', 'Tina Andes', () => {
+        state.nodes = state.nodes.filter((n) => n.id !== 'dist');
+        state.links = state.links.filter((l) => l.source !== 'dist' && l.target !== 'dist');
+        getNode('pc').name = 'PC desk';
+      });
+      clientRevs.delete(K + '|' + part6.rev);
+      const nodesBefore = state.nodes.length;
+      const mD7 = await clientMerges(lib6, D.url);
+      ok('7.17 the part\'s revision gone: two-way, and nothing is removed', mD7.ctx.isPart && !mD7.ctx.base && mD7.review && mD7.review.mode === 'two-way'
+         && !!getNode('dist') && state.nodes.length >= nodesBefore && lastLog(K).counts.removed === 0, show([mD7.ctx.via, mD7.review && mD7.review.mode, lastLog(K).counts]));
+
+      // Opening their own part: no "Replace with this copy".
+      const nAsk = asked.length;
+      openArrivedDocument(part3);
+      await keepThisNetwork();
+      const q = asked.slice(nAsk).find((x) => x.kind === 'choice');
+      ok('7.18 the client\'s own part, opened: no Replace, the whole network is never replaced by a part', !!q && !q.choices.some((c) => c.id === 'update'), show(q && q.choices.map((c) => c.id)));
+      replaceDocument(libraryEntry(K).doc, { libraryId: K, origin: 'library' });
+
+      // A provider who holds an older full copy of the network: the part
+      // merges three-way there (it names the client's full revisions), so a
+      // value the client changed since is not sent back stale.
+      {
+        await RV.revisionsFlushed();
+        const clientLib8 = cl();
+        clientRevs = new Map(revDisk);
+        CarinoLibrary.persistLibrary({}); clearSessions();
+        RV.releaseRevisionStore(); RV._reset(); revDisk.clear(); await RV.openRevisionStore(revAdapter);
+        openArrivedDocument(await unseal(sent2.url));
+        promptAnswer = 'Clinic (Andes)';
+        await keepThisNetwork();
+        const provKept = state.libraryId === K && isKept();
+        await RV.revisionsFlushed();
+        const provLib = cl(), provRevs = new Map(revDisk);
+        // The client again: changes the PC's address, sends the part.
+        CarinoLibrary.persistLibrary(clientLib8);
+        RV.releaseRevisionStore(); RV._reset(); revDisk.clear(); clientRevs.forEach((v, k) => revDisk.set(k, v)); clientRevs = null;
+        await RV.openRevisionStore(revAdapter);
+        clearSessions();
+        replaceDocument(libraryEntry(K).doc, { libraryId: K, origin: 'library' });
+        batch(() => { getNode('pc').interfaces[0].ip = '10.0.0.50/24'; save(); });
+        flushAutosave();
+        const sent8 = await TI.incidentLinkFor(inc3, { providerIds: ['pT'], passphrase: PASS, scope: 'part' });
+        await RV.revisionsFlushed();
+        const lib8 = cl();
+        clientRevs = new Map(revDisk);
+        // The provider's device: their old full copy, then the part.
+        CarinoLibrary.persistLibrary(provLib); clearSessions();
+        RV.releaseRevisionStore(); RV._reset(); revDisk.clear(); provRevs.forEach((v, k) => revDisk.set(k, v));
+        await RV.openRevisionStore(revAdapter);
+        replaceDocument(libraryEntry(K).doc, { libraryId: K, origin: 'library' });
+        const nRev = reviews.length;
+        openArrivedDocument(await unseal(sent8.url));
+        await keepThisNetwork();
+        await until(() => reviews.length > nRev && state.libraryId === K);
+        const provMode = reviews[nRev] && reviews[nRev].mode;
+        const provIp = getNode('pc') && getNode('pc').interfaces[0].ip;
+        PM.enterProviderMode(inc3);
+        batch(() => { getNode('sw').name = 'Switch C'; save(); });
+        const e8 = await PM.recordVisit({ incidentId: inc3, providerId: 'pT', by: 'Tina Andes', outcome: 'fixed', notes: 'From the old copy.', changes: { counts: { added: 0, changed: 1, removed: 0 } } });
+        const back8 = await PM.buildVisitReturn(PASS);
+        PM.leaveProviderMode();
+        ok('7.19 the provider who held an older full copy merges the part three-way, and gets the client\'s new address', provKept && provMode === 'three-way' && provIp === '10.0.0.50/24',
+           show([provKept, provMode, provIp]));
+        await RV.revisionsFlushed();
+        revDisk.clear();   // the provider's device's revisions stay on that device
+        const m8 = await clientMerges(lib8, back8.url);
+        ok('7.20 back at the client: their edit in, the client\'s address not reverted', !!e8 && m8.review && m8.review.mode === 'three-way' && getNode('sw').name === 'Switch C'
+           && getNode('pc').interfaces[0].ip === '10.0.0.50/24' && !!getNode('nvr') && !!getNode('dist'), show([m8.review && m8.review.mode, getNode('pc').interfaces[0].ip, getNode('sw').name, !!e8, back8.why, m8.banner, m8.ctx && [m8.ctx.ancestor, m8.ctx.isPart, m8.ctx.via]]));
+      }
+
+      // A device the provider adds, named as one of the client's they never
+      // saw (the NVR, three hops off): added as new, never folded into the
+      // client's NVR, and its cable stays on the new one.
+      {
+        const sent9 = await TI.incidentLinkFor(inc3, { providerIds: ['pT'], passphrase: PASS, scope: 'part' });
+        const partDoc9 = JSON.parse(await unseal(sent9.url));
+        await RV.revisionsFlushed();
+        const lib9 = cl();
+        const nvrOf = () => show([serializeDoc().nodes.find((n) => n.id === 'nvr'), state.links.filter((l) => l.source === 'nvr' || l.target === 'nvr')]);
+        const nvrBefore = nvrOf();
+        const E9 = await providerVisit(sent9.url, inc3, 'pT', 'Tina Andes', () => {
+          state.nodes.push(N('newnvr', 'nas', { name: 'NVR', x: 50, y: 250, group: 'gB' }));
+          state.links.push({ id: 'l9new', source: 'newnvr', target: 'sw' });
+        });
+        const m9 = await clientMerges(lib9, E9.url);
+        const added = state.nodes.find((n) => n.name === 'NVR' && n.id !== 'nvr');
+        ok('7.20b a device they add, named as one of yours outside their part: added as new, yours untouched', m9.ctx.isPart && !!added
+           && state.links.some((l) => (l.source === added.id && l.target === 'sw') || (l.target === added.id && l.source === 'sw')) && nvrOf() === nvrBefore,
+           show([m9.ctx.isPart, m9.review && m9.review.req.plan.items.filter((it) => it.status !== 'unchanged').map((it) => [it.kind, it.status, it.mineId, it.theirsId]), state.nodes.map((n) => n.id)]));
+        // A provider who kept that part and later merged a whole-network link
+        // still names the part in its prior: the copy is the whole network
+        // again (its newest full revision held here), never forced to a part.
+        batch(() => { getNode('nvr').notes = 'nvr notes, later'; save(); });
+        flushAutosave();
+        const w9 = await TI.incidentLinkFor(inc3, { providerIds: ['pT'], passphrase: PASS, scope: 'whole' });
+        const w9doc = JSON.parse(await unseal(w9.url));
+        const isP = (ident) => mergeCopyIsPart(K, mergeMineNow(K), ident, null);
+        const carried = [partDoc9.rev, ...(partDoc9.prior || [])];
+        ok('7.20c a part named only in an old prior, after a whole link: the whole network, not a part', w9.scope === 'whole'
+           && isP({ rev: randomToken(), base: partDoc9.base, prior: carried })
+           && !isP({ rev: randomToken(), base: w9doc.rev, prior: carried })
+           && !isP({ rev: randomToken(), base: w9doc.base, prior: [w9doc.rev, ...carried] }), show([w9doc.rev, w9doc.base, carried]));
+      }
+
+      // A part shared from a network not kept yet (Share their part on a
+      // fresh canvas): held in this tab, then the card's once it is kept,
+      // so a return from it still merges on the part (D93).
+      {
+        replaceDocument(site(), { origin: 'file', docId: 'lp-fresh' });
+        const notKept = !isKept() && !libraryEntry('lp-fresh');
+        const pc9 = await window.TopoPart.partCopy(['pT']);
+        const inTab = !!pc9 && RV.sessionRevsWhy('part').includes(pc9.rev);
+        promptAnswer = 'Fresh clinic';
+        const kid = await keepThisNetwork();
+        await RV.revisionsFlushed();
+        const card = kid ? libraryEntry(kid) : null;
+        ok('7.21 a part sent before the network was kept: held in the tab, the card\'s once kept, with its context', notKept && inTab && kid === 'lp-fresh' && !!card
+           && (card.partRevs || []).includes(pc9.rev) && RV.revisionWhy(kid, pc9.rev) === 'part' && !!RV.revisionPartMeta(kid, pc9.rev)
+           && [...revDisk.values()].some((r) => r.meta.cardId === kid && r.meta.rev === pc9.rev),
+           show([notKept, inTab, kid, card && card.partRevs, kid && pc9 && RV.revisionWhy(kid, pc9.rev)]));
+        replaceDocument(libraryEntry(K).doc, { libraryId: K, origin: 'library' });
+      }
+    }
+
     // Translated: the strings of the merge review's rows.
     const { has, locales } = window.CarinoI18N;
     const keys = ['{symptom} at {where}. Now: {status}', 'Problems', 'Problems and visits', 'Mark fixed', 'Send again', 'Reopen', 'Open problems: {n} · newest {symptom}, {date}', 'Fixed', 'Visited', 'Sent', 'Reported', 'Open', 'Closed'];

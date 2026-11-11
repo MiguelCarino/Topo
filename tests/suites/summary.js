@@ -206,7 +206,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       let b = await refreshReportPreview();
       ok('the dialog shows the report beside its questions', !!b && /^blob:/.test(el('reportPreviewFrame').getAttribute('src') || '')
          && el('reportDialog').contains(el('reportPreviewFrame')) && /Network documentation report/.test(b.html));
-      ok('named as the file it downloads as', /_\d{4}-\d{2}-\d{2}_report\.html$/.test(el('reportPreviewName').textContent), el('reportPreviewName').textContent);
+      ok('named as the file it downloads as', new RegExp(`_\\d{4}-\\d{2}-\\d{2}_report\\.${reportFormat()}$`).test(el('reportPreviewName').textContent), el('reportPreviewName').textContent);
       ok('with its own toolbar hidden (the dialog prints)', getComputedStyle(el('reportPreviewFrame').contentDocument.querySelector('.toolbar')).display === 'none');
       ok('looking hands nothing over', !handed.length);
       el('report-site').value = 'Torre B'; el('report-site').dispatchEvent(new Event('input', { bubbles: true }));
@@ -257,6 +257,45 @@ window.addEventListener('load', () => { setTimeout(async () => {
       closeReportDialog();
       ok('Close keeps nothing', handed.length === 1 && !reportPreviewBuilt());
     } finally { window.deliverReport = realDeliver; closeReportDialog(); }
+
+    // ---- 5d: Download PDF (reportFormat; CarinoPdf.pdf stubbed, no html2canvas) ----
+    // The report as previewed handed to the PDF engine, the status saying so
+    // while it is made, saved as _report.pdf, the hand-over recorded, the
+    // dialog closed; a failure said in the status with the dialog staying.
+    {
+      const P = window.CarinoPdf, heldPdf = P && P.pdf, heldSave = window.saveBlob, heldFormat = reportFormat();
+      let given = null, saved = null, release = null;
+      try {
+        replaceDocument(clean(), { origin: 'file' });
+        setReportFormat('pdf');
+        openReportDialog();
+        const b = await refreshReportPreview();
+        ok('PDF: Download PDF and the .pdf name', el('reportBuildBtn').textContent === 'Download PDF' && /_report\.pdf$/.test(el('reportPreviewName').textContent), el('reportPreviewName').textContent);
+        ok('PDF: the report\'s paper is A4 with its 16 x 14 mm margins', (() => { const pg = P.pageSetup(b.html); return pg.w === 210 && pg.h === 297 && pg.margin.join() === '16,14,16,14'; })());
+        P.pdf = (html) => { given = html; return new Promise((res) => { release = res; }); };
+        window.saveBlob = (blob, name) => { saved = { blob, name }; return 'blob:x'; };
+        el('reportBuildBtn').click();
+        for (let i = 0; i < 100 && !release; i++) await new Promise((r) => setTimeout(r, 10));
+        ok('while it is made: the buttons held, the status says so', el('reportBuildBtn').disabled && el('reportPreviewStatus').textContent === 'Creating the PDF…' && !el('reportDialog').classList.contains('hidden'), el('reportPreviewStatus').textContent);
+        ok('made from the report as previewed', typeof given === 'string' && /Clínica Norte/.test(given) && given === inlineDiagramUses(reportPreviewBuilt().html));
+        release(new Blob(['%PDF-1.4'], { type: 'application/pdf' }));
+        for (let i = 0; i < 100 && !saved; i++) await new Promise((r) => setTimeout(r, 10));
+        ok('then saved as _report.pdf and the dialog closes', !!saved && /_report\.pdf$/.test(saved.name) && saved.blob.type === 'application/pdf' && el('reportDialog').classList.contains('hidden'), saved && saved.name);
+        // A failure.
+        openReportDialog();
+        await refreshReportPreview();
+        saved = null;
+        P.pdf = () => Promise.reject(new Error('no canvas'));
+        const res = await downloadReportFromDialog();
+        ok('a PDF that cannot be made: said, nothing saved, the dialog stays', !!res && res.ok === false && !saved
+          && el('reportPreviewStatus').textContent === 'Could not create the PDF.' && !el('reportDialog').classList.contains('hidden'), el('reportPreviewStatus').textContent);
+        // HTML: the bytes as before.
+        setReportFormat('html');
+        ok('HTML: Download HTML and the .html name', el('reportBuildBtn').textContent === 'Download HTML' && /_report\.html$/.test(el('reportPreviewName').textContent));
+        const h = await downloadReportFromDialog();
+        ok('and the document saved as it always was', !!saved && /_report\.html$/.test(saved.name) && h && h.downloaded === true && el('reportDialog').classList.contains('hidden'));
+      } finally { if (P) P.pdf = heldPdf; window.saveBlob = heldSave; setReportFormat(heldFormat); closeReportDialog(); }
+    }
 
     // ---- 6: words ----
     const reachable = Object.keys(FINDING_CHECK_NAMES).concat(NODE_CHECKS.map((c) => c.key)).filter((k) => !['rack-tag', 'wifi-plan', 'service-due', 'provider'].includes(k));

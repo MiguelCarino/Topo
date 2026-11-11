@@ -167,7 +167,7 @@ function mergeShownPlan(ctx) {
     const force = mergeForce(ctx.plan, ctx.choices);
     if (!Object.keys(force).length) return ctx.plan;
     try {
-        return planMerge(ctx.mine, ctx.plan.inputs.theirs, ctx.plan.inputs.base, { force: Object.assign({}, ctx.plan.force || {}, force) });
+        return planMerge(ctx.mine, ctx.plan.inputs.theirs, ctx.plan.inputs.base, { force: Object.assign({}, ctx.plan.force || {}, force), part: ctx.plan.part });
     } catch (e) {
         return ctx.plan;
     }
@@ -598,7 +598,7 @@ async function openMergeReview(opts = {}) {
         if (!mine) return { ok: false, reason: 'target' };
         let plan;
         try {
-            plan = planMerge(mine, opts.theirs, opts.base || null);
+            plan = planMerge(mine, opts.theirs, opts.base || null, { part: opts.part || null });
         } catch (e) {
             if (!(e instanceof MergeRefused)) throw e;
             if (e.reason === 'newer') showToast(t('This copy was made by a newer version of Topo, so it cannot be merged. Open it as a copy to read it.'));

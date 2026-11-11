@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -175,5 +176,65 @@ func TestUnknownKindIsGivenUpNotLooped(t *testing.T) {
 	w.Drain(context.Background())
 	if _, tries, _, _ := row(t, st, id); tries != 1 {
 		t.Fatalf("tries %d", tries)
+	}
+}
+
+// A report with a file (D97): every recipient gets it, and the stored file
+// goes once the last of them is sent. A file gone meanwhile: sent without.
+func TestWorkerAttachment(t *testing.T) {
+	w, f, c, st := setup(t, 30)
+	ctx := context.Background()
+	pdf := []byte("%PDF-1.7 the report")
+	if err := store.InsertMailFile(ctx, st.W, &store.MailFile{ID: "mf_1", SiteID: "s_1", Name: "topo_x_2026-11-10_isp.pdf", Type: "application/pdf", Data: pdf, Created: 1}); err != nil {
+		t.Fatal(err)
+	}
+	ms := c.now().UnixMilli()
+	for _, id := range []string{"o_1", "o_2"} {
+		if err := store.InsertMail(ctx, st.W, &store.Mail{ID: id, Kind: "report", To: id + "@example.com", Lang: "en",
+			Data: `{"lines":"x","link":"https://topo.example.com/#e~a","attach":"topo_x_2026-11-10_isp.pdf"}`, Created: ms, SendAfter: ms, FileID: "mf_1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := w.Drain(ctx); err != nil || n != 2 {
+		t.Fatalf("drain %d %v", n, err)
+	}
+	for _, m := range f.got {
+		if m.Attachment == nil || string(m.Attachment.Data) != string(pdf) || m.Attachment.Name != "topo_x_2026-11-10_isp.pdf" {
+			t.Fatalf("attachment %+v", m.Attachment)
+		}
+		if !strings.Contains(m.Text, "The report is attached: topo_x_2026-11-10_isp.pdf") {
+			t.Fatalf("text %s", m.Text)
+		}
+	}
+	if n, _ := store.CountMailFiles(ctx, st.R); n != 0 {
+		t.Fatalf("file kept after sending: %d", n)
+	}
+	// Its file gone: the message goes without it and without the line.
+	f.got = nil
+	queueFile := func(id string) {
+		if err := store.InsertMail(ctx, st.W, &store.Mail{ID: id, Kind: "report", To: "z@example.com", Lang: "en",
+			Data: `{"lines":"x","attach":"r.pdf"}`, Created: ms, SendAfter: ms, FileID: "mf_gone"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queueFile("o_3")
+	if n, err := w.Drain(ctx); err != nil || n != 1 || f.got[0].Attachment != nil || strings.Contains(f.got[0].Text, "attached") {
+		t.Fatalf("missing file: %d %v %+v", n, err, f.got)
+	}
+	// Given up: the file goes too.
+	if err := store.InsertMailFile(ctx, st.W, &store.MailFile{ID: "mf_2", Name: "r.pdf", Type: "application/pdf", Data: pdf, Created: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertMail(ctx, st.W, &store.Mail{ID: "o_4", Kind: "report", To: "y@example.com", Lang: "en", Data: `{"lines":"x"}`,
+		Created: ms, SendAfter: ms, FileID: "mf_2"}); err != nil {
+		t.Fatal(err)
+	}
+	st.W.Exec("UPDATE outbox SET tries = ? WHERE id = 'o_4'", MaxTries-1)
+	f.fail = errors.New("smtp down")
+	if _, err := w.Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := store.CountMailFiles(ctx, st.R); n != 0 {
+		t.Fatalf("file kept after giving up: %d", n)
 	}
 }

@@ -110,18 +110,28 @@ const emlOf = (m) => {
     const f = readdirSync(dir).find((n) => n.endsWith('-' + m.id + '.eml'));
     return f ? readFileSync(join(dir, f), 'utf8') : '';
 };
-// The parts of a message, quoted-printable decoded: { head, text, html }.
+// The parts of a message, quoted-printable decoded: { head, type, text,
+// html, files: [{ head, name, bytes }] }; a multipart/mixed one (a report
+// with its PDF, D97) is read through its nested alternative.
 const partsOf = (eml) => {
     const head = eml.slice(0, eml.indexOf('\r\n\r\n'));
-    const b = /boundary="([^"]+)"/.exec(head);
-    const out = { head, text: '', html: '' };
-    if (!b) return out;
-    for (const seg of eml.split('--' + b[1]).slice(1, -1)) {
-        const i = seg.indexOf('\r\n\r\n');
-        const h = seg.slice(0, i), body = seg.slice(i + 4).replace(/\r\n$/, '');
-        const dec = Buffer.from(body.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/g, (x, hex) => String.fromCharCode(parseInt(hex, 16))), 'latin1').toString('utf8');
-        if (/text\/html/.test(h)) out.html = dec; else if (/text\/plain/.test(h)) out.text = dec;
-    }
+    const out = { head, type: (/Content-Type: ([^;\r\n]+)/i.exec(head) || [])[1] || '', text: '', html: '', files: [] };
+    const walk = (h, bodyAll) => {
+        const b = /boundary="([^"]+)"/.exec(h);
+        if (!b) return;
+        for (const seg of bodyAll.split('--' + b[1]).slice(1, -1)) {
+            const i = seg.indexOf('\r\n\r\n');
+            const sh = seg.slice(0, i).replace(/^\r\n/, ''), body = seg.slice(i + 4).replace(/\r\n$/, '');
+            if (/multipart\//i.test(sh)) { walk(sh, body); continue; }
+            if (/Content-Disposition: attachment/i.test(sh)) {
+                out.files.push({ head: sh, name: (/filename="?([^";\r\n]+)/.exec(sh) || [])[1] || '', bytes: Buffer.from(body.replace(/\r\n/g, ''), 'base64') });
+                continue;
+            }
+            const dec = Buffer.from(body.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/g, (x, hex) => String.fromCharCode(parseInt(hex, 16))), 'latin1').toString('utf8');
+            if (/text\/html/.test(sh)) out.html = dec; else if (/text\/plain/.test(sh)) out.text = dec;
+        }
+    };
+    walk(head, eml.slice(eml.indexOf('\r\n\r\n') + 4));
     return out;
 };
 
@@ -405,8 +415,26 @@ try {
         document.querySelectorAll('#problemContacts input[data-sendto]').forEach((box) => { if (box.checked !== (box.dataset.sendto === outside)) box.click(); });
     });
     await A.p.click('#problemSaveSendBtn');
-    ok('10b. the send step says the server sent it', await until(A.p, () => document.getElementById('problemSendStatus').textContent
-        === 'Sent by email from the server to Outside Co. Send the passphrase another way, such as a call or a text.'),
+    // D95: the email waits for Send by email; D97: the report attached.
+    ok('10b. the send step waits for Send by email', await until(A.p, () => TopoIncidents.draft.send && TopoIncidents.draft.send.result
+        && document.getElementById('problemEmailBtn').textContent === '✉ Send by email') && countMail('outside@example.test', 'report') === 0,
+        await A.p.evaluate(() => [document.getElementById('problemSendStatus').textContent, document.getElementById('problemEmailBtn').textContent]));
+    await A.p.click('#problemAttach');
+    ok('10b. the report attached is made (a PDF), the server warning said', await until(A.p, () => TopoIncidents.draft.send.attachFile && !TopoIncidents.draft.send.attachBusy)
+        && await A.p.evaluate(() => TopoIncidents.draft.send.attachFile.type === 'application/pdf'
+            && document.getElementById('problemAttachNote').textContent.includes('The server sends the report unlocked, so the server (and whoever runs it) can read it.')),
+        await A.p.evaluate(() => [document.getElementById('problemAttachNote').textContent, TopoIncidents.draft.send.attachError]));
+    const attachSent = await A.p.evaluate(async () => {
+        const f = TopoIncidents.draft.send.attachFile;
+        const b = new Uint8Array(await f.blob.arrayBuffer());
+        let bin = ''; for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+        return { name: f.name, b64: btoa(bin) };
+    });
+    await audit(A.p, '10b. the send step with the report attached');
+    await A.p.click('#problemEmailBtn');
+    ok('10b. the send step says the server sent it, with the report', await until(A.p, () => document.getElementById('problemSendStatus').textContent
+        .startsWith('Sent by email from the server to Outside Co. Send the passphrase another way, such as a call or a text.')
+        && document.getElementById('problemSendStatus').textContent.includes(' went with it.')),
         await A.p.evaluate(() => [document.getElementById('problemSendStatus').textContent, document.getElementById('problemError').textContent]));
     ok('10b. Copy passphrase stays; nothing to send by hand', await A.p.evaluate(() => !document.getElementById('problemPassRow').classList.contains('hidden')
         && ['problemEmailBtn', 'problemShareBtn', 'problemCopyMsgBtn', 'problemFileBtn'].every((id) => document.getElementById(id).classList.contains('hidden'))));
@@ -416,6 +444,12 @@ try {
     const rm = await readMail('outside@example.test', 'report');
     ok('10b. the report email is in the sink', !!rm, mails().map((m) => m.kind + ' ' + m.to));
     const rp = partsOf(rm ? emlOf(rm) : '');
+    ok('10b. the email is multipart/mixed with the PDF, byte for byte', rp.type === 'multipart/mixed' && rp.files.length === 1 && rp.files[0].name === attachSent.name
+        && /^Content-Type: application\/pdf/m.test(rp.files[0].head) && rp.files[0].bytes.equals(Buffer.from(attachSent.b64, 'base64')) && rp.files[0].bytes.subarray(0, 5).toString() === '%PDF-',
+        [rp.type, rp.files.map((f) => [f.name, f.bytes.length]), attachSent.name]);
+    ok('10b. outbox.jsonl names the attachment and its size', !!rm && rm.attachment === attachSent.name && rm.attachmentBytes === Buffer.from(attachSent.b64, 'base64').length, rm);
+    ok('10b. the text says the report is attached', rp.text.includes('The report is attached: ' + attachSent.name), rp.text.slice(-400));
+    ok('10b. the stored file is gone once sent', spawnSync('sqlite3', ['-readonly', join(data, 'topo.db'), 'SELECT count(*) FROM mail_files'], { encoding: 'utf8' }).stdout.trim() === '0');
     ok('10b. the link is this server\'s locked link', typeof sentLink === 'string' && sentLink.startsWith(ORIGIN + '/') && sentLink.includes('#e~'), String(sentLink).slice(0, 60));
     ok('10b. HTML: the hyperlink "Follow the infrastructure link" to it', rp.html.includes(`<a href="${sentLink}"`) && /">Follow the infrastructure link<\/a>/.test(rp.html), rp.html.slice(0, 600));
     ok('10b. plain: "Follow the infrastructure link: URL"', rp.text.includes('Follow the infrastructure link: ' + sentLink), rp.text.slice(0, 600));

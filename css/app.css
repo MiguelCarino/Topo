@@ -2201,6 +2201,9 @@ body.rack-view #conflictPill { display: none !important; }
 .dlg-headrow { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .topo-card .input { font-size: var(--fs-sm); padding: 6px 8px; }
 .share-link { width: 100%; font-family: var(--mono); font-size: var(--fs-micro); word-break: break-all; color: var(--text-muted); }
+/* The share dialog's ticks (Lock the link, Share their part from a phone):
+   the whole line takes the tap, 44px tall. */
+@media (pointer: coarse) { #shareDialog .dlg-check { min-height: 44px; font-size: 16px; padding-left: 12px; } #shareDialog .dlg-check input { width: 22px; height: 22px; flex-shrink: 0; } }
 .setup-rows { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; max-height: 60vh; overflow-y: auto; }
 .shortcut-body { font-size: var(--fs-label); }
 .sc-sub { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin: 4px 0 6px; color: var(--text-muted); }
@@ -2897,8 +2900,13 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
 @media (max-width: 700px) {
     .report-dlg .rpv-opts, .sheet-pv-dlg .rpv-opts { flex: 0 1 auto; max-height: 42dvh; }
     .report-dlg .rpv-opts { padding-right: 12px; }   /* the fold's own gutter, not the desktop scrollbar's 4px */
-    .report-dlg .rpv-actions .cs-btn, .sheet-pv-dlg .rpv-actions .cs-btn { min-height: 44px; }
+    .report-dlg .rpv-actions .btn, .sheet-pv-dlg .rpv-actions .btn { min-height: 44px; }
     .rpv-x { min-width: 44px; min-height: 44px; }
+}
+/* The PDF | HTML switch (carino-pdf.js, above the file name): a finger's
+   size wherever the buttons are. */
+@media (max-width: 700px), (pointer: coarse) {
+    .report-dlg .rpv-format .toggle-btn, .sheet-pv-dlg .rpv-format .toggle-btn { min-height: 44px; }
 }
 
 /* The library folded (updateRailWrap, js/ui.js): its row, and the panels
@@ -3573,4 +3581,20 @@ body:not(.simple-mode) .inc-simple { display: none; }
     /* The label takes the tap around its box: 12px each side of a 22px box. */
     .topo-server .srv-tick { min-height: 44px; padding: 0 0 0 12px; }
     .topo-server .srv-tick input { width: 22px; height: 22px; }
+}
+
+/* ---- What a report's link carries (js/incidents.js, D95) ---------------------
+   Two choices in the send step: the providers' part (the default) or the
+   whole network, with the part's counts under the first. */
+.pb-scope { border: 1px solid var(--border); border-radius: 6px; margin: 8px 0; padding: 6px 10px 8px; min-width: 0; }
+.pb-scope.hidden { display: none; }
+.pb-scope legend { padding: 0 4px; }
+.pb-scope .pb-radio { margin: 4px 0 0; align-items: flex-start; font-size: var(--fs-sm); }
+.pb-scope .pb-radio input { flex-shrink: 0; width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); }
+.pb-scope .pb-radio span { min-width: 0; overflow-wrap: anywhere; }
+.pb-scope-count { margin: 0 0 2px 26px; font-size: var(--fs-label); color: var(--text-sec); overflow-wrap: anywhere; }
+@media (pointer: coarse) {
+    .pb-scope .pb-radio { min-height: 44px; align-items: center; font-size: 16px; padding-left: 12px; }
+    .pb-scope-count { margin-left: 38px; font-size: var(--fs-sm); }
+    .pb-scope .pb-radio input { width: 22px; height: 22px; margin: 0; }
 }

@@ -17,7 +17,15 @@
 //      paper), a dashed line where each page ends and the count saying A4;
 //      the sheet carries its @page margins; the marks hidden under print;
 //   6. a stage narrower than a page shows the page scaled, never reflowed;
-//   7. the new strings in es, pt-BR, ja and ru, Japanese never コンピューター.
+//   7. the new strings in es, pt-BR, ja and ru, Japanese never コンピューター;
+//   8. the PDF | HTML switch (reportFormat, js/report.js; carino-pdf.js)
+//      above the file name, outside the scrolling note, in both previews;
+//      Download and the name follow it; PDF: the sheet's own html handed to
+//      CarinoPdf.pdf (stubbed here, no html2canvas), its paper read from the
+//      sheet's @page (62 x 29 mm labels, A4 for Locate), the buttons held and
+//      "Creating the PDF…" said meanwhile, saved as _labels.pdf and closed; a
+//      failure says "Could not create the PDF." and the dialog stays; one
+//      finished after ✕ is not saved. Checks 1-6 run on HTML.
 window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
@@ -31,6 +39,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
   HTMLAnchorElement.prototype.click = function () { if (this.download) downloads.push(this.download); else realClick.call(this); };
   const N = (id, type, extra = {}) => Object.assign({ id, type, name: id.toUpperCase(), x: 0, y: 0, interfaces: [{ id: 'e1', name: 'eth0', ip: '' }] }, extra);
   setLocale('en');
+  // Checks 1-6 hold the HTML file (the bytes Topo always saved); 8 the PDF.
+  const heldFormat = reportFormat();
+  setReportFormat('html');
 
   try {
     const pcs = [];
@@ -147,7 +158,81 @@ window.addEventListener('load', () => { setTimeout(async () => {
       closeSheetPreview();
     }
 
+    // ---- 8. PDF or HTML ----
+    {
+      const P = window.CarinoPdf;
+      ok('carino-pdf.js is loaded', !!P && typeof P.pdf === 'function' && typeof P.formatSwitch === 'function');
+      const r4 = printAssetLabels([{ type: 'node', id: 'pc1' }, { type: 'link', id: 'l1' }]);
+      await r4.ready;
+      const side = el('sheetPreviewDialog').querySelector('.rpv-side');
+      const fmt = side.querySelector('.rpv-format');
+      ok('the switch sits just above the file name, outside the options', !!fmt && fmt.nextElementSibling === el('sheetPreviewName') && !fmt.closest('.rpv-opts'));
+      ok('it reads File  PDF | HTML', !!fmt && fmt.querySelector('.rpv-format-label').textContent === 'File'
+        && [...fmt.querySelectorAll('.toggle-btn')].map((b) => b.textContent).join('|') === 'PDF|HTML');
+      ok('on HTML: Download HTML, the .html name', el('sheetPreviewDownload').textContent === 'Download HTML' && /_labels\.html$/.test(el('sheetPreviewName').textContent));
+      const acts = [...el('sheetPreviewDialog').querySelector('.rpv-actions').children];
+      ok('the foot: Print, then one Download (btn btn-primary, last)', acts.length === 2 && acts[0] === el('sheetPreviewPrint')
+        && acts[1] === el('sheetPreviewDownload') && acts[1].classList.contains('btn') && acts[1].classList.contains('btn-primary'));
+      fmt.querySelector('[data-format="pdf"]').click();
+      ok('PDF picked: Download PDF, the .pdf name', reportFormat() === 'pdf' && el('sheetPreviewDownload').textContent === 'Download PDF'
+        && /_labels\.pdf$/.test(el('sheetPreviewName').textContent), el('sheetPreviewName').textContent);
+      ok('the paper the PDF gets: a label page, 62 x 29 mm, no margin', (() => { const pg = P.pageSetup(r4.html); return Math.abs(pg.w - 62) < 0.01 && Math.abs(pg.h - 29) < 0.01 && pg.margin.every((m) => m === 0); })());
+      const heldPdf = P.pdf, heldSave = window.saveBlob;
+      let given = null, saved = null, release = null;
+      P.pdf = (html, opts) => { given = { html, opts }; return new Promise((res) => { release = res; }); };
+      window.saveBlob = (blob, name) => { saved = { blob, name }; return 'blob:x'; };
+      try {
+        const pending = downloadSheetPreview();
+        ok('while it is made: Download held, the status says so', el('sheetPreviewDownload').disabled && el('sheetPreviewStatus').textContent === 'Creating the PDF…', el('sheetPreviewStatus').textContent);
+        ok('the PDF is made from the sheet itself', !!given && given.html === r4.html);
+        release(new Blob(['%PDF-1.4'], { type: 'application/pdf' }));
+        const res = await pending;
+        ok('then saved as _labels.pdf, and the dialog closes', !!saved && /_labels\.pdf$/.test(saved.name) && res.ok === true && res.format === 'pdf' && !shown(), saved && saved.name);
+        // A failure: said, and the dialog stays.
+        const r5 = printAssetLabels([{ type: 'node', id: 'pc1' }]);
+        await r5.ready;
+        saved = null;
+        P.pdf = () => Promise.reject(new Error('no canvas'));
+        const bad = await downloadSheetPreview();
+        ok('a PDF that cannot be made says so, nothing saved, the dialog stays', bad.ok === false && !saved && shown()
+          && el('sheetPreviewStatus').textContent === 'Could not create the PDF.' && !el('sheetPreviewDownload').disabled, el('sheetPreviewStatus').textContent);
+        // Closed while it is made: nothing saved.
+        P.pdf = () => new Promise((res) => { release = res; });
+        const late = downloadSheetPreview();
+        closeSheetPreview();
+        release(new Blob(['%PDF-1.4'], { type: 'application/pdf' }));
+        const lr = await late;
+        ok('one finished after ✕ is not saved', lr.ok === false && lr.cancelled === true && !saved);
+        // Locate: A4 with its margins.
+        const r6 = printLocate([{ type: 'node', id: 'pc1' }]);
+        await r6.ready;
+        const pg = P.pageSetup(r6.html);
+        ok('Locate\'s PDF: A4, its 16 x 14 mm margins', pg.w === 210 && pg.h === 297 && pg.margin.join() === '16,14,16,14', JSON.stringify(pg));
+        ok('the switch is shared: still PDF here, Download PDF, _locate.pdf', el('sheetPreviewDownload').textContent === 'Download PDF' && /_locate\.pdf$/.test(el('sheetPreviewName').textContent));
+        closeSheetPreview();
+      } finally { P.pdf = heldPdf; window.saveBlob = heldSave; }
+      // The site report's preview has its own switch and follows the same choice.
+      openReportDialog('site');
+      const rfmt = el('reportDialog').querySelector('.rpv-format');
+      ok('the report\'s switch: above its name, PDF picked, Download PDF', !!rfmt && rfmt.nextElementSibling === el('reportPreviewName') && !rfmt.closest('.rpv-opts')
+        && rfmt.querySelector('[data-format="pdf"]').getAttribute('aria-checked') === 'true' && el('reportBuildBtn').textContent === 'Download PDF');
+      setReportFormat('html');
+      ok('and HTML from either: Download HTML there too', el('reportBuildBtn').textContent === 'Download HTML' && rfmt.querySelector('[data-format="html"]').getAttribute('aria-checked') === 'true');
+      closeReportDialog();
+      try { localStorage.removeItem('carino-report-format'); } catch (e) { /* private */ }
+    }
+
     // ---- 7. The words ----
+    {
+      const fk = ['File', 'PDF', 'HTML', 'Download PDF', 'Download HTML', 'Creating the PDF…', 'Could not create the PDF.'];
+      ['es', 'pt-BR', 'ja', 'ru'].forEach((loc) => {
+        const miss = fk.filter((k) => !CarinoI18N.has(loc, k));
+        ok(`${loc} has the PDF | HTML strings`, miss.length === 0, miss.join(' | '));
+      });
+      setLocale('es');
+      ok('PDF and HTML stay Latin', t('PDF') === 'PDF' && t('HTML') === 'HTML' && t('Download PDF') === 'Descargar PDF');
+      setLocale('en');
+    }
     const keys = ['Print preview', '1 label', '{n} labels', '1 page (A4)', '{n} pages (A4)', 'Page {n}'];
     ['es', 'pt-BR', 'ja', 'ru'].forEach((loc) => {
       const miss = keys.filter((k) => !CarinoI18N.has(loc, k));
@@ -164,6 +249,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     document.querySelectorAll('body > button').forEach((b) => { if (b.textContent === 'opener') b.remove(); });
     window.open = heldOpen;
     HTMLAnchorElement.prototype.click = realClick;
+    setReportFormat(heldFormat);
     setLocale('en');
   }
 

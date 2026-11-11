@@ -258,6 +258,9 @@ type SinkLine struct {
 	Link    string `json:"link,omitempty"`
 	Site    string `json:"site,omitempty"`
 	File    string `json:"file"`
+	// The attached file's name and size (D97), when the message carries one.
+	Attachment      string `json:"attachment,omitempty"`
+	AttachmentBytes int    `json:"attachmentBytes,omitempty"`
 }
 
 func (f *File) Send(ctx context.Context, m *Message) error {
@@ -272,7 +275,11 @@ func (f *File) Send(ctx context.Context, m *Message) error {
 	if err := os.WriteFile(filepath.Join(f.dir, name), raw, 0o600); err != nil {
 		return err
 	}
-	line, _ := json.Marshal(SinkLine{At: now.UnixMilli(), ID: m.ID, Kind: m.Kind, To: m.To, Lang: m.Lang, Subject: m.Subject, Code: m.Code, Link: m.Link, Site: m.Site, File: name})
+	sl := SinkLine{At: now.UnixMilli(), ID: m.ID, Kind: m.Kind, To: m.To, Lang: m.Lang, Subject: m.Subject, Code: m.Code, Link: m.Link, Site: m.Site, File: name}
+	if m.Attachment != nil {
+		sl.Attachment, sl.AttachmentBytes = CleanAttachName(m.Attachment.Name, m.Attachment.Type), len(m.Attachment.Data)
+	}
+	line, _ := json.Marshal(sl)
 	out, err := os.OpenFile(filepath.Join(f.dir, "outbox.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err

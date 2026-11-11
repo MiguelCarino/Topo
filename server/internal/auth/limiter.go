@@ -65,6 +65,26 @@ func (l *Limiter) Take(key string) (bool, time.Duration) {
 	return false, wait
 }
 
+// Peek reports what Take would answer, without spending a token (a caller
+// that must read a large body first refuses early, then Takes).
+func (l *Limiter) Peek(key string) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b := l.buckets[key]
+	if b == nil {
+		return true, 0
+	}
+	l.refill(b, l.Now())
+	if b.tokens >= 1 {
+		return true, 0
+	}
+	wait := time.Duration((1 - b.tokens) * float64(l.Period) / l.Capacity)
+	if wait < time.Second {
+		wait = time.Second
+	}
+	return false, wait
+}
+
 // Refund returns one token to key.
 func (l *Limiter) Refund(key string) {
 	l.mu.Lock()

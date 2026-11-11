@@ -267,6 +267,7 @@ type Mail struct {
 	Sent      int64 // 0 = not yet; -1 failed for good; -2 decoy
 	Tries     int
 	Error     string
+	FileID    string // mail_files row the message carries ("report" only, D97)
 }
 
 func nullable(s string) any {
@@ -285,14 +286,65 @@ func InsertMail(ctx context.Context, q Q, m *Mail) error {
 	if m.Sent != 0 {
 		sent = m.Sent
 	}
-	_, err := q.ExecContext(ctx, "INSERT INTO outbox(id, kind, to_email, user_id, site_id, lang, data, dedupe, count, created, send_after, sent, tries) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)",
-		m.ID, m.Kind, m.To, nullable(m.UserID), nullable(m.SiteID), m.Lang, m.Data, nullable(m.Dedupe), m.Count, m.Created, m.SendAfter, sent)
+	_, err := q.ExecContext(ctx, "INSERT INTO outbox(id, kind, to_email, user_id, site_id, lang, data, dedupe, count, created, send_after, sent, tries, file_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,?)",
+		m.ID, m.Kind, m.To, nullable(m.UserID), nullable(m.SiteID), m.Lang, m.Data, nullable(m.Dedupe), m.Count, m.Created, m.SendAfter, sent, nullable(m.FileID))
 	return err
+}
+
+// MailFile is a file a queued message carries (D97), kept once for all its
+// recipients.
+type MailFile struct {
+	ID      string
+	SiteID  string
+	Name    string
+	Type    string
+	Data    []byte
+	Created int64
+}
+
+// InsertMailFile stores f (in the same transaction as the rows naming it).
+func InsertMailFile(ctx context.Context, q Q, f *MailFile) error {
+	_, err := q.ExecContext(ctx, "INSERT INTO mail_files(id, site_id, name, type, data, created) VALUES(?,?,?,?,?,?)",
+		f.ID, nullable(f.SiteID), f.Name, f.Type, f.Data, f.Created)
+	return err
+}
+
+// GetMailFile returns the file, or sql.ErrNoRows.
+func GetMailFile(ctx context.Context, q Q, id string) (*MailFile, error) {
+	f := &MailFile{}
+	err := q.QueryRowContext(ctx, "SELECT id, coalesce(site_id,''), name, type, data, created FROM mail_files WHERE id = ?", id).
+		Scan(&f.ID, &f.SiteID, &f.Name, &f.Type, &f.Data, &f.Created)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// DropMailFileIfUnused deletes the file once no row still waiting to be sent
+// (sent IS NULL) names it: sent, given up (-1), skipped (-3) or deleted rows
+// no longer need it. -> whether it was deleted.
+func DropMailFileIfUnused(ctx context.Context, q Q, id string) (bool, error) {
+	if id == "" {
+		return false, nil
+	}
+	res, err := q.ExecContext(ctx, "DELETE FROM mail_files WHERE id = ? AND NOT EXISTS (SELECT 1 FROM outbox WHERE file_id = ? AND sent IS NULL)", id, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// CountMailFiles is the number of stored files (tests, the e2e's health).
+func CountMailFiles(ctx context.Context, q Q) (int, error) {
+	var n int
+	err := q.QueryRowContext(ctx, "SELECT count(*) FROM mail_files").Scan(&n)
+	return n, err
 }
 
 // DueMail returns up to limit unsent rows due at now, oldest first.
 func DueMail(ctx context.Context, q Q, now int64, limit int) ([]Mail, error) {
-	rows, err := q.QueryContext(ctx, "SELECT id, kind, to_email, coalesce(user_id,''), coalesce(site_id,''), lang, data, coalesce(dedupe,''), count, created, send_after, tries FROM outbox WHERE sent IS NULL AND send_after <= ? ORDER BY send_after, created LIMIT ?", now, limit)
+	rows, err := q.QueryContext(ctx, "SELECT id, kind, to_email, coalesce(user_id,''), coalesce(site_id,''), lang, data, coalesce(dedupe,''), count, created, send_after, tries, coalesce(file_id,'') FROM outbox WHERE sent IS NULL AND send_after <= ? ORDER BY send_after, created LIMIT ?", now, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +352,7 @@ func DueMail(ctx context.Context, q Q, now int64, limit int) ([]Mail, error) {
 	var out []Mail
 	for rows.Next() {
 		var m Mail
-		if err := rows.Scan(&m.ID, &m.Kind, &m.To, &m.UserID, &m.SiteID, &m.Lang, &m.Data, &m.Dedupe, &m.Count, &m.Created, &m.SendAfter, &m.Tries); err != nil {
+		if err := rows.Scan(&m.ID, &m.Kind, &m.To, &m.UserID, &m.SiteID, &m.Lang, &m.Data, &m.Dedupe, &m.Count, &m.Created, &m.SendAfter, &m.Tries, &m.FileID); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -369,6 +421,10 @@ func (s *Store) Housekeep(ctx context.Context, now int64, l HousekeepLimits) ([]
 			{"DELETE FROM invite_sends WHERE at < ?", []any{now - day}},
 			{"DELETE FROM outbox WHERE sent = -2 AND created < ?", []any{now - 3600*1000}},
 			{"DELETE FROM outbox WHERE sent IS NOT NULL AND sent <> -2 AND created < ?", []any{now - 7*day}},
+			// A file no waiting row names any more (its rows were deleted
+			// with an invite or a site, or the worker stopped between the
+			// send and the drop).
+			{"DELETE FROM mail_files WHERE NOT EXISTS (SELECT 1 FROM outbox WHERE outbox.file_id = mail_files.id AND outbox.sent IS NULL)", nil},
 		}
 		for _, st := range stmts {
 			if _, err := tx.ExecContext(ctx, st.q, st.args...); err != nil {

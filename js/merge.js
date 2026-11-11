@@ -481,7 +481,7 @@ function mergeLabel(kind, rec, names) {
 // ---- The plan ----
 function planMerge(mine, theirs, base, opts = {}) {
     const M = mergeInput(mine), T = mergeInput(theirs), B = base ? mergeInput(base) : null;
-    const ctx = { M, T, B, force: Object.assign({}, opts.force || {}), maps: {}, ifaceMaps: new Map(), notes: [] };
+    const ctx = { M, T, B, force: Object.assign({}, opts.force || {}), maps: {}, ifaceMaps: new Map(), notes: [], part: mergePartInfo(opts.part) };
     T.nodeIds = new Set(mgList(T.doc, 'nodes').map((n) => n.id));
     const matches = {};
 
@@ -512,7 +512,7 @@ function planMerge(mine, theirs, base, opts = {}) {
         matches.groups = mergeMatchKind('groups', ctx, (claimed) => {
             const pool = mineL.filter((m) => !claimed.has(m));
             const byPath = new Map();
-            pool.forEach((m) => { const k = placeKey(groupPath(m, mineL)); const a = byPath.get(k) || []; a.push(m); byPath.set(k, a); });
+            mergePartPool(ctx, pool).forEach((m) => { const k = placeKey(groupPath(m, mineL)); const a = byPath.get(k) || []; a.push(m); byPath.set(k, a); });
             return [mgIdFinder(ctx, 'groups', pool, M.raw.groups, T.raw.groups, (m, t) => m.kind !== t.kind
                 || (differ(mgLower(m.name), mgLower(t.name)) && parentName(m, mineL) !== parentName(t, theirsL))),
                 { by: 'path', find: (t) => byPath.get(placeKey(groupPath(t, theirsL))) || [] }];
@@ -525,8 +525,9 @@ function planMerge(mine, theirs, base, opts = {}) {
         const mineL = mgList(M.doc, 'nodes'), theirsL = mgList(T.doc, 'nodes');
         matches.nodes = mergeMatchKind('nodes', ctx, (claimed) => {
             const pool = mineL.filter((m) => !claimed.has(m));
-            const ix = csvIndex(pool);
-            const poolById = new Map(pool.map((m) => [m.id, m]));
+            const keyPool = mergePartPool(ctx, pool);
+            const ix = csvIndex(keyPool);
+            const poolById = new Map(keyPool.map((m) => [m.id, m]));
             const byIds = (ids) => (ids || []).map((id) => poolById.get(id)).filter(Boolean);
             const multi = (keys, map) => { const s = new Set(); keys.forEach((k) => (map.get(k) || []).forEach((id) => s.add(id))); return byIds([...s]); };
             const guard = (by, find) => ({ by, find: (t) => { const hits = find(t); return hits.length === 1 && mergeContradicts(hits[0], t, by) ? [] : hits; } });
@@ -559,7 +560,7 @@ function planMerge(mine, theirs, base, opts = {}) {
         matches.links = mergeMatchKind('links', ctx, (claimed) => {
             const pool = mineL.filter((m) => !claimed.has(m));
             const byPair = new Map();
-            pool.forEach((m) => { const k = mgPairKey(m.source, m.target); const a = byPair.get(k) || []; a.push(m); byPair.set(k, a); });
+            mergePartPool(ctx, pool).forEach((m) => { const k = mgPairKey(m.source, m.target); const a = byPair.get(k) || []; a.push(m); byPair.set(k, a); });
             const ends = (t) => ({ s: mgRef(ctx, 'nodes', t.source), tg: mgRef(ctx, 'nodes', t.target),
                 si: mgIfaceRef(ctx, t.source, t.sourceIface) || null, ti: mgIfaceRef(ctx, t.target, t.targetIface) || null });
             const idF = mgIdFinder(ctx, 'links', pool, M.raw.links, T.raw.links, (m, t) => {
@@ -665,8 +666,27 @@ function planMerge(mine, theirs, base, opts = {}) {
         anchors, theirsEdges,
         theirsLog: T.log,
         force: ctx.force,
+        part: opts.part || null,
         inputs: { theirs: mgClone(theirs), base: base ? mgClone(base) : null }
     };
+}
+// A provider's part coming back (js/providerpart.js partMergeInfo, D93):
+// { nodes, groups } its context (the devices and groups the provider only
+// saw), known: every record id a revision of this network held. Lists or
+// Sets; null when the copy is not a part.
+// The mine records a part's new record may be matched with by anything but
+// its id (path, name, address, ends): a provider only saw the part, so a
+// record it added is never one of yours it could not see. Records a full
+// revision of this network held are out (those inside the part were matched
+// by id already); what you added since stays in, so the same new device
+// added on both sides is still one.
+function mergePartPool(ctx, pool) {
+    return ctx.part ? pool.filter((m) => !ctx.part.known.has(m.id)) : pool;
+}
+function mergePartInfo(part) {
+    if (!part || typeof part !== 'object') return null;
+    const set = (v) => (v instanceof Set ? v : new Set(Array.isArray(v) ? v : []));
+    return { nodes: set(part.nodes), groups: set(part.groups), known: set(part.known) };
 }
 
 // Problem reports over the cap (INCIDENT_MAX): one of theirs that the cap
@@ -881,11 +901,21 @@ function mergeListItems(ctx, kind, match, names, sigs) {
         // link), never deleted: it stays (D39).
         if (kind === 'incidents') item.status = 'unchanged';
         else if (b && match.removedTheirs.has(m)) {
-            if (eq('mine', m, b)) item.status = 'removed';
+            // A part's context device or group, gone from theirs: the
+            // provider only saw it, so the removal is asked, kept by default.
+            if (ctx.part && ((kind === 'nodes' && ctx.part.nodes.has(m.id)) || (kind === 'groups' && ctx.part.groups.has(m.id)))) {
+                item.status = 'conflict'; item.conflict = { type: 'removed-theirs-edited-mine' };
+            } else if (eq('mine', m, b)) item.status = 'removed';
             else { item.status = 'conflict'; item.conflict = { type: 'removed-theirs-edited-mine' }; }
         } else item.status = 'unchanged';
         items.push(item);
     });
+    // A part: a record only theirs holds that this network once held (an
+    // older full copy the provider still had) was removed here since; it
+    // does not come back, nor do its cables.
+    const mineIds = ctx.part ? new Set(mgList(ctx.M.doc, 'nodes').map((n) => n.id)) : null;
+    const goneHere = (t) => !!ctx.part && ['nodes', 'links', 'groups'].includes(kind) && (ctx.part.known.has(t.id)
+        || (kind === 'links' && [t.source, t.target].some((id) => ctx.part.known.has(id) && !mineIds.has(id))));
     theirs.forEach((t) => {
         if (match.pair.has(t)) return;
         const r = mergeRemap(ctx, kind, t);
@@ -901,7 +931,7 @@ function mergeListItems(ctx, kind, match, names, sigs) {
             item.status = 'unchanged'; item.gone = true;
         } else if (b) {
             if (eq('theirs', t, b)) { item.status = 'unchanged'; item.gone = true; } else { item.status = 'conflict'; item.conflict = { type: 'removed-mine-edited-theirs' }; }
-        } else item.status = 'added';
+        } else if (goneHere(t)) { item.status = 'unchanged'; item.gone = true; } else item.status = 'added';
         items.push(item);
     });
     return items;
@@ -1034,7 +1064,7 @@ function applyMergePlan(mine, plan, choices = {}) {
         const k = `${it.kind}:${it.theirsId}`;
         if (c !== 'skip' && force[k] === undefined) { force[k] = c === 'add' ? 'add' : c; again = true; }
     });
-    if (again) return applyMergePlan(mine, planMerge(mine, plan.inputs.theirs, plan.inputs.base, { force }), choices);
+    if (again) return applyMergePlan(mine, planMerge(mine, plan.inputs.theirs, plan.inputs.base, { force, part: plan.part }), choices);
 
     const M = mergeInput(mine);
     const out = mgClone(M.doc);

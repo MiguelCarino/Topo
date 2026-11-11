@@ -23,6 +23,15 @@
 //      the password-in-notes warning holds the link back until Send anyway;
 //   6. the share dialog leaves reports and visits out unless ticked
 //      (withoutIncidents mends the copy's chain);
+//   4b. what the link carries (D91-D95): the send step starts on the
+//      providers' part ("Only what Casa Segura looks after", its counts),
+//      the link holds only their part (no other provider, no notes of a
+//      linked device), the whole network on request with no new commit (one
+//      undo step), the part's file when too big for a link, and the
+//      password lint reads the copy as it leaves; Email copies the link on
+//      EVERY press (three presses, Copy passphrase between: three copies,
+//      three mail programs), a failed copy shows the link once and the next
+//      press opens the mail program anyway (D94);
 //   7. translated: the sheet in es, every new string in every locale, and
 //      Japanese never says パソコン.
 window.addEventListener('load', async () => {
@@ -232,6 +241,37 @@ window.addEventListener('load', async () => {
     ok('Web Crypto is back', !!(subtle && window.crypto.subtle));
     ok('the chain still reads as whole', (await TopoMerge.verifyLog(state.log)) === -1);
 
+    // ---- 4b. What the link carries ----
+    {
+      getNode('pc').notes = 'Front desk only'; save();
+      const logA = state.log.length;
+      const rp = await TI.incidentLinkFor(id, { providerIds: ['pS'], passphrase: PASS, scope: 'part' });
+      const pd = JSON.parse((await unsealFragment(rp.url.slice(rp.url.indexOf('#') + 1), PASS)).json);
+      const ids = (pd.nodes || []).map((n) => n.id).sort();
+      ok('the part: Casa Segura\'s camera, the switch it hangs off, two hops, not the Internet three away', rp.ok && rp.scope === 'part' && show(ids) === '["cam","pc","rt","sw"]', show(ids));
+      const refsOk = [...(pd.nodes || []), ...(pd.links || []), ...(pd.groups || [])].every((r) => (r.providers || []).every((x) => x === 'pS'))
+        && (pd.incidents || []).every((x) => (x.routedTo || []).every((r) => r === 'pS')) && (pd.log || []).every((e) => (e.routedTo || []).every((r) => r === 'pS'));
+      ok('only their provider record, and no other provider anywhere', show((pd.providers || []).map((p) => p.id)) === '["pS"]' && refsOk
+         && !JSON.stringify(pd).includes('Fibra') && !JSON.stringify(pd).includes('Andes'));
+      ok('a linked device goes reduced: its name and place, never its notes', !(pd.nodes.find((n) => n.id === 'pc') || {}).notes && pd.nodes.find((n) => n.id === 'pc').name === 'Reception PC',
+         show(pd.nodes.find((n) => n.id === 'pc')));
+      ok('the part names the network and a revision of its own, held here as a part', pd.id === 'inc-net' && /^[A-Za-z0-9_-]+$/.test(pd.rev || '')
+         && CarinoRevisions.revisionWhy('inc-net', pd.rev) === 'part' && CarinoRevisions.cardPartRevs('inc-net').has(pd.rev), pd.rev);
+      ok('its log still verifies', (await TopoMerge.verifyLog(pd.log || [])) === -1);
+      ok('no commit: a link of a report already sent', state.log.length === logA);
+      const rw = await TI.incidentLinkFor(id, { providerIds: ['pS'], passphrase: PASS, scope: 'whole' });
+      const wd = JSON.parse((await unsealFragment(rw.url.slice(rw.url.indexOf('#') + 1), PASS)).json);
+      ok('the whole network as before: every device, every provider, the reports', rw.scope === 'whole' && wd.nodes.length === 5 && wd.providers.length === 3 && (wd.incidents || []).length >= 1);
+      H.urlMax = () => 100;
+      saved.length = 0;
+      const rf = await TI.incidentLinkFor(id, { providerIds: ['pS'], passphrase: PASS, scope: 'part' });
+      H.urlMax = held.urlMax;
+      const ff = saved.length ? JSON.parse(await saved[0].blob.text()) : { doc: {} };
+      ok('too big for a link: the part goes as the file, never the whole network', rf.why === 'too-long' && saved.length === 1 && /_incident\.json$/.test(saved[0].name)
+         && show((ff.doc.nodes || []).map((n) => n.id).sort()) === '["cam","pc","rt","sw"]' && show((ff.doc.providers || []).map((p) => p.id)) === '["pS"]', show(ff.doc.nodes && ff.doc.nodes.length));
+      delete getNode('pc').notes; save();
+    }
+
     // ---- 5. The sheet ----
     selectEntries([{ type: 'node', id: 'cam' }]);
     TI.openProblemDialog();
@@ -278,25 +318,48 @@ window.addEventListener('load', async () => {
        && el('problemLink').value.includes('#e~') && el('problemPass').type === 'password' && el('problemPass').value.length >= 16, el('problemSendStatus').textContent);
     el('problemPassShow').click();
     ok('Show reveals the passphrase', el('problemPass').type === 'text' && el('problemPassShow').getAttribute('aria-pressed') === 'true');
-    // A copy that fails: the link is shown first, the second press opens.
-    H.copyRich = async () => { throw new Error('denied'); };
+    ok('the send step offers what the link carries: their part, chosen', !el('problemScopeRow').classList.contains('hidden')
+       && el('problemScopeRow').querySelector('input[value=part]').checked && el('problemScopePartText').textContent === 'Only what Casa Segura looks after'
+       && /^\d+ devices? of theirs · \d+ linked devices? around them$/.test(el('problemScopeCount').textContent) && TI.draft.send.result.scope === 'part',
+       el('problemScopePartText').textContent + ' | ' + el('problemScopeCount').textContent);
+    // A copy that fails: the link is shown first, the second press opens
+    // the mail program anyway (D94), and tries the copy again.
+    let failedTries = 0;
+    H.copyRich = async () => { failedTries++; throw new Error('denied'); };
     el('problemEmailBtn').click();
     await until(() => TI.draft.send.copied === 'link-failed');
     ok('Email when the copy fails: no mail program yet, the link shown and selected', opened.length === 0 && document.activeElement === el('problemLink')
-       && el('problemSendStatus').textContent.startsWith('The link could not be copied.'), el('problemSendStatus').textContent);
+       && el('problemSendStatus').textContent === 'The link could not be copied. Copy it from the box below; Email opens your mail program on the next press.', el('problemSendStatus').textContent);
     el('problemEmailBtn').click();
     await until(() => opened.length > 0);
-    ok('the second press opens the mail program', opened.length === 1);
+    ok('the second press tries the copy again and opens the mail program', opened.length === 1 && failedTries === 2 && TI.draft.send.failCount === 2
+       && el('problemSendStatus').textContent.startsWith('The link could not be copied: copy it from the box below'), `${opened.length} ${failedTries} ${el('problemSendStatus').textContent}`);
     H.copyRich = async (html, text) => { rich.push({ html, text }); };
-    opened.length = 0; TI.draft.send.copied = '';
+    opened.length = 0;
     el('problemEmailBtn').click();
     await until(() => opened.length > 0);
     const link2 = el('problemLink').value;
     ok('Email: the hyperlink to the clipboard (rich and plain), then the mailto:', opened.length === 1 && opened[0].startsWith('mailto:?subject=') && opened[0].length <= TI.INCIDENT_MAILTO_MAX
        && !opened[0].includes('e~') && decodeURIComponent(opened[0]).includes('Infrastructure link:\n\n') && rich.length === 1 && rich[0].text === link2
        && rich[0].html === `<a href="${link2.replace(/&/g, '&amp;')}">Follow the infrastructure link</a>`, `${opened[0] && opened[0].length} ${show(rich[0] && rich[0].html.slice(0, 80))}`);
-    ok('the send step says the mail program is open and where to paste', el('problemSendStatus').textContent
-       === 'Your mail program is open and the infrastructure link is copied. Paste it under "Infrastructure link:" (Ctrl+V, or on a phone press and hold, then Paste).', el('problemSendStatus').textContent);
+    ok('the send step says the link is copied, where to paste it, and that the passphrase goes another way', el('problemSendStatus').textContent
+       === 'Link copied: paste it in the email under "Infrastructure link:" (Ctrl+V, or on a phone press and hold, then Paste). The passphrase goes another way, such as a call or a text.', el('problemSendStatus').textContent);
+    // Every press copies (D94): after Copy passphrase too, and with the
+    // last state already "copied".
+    {
+      rich.length = 0; opened.length = 0; copied.length = 0;
+      for (let i = 0; i < 3; i++) {
+        el('problemPassCopy').click();
+        await until(() => TI.draft.send.copied === 'pass');
+        el('problemEmailBtn').click();
+        await until(() => opened.length > i);
+      }
+      ok('three presses of Email, Copy passphrase between: three copies of the link, three mail programs', rich.length === 3 && opened.length === 3 && copied.length === 3
+         && rich.every((r) => r.text === link2) && copied.every((c) => c === TI.draft.send.pass) && TI.draft.send.copied === 'link', `${rich.length} ${opened.length} ${copied.length}`);
+      el('problemEmailBtn').click();
+      await until(() => opened.length > 3);
+      ok('and again with nothing between', rich.length === 4 && opened.length === 4);
+    }
     ok('Casa Segura has no email: the mailto: has no address, and the call button stays', el('problemCalls').querySelector('a[href="tel:5550199"]') !== null);
     el('problemCopyMsgBtn').click();
     await until(() => rich.length > 1 && el('problemSendStatus').textContent === 'Message copied.');
@@ -311,13 +374,21 @@ window.addEventListener('load', async () => {
     TI.closeProblemDialog();
 
     // On a Topo server, providers not all members (D87): the link, then the
-    // server emails it; refused or no relay, the mail program, said why.
+    // server emails it when the client presses Send by email (D95); refused
+    // or no relay, the mail program, said why.
     const mailed = [];
     let mailAnswer = () => Promise.resolve({ queued: 2 });
     window.serverMailRoute = () => ({ siteId: 's_test', relay: true });
     H.reportMail = (siteId, body) => { mailed.push({ siteId, body }); return mailAnswer(); };
     TI.openIncidentSend(id);
-    await until(() => TI.draft.send && TI.draft.send.result && !TI.draft.send.mailing && (TI.draft.send.mailed || TI.draft.send.mailNote), 600);
+    await until(() => TI.draft.send && TI.draft.send.result, 600);
+    await tick(); await tick();
+    const names3 = TI.draft.sendTo.map((p) => providerById(p).name).join(', ');
+    ok('the server waits for the press: nothing sent yet, Email reads Send by email (D95)', mailed.length === 0 && !TI.draft.send.mailed
+       && el('problemEmailBtn').textContent === '✉ Send by email' && !el('problemEmailBtn').classList.contains('hidden')
+       && el('problemSendStatus').textContent.endsWith('Press Send by email: the server emails the locked link to ' + names3 + '.'), el('problemSendStatus').textContent);
+    el('problemEmailBtn').click();
+    await until(() => !TI.draft.send.mailing && (TI.draft.send.mailed || TI.draft.send.mailNote), 600);
     const sent3 = TI.draft.send.result;
     ok('the server sends the report email: one request, the providers\' addresses, the link, no HTML', mailed.length === 1 && mailed[0].siteId === 's_test'
        && mailed[0].body.to.length > 0 && show(mailed[0].body.to) === show(sent3.message.to) && mailed[0].body.to.includes('noc@fibra.example') && mailed[0].body.link === sent3.url && mailed[0].body.lang === 'en'
@@ -329,10 +400,101 @@ window.addEventListener('load', async () => {
     TI.closeProblemDialog();
     mailAnswer = () => Promise.reject(Object.assign(new Error('rate-limited'), { status: 429 }));
     TI.openIncidentSend(id);
-    await until(() => TI.draft.send && TI.draft.send.result && TI.draft.send.mailNote, 600);
+    await until(() => TI.draft.send && TI.draft.send.result, 600);
+    el('problemEmailBtn').click();
+    await until(() => TI.draft.send.mailNote, 600);
     ok('refused by the server (429): Email opens the mail program, and the step says why', !TI.draft.send.mailed && !el('problemEmailBtn').classList.contains('hidden')
+       && el('problemEmailBtn').textContent === '✉ Email'
        && el('problemSendStatus').textContent.startsWith('The server has sent all the reports it may for now, so Email opens your mail program.'), el('problemSendStatus').textContent);
+    {
+      const op0 = opened.length;
+      el('problemEmailBtn').click();
+      await until(() => opened.length > op0, 600);
+      ok('then Email is the mail program, the link copied', opened.length === op0 + 1 && mailed.length === 2 && TI.draft.send.copied === 'link', `${opened.length} ${mailed.length}`);
+    }
     TI.closeProblemDialog();
+
+    // The report attached (D97). Through the server: made as a PDF once the
+    // box is ticked, the warning said, and sent with the email.
+    {
+      const files = [], saved = [];
+      const fakePdf = (bytes) => new Blob(['%PDF-1.7 ' + 'x'.repeat(Math.max(0, bytes - 9))], { type: 'application/pdf' });
+      let fileAnswer = (ids, opts) => Promise.resolve({ blob: fakePdf(2000), name: 'topo_acme_reception_2026-11-10_fibra-norte.pdf', type: 'application/pdf', format: 'pdf', bytes: 2000 });
+      const heldFile = H.reportFile, heldSave = H.save;
+      H.reportFile = (ids, opts) => { files.push({ ids, opts }); return fileAnswer(ids, opts); };
+      H.save = (blob, name) => { saved.push({ blob, name }); };
+      mailAnswer = () => Promise.resolve({ queued: 1 });
+      TI.openIncidentSend(id);
+      await until(() => TI.draft.send && TI.draft.send.result, 600);
+      ok('the attachment box: shown, off by default', !el('problemScopeRow').classList.contains('hidden') && !el('problemAttach').checked
+         && el('problemAttachNote').classList.contains('hidden') && files.length === 0);
+      const before = mailed.length, logA = state.log.length;
+      el('problemAttach').click();
+      await until(() => TI.draft.send.attachFile, 600);
+      ok('ticked: the report is made once, for the chosen providers, as a PDF for the server; no new commit', files.length === 1
+         && show(files[0].ids) === show(TI.draft.send.part.providerIds) && files[0].opts.format === 'pdf' && files[0].opts.audience === 'client'
+         && files[0].opts.incidentId === id && state.log.length === logA, show(files.map((f) => f.opts)));
+      ok('the note: it goes with the email, and the server can read it (D97)', el('problemAttachNote').textContent
+         === 'The report topo_acme_reception_2026-11-10_fibra-norte.pdf goes with the email. The server sends the report unlocked, so the server (and whoever runs it) can read it. The link stays locked.', el('problemAttachNote').textContent);
+      el('problemEmailBtn').click();
+      await until(() => TI.draft.send.mailed, 600);
+      const att = mailed[before] && mailed[before].body.attachment;
+      ok('sent: the PDF in the request, named, base64', mailed.length === before + 1 && !!att && att.type === 'application/pdf'
+         && att.name === 'topo_acme_reception_2026-11-10_fibra-norte.pdf' && atob(att.dataBase64).startsWith('%PDF-') && atob(att.dataBase64).length === 2000 && saved.length === 0, show(att && { name: att.name, type: att.type }));
+      ok('the send step says the report went with it', el('problemSendStatus').textContent.endsWith('The report topo_acme_reception_2026-11-10_fibra-norte.pdf went with it.'), el('problemSendStatus').textContent);
+      TI.closeProblemDialog();
+      // Too big for the server: downloaded, the client sends it.
+      fileAnswer = () => Promise.resolve({ blob: fakePdf(10), name: 'big.pdf', type: 'application/pdf', format: 'pdf', bytes: TI.PROBLEM_ATTACH_SERVER_MAX + 1 });
+      TI.openIncidentSend(id);
+      await until(() => TI.draft.send && TI.draft.send.result, 600);
+      el('problemAttach').click();
+      await until(() => TI.draft.send.attachFile, 600);
+      ok('a PDF over 6 MB: the note says to attach it, and no "the server can read it" (it never gets it)', el('problemAttachNote').textContent
+         === 'Email downloads the report big.pdf: attach it to the email.', el('problemAttachNote').textContent);
+      el('problemEmailBtn').click();
+      await until(() => TI.draft.send.mailed, 600);
+      ok('a PDF over 6 MB: not in the request, downloaded, said', !mailed[mailed.length - 1].body.attachment && saved.length === 1 && saved[0].name === 'big.pdf'
+         && el('problemSendStatus').textContent.includes('The server attaches a PDF of 6 MB at most, so the report big.pdf was downloaded: send it to them yourself.'), el('problemSendStatus').textContent);
+      TI.closeProblemDialog();
+      // No server: Email copies the link, downloads the report once, and
+      // the mailto: says it is attached.
+      window.serverMailRoute = () => null;
+      saved.length = 0;
+      fileAnswer = (ids, opts) => Promise.resolve({ blob: new Blob(['<!doctype html>'], { type: 'text/html' }), name: 'topo_acme_reception_2026-11-10_fibra-norte.html', type: 'text/html', format: 'html', bytes: 15 });
+      TI.openIncidentSend(id);
+      await until(() => TI.draft.send && TI.draft.send.result, 600);
+      el('problemAttach').click();
+      await until(() => TI.draft.send.attachFile, 600);
+      ok('mail program: the format is the preview\'s (not forced), the note says Email downloads it', files[files.length - 1].opts.format === undefined
+         && el('problemAttachNote').textContent === 'Email downloads the report topo_acme_reception_2026-11-10_fibra-norte.html: attach it to the email.', el('problemAttachNote').textContent);
+      const op0 = opened.length, rich0 = rich.length;
+      el('problemEmailBtn').click();
+      await until(() => opened.length > op0, 600);
+      el('problemEmailBtn').click();
+      await until(() => opened.length > op0 + 1, 600);
+      const body = decodeURIComponent(opened[opened.length - 1].split('body=')[1] || '');
+      ok('Email: the link copied each press, the report downloaded once, the mailto: says attached', rich.length === rich0 + 2 && saved.length === 1
+         && saved[0].name === 'topo_acme_reception_2026-11-10_fibra-norte.html' && body.includes('Report: attached (topo_acme_reception_2026-11-10_fibra-norte.html)')
+         && body.includes('Infrastructure link:'), `${rich.length - rich0} ${saved.length} ${body.slice(-200)}`);
+      ok('the status: link copied, and attach the file that downloaded', el('problemSendStatus').textContent.endsWith('The report topo_acme_reception_2026-11-10_fibra-norte.html was downloaded: attach it to the email.'), el('problemSendStatus').textContent);
+      el('problemAttach').click();
+      await tick();
+      const op1 = opened.length;
+      el('problemEmailBtn').click();
+      await until(() => opened.length > op1, 600);
+      ok('unticked: no download, no attached line', saved.length === 1 && !decodeURIComponent(opened[opened.length - 1]).includes('Report: attached'));
+      // While it is being made, Email waits.
+      let release;
+      fileAnswer = () => new Promise((r) => { release = () => r({ blob: new Blob(['x']), name: 'r.html', type: 'text/html', format: 'html', bytes: 1 }); });
+      el('problemAttach').click();
+      await tick();
+      ok('while the report is made: Email disabled, the note says so', el('problemEmailBtn').disabled && el('problemAttachNote').textContent === 'Preparing the report…');
+      release();
+      await until(() => TI.draft.send.attachFile, 600);
+      ok('then Email is back', !el('problemEmailBtn').disabled);
+      TI.closeProblemDialog();
+      H.reportFile = heldFile; H.save = heldSave;
+    }
     window.serverMailRoute = () => ({ siteId: 's_test', relay: false });
     const before3 = mailed.length;
     TI.openIncidentSend(id);
@@ -343,19 +505,33 @@ window.addEventListener('load', async () => {
     if (held.mailRoute) window.serverMailRoute = held.mailRoute; else delete window.serverMailRoute;
     H.reportMail = held.reportMail;
 
-    // The password warning holds the link back.
+    // The password warning holds the link back: read on the copy as it
+    // leaves. The PC is only a linked device in Casa Segura's part (its
+    // notes do not go), so the part goes at once; the whole network warns.
     getNode('pc').notes = 'admin password: hunter22';
     save();
     const logN = state.log.length;
     TI.openIncidentSend(inc2.id);
+    await until(() => TI.draft.send && TI.draft.send.result, 600);
+    ok('a password in a linked device\'s notes: their part does not carry it, no warning, the link at once', el('problemLint').classList.contains('hidden')
+       && TI.draft.send.result.scope === 'part' && state.log.length === logN + 1, el('problemLint').textContent);
+    el('problemScopeRow').querySelector('input[value=whole]').click();
     await tick(); await tick();
-    ok('a password in the notes: the warning, no link yet, Send anyway', !el('problemLint').classList.contains('hidden')
+    ok('the whole network: the warning, the link held back, Send anyway', !el('problemLint').classList.contains('hidden')
        && el('problemLint').textContent.includes('Reception PC') && !TI.draft.send.result && !el('problemMakeBtn').classList.contains('hidden')
-       && el('problemMakeBtn').textContent === 'Send anyway' && state.log.length === logN, el('problemLint').textContent);
+       && el('problemMakeBtn').textContent === 'Send anyway' && state.log.length === logN + 1, el('problemLint').textContent);
     el('problemMakeBtn').click();
     await until(() => TI.draft.send.result, 600);
-    ok('Send anyway sends', !!TI.draft.send.result && state.log.length === logN + 1);
+    ok('Send anyway makes the whole network\'s link, no second "sent"', !!TI.draft.send.result && TI.draft.send.result.scope === 'whole' && state.log.length === logN + 1);
     TI.closeProblemDialog();
+    getNode('cam').notes = 'nvr password: hunter22';
+    save();
+    TI.openIncidentSend(inc2.id);
+    await tick(); await tick();
+    ok('a password on their own device warns for the part too', !el('problemLint').classList.contains('hidden') && el('problemLint').textContent.includes('Door cam') && !TI.draft.send.result,
+       el('problemLint').textContent);
+    TI.closeProblemDialog();
+    delete getNode('cam').notes; save();
     const hits = docSecretHits(Object.assign({}, serializeDoc(), { incidents: [{ id: 'inzz', symptom: 'other', text: 'wifi password: hunter22' }] }));
     ok('the warning reads a report\'s words too', hits.some((h) => h.kind === 'incident' && h.id === 'inzz'));
 

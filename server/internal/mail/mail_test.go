@@ -716,3 +716,150 @@ func TestDefaultFromOnAddressHosts(t *testing.T) {
 		}
 	}
 }
+
+// A client-chosen attachment name (D97): no path, no quotes or separators,
+// no leading dots, the type's extension forced, at most 120 runes.
+func TestCleanAttachName(t *testing.T) {
+	for in, want := range map[string]string{
+		"../../x.exe":                         "x.pdf",
+		"topo_acme_casa_2026-11-10_fibra.pdf": "topo_acme_casa_2026-11-10_fibra.pdf",
+		"topo_acme_casa_2026-11-10_fibra.PDF": "topo_acme_casa_2026-11-10_fibra.pdf",
+		"":                                    "report.pdf",
+		"...":                                 "report.pdf",
+		".hidden":                             "hidden.pdf",
+		"a\"b;c\r\nd.pdf":                     "abc d.pdf",
+		`C:\Users\x\report.pdf`:               "report.pdf",
+		"topo_東京_2026-11-10_光ファイバー.pdf": "topo_東京_2026-11-10_光ファイバー.pdf",
+		"report.html": "report.pdf",
+	} {
+		if got := CleanAttachName(in, "application/pdf"); got != want {
+			t.Errorf("%q -> %q, want %q", in, got, want)
+		}
+	}
+	if n := []rune(CleanAttachName(strings.Repeat("ж", 300), "application/pdf")); len(n) != 120 {
+		t.Fatalf("long name: %d runes", len(n))
+	}
+}
+
+// With an attachment the message is multipart/mixed: the alternative
+// (text and HTML, as without one), then the file in base64 lines of 76
+// with its name (RFC 2231 when not ASCII). Without one, nothing changes.
+func TestBytesWithAttachment(t *testing.T) {
+	m, _ := Render("report", "ja", Data{"lines": "x", "link": "https://topo.example.com/#e~a", "attach": "報告書.pdf", "email": "a@example.com"})
+	m.To, m.ID = "bo@example.com", "o_att"
+	plain, err := m.Bytes("Topo <topo@example.com>", "topo.example.com", time.Unix(1_700_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.Text, "報告書を添付しています: 報告書.pdf") || !strings.Contains(m.HTML, "報告書を添付しています") {
+		t.Fatalf("attached line: %s", m.Text)
+	}
+	data := []byte("%PDF-1.4\n" + strings.Repeat("\x00\xff binary ", 500))
+	m.Attachment = &Attachment{Name: "報告書.pdf", Type: "application/pdf", Data: data}
+	raw, err := m.Bytes("Topo <topo@example.com>", "topo.example.com", time.Unix(1_700_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(bytes.ReplaceAll(raw, []byte("\r\n"), nil), []byte("\n")) {
+		t.Fatal("bare LF in message")
+	}
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mt, params, _ := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+	if mt != "multipart/mixed" {
+		t.Fatalf("top type %s", mt)
+	}
+	mr := multipart.NewReader(msg.Body, params["boundary"])
+	alt, err := mr.NextPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	amt, aparams, _ := mime.ParseMediaType(alt.Header.Get("Content-Type"))
+	if amt != "multipart/alternative" {
+		t.Fatalf("first part %s", amt)
+	}
+	ar := multipart.NewReader(alt, aparams["boundary"])
+	var text string
+	for {
+		p, err := ar.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(p)
+		if strings.HasPrefix(p.Header.Get("Content-Type"), "text/plain") {
+			text = string(b)
+		}
+	}
+	if strings.ReplaceAll(text, "\r\n", "\n") != m.Text {
+		t.Fatalf("text part: %q", text)
+	}
+	file, err := mr.NextPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.FileName() != "報告書.pdf" {
+		t.Fatalf("filename %q (%s)", file.FileName(), file.Header.Get("Content-Disposition"))
+	}
+	if ct, p, _ := mime.ParseMediaType(file.Header.Get("Content-Type")); ct != "application/pdf" || p["name"] != "報告書.pdf" {
+		t.Fatalf("file type %s %v", ct, p)
+	}
+	enc, _ := io.ReadAll(file)
+	for _, l := range strings.Split(strings.TrimRight(string(enc), "\r\n"), "\r\n") {
+		if len(l) > 76 {
+			t.Fatalf("base64 line of %d", len(l))
+		}
+	}
+	got, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(string(enc), "\r\n", ""))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("attachment bytes differ: %v", err)
+	}
+	if _, err := mr.NextPart(); err != io.EOF {
+		t.Fatal("a third part")
+	}
+	// Without the attachment, byte for byte what it always was.
+	m.Attachment = nil
+	again, _ := m.Bytes("Topo <topo@example.com>", "topo.example.com", time.Unix(1_700_000_000, 0))
+	if mt, _, _ := mime.ParseMediaType(mustHeader(t, again)); mt != "multipart/alternative" || len(again) != len(plain) {
+		t.Fatalf("no attachment: %s", mt)
+	}
+	// A type other than a PDF is refused at composing.
+	m.Attachment = &Attachment{Name: "x.html", Type: "text/html", Data: []byte("<p>")}
+	if _, err := m.Bytes("Topo <topo@example.com>", "h", time.Unix(0, 0)); err == nil {
+		t.Fatal("html attachment composed")
+	}
+}
+
+func mustHeader(t *testing.T, raw []byte) string {
+	t.Helper()
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return msg.Header.Get("Content-Type")
+}
+
+// The file sink names the attachment and its size.
+func TestFileSinkAttachment(t *testing.T) {
+	cfg := testCfg(t, "TOPO_MAIL=file")
+	m, err := New(cfg, nil, Options{Now: func() time.Time { return time.UnixMilli(1_700_000_000_000) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, _ := Render("report", "en", Data{"lines": "x", "attach": "r.pdf"})
+	msg.To, msg.ID = "bo@example.com", "o_f"
+	msg.Attachment = &Attachment{Name: "r.pdf", Type: "application/pdf", Data: []byte("%PDF-123")}
+	if err := m.Send(context.Background(), msg); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(cfg.MailDir, "outbox.jsonl"))
+	var l SinkLine
+	json.Unmarshal(bytes.TrimSpace(b), &l)
+	if l.Attachment != "r.pdf" || l.AttachmentBytes != 8 {
+		t.Fatalf("sink line %+v", l)
+	}
+}

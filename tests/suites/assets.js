@@ -391,6 +391,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // nothing opened or saved until the preview's Download or Print.
     ok('the labels are previewed first: no tab, no download', printed.previewed === true && opened === null && downloaded === null && !el('sheetPreviewDialog').classList.contains('hidden'));
     await printed.ready;
+    setReportFormat('html');   // the HTML file (the PDF is the sheetpreview suite's)
     el('sheetPreviewDownload').click();
     HTMLAnchorElement.prototype.click = realClick;
     ok('the preview\'s Download saves it, named as labels', /_\d{4}-\d{2}-\d{2}_labels\.html$/.test(downloaded || '') && downloaded === printed.name && el('sheetPreviewDialog').classList.contains('hidden'), downloaded);

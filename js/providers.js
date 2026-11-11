@@ -121,6 +121,10 @@ function providerCardHtml(p) {
         <div class="net-actions">
             <button type="button" class="link-btn" data-act="covers" data-pv="${id}" ${covered ? '' : 'disabled'}
                 title="${escapeHtml(t('Select every device and cable this provider is responsible for and show them on the map'))}">${escapeHtml(t('Select what it covers'))}</button>
+            <button type="button" class="link-btn" data-act="report" data-pv="${id}"
+                title="${escapeHtml(t('What this provider looks after here, the devices around it, the cables and their problems: print it, or save it as a PDF or HTML'))}">${escapeHtml(t('Report for this provider'))}</button>
+            <button type="button" class="link-btn" data-act="sharepart" data-pv="${id}"
+                title="${escapeHtml(t('A locked link that carries only what this provider looks after'))}">${escapeHtml(t('Share their part'))}</button>
             <button type="button" class="link-btn" data-act="edit" data-pv="${id}" aria-expanded="${open}">${escapeHtml(t(open ? 'Close' : 'Edit'))}</button>
             <button type="button" class="link-btn quiet" data-act="delete" data-pv="${id}">${escapeHtml(t('Delete'))}</button>
         </div>
@@ -195,7 +199,11 @@ async function onProviderAction(e) {
         return;
     }
     if (act === 'covers') { selectProviderCovers(id); return; }
+    // Their report (D98): a read-only network prints too.
+    if (act === 'report') { if (typeof openProviderReport === 'function') await openProviderReport(id, { doc: serializeDoc(), audience: 'client' }); return; }
     if (readOnlyRefuses()) return;
+    // Their part as a locked link (js/share.js), any time.
+    if (act === 'sharepart') { openShareDialog('doc', { providerIds: [id] }); return; }
     if (act === 'preset') { addProviderPreset(id); return; }
     if (act === 'delete') await deleteProvider(id);
 }

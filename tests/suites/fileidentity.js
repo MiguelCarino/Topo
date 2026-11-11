@@ -122,7 +122,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
       tagged.assetTag = 'A-0001';
       const lab = printAssetLabels([{ type: 'node', id: tagged.id }]);
       await new Promise((r) => setTimeout(r, 50));
-      ok('the labels sheet is <stem>_labels.html', !!lab && el('sheetPreviewName').textContent === `${stem}_labels.html`, el('sheetPreviewName') && el('sheetPreviewName').textContent);
+      // In the preview's PDF | HTML format (reportFormat, js/report.js; PDF by default).
+      ok('the labels sheet is <stem>_labels.<format>', !!lab && el('sheetPreviewName').textContent === `${stem}_labels.${reportFormat()}`, el('sheetPreviewName') && el('sheetPreviewName').textContent);
       if (typeof closeSheetPreview === 'function') closeSheetPreview();
       const realCapture = window.captureCanvasImage;
       window.captureCanvasImage = () => Promise.resolve({ url: 'data:image/png;base64,iVBORw0KGgo=', ext: 'png' });
@@ -135,7 +136,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('an estate report naming nobody says networks', reportFileName({ site: '', date: '2026-01-02', binder: true }, 'report') === 'topo_networks_2026-01-02_report.html');
     const loc = printLocate([{ type: 'node', id: state.nodes[0].id }]);
     await new Promise((r) => setTimeout(r, 50));
-    ok('the Locate sheet is <stem>_locate.html', !!loc && el('sheetPreviewName').textContent === `${stem}_locate.html`, el('sheetPreviewName') && el('sheetPreviewName').textContent);
+    ok('the Locate sheet is <stem>_locate.<format>', !!loc && el('sheetPreviewName').textContent === `${stem}_locate.${reportFormat()}`, el('sheetPreviewName') && el('sheetPreviewName').textContent);
     if (typeof closeSheetPreview === 'function') closeSheetPreview();
 
     // ---- 1/5c. The binder: download, bound file, picker ----

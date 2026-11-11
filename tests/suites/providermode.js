@@ -184,6 +184,20 @@ window.addEventListener('load', async () => {
     selfSel.dispatchEvent(new Event('change', { bubbles: true }));
     ok('remembered in Settings', PM.providerSelfOf('pm-net') === 'pI' && (savedSettings().providerSelf || {})['pm-net'] === 'pI');
     ok('what you look after here', el('cfgPanel-visit').textContent.includes('You look after: 1 device'), el('cfgPanel-visit').textContent.slice(0, 400));
+    // Their part on paper and as spreadsheets (js/providerreport.js, D96).
+    const partBtns = [...el('cfgPanel-visit').querySelectorAll('.pm-part button')];
+    ok('the panel offers Your part of this network, Devices CSV and Cables CSV', partBtns.map((b) => b.textContent).join('|') === '📄 Your part of this network|Devices CSV|Cables CSV',
+       partBtns.map((b) => b.textContent).join('|'));
+    partBtns[0].click();
+    await until(() => !!sheetPreviewBuilt() && !el('sheetPreviewDialog').classList.contains('hidden'));
+    const pvBuilt = sheetPreviewBuilt();
+    ok('Your part of this network opens the print preview, named for the provider', !!pvBuilt && el('sheetPreviewTitle').textContent === 'Your part of this network'
+       && /^topo_clinica-sol_reception_\d{4}-\d{2}-\d{2}_fibra-norte\.html$/.test(pvBuilt.name) && pvBuilt.html.includes('Nothing loads since 9.'), pvBuilt && pvBuilt.name);
+    closeSheetPreview();
+    const savedBefore = saved.length;
+    partBtns[1].click(); partBtns[2].click();
+    const csvNames = saved.slice(savedBefore).map((s) => s.name);
+    ok('Devices CSV and Cables CSV download their items', /_fibra-norte-devices\.csv$/.test(csvNames[0] || '') && /_fibra-norte-cables\.csv$/.test(csvNames[1] || ''), csvNames.join(' '));
 
     // ---- 4. The provider works, then records the visit ----
     getNode('rt').name = 'Core router';
@@ -240,7 +254,32 @@ window.addEventListener('load', async () => {
     ok('the link never goes in the mailto:; the hyperlink goes to the clipboard first', rich.length === 1 && rich[0].text === r.result.url
        && rich[0].html === '<a href="' + r.result.url.replace(/&/g, '&amp;') + '">Follow the infrastructure link</a>' && !opened[0].includes('e~')
        && decodeURIComponent(opened[0]).includes('\nInfrastructure link:\n\n'), decodeURIComponent(opened[0] || '').slice(-300));
-    ok('the return step says where to paste it', el('visitReturnStatus').textContent.startsWith('Your mail program is open and the infrastructure link is copied.'), el('visitReturnStatus').textContent);
+    ok('the return step says the link is copied, where to paste it, and that the client has the passphrase', el('visitReturnStatus').textContent
+       === 'Link copied: paste it in the email under "Infrastructure link:" (Ctrl+V, or on a phone press and hold, then Paste). The client already has the passphrase.', el('visitReturnStatus').textContent);
+    // Every press copies the link again (D94), after Copy link or a failure too.
+    el('visitCopyLinkBtn').click();
+    await until(() => r.copied === 'linkonly');
+    el('visitEmailBtn').click();
+    await until(() => opened.length > 1);
+    el('visitEmailBtn').click();
+    await until(() => opened.length > 2);
+    ok('Email the client, pressed three times: three copies of the hyperlink, three mail programs', opened.length === 3 && rich.length === 3 && rich.every((x) => x.text === r.result.url), opened.length + ' ' + rich.length);
+    {
+      const heldRich = H.copyRich;
+      H.copyRich = async () => { throw new Error('denied'); };
+      el('visitEmailBtn').click();
+      await until(() => r.copied === 'link-failed');
+      ok('a failed copy: the link shown, no mail program yet', opened.length === 3 && el('visitReturnStatus').textContent.startsWith('The link could not be copied. Copy it from the box below;'));
+      el('visitEmailBtn').click();
+      await until(() => opened.length > 3);
+      ok('the next press opens it anyway', opened.length === 4 && r.failCount === 2);
+      H.copyRich = heldRich;
+      rich.length = 0;
+      el('visitEmailBtn').click();
+      await until(() => opened.length > 4);
+      ok('and copies again once the clipboard works', rich.length === 1 && r.copied === 'link');
+      rich.length = 1;
+    }
     el('visitCopyMsgBtn').click();
     await until(() => rich.length > 1 && el('visitReturnStatus').textContent === 'Message copied.');
     ok('Copy message: rich with the hyperlink, plain with the raw link', rich.length === 2 && rich[1].html.includes('>Follow the infrastructure link</a>')

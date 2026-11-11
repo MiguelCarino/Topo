@@ -12,10 +12,14 @@
 //                          this browser first, so a visit sent back has a
 //                          card to merge into
 //   sendIncident           status sent (sentAt the first time, routedTo
-//                          grows), then a locked link of the network with
-//                          its reports; a network too big for a link, or a
-//                          page that cannot lock one, goes as a file to
-//                          attach: an unlocked link never carries a report
+//                          grows), then incidentLinkFor
+//   incidentLinkFor        a locked link of the providers' part of the
+//                          network (scope 'part', the send step's default:
+//                          js/providerpart.js, D91-D95) or of the whole
+//                          network with its reports ('whole'); a copy too
+//                          big for a link, or a page that cannot lock one,
+//                          goes as a file to attach: an unlocked link never
+//                          carries a report
 //   composeIncidentMessage the email's subject and body and the mailto:,
 //                          pure, so the suite reads the words without a mail
 //                          program
@@ -28,10 +32,11 @@
 // the client reads all of it.
 //
 // Without a server nothing is sent from here. Email opens the visitor's mail
-// program with a mailto: and copies the infrastructure link first, as a
-// hyperlink ("Follow the infrastructure link", rich HTML in the clipboard,
-// D86): a mailto: carries plain text only, so the body has an
-// "Infrastructure link:" line to paste under. Share hands the plain message,
+// program with a mailto: and copies the infrastructure link first, on every
+// press (D94), as a hyperlink ("Follow the infrastructure link", rich HTML in
+// the clipboard, D86): a mailto: carries plain text only, so the body has an
+// "Infrastructure link:" line to paste under, and the client handles only the
+// passphrase by hand. Share hands the plain message,
 // raw link included, to the system's share sheet; the passphrase goes
 // another way. On a Topo server that can send mail, the server emails the
 // report to providers who are not members (D87, js/serversync.js); members
@@ -63,8 +68,14 @@ const _incHooks = {
         await cb.writeText(text);
     },
     reportMail: (siteId, body) => (typeof serverReportMail === 'function' ? serverReportMail(siteId, body) : Promise.reject(new Error('no server'))),
+    // The provider report attached to the email (D97, js/providerreport.js).
+    reportFile: (ids, opts) => (typeof providerReportFile === 'function' ? providerReportFile(ids, opts) : Promise.resolve(null)),
+    save: (blob, name) => saveBlob(blob, name),
     now: () => Date.now()
 };
+// The largest report the server attaches (D97: a PDF, the server's
+// ReportMaxAttach); a bigger one, or an HTML one, is downloaded instead.
+const PROBLEM_ATTACH_SERVER_MAX = 6 * 1024 * 1024;
 
 // ---- Reading an incident ----
 const incidentById = (id, list = state.incidents) => (list || []).find((x) => x && x.id === id) || null;
@@ -130,7 +141,7 @@ function linesToHtml(lines, html = {}) {
 // without the link (the server's template adds it), the phone apart.
 // A mailto: longer than INCIDENT_MAILTO_MAX has the client's words
 // shortened in the email (never in the report).
-function composeIncidentMessage({ incident, site, providers = [], link = '', file = '', sealed = false, ctx = {} }) {
+function composeIncidentMessage({ incident, site, providers = [], link = '', file = '', sealed = false, attachment = '', ctx = {} }) {
     const inc = incident || {};
     const symptom = symptomLabel(inc.symptom);
     const subject = t('Network problem at {site}: {symptom}', { site: site || incidentSiteName(), symptom });
@@ -154,7 +165,9 @@ function composeIncidentMessage({ incident, site, providers = [], link = '', fil
     const pass = link && sealed ? [t('The passphrase comes separately: I will send it by another way.')] : [];
     const fileLine = !link && file ? [t('The network is in the attached file {file}. Open it with Topo: {url}', { file, url: publicBase() })] : [];
     // The mailto: body: a line to paste the link under, never the link.
-    const mailTail = link ? [t('Infrastructure link:'), '', ...pass] : fileLine;
+    // The provider report the client attaches by hand (D97).
+    const attached = attachment ? [t('Report: attached ({file})', { file: attachment })] : [];
+    const mailTail = (link ? [t('Infrastructure link:'), '', ...pass] : fileLine).concat(attached);
     const words = inc.text || '';
     const full = head(words);
     const fullBody = full.lines.concat(link ? [t('Follow the infrastructure link: {link}', { link }), ...pass] : fileLine).join('\n');
@@ -273,9 +286,11 @@ async function createIncident(d) {
 }
 
 // A network file of the open network, its reports and visits included:
-// topo_<org>_<site>_<date>_<kind>.json. -> the file's name.
-function downloadIncidentFile(kind) {
-    const doc = identifiedDoc(serializeDoc());
+// topo_<org>_<site>_<date>_<kind>.json. doc: the copy to write instead, as
+// it left (a provider's part, partCopy: never the whole network then).
+// -> the file's name.
+function downloadIncidentFile(kind, partDoc = null) {
+    const doc = partDoc || identifiedDoc(serializeDoc());
     const name = docDisplayName();
     const filename = `${docFileStem(kind)}.json`;
     downloadJson(Object.assign({ kind: 'nettopology', version: 1 }, name ? { name } : {}, { doc }), filename);
@@ -283,10 +298,11 @@ function downloadIncidentFile(kind) {
 }
 
 // Mark it sent and make what goes to the providers. opts: { providerIds,
-// passphrase }. The status is committed first, so the copy that leaves says
-// sent; if the link then cannot be made, that one step is undone (nothing
-// else has run since). -> { ok, url, file, why: 'link'|'too-long'|'no-seal',
-// message } or { ok: false, reason }.
+// passphrase, scope: 'part' | 'whole' (the default here; the send step
+// starts on 'part') }. The status is committed first, so the copy that
+// leaves says sent; if the link then cannot be made, that one step is undone
+// (nothing else has run since). -> incidentLinkFor's answer, or { ok: false,
+// reason }.
 async function sendIncident(id, opts = {}) {
     if (state.readOnly) { readOnlyRefuses(); return { ok: false, reason: 'readonly' }; }
     if (!incidentById(id)) return { ok: false, reason: 'missing' };
@@ -301,7 +317,6 @@ async function sendIncident(id, opts = {}) {
     });
     if (!res) return { ok: false, reason: 'stale' };
     const committed = JSON.stringify(serializeDoc());
-    let url = null, file = '', why = 'link';
     // Through a Topo server (js/serversync.js): no link and no file, the
     // change is pushed and the server emails the providers.
     if (opts.server) {
@@ -311,24 +326,49 @@ async function sendIncident(id, opts = {}) {
         const providers0 = to.map((p) => providerById(p)).filter(Boolean);
         return { ok: true, url: null, file: '', why: 'server', message: composeIncidentMessage({ incident: inc0, providers: providers0, link: '', file: '', sealed: false }), providers: providers0 };
     }
+    return incidentLinkFor(id, { providerIds: to, passphrase: opts.passphrase, scope: opts.scope, committed });
+}
+
+// The link (or the file) of a report already marked sent: what the send
+// step makes once, and again when the client changes what the link carries
+// (no new commit then). opts: { providerIds, passphrase, scope, committed:
+// the network as the send left it, when this is that send's own link: a link
+// that cannot be made undoes the send then }.
+// scope 'part': only what those providers look after (partCopy,
+// js/providerpart.js), its file too; 'whole' or no provider: the whole
+// network with its reports. -> { ok, url, file, why: 'link'|'too-long'|
+// 'no-seal', message, providers, scope, partDoc, counts } or { ok: false, reason }.
+async function incidentLinkFor(id, opts = {}) {
+    const to = (opts.providerIds || []).filter((p) => providerById(p));
+    let url = null, file = '', why = 'link', partDoc = null, counts = null;
+    const failed = (e) => {
+        console.warn('Report: could not make the link', e);
+        if (opts.committed && JSON.stringify(serializeDoc()) === opts.committed) undo();
+        return { ok: false, reason: 'build' };
+    };
+    if (opts.scope === 'part' && to.length && typeof partCopy === 'function') {
+        try {
+            const pc = await partCopy(to, { incidentId: id });
+            if (pc) { partDoc = pc.doc; counts = pc.part.counts; }
+        } catch (e) { return failed(e); }
+    }
     if (!canSeal()) why = 'no-seal';
     else {
         const pass = String(opts.passphrase || '');
         try {
             if (pass.length < SEAL_MIN_PASSPHRASE) throw new Error('passphrase');
-            url = await buildShareLink('doc', true, pass, { incidents: true, max: _incHooks.urlMax() });
-        } catch (e) {
-            console.warn('Report: could not make the link', e);
-            if (JSON.stringify(serializeDoc()) === committed) undo();
-            return { ok: false, reason: 'build' };
-        }
+            url = await buildShareLink('doc', true, pass, partDoc ? { doc: partDoc, max: _incHooks.urlMax() } : { incidents: true, max: _incHooks.urlMax() });
+        } catch (e) { return failed(e); }
         if (!url) why = 'too-long';
     }
-    if (!url) file = downloadIncidentFile('incident');
+    if (!url) file = downloadIncidentFile('incident', partDoc);
     const inc = incidentById(id);
     const providers = to.map((p) => providerById(p)).filter(Boolean);
-    const message = composeIncidentMessage({ incident: inc, providers, link: url || '', file, sealed: !!url });
-    return { ok: true, url, file, why, message, providers };
+    const args = { incident: inc, providers, link: url || '', file, sealed: !!url };
+    const message = composeIncidentMessage(args);
+    // The same message again with an attachment line (or without it).
+    const compose = (extra) => composeIncidentMessage(Object.assign({}, args, extra));
+    return { ok: true, url, file, why, message, compose, providers, scope: partDoc ? 'part' : 'whole', partDoc, counts };
 }
 
 // ---- The sheet ----
@@ -578,28 +618,57 @@ function enterSendStage() {
         makeIncidentLink();
         return;
     }
-    const hits = secretHitsFor('doc');
+    // What the link carries (D95): only what the chosen providers look
+    // after, by default and every time; the whole network on request.
+    const scope = problemPartOf(_pb.sendTo) ? 'part' : 'whole';
+    const hits = problemSendHits(scope);
     // A network on a Topo server, providers who are not all members: the
     // link as below, then the server emails it when it can (D87).
     const mail = typeof serverMailRoute === 'function' ? serverMailRoute(state.libraryId, _pb.sendTo) : null;
-    _pb.send = { pass: canSeal() ? generatePassphrase() : '', shown: false, hits, result: null, busy: false, copied: '', mail, mailed: false, mailNote: '' };
+    _pb.send = { pass: canSeal() ? generatePassphrase() : '', shown: false, hits, result: null, busy: false, copied: '', failCount: 0,
+        scope, part: problemPartOf(_pb.sendTo), mail, mailed: false, mailNote: '',
+        attach: false, attachBusy: false, attachFile: null, attachError: '', attachDownloaded: false, attachGen: 0 };
     renderProblemDialog();
     // Nothing to warn about: the link is made at once. Otherwise the
     // warning is read first, and the link waits for a tap.
     if (!hits.length) makeIncidentLink();
 }
 
+// The chosen providers' part of the open network (counts for the send
+// step), or null when there is none to choose (no provider chosen, or none
+// the network holds).
+function problemPartOf(ids) {
+    if (typeof providerPart !== 'function') return null;
+    const to = (ids || []).filter((p) => providerById(p));
+    if (!to.length) return null;
+    const part = providerPart(serializeDoc(), to, { incidentId: _pb.incidentId });
+    return part.whole ? null : { providerIds: to, counts: part.counts };
+}
+// The password-in-notes lint of the copy as it would leave: the part
+// (canonical, as the provider reads it) or the whole network (D93, A14).
+function problemSendHits(scope) {
+    if (scope !== 'part') return secretHitsFor('doc');
+    try {
+        const part = providerPart(serializeDoc(), _pb.sendTo, { incidentId: _pb.incidentId });
+        return secretHitsFor('doc', part.whole ? null : canonicalDoc(part.doc));
+    } catch (e) { return secretHitsFor('doc'); }
+}
+
 async function makeIncidentLink() {
     const s = _pb.send;
     if (!s || s.busy || !_pb.incidentId) return;
-    s.busy = true; s.copied = '';
+    // Sent already (a change of what the link carries, before or after):
+    // only the link again, no second 'sent'.
+    if (s.sentOnce) { await rebuildIncidentLink(); return; }
+    s.busy = true; s.copied = ''; s.failCount = 0;
     incEl('problemError').textContent = '';
     renderProblemDialog();
     const gen = _pb.gen;
     let res;
-    try { res = await sendIncident(_pb.incidentId, { providerIds: _pb.sendTo, passphrase: s.pass, server: !!s.server }); }
+    try { res = await sendIncident(_pb.incidentId, { providerIds: _pb.sendTo, passphrase: s.pass, server: !!s.server, scope: s.scope }); }
     catch (e) { console.warn('Report: send failed', e); res = { ok: false, reason: 'build' }; }
     if (gen !== _pb.gen || _pb.send !== s) return;
+    if (res.ok) s.sentOnce = true;
     s.busy = false;
     if (!res.ok) {
         incEl('problemError').textContent = res.reason === 'build' ? t('The link could not be made in this browser, so nothing was marked as sent.')
@@ -608,27 +677,106 @@ async function makeIncidentLink() {
         return;
     }
     s.result = res;
+    recomposeProblemMessage(s);
+    // On a server that emails (D87), the email waits for Send by email
+    // (D95); a server that cannot says why once.
+    if (s.mail && res.url) { const why = serverMailWhyNot(s); if (why && why !== 'none') s.mailNote = why; }
     renderProblemDialog();
-    if (s.mail && res.url) await mailThroughServer(s, gen);
 }
 
-// The server emails the report with the locked link (D87): one request, to
-// the chosen providers' addresses. Without a relay, or when it fails, the
-// send step stays the mail-program one and says why in one line.
+// The client chose what the link carries again: a new link of the same
+// report (a new part revision when it is the part), no new commit; the
+// clipboard state starts over. The generation guard drops a stale one.
+async function rebuildIncidentLink() {
+    const s = _pb.send;
+    if (!s || !_pb.incidentId) return;
+    s.busy = true; s.copied = ''; s.failCount = 0; s.result = null;
+    incEl('problemError').textContent = '';
+    renderProblemDialog();
+    const gen = _pb.gen;
+    const mine = s.linkGen = (s.linkGen || 0) + 1;
+    let res;
+    try { res = await incidentLinkFor(_pb.incidentId, { providerIds: _pb.sendTo, passphrase: s.pass, scope: s.scope }); }
+    catch (e) { console.warn('Report: the link could not be made again', e); res = { ok: false, reason: 'build' }; }
+    if (gen !== _pb.gen || _pb.send !== s || s.linkGen !== mine) return;
+    s.busy = false;
+    if (!res.ok) {
+        incEl('problemError').textContent = t('The link could not be made in this browser.');
+        renderProblemDialog();
+        return;
+    }
+    s.result = res;
+    recomposeProblemMessage(s);
+    renderProblemDialog();
+}
+// The scope's radio: the lint again for that copy (A14), then its link, a
+// new one when the report was sent already; a warning holds it back until
+// Send anyway, as on the first send.
+function setProblemScope(scope) {
+    const s = _pb.send;
+    if (!s || s.server || s.busy || (scope !== 'part' && scope !== 'whole') || scope === s.scope) return;
+    if (scope === 'part' && !s.part) return;
+    s.scope = scope;
+    s.hits = problemSendHits(scope);
+    if (!s.hits.length) { makeIncidentLink(); return; }
+    s.result = null; s.copied = ''; s.failCount = 0;
+    s.linkGen = (s.linkGen || 0) + 1;   // a link still being made for the other choice is dropped
+    renderProblemDialog();
+}
+
+// The server emails the report with the locked link (D87), when the client
+// presses Send by email (D95): one request, to the chosen providers'
+// addresses, with the provider report attached when asked for (D97: a PDF
+// of PROBLEM_ATTACH_SERVER_MAX at most; the server reads it, and the send
+// step said so). Without a relay, or when it fails, the send step stays the
+// mail-program one and says why in one line.
+// Why the server will not email this one: a sentence, 'none' (no server
+// route, no address), or '' when it can.
+function serverMailWhyNot(s) {
+    const m = s && s.result && s.result.message;
+    if (!s || !s.mail || !m || !m.to.length) return 'none';
+    if (!s.mail.relay) return t('This server cannot send email, so Email opens your mail program.');
+    if (m.to.length > 5) return t('The server sends to five addresses at most, so Email opens your mail program.');
+    return '';
+}
+const serverMailReady = (s) => !!(s && s.mail && s.result && s.result.url && !s.mailed && !s.mailing && !s.mailFailed && serverMailWhyNot(s) === '');
+// A Blob as base64, without the data: prefix.
+function blobBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => { const v = String(r.result || ''); resolve(v.slice(v.indexOf(',') + 1)); };
+        r.onerror = () => reject(r.error || new Error('read'));
+        r.readAsDataURL(blob);
+    });
+}
 async function mailThroughServer(s, gen) {
     const res = s.result, m = res && res.message;
-    if (!m || !m.to.length) return;
-    if (!s.mail.relay) { s.mailNote = t('This server cannot send email, so Email opens your mail program.'); renderProblemDialog(); return; }
-    if (m.to.length > 5) { s.mailNote = t('The server sends to five addresses at most, so Email opens your mail program.'); renderProblemDialog(); return; }
+    if (!serverMailReady(s)) return;
     s.mailing = true;
     renderProblemDialog();
+    const body = { to: m.to, subject: m.server.subject, lines: m.server.lines, link: res.url,
+        phone: m.server.phone || undefined, passphraseNote: m.server.passphraseNote, lang: typeof LOCALE === 'string' ? LOCALE : 'en' };
+    const f = s.attach && s.attachFile;
+    let hand = '';
+    if (f) {
+        if (f.type === 'application/pdf' && f.bytes <= PROBLEM_ATTACH_SERVER_MAX) {
+            try { body.attachment = { name: f.name, type: f.type, dataBase64: await blobBase64(f.blob) }; }
+            catch (e) { console.warn('Report: the report could not be read for the server', e); }
+        }
+        if (!body.attachment) {
+            // An HTML report, or a PDF too big: the client sends it.
+            if (!s.attachDownloaded) { _incHooks.save(f.blob, f.name); s.attachDownloaded = true; }
+            hand = t('The server attaches a PDF of 6 MB at most, so the report {file} was downloaded: send it to them yourself.', { file: f.name });
+        }
+    }
     let note = '';
     try {
-        await _incHooks.reportMail(s.mail.siteId, { to: m.to, subject: m.server.subject, lines: m.server.lines, link: res.url,
-            phone: m.server.phone || undefined, passphraseNote: m.server.passphraseNote, lang: typeof LOCALE === 'string' ? LOCALE : 'en' });
+        await _incHooks.reportMail(s.mail.siteId, body);
         s.mailed = true;
+        s.mailedAttach = body.attachment ? body.attachment.name : '';
     } catch (e) {
         console.warn('Report: the server did not send the email', e);
+        s.mailFailed = true;
         note = e && e.status === 429 ? t('The server has sent all the reports it may for now, so Email opens your mail program.')
             : e && e.status === 0 ? t('The server cannot be reached, so Email opens your mail program.')
                 : t('The server could not send the email, so Email opens your mail program.');
@@ -636,6 +784,47 @@ async function mailThroughServer(s, gen) {
     s.mailing = false;
     if (gen !== _pb.gen || _pb.send !== s) return;
     s.mailNote = note;
+    s.handNote = hand;
+    renderProblemDialog();
+}
+
+// ---- The report attached (D97) ----
+// The chosen providers' report, made once when the box is ticked (never in
+// Email's press: the copy and the mail program need the press's own
+// activation), as a PDF (reportFormat; always a PDF when the server emails
+// it), else the HTML. The message's mailto: then says "Report: attached".
+function recomposeProblemMessage(s) {
+    const res = s && s.result;
+    if (res && res.compose) res.message = res.compose({ attachment: s.attach && s.attachFile ? s.attachFile.name : '' });
+}
+async function buildProblemAttachment() {
+    const s = _pb.send;
+    if (!s || !s.attach || !s.part) return;
+    const mine = s.attachGen = (s.attachGen || 0) + 1;
+    Object.assign(s, { attachBusy: true, attachFile: null, attachError: '', attachDownloaded: false });
+    recomposeProblemMessage(s);
+    renderProblemDialog();
+    const gen = _pb.gen;
+    let f = null;
+    try {
+        f = await _incHooks.reportFile(s.part.providerIds, { incidentId: _pb.incidentId, audience: 'client',
+            format: s.mail && s.mail.relay && !s.mailFailed ? 'pdf' : undefined });
+    } catch (e) { console.warn('Report: the provider report could not be made', e); f = null; }
+    if (gen !== _pb.gen || _pb.send !== s || s.attachGen !== mine) return;
+    s.attachBusy = false;
+    s.attachFile = f || null;
+    if (!f) s.attachError = t('The report could not be made in this browser.');
+    recomposeProblemMessage(s);
+    renderProblemDialog();
+}
+function setProblemAttach(on) {
+    const s = _pb.send;
+    if (!s || s.server || s.mailed || s.mailing) return;
+    s.attach = !!on;
+    if (s.attach) { buildProblemAttachment(); return; }
+    s.attachGen = (s.attachGen || 0) + 1;   // a report still being made is dropped
+    Object.assign(s, { attachBusy: false, attachFile: null, attachError: '', attachDownloaded: false });
+    recomposeProblemMessage(s);
     renderProblemDialog();
 }
 
@@ -650,6 +839,7 @@ function renderProblemSend() {
         : t('No provider is chosen: send it to whoever looks after this network.'),
         noEmail.length ? t('No email address for {names}: call them, or copy the message.', { names: noEmail.join(', ') }) : '']);
     renderSecretLint(incEl('problemLint'), s.hits || [], null);
+    renderProblemScope(s);
     const sealedLink = !!(res && res.url);
     // The passphrase: before the link only while it is being made; after,
     // only for a locked link.
@@ -673,11 +863,18 @@ function renderProblemSend() {
     else if (res.why === 'server') status.textContent = t('Sent through the server. {names} will get an email.', { names: names.join(', ') });
     else if (res.why === 'too-long') status.textContent = t('Marked as sent. This network is too big for a link, so the file {file} was downloaded: attach it to the email.', { file: res.file });
     else status.textContent = t('Marked as sent. This page cannot lock a link (it needs https), so the file {file} was downloaded instead: attach it to the email.', { file: res.file });
-    if (res && s.copied === 'link') status.textContent = t('Your mail program is open and the infrastructure link is copied. Paste it under "Infrastructure link:" (Ctrl+V, or on a phone press and hold, then Paste).');
-    if (res && s.copied === 'link-failed') status.textContent = t('The link could not be copied. Copy it from the box below, then press the email button again and paste it where the email says so.');
+    if (res && s.copied === 'link') status.textContent = t('Link copied: paste it in the email under "Infrastructure link:" (Ctrl+V, or on a phone press and hold, then Paste). The passphrase goes another way, such as a call or a text.');
+    if (res && s.copied === 'link-failed') status.textContent = (s.failCount || 0) > 1
+        ? t('The link could not be copied: copy it from the box below and paste it in the email under "Infrastructure link:".')
+        : t('The link could not be copied. Copy it from the box below; Email opens your mail program on the next press.');
     if (res && s.copied === 'message') status.textContent = t('Message copied.');
+    if (res && s.copied === 'link' && s.attachDownloaded && s.attachFile) status.textContent = joinSentences([status.textContent,
+        t('The report {file} was downloaded: attach it to the email.', { file: s.attachFile.name })]);
+    if (res && serverMailReady(s) && !s.copied) status.textContent = joinSentences([status.textContent,
+        t('Press Send by email: the server emails the locked link to {names}.', { names: names.join(', ') })]);
     if (res && s.mailing) status.textContent = t('Sending the email from the server…');
-    if (res && s.mailed) status.textContent = t('Sent by email from the server to {names}. Send the passphrase another way, such as a call or a text.', { names: names.join(', ') });
+    if (res && s.mailed) status.textContent = joinSentences([t('Sent by email from the server to {names}. Send the passphrase another way, such as a call or a text.', { names: names.join(', ') }),
+        s.mailedAttach ? t('The report {file} went with it.', { file: s.mailedAttach }) : '', s.handNote || '']);
     if (res && s.mailNote && !s.mailed && !s.copied) status.textContent = joinSentences([s.mailNote, status.textContent]);
     const link = incEl('problemLink');
     link.value = sealedLink ? res.url : '';
@@ -695,7 +892,9 @@ function renderProblemSend() {
     // Nobody chosen has an email: a mailto: with no one in To helps nobody.
     if (res && !s.mailed && !s.mailing) email.classList.toggle('hidden', !(res.message && res.message.to.length));
     if (res && !s.mailed && !s.mailing) {
-        email.textContent = `✉ ${t('Email')}`;
+        email.textContent = serverMailReady(s) ? `✉ ${t('Send by email')}` : `✉ ${t('Email')}`;
+        // The report being made: Email waits for it.
+        email.disabled = !!(s.attach && s.attachBusy);
         share.textContent = `↗ ${t('Share…')}`;
         share.classList.toggle('hidden', !_incHooks.canShare());
         copy.textContent = `📋 ${t('Copy message')}`;
@@ -707,6 +906,44 @@ function renderProblemSend() {
     if (res) (res.providers || []).forEach((p) => { if (telHref(p.phone)) calls.appendChild(contactRow({ provider: p, reason: providerServiceLabel(providerServiceOf(p)) || '', open: null }, { mail: false })); });
 }
 
+// What the link carries (D95): shown once a provider is chosen and the
+// network holds a part for them, not on the server's route (D75), not once
+// the server mailed the link.
+function renderProblemScope(s) {
+    const row = incEl('problemScopeRow');
+    if (!row) return;
+    const shown = !!s.part && !s.server && !s.mailed && !s.mailing;
+    row.classList.toggle('hidden', !shown);
+    if (!shown) return;
+    const ids = s.part.providerIds;
+    const names = typeof partProviderNames === 'function' ? partProviderNames(ids) : ids.join(', ');
+    incEl('problemScopePartText').textContent = t(ids.length === 1 ? 'Only what {names} looks after' : 'Only what {names} look after', { names });
+    const c = (s.result && s.result.counts) || s.part.counts;
+    incEl('problemScopeCount').textContent = [tn(c.items, '1 device of theirs', '{n} devices of theirs'),
+        tn(c.context, '1 linked device around them', '{n} linked devices around them')].join(' · ');
+    row.querySelectorAll('input[name="problemScope"]').forEach((r) => { r.checked = r.value === s.scope; r.disabled = !!s.busy; });
+    const box = incEl('problemAttach'), note = incEl('problemAttachNote');
+    if (!box || !note) return;
+    box.checked = !!s.attach;
+    box.disabled = !!s.attachBusy;
+    let text = '';
+    if (s.attach) {
+        const m = s.result && s.result.message;
+        const server = !!(s.mail && s.mail.relay && !s.mailFailed && !(m && m.to.length > 5));
+        const f = s.attachFile;
+        // What the server attaches (mailThroughServer): a PDF within the limit.
+        const uploads = server && !!f && f.type === 'application/pdf' && f.bytes <= PROBLEM_ATTACH_SERVER_MAX;
+        text = s.attachBusy ? t('Preparing the report…') : s.attachError ? s.attachError
+            : !f ? '' : uploads ? t('The report {file} goes with the email.', { file: f.name })
+                : t('Email downloads the report {file}: attach it to the email.', { file: f.name });
+        // The E2E exception (D97), said before the press: only when the server
+        // gets the report (or may, while it is still being built).
+        if (server && (uploads || (!f && !s.attachError))) text = joinSentences([text, t('The server sends the report unlocked, so the server (and whoever runs it) can read it. The link stays locked.')]);
+    }
+    note.textContent = text;
+    note.classList.toggle('hidden', !text);
+}
+
 async function incidentCopy(text) {
     try { await _incHooks.copy(text); return true; } catch (e) { return false; }
 }
@@ -715,24 +952,40 @@ async function incidentCopyRich(html, text) {
 }
 // The infrastructure link goes to the clipboard as a hyperlink, then the
 // mail program opens with the words and an "Infrastructure link:" line to
-// paste under (D86). If the copy fails, the email would say to paste with
-// nothing to paste: say so first and show the link; the second press opens
-// the mail program.
+// paste under (D86). On EVERY press (D94): a press after Copy passphrase, or
+// after a copy that failed, copies the link again, so the client pastes it
+// and handles only the passphrase. The copy is the press's first await, so
+// it runs within the press's activation (Chromium, Firefox). If it fails,
+// the email would say to paste with nothing to paste: the first failure
+// shows the link, selected, and stops; the next press opens the mail program
+// whatever the clipboard does.
 async function problemEmail() {
-    const res = _pb.send && _pb.send.result;
-    if (!res) return;
-    const m = res.message;
-    if (res.url && _pb.send.copied !== 'link-failed') {
-        if (await incidentCopyRich(infraLinkHtml(res.url), res.url)) _pb.send.copied = 'link';
-        else {
-            _pb.send.copied = 'link-failed';
-            renderProblemDialog();
-            const box = incEl('problemLink'); box.focus(); box.select();
-            return;
-        }
+    const s = _pb.send;
+    const res = s && s.result;
+    if (!res || (s.attach && s.attachBusy)) return;
+    // On a server that emails: this press is Send by email (D95).
+    if (serverMailReady(s)) { await mailThroughServer(s, _pb.gen); return; }
+    let failed = false;
+    if (res.url) {
+        const ok = await incidentCopyRich(infraLinkHtml(res.url), res.url);
+        if (_pb.send !== s || s.result !== res) return;   // the link was made again meanwhile
+        if (!ok) {
+            s.failCount = (s.failCount || 0) + 1;
+            s.copied = 'link-failed';
+            failed = true;
+            if (s.failCount === 1) {
+                renderProblemDialog();
+                const box = incEl('problemLink'); box.focus(); box.select();
+                return;
+            }
+        } else s.copied = 'link';
     }
+    // The report, once per build (D97): the client attaches it.
+    const f = s.attach && s.attachFile;
+    if (f && !s.attachDownloaded) { _incHooks.save(f.blob, f.name); s.attachDownloaded = true; }
     renderProblemDialog();
-    _incHooks.open(m.mailto);
+    if (failed) { const box = incEl('problemLink'); box.focus(); box.select(); }
+    _incHooks.open(s.result.message.mailto);
 }
 async function problemShare() {
     const res = _pb.send && _pb.send.result;
@@ -757,7 +1010,7 @@ async function problemCopyPass() {
 function problemFileAgain() {
     const res = _pb.send && _pb.send.result;
     if (!res) return;
-    res.file = downloadIncidentFile('incident');
+    res.file = downloadIncidentFile('incident', res.partDoc || null);
 }
 
 // ---- Tap it on the map ----
@@ -858,6 +1111,11 @@ function problemDialogLocale() {
     incEl('problemSaveBtn').addEventListener('click', () => saveProblem(false));
     incEl('problemSaveSendBtn').addEventListener('click', () => saveProblem(true));
     incEl('problemMakeBtn').addEventListener('click', makeIncidentLink);
+    const scopeRow = incEl('problemScopeRow');
+    if (scopeRow) scopeRow.addEventListener('change', (e) => {
+        if (e.target.name === 'problemScope' && e.target.checked) setProblemScope(e.target.value);
+        else if (e.target.id === 'problemAttach') setProblemAttach(e.target.checked);
+    });
     incEl('problemPassShow').addEventListener('click', () => { if (_pb.send) { _pb.send.shown = !_pb.send.shown; renderProblemDialog(); } });
     incEl('problemPassCopy').addEventListener('click', problemCopyPass);
     incEl('problemEmailBtn').addEventListener('click', problemEmail);
@@ -1196,7 +1454,7 @@ function incidentsReportSection(incidents, log) {
 // Published for tests/suites/incident.js (and the later steps' panels).
 window.TopoIncidents = {
     hooks: _incHooks, draft: _pb, INCIDENT_MAILTO_MAX, infraLinkHtml, incidentCopyRich, linesToHtml, tHtml,
-    commitIncidentChange, createIncident, sendIncident, composeIncidentMessage, incidentDraftProblems, keepForIncident,
+    commitIncidentChange, createIncident, sendIncident, incidentLinkFor, setProblemScope, setProblemAttach, buildProblemAttachment, serverMailReady, mailThroughServer, problemEmail, PROBLEM_ATTACH_SERVER_MAX, problemPartOf, composeIncidentMessage, incidentDraftProblems, keepForIncident,
     incidentWhereText, incidentSiteName, downloadIncidentFile, openProblemDialog, openIncidentSend, closeProblemDialog,
     startProblemPick, endProblemPick, defaultSendTo, telHref,
     markIncidentFixed, reopenIncident, askMarkFixed, askReopen, openIncidentNodeIds, liveIncidents, incidentLogText, renderIncidentsPanel,

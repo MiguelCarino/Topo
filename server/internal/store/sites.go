@@ -69,9 +69,12 @@ func SetRoster(ctx context.Context, q Q, id string, seq, epoch int64, nameCt str
 
 // DeleteSite removes a site and everything that hangs from it (rosters,
 // members, wraps, invites, revisions and bodies cascade), plus its unsent
-// mail.
+// mail and the files it carries.
 func DeleteSite(ctx context.Context, q Q, id string) error {
 	if _, err := q.ExecContext(ctx, "DELETE FROM outbox WHERE site_id = ? AND sent IS NULL", id); err != nil {
+		return err
+	}
+	if _, err := q.ExecContext(ctx, "DELETE FROM mail_files WHERE site_id = ?", id); err != nil {
 		return err
 	}
 	_, err := q.ExecContext(ctx, "DELETE FROM sites WHERE id = ?", id)

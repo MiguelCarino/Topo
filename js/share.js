@@ -21,10 +21,16 @@ let _shareGen = 0;   // a result is shown only for the choices it was made from
 // found once when the dialog opens: the passphrase field redraws the dialog
 // on every keystroke, and the network cannot change under a modal.
 let _shareLintHits = [];
+// Share their part (D98): the link carries only what these providers look
+// after (partCopy, js/providerpart.js), not the whole network. null: the
+// whole network, as always. Set by openShareDialog's opts, each opening.
+let _sharePart = null;
 
 const _shareEl = (id) => document.getElementById(id);
 
-function openShareDialog(mode) {
+// opts.providerIds (mode 'doc'): their part only (Share their part, the
+// Providers tab).
+function openShareDialog(mode, opts = {}) {
     // A newer Topo's document does not go into a link: the serializer would
     // trim it, and passing it through raw would let hand-edited keys past the
     // allowlist (outgoingDoc in app.js). The build file carries it as it is.
@@ -33,15 +39,23 @@ function openShareDialog(mode) {
         return;
     }
     _shareMode = mode === 'binder' ? 'binder' : 'doc';
+    _sharePart = null;
+    if (_shareMode === 'doc' && Array.isArray(opts.providerIds) && typeof providerPart === 'function') {
+        const ids = opts.providerIds.filter((id) => providerById(id));
+        const part = ids.length ? providerPart(serializeDoc(), ids, {}) : null;
+        if (part && !part.whole) _sharePart = { providerIds: ids, counts: part.counts, lintDoc: canonicalDoc(part.doc) };
+    }
     const seal = _shareEl('shareSeal');
     seal.checked = canSeal();
     seal.disabled = !canSeal();
     _shareEl('sharePass').value = canSeal() ? generatePassphrase() : '';
     setPassphraseShown(false);   // masked each time; the visitor reveals or copies it
-    _shareLintHits = secretHitsFor(_shareMode);
-    // Off each time: names and phone numbers go only when asked for.
+    // The password lint of the copy as it would leave: their part, canonical.
+    _shareLintHits = _sharePart ? secretHitsFor('doc', _sharePart.lintDoc) : secretHitsFor(_shareMode);
+    // Off each time: names and phone numbers go only when asked for. Their
+    // part carries their own reports always (the rule, D91): no choice.
     _shareEl('shareIncidents').checked = false;
-    _shareEl('shareIncidentsRow').classList.toggle('hidden', !shareHasIncidents(_shareMode));
+    _shareEl('shareIncidentsRow').classList.toggle('hidden', !!_sharePart || !shareHasIncidents(_shareMode));
     resetShareResult();
     renderShareDialog();
     _shareEl('shareDialog').classList.remove('hidden');
@@ -63,18 +77,24 @@ function renderShareDialog() {
     const binder = _shareMode === 'binder';
     const sealed = shareSealed();
     const pass = sharePassphrase();
-    _shareEl('shareTitle').textContent = binder ? t('Share these networks') : t('Share this network');
+    const part = !binder && _sharePart;
+    _shareEl('shareTitle').textContent = binder ? t('Share these networks') : part ? t('Share their part') : t('Share this network');
     _shareEl('shareBlurb').textContent = binder
         ? t('One link carries every saved network. Whoever opens it sees them on a shelf and chooses which to keep.')
-        : t('The link carries the whole network: devices, addresses, names and notes.');
+        : part ? t(part.providerIds.length === 1 ? 'The link carries only what {name} looks after: {items}, {context}, their reports and visits.'
+            : 'The link carries only what {name} look after: {items}, {context}, their reports and visits.',
+            { name: partProviderNames(part.providerIds), items: tn(part.counts.items, '1 device of theirs', '{n} devices of theirs'),
+                context: tn(part.counts.context, '1 linked device around them', '{n} linked devices around them') })
+            : t('The link carries the whole network: devices, addresses, names and notes.');
     _shareEl('sharePassRow').classList.toggle('hidden', !sealed);
     const hint = _shareEl('shareHint');
     hint.style.color = sealed ? 'var(--text-muted)' : '#f87171';
     if (!canSeal()) hint.textContent = t('This page cannot encrypt (it needs https), so the link can only be plain. Anyone who gets it can read the whole network.');
-    else if (!sealed) hint.textContent = `⚠ ${t('Anyone who gets this link can read the whole network. Chats, mail and browser history keep links.')}`;
+    else if (!sealed) hint.textContent = `⚠ ${part ? t('Anyone who gets this link can read what it carries. Chats, mail and browser history keep links.')
+        : t('Anyone who gets this link can read the whole network. Chats, mail and browser history keep links.')}`;
     else if (pass.length < SEAL_MIN_PASSPHRASE) hint.textContent = t('At least {n} characters. The suggested one is far stronger than anything memorable.', { n: SEAL_MIN_PASSPHRASE });
     else hint.textContent = t('Send the passphrase a different way from the link: a call, a text, another app. The link alone cannot be opened.');
-    if (!sealed && shareIncludesIncidents()) hint.textContent += ` ${t('The problem reports carry names and phone numbers: lock the link.')}`;
+    if (!sealed && (part ? sharePartHasPeople(part) : shareIncludesIncidents())) hint.textContent += ` ${t('The problem reports carry names and phone numbers: lock the link.')}`;
     const copy = _shareEl('shareCopyBtn');
     copy.disabled = _shareBusy || (sealed && pass.length < SEAL_MIN_PASSPHRASE);
     copy.textContent = _shareBusy ? `⏳ ${t('Locking…')}` : sealed ? `🔒 ${t('Copy locked link')}` : `🔗 ${t('Copy plain link')}`;
@@ -112,6 +132,8 @@ function resetShareResult() {
 // js/model.js); left out unless asked. opts.max: a network link longer than
 // this is null as well (a report sent to its providers goes as a file then,
 // js/incidents.js); the share dialog's own network links have no cap.
+// opts.doc: the copy to carry instead of the open network, as it leaves
+// (partCopy, js/providerpart.js: a provider's part, with its identity).
 async function buildShareLink(mode, sealed, passphrase, opts = {}) {
     const binder = mode === 'binder';
     if (!binder && state.readOnly) throw new Error('A read-only document is not shared as a link.');
@@ -126,7 +148,8 @@ async function buildShareLink(mode, sealed, passphrase, opts = {}) {
     if (binder) {
         payload = stampedBinderLinkFile(strip);
         payload.sites = await Promise.all(payload.sites.map(async (site) => (site && site.doc ? Object.assign({}, site, { doc: await relink(site.doc) }) : site)));
-    } else payload = withLinkLog(await relink(strip(identifiedDoc(serializeDoc(), 'link'))));
+    } else if (opts.doc) payload = opts.doc;   // a provider's part, identified and chained already (js/providerpart.js)
+    else payload = withLinkLog(await relink(strip(identifiedDoc(serializeDoc(), 'link'))));
     const json = JSON.stringify(payload);
     const frag = sealed
         ? await sealFragment(json, binder ? SEAL_KIND.binder : SEAL_KIND.doc, passphrase)
@@ -160,6 +183,10 @@ function shareHasIncidents(mode) {
     if (mode === 'binder') return binderLinkFile().file.sites.some((site) => docHasIncidentData(site && site.doc));
     return docHasIncidentData(serializeDoc());
 }
+// Their part always carries their reports (D91): a reporter's name, phone or
+// e-mail in one of them asks for the lock as the whole network's does.
+const sharePartHasPeople = (part) => (Array.isArray(part && part.lintDoc && part.lintDoc.incidents) ? part.lintDoc.incidents : [])
+    .some((i) => i && i.reporter && typeof i.reporter === 'object' && Object.values(i.reporter).some((v) => typeof v === 'string' && v.trim()));
 const shareIncludesIncidents = () => { const box = _shareEl('shareIncidents'); return !!box && box.checked && !_shareEl('shareIncidentsRow').classList.contains('hidden'); };
 
 async function copyShareLink() {
@@ -177,7 +204,7 @@ async function copyShareLink() {
                 : '{n} of these networks were made by a newer version of Topo and cannot travel in a link. Export the binder file instead?', { n: newer }), { ok: t('Back up all') })) exportBinder();
             return;
         }
-    } else if (state.readOnly) { closeShareDialog(); openShareDialog('doc'); return; }
+    } else if (state.readOnly) { closeShareDialog(); openShareDialog('doc', _sharePart ? { providerIds: _sharePart.providerIds } : {}); return; }
     // Sealing takes a moment and the dialog stays live meanwhile: a new
     // passphrase, the seal unticked, or the dialog closed and reopened all
     // bump the generation (resetShareResult), and the link made from the old
@@ -185,7 +212,14 @@ async function copyShareLink() {
     const gen = _shareGen;
     _shareBusy = true; renderShareDialog();
     let url;
-    try { url = await buildShareLink(_shareMode, sealed, pass, { incidents: shareIncludesIncidents() }); }
+    try {
+        if (_shareMode === 'doc' && _sharePart) {
+            // Their part, recorded as a 'part' revision (its base when it
+            // comes back, D93).
+            const pc = await partCopy(_sharePart.providerIds, {});
+            url = pc ? await buildShareLink('doc', sealed, pass, { doc: pc.doc }) : undefined;
+        } else url = await buildShareLink(_shareMode, sealed, pass, { incidents: shareIncludesIncidents() });
+    }
     catch (e) { console.warn('Share: could not build the link', e); url = undefined; }
     finally { _shareBusy = false; renderShareDialog(); }
     if (gen !== _shareGen) return;   // the choices changed while it was locking: that link matches nothing on screen

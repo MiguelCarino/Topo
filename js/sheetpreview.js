@@ -4,11 +4,15 @@
 // with a Print button of its own, or download it when the pop-up was
 // blocked. Like the site report (refreshReportPreview, js/report.js), each now
 // shows first, in a dialog, exactly the page that is printed or saved: Print
-// prints that frame, Download saves the same bytes under the same name as
-// before, the ✕ (or Esc, or the backdrop) drops it and nothing is handed
-// over. The dialog is the fleet's report preview (carino-ui.css 18b .rpv):
-// title, count, the sheet's note and the file name in the left column,
-// Print then Download at its foot, the page on the right (the stage).
+// prints that frame, Download saves it in the format the PDF | HTML switch
+// says (reportFormat, js/report.js): HTML is the same bytes under the same
+// name as before, PDF the same pages drawn into a PDF (carino-pdf.js) on the
+// sheet's own paper (its @page: a 62 x 29 mm page per label, A4 with the
+// Locate sheet's margins). The ✕ (or Esc, or the backdrop) drops it and
+// nothing is handed over. The dialog is the fleet's report preview
+// (carino-ui.css 18b .rpv): title, count, the sheet's note, the switch and
+// the file name in the left column, Print then Download at its foot, the
+// page on the right (the stage).
 //
 // The frame holds the sheet itself. Its own print rules are made to apply on
 // screen too (@media print read as @media all: under print that is the same
@@ -46,7 +50,7 @@ body { box-sizing: content-box; width: ${px(s.pageW - 2 * s.marginX)}; min-heigh
 .sp-break span { position: absolute; left: 8px; top: 3px; font: 10px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; color: #6b7280; }`;
 })();
 
-const _sheetPv = { seq: 0, cfg: null, built: null, url: null, back: null, ready: null };
+const _sheetPv = { seq: 0, cfg: null, built: null, url: null, back: null, ready: null, status: '' };
 const sheetPvEl = (id) => document.getElementById(id);
 const sheetPreviewOpen = () => { const d = sheetPvEl('sheetPreviewDialog'); return !!d && !d.classList.contains('hidden'); };
 
@@ -80,6 +84,14 @@ function sheetPageBreaks(doc, top, pageH) {
 }
 
 function sheetPreviewStatus(text) { const el = sheetPvEl('sheetPreviewStatus'); if (el) el.textContent = text || ''; }
+
+// The Download button and the file name follow the PDF | HTML switch.
+function syncSheetFormat() {
+    const dl = sheetPvEl('sheetPreviewDownload');
+    if (dl) dl.textContent = reportDownloadLabel();
+    const b = _sheetPv.built, name = sheetPvEl('sheetPreviewName');
+    if (b && name) name.textContent = reportFileName(b.meta, b.kind, reportFormat());
+}
 
 // The page counted and marked once the frame shows it.
 function measureSheetPreview(frame, kind) {
@@ -135,7 +147,10 @@ function refreshSheetPreview() {
     sheetPvEl('sheetPreviewBlurb').textContent = note ? note.textContent : '';
     const opts = sheetPvEl('sheetPreviewOpts');
     if (opts) opts.hidden = !note;
-    sheetPvEl('sheetPreviewName').textContent = built.name;
+    sheetPvEl('sheetPreviewName').textContent = reportFileName(cfg.meta, cfg.kind, reportFormat());
+    const dl = sheetPvEl('sheetPreviewDownload');
+    if (dl) dl.textContent = reportDownloadLabel();
+    _sheetPv.status = '';
     sheetPreviewStatus('');
     ['sheetPreviewPrint', 'sheetPreviewDownload'].forEach((id) => { const b = sheetPvEl(id); if (b) b.disabled = true; });
     const shownHtml = sheetPreviewHtml(html, cfg.kind);
@@ -153,6 +168,7 @@ function refreshSheetPreview() {
             try { frame.contentWindow.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheetPreview(); }); } catch (e) { /* not readable */ }
             let status = '';
             try { status = measureSheetPreview(frame, cfg.kind); } catch (e) { console.warn('Print preview: could not measure the pages.', e); }
+            _sheetPv.status = status;
             sheetPreviewStatus(status);
             ['sheetPreviewPrint', 'sheetPreviewDownload'].forEach((id) => { const b = sheetPvEl(id); if (b) b.disabled = false; });
             done(built);
@@ -176,6 +192,8 @@ function openSheetPreview(cfg) {
     }
     if (!sheetPreviewOpen()) _sheetPv.back = document.activeElement;
     _sheetPv.cfg = cfg;
+    // The PDF | HTML switch above the file name (reportFormat, js/report.js).
+    mountReportFormat(dialog, syncSheetFormat);
     dialog.classList.remove('hidden');
     const ready = refreshSheetPreview();
     const close = sheetPvEl('sheetPreviewClose');
@@ -218,14 +236,40 @@ async function printSheetPreview() {
     return true;
 }
 
-// Download: the sheet as a file, the same bytes and name the blocked-pop-up
-// fallback saved before; the dialog closes. -> { name, url }.
+// Download, in the switch's format (reportFormat). HTML: the sheet as a
+// file, the same bytes and name the blocked-pop-up fallback saved before;
+// the dialog closes. -> { name, url, format }. PDF: the same pages drawn on
+// the sheet's paper (makeReportPdf, js/report.js), the buttons held and the
+// status saying so meanwhile, then saved under the same stem and the dialog
+// closed; one that could not be made says so and the dialog stays, one
+// finished after the dialog was closed is not saved.
+// -> a promise of { ok, name, url?, format, error? }.
 function downloadSheetPreview() {
     const b = _sheetPv.built;
     if (!b) return null;
-    const url = saveBlob(new Blob([b.html], { type: 'text/html;charset=utf-8' }), b.name);
-    closeSheetPreview();
-    return { name: b.name, url };
+    if (reportFormat() !== 'pdf') {
+        const url = saveBlob(new Blob([b.html], { type: 'text/html;charset=utf-8' }), b.name);
+        closeSheetPreview();
+        return { name: b.name, url, format: 'html' };
+    }
+    const name = reportFileName(b.meta, b.kind, 'pdf');
+    const btns = ['sheetPreviewPrint', 'sheetPreviewDownload'].map(sheetPvEl).filter(Boolean);
+    btns.forEach((x) => { x.disabled = true; });
+    sheetPreviewStatus(t('Creating the PDF…'));
+    const still = () => _sheetPv.built === b && sheetPreviewOpen();
+    return makeReportPdf(b.html).then((blob) => {
+        if (!still()) return { ok: false, cancelled: true, name, format: 'pdf' };
+        const url = saveBlob(blob, name);
+        closeSheetPreview();
+        return { ok: true, name, url, format: 'pdf' };
+    }, (e) => {
+        console.warn('Print preview: could not create the PDF.', e);
+        if (still()) sheetPreviewStatus(t('Could not create the PDF.'));
+        return { ok: false, name, format: 'pdf', error: (e && e.message) || String(e) };
+    }).then((out) => {
+        if (still()) btns.forEach((x) => { x.disabled = false; });
+        return out;
+    });
 }
 
 (function wireSheetPreview() {
@@ -244,7 +288,7 @@ function downloadSheetPreview() {
     window.addEventListener('resize', () => { if (sheetPreviewOpen()) fitSheetPreview(); });
     // A language switch while it is open: the sheet in the new language
     // (i18n.js's listener, registered first, has switched the dictionary).
-    window.addEventListener('carino:langchange', () => setTimeout(() => { if (sheetPreviewOpen()) refreshSheetPreview(); }, 0));
+    window.addEventListener('carino:langchange', () => setTimeout(() => { if (sheetPreviewOpen()) { relabelReportFormats(); refreshSheetPreview(); } }, 0));
 })();
 // What the open preview holds ({ html, meta, kind, name }), or null.
 const sheetPreviewBuilt = () => _sheetPv.built;

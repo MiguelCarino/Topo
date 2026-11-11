@@ -40,7 +40,7 @@ func TestOpenMigratesAndReopens(t *testing.T) {
 	if fk != 1 {
 		t.Fatal("foreign keys off on the reader")
 	}
-	for _, table := range []string{"meta", "users", "devices", "link_requests", "sessions", "challenges", "sites", "site_rosters", "members", "site_wraps", "invites", "revisions", "rev_bodies", "outbox", "mail_rate", "verify_fail", "last_sent"} {
+	for _, table := range []string{"meta", "users", "devices", "link_requests", "sessions", "challenges", "sites", "site_rosters", "members", "site_wraps", "invites", "revisions", "rev_bodies", "outbox", "mail_rate", "verify_fail", "last_sent", "mail_files"} {
 		var n int
 		if err := s.R.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&n); err != nil || n != 1 {
 			t.Errorf("table %s missing", table)
@@ -235,5 +235,91 @@ func TestRevBodiesCascade(t *testing.T) {
 	s.W.QueryRow("SELECT count(*) FROM rev_bodies").Scan(&n)
 	if n != 0 {
 		t.Fatal("bodies outlived their site")
+	}
+}
+
+// 0002 (D97) applies on a database left at 0001 with mail queued, and the
+// rows already there keep working (file_id NULL).
+func TestMailFilesMigrationOnAnOldDatabase(t *testing.T) {
+	ms, err := migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) < 2 || ms[1].name != "0002_mail_files.sql" {
+		t.Fatalf("migrations: %v", ms)
+	}
+	dir := t.TempDir()
+	w, _ := sql.Open("sqlite", dsn(filepath.Join(dir, "x.db"), true))
+	w.SetMaxOpenConns(1)
+	defer w.Close()
+	s := &Store{W: w, R: w}
+	ctx := context.Background()
+	if err := applyMigrations(ctx, s, ms[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Exec("INSERT INTO outbox(id, kind, to_email, lang, data, created, send_after) VALUES('o_old','report','a@x.test','en','{}',1,1)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyMigrations(ctx, s, ms); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := DueMail(ctx, w, 10, 10)
+	if err != nil || len(rows) != 1 || rows[0].FileID != "" {
+		t.Fatalf("old row after 0002: %v %+v", err, rows)
+	}
+	// A file named by two waiting rows stays until both are done.
+	if err := InsertMailFile(ctx, w, &MailFile{ID: "mf_1", SiteID: "s_1", Name: "r.pdf", Type: "application/pdf", Data: []byte("%PDF-1"), Created: 1}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"o_a", "o_b"} {
+		if err := InsertMail(ctx, w, &Mail{ID: id, Kind: "report", To: "a@x.test", SiteID: "s_1", Lang: "en", Data: "{}", Created: 1, SendAfter: 1, FileID: "mf_1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	MailSent(ctx, w, "o_a", 2)
+	if gone, _ := DropMailFileIfUnused(ctx, w, "mf_1"); gone {
+		t.Fatal("dropped while o_b still waits")
+	}
+	MailRetry(ctx, w, "o_b", 0, "given up")
+	if gone, _ := DropMailFileIfUnused(ctx, w, "mf_1"); !gone {
+		t.Fatal("kept after every row was done")
+	}
+	if n, _ := CountMailFiles(ctx, w); n != 0 {
+		t.Fatalf("files left: %d", n)
+	}
+}
+
+// A deleted site takes its files; the housekeeping sweeps a file no waiting
+// row names.
+func TestMailFilesCleanup(t *testing.T) {
+	s := open(t, t.TempDir())
+	defer s.Close()
+	ctx := context.Background()
+	for _, f := range []MailFile{{ID: "mf_site", SiteID: "s_gone"}, {ID: "mf_orphan", SiteID: "s_other"}, {ID: "mf_wait", SiteID: "s_other"}} {
+		f.Name, f.Type, f.Data, f.Created = "r.pdf", "application/pdf", []byte("%PDF-"), 1
+		if err := InsertMailFile(ctx, s.W, &f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := InsertMail(ctx, s.W, &Mail{ID: "o_w", Kind: "report", To: "a@x.test", SiteID: "s_other", Lang: "en", Data: "{}", Created: 1, SendAfter: 1, FileID: "mf_wait"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := InsertMail(ctx, s.W, &Mail{ID: "o_s", Kind: "report", To: "a@x.test", SiteID: "s_gone", Lang: "en", Data: "{}", Created: 1, SendAfter: 1, FileID: "mf_site"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteSite(ctx, s.W, "s_gone"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetMailFile(ctx, s.R, "mf_site"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("site file kept: %v", err)
+	}
+	if _, err := s.Housekeep(ctx, 10, HousekeepLimits{SessionIdleMs: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetMailFile(ctx, s.R, "mf_orphan"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("orphan kept: %v", err)
+	}
+	if f, err := GetMailFile(ctx, s.R, "mf_wait"); err != nil || string(f.Data) != "%PDF-" {
+		t.Fatalf("waiting file swept: %v", err)
 	}
 }

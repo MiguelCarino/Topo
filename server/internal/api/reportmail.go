@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -20,7 +22,9 @@ import (
 // Reply-To the signed-in person. The text and HTML come from a fixed
 // template (internal/mail renderReport): the client sends plain lines, never
 // HTML, and the link must be one of this server's own pages, so the server
-// cannot be used to mail anyone an arbitrary link.
+// cannot be used to mail anyone an arbitrary link. The one file it may carry
+// is a PDF (D97: the provider report), checked for its signature, its name
+// cleaned and its extension forced.
 const (
 	reportMaxTo      = 5
 	reportMaxSubject = 200
@@ -28,6 +32,11 @@ const (
 	reportMaxChars   = 6000
 	reportMaxLink    = 20000 // DOC_URL_MAX (16,000) and room for the query
 	reportMaxPhone   = 40
+	// ReportMaxAttach is the largest attached report (decoded bytes, D97); a
+	// body carrying one is read with up to reportMaxBody (base64 adds a
+	// third, plus the rest of the request).
+	ReportMaxAttach = 6 << 20
+	reportMaxBody   = 9 << 20
 	// ReportPerUserHour and ReportPerSiteDay are the sends allowed (one
 	// request is one send, up to reportMaxTo addresses).
 	ReportPerUserHour = 10
@@ -66,17 +75,42 @@ func (s *Server) reportMail(w http.ResponseWriter, r *http.Request) {
 		Phone    string   `json:"phone"`
 		PassNote bool     `json:"passphraseNote"`
 		Lang     string   `json:"lang"`
+		// The provider report attached (D97): a PDF only, at most
+		// ReportMaxAttach bytes. The server reads it in clear and keeps it
+		// until it is sent: the client was told so (the E2E exception).
+		Attachment *struct {
+			Name       string `json:"name"`
+			Type       string `json:"type"`
+			DataBase64 string `json:"dataBase64"`
+		} `json:"attachment"`
 	}
-	if err := decodeBody(w, r, 64<<10, &req); err != nil {
+	if !s.MailRelay() {
+		writeError(w, http.StatusServiceUnavailable, ErrUnavailable, map[string]any{"field": "mail"})
+		return
+	}
+	sess := SessionFrom(r.Context())
+	site := r.PathValue("site")
+	// The limits are looked at before a large body is read (a refused send
+	// costs a few bytes, not megabytes); they are spent below, once the
+	// request is valid.
+	if ok, wait := s.reportUser.Peek(sess.UserID); !ok {
+		writeError(w, http.StatusTooManyRequests, ErrRateLimited, map[string]any{"retryAfter": retrySeconds(wait), "limit": "user"})
+		return
+	}
+	if ok, wait := s.reportSite.Peek(site); !ok {
+		writeError(w, http.StatusTooManyRequests, ErrRateLimited, map[string]any{"retryAfter": retrySeconds(wait), "limit": "site"})
+		return
+	}
+	if r.ContentLength > reportMaxBody {
+		writeError(w, http.StatusRequestEntityTooLarge, ErrTooLarge, map[string]any{"field": "attachment"})
+		return
+	}
+	if err := decodeBody(w, r, reportMaxBody, &req); err != nil {
 		writeDecodeError(w, err)
 		return
 	}
 	bad := func(field string) {
 		writeError(w, http.StatusBadRequest, ErrBadRequest, map[string]any{"field": field})
-	}
-	if !s.MailRelay() {
-		writeError(w, http.StatusServiceUnavailable, ErrUnavailable, map[string]any{"field": "mail"})
-		return
 	}
 	if len(req.To) == 0 || len(req.To) > reportMaxTo {
 		bad("to")
@@ -127,12 +161,31 @@ func (s *Server) reportMail(w http.ResponseWriter, r *http.Request) {
 	if !mail.ValidLang(lang) {
 		lang = "en"
 	}
-	sess := SessionFrom(r.Context())
+	var file *store.MailFile
+	if a := req.Attachment; a != nil {
+		if mail.AttachTypes[a.Type] == "" {
+			bad("attachment")
+			return
+		}
+		data, err := base64.StdEncoding.DecodeString(a.DataBase64)
+		if err != nil {
+			bad("attachment")
+			return
+		}
+		if len(data) == 0 || len(data) > ReportMaxAttach {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrTooLarge, map[string]any{"field": "attachment"})
+			return
+		}
+		if !bytes.HasPrefix(data, []byte("%PDF-")) {
+			bad("attachment")
+			return
+		}
+		file = &store.MailFile{ID: store.NewID("mf_"), SiteID: site, Name: mail.CleanAttachName(a.Name, a.Type), Type: a.Type, Data: data}
+	}
 	replyTo, err := mail.ParseAddress(sess.Email)
 	if err != nil {
 		replyTo = ""
 	}
-	site := r.PathValue("site")
 	// The limits: per person per hour, then per site per day (a refused
 	// site send gives the person's token back).
 	if ok, wait := s.reportUser.Take(sess.UserID); !ok {
@@ -151,13 +204,25 @@ func (s *Server) reportMail(w http.ResponseWriter, r *http.Request) {
 	if req.PassNote {
 		data["pass"] = "1"
 	}
+	fileID := ""
+	if file != nil {
+		data["attach"] = file.Name
+		fileID = file.ID
+	}
 	b, _ := json.Marshal(data)
 	ctx := r.Context()
 	ms := s.d.Now().UnixMilli()
 	err = s.d.Store.Tx(ctx, func(tx *sql.Tx) error {
+		// The file once, however many addresses (D97).
+		if file != nil {
+			file.Created = ms
+			if err := store.InsertMailFile(ctx, tx, file); err != nil {
+				return err
+			}
+		}
 		for _, addr := range to {
 			if err := store.InsertMail(ctx, tx, &store.Mail{ID: store.NewID("o_"), Kind: "report", To: addr, SiteID: site, Lang: lang,
-				Data: string(b), Created: ms, SendAfter: ms}); err != nil {
+				Data: string(b), Created: ms, SendAfter: ms, FileID: fileID}); err != nil {
 				return err
 			}
 		}
@@ -173,9 +238,17 @@ func (s *Server) reportMail(w http.ResponseWriter, r *http.Request) {
 	for i, a := range to {
 		masked[i] = mail.Mask(a)
 	}
-	s.d.Log.Info("report mail queued", "site", site, "user", sess.UserID, "to", strings.Join(masked, ","))
+	attached := 0
+	if file != nil {
+		attached = len(file.Data)
+	}
+	s.d.Log.Info("report mail queued", "site", site, "user", sess.UserID, "to", strings.Join(masked, ","), "attachmentBytes", attached)
 	s.wake()
-	writeJSON(w, http.StatusAccepted, map[string]any{"queued": len(to)})
+	out := map[string]any{"queued": len(to)}
+	if file != nil {
+		out["attachment"] = file.Name
+	}
+	writeJSON(w, http.StatusAccepted, out)
 }
 
 func retrySeconds(d time.Duration) int {

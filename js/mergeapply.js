@@ -152,7 +152,7 @@ async function commitMerge(opts = {}) {
         const mineJson = live ? JSON.stringify(serializeDoc()) : JSON.stringify((libraryEntry(targetId) || {}).doc || null);
         const mine = JSON.parse(mineJson);
         if (!mine) return { ok: false, reason: 'target' };
-        const plan = planMerge(mine, theirs, base);
+        const plan = planMerge(mine, theirs, base, { part: opts.part || null });
         if (opts.plan && mergeConflictKeys(opts.plan) !== mergeConflictKeys(plan)) {
             showToast(t('The network changed since the merge was reviewed: review it again.'));
             return { ok: false, reason: 'stale', plan };
@@ -183,9 +183,16 @@ async function commitMerge(opts = {}) {
         // and a later copy naming the rev must not take the edits as its
         // base (they would read as removed by the other side). The tab's
         // copy of the arrival is recorded instead when it has one.
+        // A provider's part merged back (D93) is held as a part: the base of
+        // that provider's next return, never a full copy's (outgoingBase).
+        const theirsWhy = opts.part ? 'part' : 'merge-theirs';
         if (theirsRev && typeof recordRevision === 'function' && !hasRevision(targetId, theirsRev)) {
-            if (typeof hasSessionRevision === 'function' && hasSessionRevision(theirsRev)) adoptSessionRevisions(targetId, [theirsRev], 'merge-theirs');
-            else recordRevision(targetId, theirsRev, theirs, 'merge-theirs');
+            if (typeof hasSessionRevision === 'function' && hasSessionRevision(theirsRev)) adoptSessionRevisions(targetId, [theirsRev], theirsWhy);
+            // With the part's context and ids, as the part that left was
+            // (recordPartRevision): the next return from it asks before a
+            // context removal and never pairs a new record with one of yours.
+            else recordRevision(targetId, theirsRev, theirs, theirsWhy, undefined, opts.part ? {
+                nodes: [...(opts.part.nodes || [])], groups: [...(opts.part.groups || [])], all: [...(opts.part.known || [])] } : undefined);
         }
         if (typeof landingIsOpen === 'function' && landingIsOpen() && typeof renderLanding === 'function') renderLanding();
         // A report brought in open or sent: the provider's banner (an IT firm

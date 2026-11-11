@@ -17,7 +17,10 @@ are D51 onward there.
   pushes again.
 - **Notifications by email only**, with no network content in them; and,
   for a client reporting a problem to providers who are not on the server,
-  the problem report itself (below, "Problem reports by email").
+  the problem report itself (below, "Problem reports by email"), with the
+  provider's report attached when the client asks: that PDF is the one
+  piece of network content the server reads in clear (the owner's choice,
+  D97; the browser warns).
 - **What it does not do (yet):** backups of its data (step 5b/5c; until then,
   see "Data and backups" below), installers and a server inside the desktop
   apps (later), Postgres or blob stores (later; the settings are reserved).
@@ -253,8 +256,9 @@ content.
 ### Problem reports by email
 
 When a client reports a problem to providers who are not members of the
-site, the browser makes the locked link as without a server and then asks
-the server to email it (docs/SCOPE.md D87). Members are told through the
+site, the browser makes the locked link as without a server and, when the
+client presses **Send by email**, asks the server to email it
+(docs/SCOPE.md D87, D95: nothing is mailed before that press). Members are told through the
 server instead (D75), with the usual "a problem was reported to you" email,
 whose link reads "Follow the infrastructure link".
 
@@ -266,12 +270,15 @@ and same-origin check:
 { "to": ["noc@isp.example"], "subject": "Network problem at Office: No internet",
   "lines": ["Nothing loads since 9.", "", "Problem: No internet", "Where: Reception PC"],
   "link": "https://topo.example.com/#e~…", "phone": "+52 55 1234 5678",
-  "passphraseNote": true, "lang": "es" }
+  "passphraseNote": true, "lang": "es",
+  "attachment": { "name": "topo_clinica-sol_reception_2026-11-10_fibra-norte.pdf",
+                  "type": "application/pdf", "dataBase64": "JVBERi0xLjQK…" } }
 ```
 
 - **Limits**: 1 to 5 addresses (bare, no display names), a subject of 200
   characters at most, 60 lines and 6000 characters at most, a phone of 40;
-  the body 64 KiB. 10 sends per person per hour and 30 per site per day (a
+  the body 9 MiB (room for an attachment in base64), read with the
+  2-minute deadline revision pushes get. 10 sends per person per hour and 30 per site per day (a
   send is one request); then 429 with `Retry-After` and `limit` (`user` or
   `site`). The limits live in memory: a restart refills them.
 - **The link rule**: the link must start with this server's public address
@@ -293,6 +300,38 @@ and same-origin check:
   relay.
 - It is queued in the outbox and sent by the mail worker like every other
   email (one message per address, kind `report`), never from the request.
+- **The attachment** (optional, D97): the provider's report the client
+  chose to attach, `{ name, type, dataBase64 }`. Only `application/pdf`
+  (an HTML file from the server's own address would get around the link
+  rule, and mail filters hold .html; the browser downloads an HTML report
+  for the client to send), standard base64, 1 byte to 6 MiB decoded, and
+  it must start with `%PDF-`. Otherwise 400 (`field: attachment`), or 413
+  (`field: attachment`) when empty or too big. Both rate limits are checked
+  without spending first (429 before the body is read), then the
+  `Content-Length` (over 9 MiB: 413 before reading); a refused request
+  spends no send. The name is cleaned (`mail.CleanAttachName`: no folder
+  part, quotes, `;<>|*?:` or control characters, no leading dots, 120
+  characters at most, `.pdf` forced, `report.pdf` when nothing is left).
+  The 202 answer adds `"attachment": <the cleaned name>`.
+- **Stored once, until sent**: the file goes in a `mail_files` row
+  (migration `0002_mail_files.sql`) in the same transaction as the outbox
+  rows, which name it by `file_id` (their data says `"attach": name`). The
+  worker loads it for each address; once no unsent row names it (each one
+  sent, given up or skipped) it is deleted. Deleting the site deletes its
+  files, and the housekeeping (also at start) sweeps any left orphaned. A
+  file missing at send time is logged and the email goes without it (and
+  without the "attached" line).
+- **The message**: without an attachment, byte for byte as before
+  (`multipart/alternative`). With one, `multipart/mixed`: the
+  `multipart/alternative` text and HTML, then the file (`Content-Type` and
+  `Content-Disposition: attachment` with the name per RFC 2231, base64 in
+  76-column lines). The text says "The report is attached: {name}" in the
+  recipient's language. The file sink's line (`outbox.jsonl`) adds
+  `attachment` and `attachmentBytes`, and so does the request's log line.
+- **Unlocked through the server.** The attached report is not end-to-end
+  encrypted: the server (and whoever runs it) can read it while it is held
+  and sent. The owner chose this exception; the browser says so whenever
+  the box is ticked on the server route. The link itself stays locked.
 
 ## First sign-in: the server owner
 
@@ -400,8 +439,10 @@ It **can**:
   10 times an hour per person and 30 a day per site; the words are plain
   text in a fixed template (no HTML from the browser, every line escaped);
   the only link is one to this server's own address; the footer names the
-  member it was sent for. A member can still write anything in those lines
-  to anyone, under the server's From; the owner who invites providers
+  member it was sent for. An attached report (D97) is a PDF only, so the
+  server does not send arbitrary HTML either, and the server reads that
+  report in clear (the one end-to-end exception). A member can still write
+  anything in those lines to anyone, under the server's From; the owner who invites providers
   accepts that, as with any shared mail account;
 - **lock someone out of codes**: the per-email limits that stop guessing also
   let someone who floods requests for an address delay that person's codes. A

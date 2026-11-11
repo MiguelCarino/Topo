@@ -9,7 +9,9 @@ package notify
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strconv"
 	"sync"
@@ -171,11 +173,26 @@ func (w *Worker) sendOne(ctx context.Context, row *store.Mail) (bool, error) {
 			delete(data, "name")
 		}
 	}
+	// The file a report carries (D97). Gone (a site deleted meanwhile): the
+	// message goes without it, and says nothing of it.
+	var att *mail.Attachment
+	if row.FileID != "" {
+		f, ferr := store.GetMailFile(ctx, w.St.R, row.FileID)
+		if errors.Is(ferr, sql.ErrNoRows) {
+			w.Log.Warn("mail attachment missing: sending without it", "kind", row.Kind, "to", mail.Mask(row.To))
+			delete(data, "attach")
+		} else if ferr != nil {
+			return false, ferr
+		} else {
+			att = &mail.Attachment{Name: f.Name, Type: f.Type, Data: f.Data}
+		}
+	}
 	msg, err := mail.Render(row.Kind, row.Lang, data)
 	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if err == nil {
 		msg.ID, msg.To, msg.Site = row.ID, row.To, row.SiteID
+		msg.Attachment = att
 		w.noteSent(w.Now())
 		err = w.Mailer.Send(sendCtx, msg)
 	}
@@ -186,7 +203,10 @@ func (w *Worker) sendOne(ctx context.Context, row *store.Mail) (bool, error) {
 				return false, err
 			}
 		}
-		return true, store.MailSent(sendCtx, w.St.W, row.ID, now.UnixMilli())
+		if err := store.MailSent(sendCtx, w.St.W, row.ID, now.UnixMilli()); err != nil {
+			return false, err
+		}
+		return true, w.dropFile(sendCtx, row)
 	}
 	tries := row.Tries + 1
 	var next int64
@@ -201,5 +221,20 @@ func (w *Worker) sendOne(ctx context.Context, row *store.Mail) (bool, error) {
 	if len(msgText) > 500 {
 		msgText = msgText[:500]
 	}
-	return false, store.MailRetry(sendCtx, w.St.W, row.ID, next, msgText)
+	if err := store.MailRetry(sendCtx, w.St.W, row.ID, next, msgText); err != nil {
+		return false, err
+	}
+	if next == 0 {
+		return false, w.dropFile(sendCtx, row)
+	}
+	return false, nil
+}
+
+// dropFile deletes the row's file once no other row waits for it.
+func (w *Worker) dropFile(ctx context.Context, row *store.Mail) error {
+	if row.FileID == "" {
+		return nil
+	}
+	_, err := store.DropMailFileIfUnused(ctx, w.St.W, row.FileID)
+	return err
 }

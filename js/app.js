@@ -1937,11 +1937,16 @@ function claimEmptyDocument() {
 // changed since the last copy that left, and keeps the content under it,
 // so the copy coming back finds what it was. `why`: 'export' or 'link'.
 function identifiedDoc(doc, why = 'export') {
+    const { id, updated } = docIdentityHead();
+    const { v, ...rest } = doc;
+    return Object.assign({ v, id, updated }, revisionFields(stampOpenDoc(doc, why)), rest);
+}
+// The open network's id and updated as a copy of it carries them (a part of
+// it too, js/providerpart.js, which takes no revision of the whole).
+function docIdentityHead() {
     if (!state.docId) state.docId = mintLibraryId();   // so the next export or link is the same network
     const kept = isKept() && flushAutosave() ? libraryEntry(state.libraryId) : null;
-    const updated = (kept && kept.updated) || state.docUpdated || Date.now();
-    const { v, ...rest } = doc;
-    return Object.assign({ v, id: state.docId, updated }, revisionFields(stampOpenDoc(doc, why)), rest);
+    return { id: state.docId, updated: (kept && kept.updated) || state.docUpdated || Date.now() };
 }
 
 // What a download of this network is called (topoFileStem, js/report.js):

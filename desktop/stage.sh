@@ -39,6 +39,7 @@ SRC="$(cd "$(dirname "$0")/.." && pwd)"
 
 ITEMS="index.html css js fonts vendor
 carino-clock.js carino-lang.js carino-navbar.js carino-theme.css carino-theme.js carino-ui.css carino-ui.js
+carino-pdf.js carino-html2canvas.js
 logo.svg logo-color.svg logo.webp
 LICENSE"
 
@@ -66,9 +67,10 @@ fail=0
 bad() { echo "stage check: $*" >&2; fail=1; }
 
 # 1. Everything index.html points at is there (and the clock the navbar
-#    loads on its own).
+#    loads on its own, and html2canvas, which carino-pdf.js loads on the
+#    first PDF a report preview makes).
 refs="$(grep -oE '(src|href)="[^"]*"' "$OUT/index.html" | sed -E 's/^(src|href)="//; s/"$//' | sort -u || true)"
-for ref in $refs carino-clock.js; do
+for ref in $refs carino-clock.js carino-html2canvas.js; do
     case "$ref" in
         ''|\#*|*:*|//*) continue ;;
     esac

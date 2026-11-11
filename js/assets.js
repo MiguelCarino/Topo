@@ -969,8 +969,10 @@ assetEl('printLabelBtn').onclick = () => printAssetLabels();
 // network's name prefixes each hit in the binder modes. A read-only network
 // (one from a newer build) is linted too: share refuses it, but the report
 // still prints its notes, so the report dialog still has to warn.
-function secretHitsFor(mode) {
-    if (mode === 'doc') return docSecretHits(serializeDoc());
+// doc: the copy as it leaves, when it is not the whole network (a
+// provider's part, js/providerpart.js).
+function secretHitsFor(mode, doc = null) {
+    if (mode === 'doc') return docSecretHits(doc || serializeDoc());
     const sites = mode === 'binder-report' ? libraryNetworks() : binderFile().sites;
     return sites.flatMap((site) => docSecretHits(site.doc)
         .map((h) => Object.assign({}, h, { kind: 'site', name: `${site.name || t('Untitled network')} · ${h.name}` })));

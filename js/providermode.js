@@ -478,6 +478,21 @@ function renderProviderPanel() {
             }));
         }
         panel.appendChild(cover);
+        // Their part on paper and as spreadsheets (js/providerreport.js, D96).
+        if (typeof openProviderReport === 'function') {
+            const rep = pmNode('div', 'pb-acts pm-part');
+            const doc = () => serializeDoc();
+            rep.appendChild(pmButton(`📄 ${t('Your part of this network')}`, 'btn', async (e) => {
+                const b = e.currentTarget;
+                b.disabled = true;
+                try { await openProviderReport(self, { doc: doc(), incidentId: inc.id, audience: 'provider' }); }
+                catch (err) { console.warn('Provider report:', err); showToast(t('Could not build the report.'), 'err'); }
+                finally { b.disabled = false; }
+            }));
+            rep.appendChild(pmButton(t('Devices CSV'), 'btn', () => downloadProviderCsv(self, 'devices', doc())));
+            rep.appendChild(pmButton(t('Cables CSV'), 'btn', () => downloadProviderCsv(self, 'cables', doc())));
+            panel.appendChild(rep);
+        }
     }
     // The visits so far.
     const ids = inc.visits || [];
@@ -875,8 +890,12 @@ function renderVisitReturn() {
     else if (res.why === 'too-long') status.textContent = t('This network is too big for a link, so the file {file} was downloaded: send it to the client.', { file: res.file });
     else if (res.why === 'no-seal') status.textContent = t('This page cannot lock a link (it needs https), so the file {file} was downloaded: send it to the client.', { file: res.file });
     else status.textContent = '';
-    if (res && r.copied === 'link') status.textContent = t('Your mail program is open and the infrastructure link is copied. Paste it under "Infrastructure link:" (Ctrl+V, or on a phone press and hold, then Paste).');
-    if (res && r.copied === 'link-failed') status.textContent = t('The link could not be copied. Copy it from the box below, then press the email button again and paste it where the email says so.');
+    if (res && r.copied === 'link') status.textContent = r.samePass
+        ? t('Link copied: paste it in the email under "Infrastructure link:" (Ctrl+V, or on a phone press and hold, then Paste). The client already has the passphrase.')
+        : t('Link copied: paste it in the email under "Infrastructure link:" (Ctrl+V, or on a phone press and hold, then Paste). The passphrase goes another way, such as a call or a text.');
+    if (res && r.copied === 'link-failed') status.textContent = (r.failCount || 0) > 1
+        ? t('The link could not be copied: copy it from the box below and paste it in the email under "Infrastructure link:".')
+        : t('The link could not be copied. Copy it from the box below; Email opens your mail program on the next press.');
     if (res && r.copied === 'message') status.textContent = t('Message copied.');
     const link = pmEl('visitLink');
     link.value = sealedLink ? res.url : '';
@@ -907,15 +926,22 @@ async function visitEmail() {
     const res = r && r.result;
     if (!res) return;
     const m = res.message;
-    // As the report's Email (D86): the hyperlink to the clipboard first.
-    if (res.url && r.copied !== 'link-failed') {
-        if (await TopoIncidents.incidentCopyRich(TopoIncidents.infraLinkHtml(res.url), res.url)) r.copied = 'link';
-        else {
+    // As the report's Email (D86, D94): the hyperlink to the clipboard first,
+    // on every press; the first failure shows the link and stops, the next
+    // press opens the mail program whatever the clipboard does.
+    if (res.url) {
+        const ok = await TopoIncidents.incidentCopyRich(TopoIncidents.infraLinkHtml(res.url), res.url);
+        if (!_pm.vd || _pm.vd.ret !== r || r.result !== res) return;
+        if (!ok) {
+            r.failCount = (r.failCount || 0) + 1;
             r.copied = 'link-failed';
             renderVisitDialog();
             const box = pmEl('visitLink'); box.focus(); box.select();
+            if (r.failCount === 1) return;
+            _incHooks.open(m.mailto);
             return;
         }
+        r.copied = 'link';
     }
     renderVisitDialog();
     _incHooks.open(m.mailto);

@@ -9,8 +9,10 @@
 //
 // The document is standalone by construction — one HTML file with its styles
 // inline and the diagram embedded as a data URI — so it survives being emailed,
-// archived or opened on a machine that has never heard of this tool. Printing
-// it to PDF is the browser's job, which is why there is no PDF library here.
+// archived or opened on a machine that has never heard of this tool. The
+// preview's Download saves it as that HTML file or as a PDF of the same pages
+// (the fleet's carino-pdf.js, see reportFormat below); Print hands it to the
+// browser's print dialog, which saves a PDF with selectable text.
 //
 // Load order: state -> i18n -> model -> data -> diagnostics -> ui -> report -> app
 
@@ -2849,12 +2851,112 @@ const pickSet = (meta) => { const out = {}; Object.keys(meta || {}).forEach((k) 
 // other kind opens in a tab (openReportTab); the labels and Locate sheets
 // no longer come here, they have a preview of their own (js/sheetpreview.js),
 // which falls back to that tab only on a page without its dialog.
-function deliverReport(html, meta, kind = 'report', onKept = null) {
+// `format` is the preview's PDF | HTML switch (reportFormat): 'html' saves
+// the document byte for byte, as it always did; 'pdf' answers with a promise,
+// the same pages drawn into a PDF (makeReportPdf) and saved under the same
+// stem, unless `wanted()` says the preview was closed meanwhile. A PDF that
+// cannot be made is { ok: false, error } and nothing is handed over.
+function deliverReport(html, meta, kind = 'report', onKept = null, format = 'html', wanted = null) {
     if (kind !== 'report' && kind !== 'summary') return openReportTab(html, meta, kind);
+    if (format === 'pdf') {
+        const name = reportFileName(meta, kind, 'pdf');
+        return makeReportPdf(html).then((blob) => {
+            if (typeof wanted === 'function' && !wanted()) return { ok: false, cancelled: true, name, downloaded: false };
+            const url = saveBlob(blob, name);
+            if (typeof onKept === 'function') onKept();
+            return { ok: true, url, name, opened: false, downloaded: true, format: 'pdf' };
+        }, (e) => {
+            console.warn('Report: could not create the PDF.', e);
+            return { ok: false, name, downloaded: false, error: (e && e.message) || String(e) };
+        });
+    }
     const name = reportFileName(meta, kind);
     const url = saveBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), name);
     if (typeof onKept === 'function') onKept();
     return { url, name, opened: false, downloaded: true };
+}
+
+// ---- The file's format: PDF or HTML ----
+// Every report preview in the fleet offers its file in two formats, picked
+// with the PDF | HTML switch just above the file name (CarinoPdf.formatSwitch,
+// carino-pdf.js, which remembers the choice for this site); the one Download
+// button and the file name follow it. HTML is the document itself, the bytes
+// Topo always saved. PDF is that same document drawn page by page
+// (CarinoPdf.pdf: its print rules and @page margins, pictures of the pages
+// made with html2canvas), so it looks exactly like the preview; its text is
+// not selectable (Print, then Save as PDF, gives text). The site report, the
+// labels and the Locate sheet all go through here (js/sheetpreview.js).
+// Without carino-pdf.js (a page that did not load it) there is no switch and
+// Download saves the HTML.
+const reportPdfEngine = () => (typeof window !== 'undefined' && window.CarinoPdf && typeof window.CarinoPdf.pdf === 'function') ? window.CarinoPdf : null;
+let _reportFormat = null;
+const _reportFormatSwitches = new Map();
+function reportFormat() {
+    const P = reportPdfEngine();
+    if (!P) return 'html';
+    if (!_reportFormat) _reportFormat = (typeof P.remembered === 'function' && P.remembered()) || 'pdf';
+    return _reportFormat === 'html' ? 'html' : 'pdf';
+}
+// Sets the format for every preview (not remembered: only the switch's own
+// click is). -> the format now.
+function setReportFormat(v) {
+    _reportFormat = v === 'html' ? 'html' : 'pdf';
+    _reportFormatSwitches.forEach((sw) => sw.set(_reportFormat));
+    return reportFormat();
+}
+// 'Download PDF' / 'Download HTML', translated.
+function reportDownloadLabel(format = reportFormat()) {
+    const P = reportPdfEngine();
+    if (P && typeof P.label === 'function') return P.label(format);
+    return t(format === 'pdf' ? 'Download PDF' : 'Download HTML');
+}
+// The switch in a preview's column, just above its file name (.rpv-name),
+// outside the scrolling options; made once per dialog, on its first opening
+// (carino-pdf.js is deferred, so it is not there while these scripts load).
+// onChange(format) runs when it changes, from either preview. -> the switch,
+// or null without carino-pdf.js.
+function mountReportFormat(dialog, onChange) {
+    const P = reportPdfEngine();
+    if (!dialog || !P || typeof P.formatSwitch !== 'function') return null;
+    let sw = _reportFormatSwitches.get(dialog.id);
+    if (!sw) {
+        const name = dialog.querySelector('.rpv-name');
+        if (!name) return null;
+        sw = P.formatSwitch({ value: reportFormat(), onChange: (v) => {
+            _reportFormat = v;
+            _reportFormatSwitches.forEach((other) => { if (other !== sw) other.set(v); });
+            if (typeof onChange === 'function') onChange(v);
+        } });
+        sw.el.classList.add('topo-format');
+        name.parentNode.insertBefore(sw.el, name);
+        _reportFormatSwitches.set(dialog.id, sw);
+    }
+    sw.relabel();
+    if (sw.get() !== reportFormat()) sw.set(reportFormat());
+    return sw;
+}
+// The switch's words again (a language switch).
+function relabelReportFormats() { _reportFormatSwitches.forEach((sw) => sw.relabel()); }
+// The report (or sheet) as a PDF: its document as it prints, pages from its
+// own @page rule (A4 when it names no paper), the site's fonts.
+function makeReportPdf(html) {
+    const P = reportPdfEngine();
+    if (!P) return Promise.reject(new Error('carino-pdf.js is not loaded'));
+    return P.pdf(inlineDiagramUses(html), { producer: 'Topo (Carino Systems)' });
+}
+// The landscape map sheets draw the picture with <use href="#topo-dg"/>,
+// pointing at one <image> in another <svg>'s <defs> (diagramSheets), so
+// the file carries it once. html2canvas draws each <svg> on its own and
+// cannot follow a reference out of it, which left those sheets blank in the
+// PDF. For the PDF only, each such <use> gets the picture itself.
+function inlineDiagramUses(html) {
+    const defs = new Map();
+    String(html).replace(/<image id="([^"]+)" href="([^"]+)" width="([^"]+)" height="([^"]+)"\/>/g, (m, id, href, w, h) => {
+        defs.set(id, `<image href="${href}" width="${w}" height="${h}"/>`);
+        return m;
+    });
+    if (!defs.size) return html;
+    return String(html).replace(/<use href="#([^"]+)"\/>/g, (m, id) => defs.get(id) || m);
 }
 // A report or sheet (topoFileStem): its header's client and site, the
 // report's own date, and the kind. An estate report (meta.binder) that
@@ -2863,8 +2965,9 @@ function deliverReport(html, meta, kind = 'report', onKept = null) {
 // every other download of it says it, the card's name first (docDisplayName,
 // js/app.js), so a kept network has one stem even when its report's Site
 // header says something else; the header's Site still heads the report.
-const reportFileName = (meta, kind) => topoFileName({ org: meta.client, site: typeof meta.fileSite === 'string' ? meta.fileSite : meta.site, date: meta.date || todayISO(), kind,
-    fallback: meta.binder ? 'networks' : 'network' }, 'html');
+// `format` 'pdf' names the PDF of it (reportFormat); anything else the HTML.
+const reportFileName = (meta, kind, format = 'html') => topoFileName({ org: meta.client, site: typeof meta.fileSite === 'string' ? meta.fileSite : meta.site, date: meta.date || todayISO(), kind,
+    fallback: meta.binder ? 'networks' : 'network' }, format === 'pdf' ? 'pdf' : 'html');
 function openReportTab(html, meta, kind) {
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -3108,7 +3211,8 @@ function renderReportDialog() {
             : t('The findings, the inventory and the diagram as one printable document. Everything here is optional — it only fills in the header.')
                 + (state.readOnly ? ` ${t('This network is read-only, so the header is used for this report and not kept.')}` : '');
     }
-    if (build) build.textContent = t('⬇ Download');
+    if (build) build.textContent = reportDownloadLabel();
+    relabelReportFormats();
     // The report prints every device's notes: a password in one is named
     // here, before the document is handed to anyone (js/assets.js).
     renderSecretLint(document.getElementById('reportLint'), secretHitsFor(binder ? 'binder-report' : 'doc'), binder ? null : closeReportDialog);
@@ -3146,6 +3250,8 @@ function openReportDialog(mode) {
     document.getElementById('reportLargeMapRow')?.classList.toggle('hidden', !document.getElementById('reportTechnical')?.checked);
     renderReportSections();
     renderReportSearches();
+    // The PDF | HTML switch above the file name (reportFormat).
+    mountReportFormat(dialog, syncReportFormat);
     renderReportDialog();
     dropReportPreview();
     dialog.classList.remove('hidden');
@@ -3345,7 +3451,7 @@ function closeReportDialog() {
 // inline onclick) is hidden there, the dialog's buttons do its job. Only
 // Download or Print hands the report over (its onKept); the header typed
 // into a site's dialog is stored then too (commitReportMeta).
-const _reportPv = { seq: 0, timer: null, url: null, built: null, cache: null, pending: null, focusLarge: false };
+const _reportPv = { seq: 0, timer: null, url: null, built: null, cache: null, pending: null, focusLarge: false, session: 0 };
 // What the dialog asks for now, read and not stored.
 function reportDialogAsk() {
     const binder = _reportMode === 'binder';
@@ -3401,6 +3507,9 @@ async function refreshReportPreview() {
                 try {
                     const bar = frame.contentDocument && frame.contentDocument.querySelector('.toolbar');
                     if (bar) bar.style.display = 'none';
+                    // Esc inside the page (focused by Print, or a click on
+                    // it) closes the dialog too, as in the sheet preview.
+                    frame.contentWindow.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeReportDialog(); });
                     wirePreviewCells(frame.contentDocument);
                     fitReportPreview(frame);
                     placeReportPreview(frame, toLarge, was);
@@ -3415,7 +3524,7 @@ async function refreshReportPreview() {
         });
         if (seq !== _reportPv.seq) return null;
         const name = document.getElementById('reportPreviewName');
-        if (name) name.textContent = reportFileName(b.meta, b.kind);
+        if (name) name.textContent = reportFileName(b.meta, b.kind, reportFormat());
         reportPreviewStatus('');
         return b;
     })();
@@ -3454,6 +3563,7 @@ window.addEventListener('resize', () => { const f = document.getElementById('rep
 function dropReportPreview() {
     clearTimeout(_reportPv.timer);
     _reportPv.seq++;
+    _reportPv.session++;
     const frame = document.getElementById('reportPreviewFrame');
     if (frame) { frame.onload = null; frame.removeAttribute('src'); frame.removeAttribute('srcdoc'); }
     if (_reportPv.url) URL.revokeObjectURL(_reportPv.url);
@@ -3468,15 +3578,37 @@ function commitReportAsk() {
     if (_reportMode === 'binder') return;
     commitReportMeta();
 }
+// The switch changed: the Download button and the file name follow it.
+function syncReportFormat() {
+    const build = document.getElementById('reportBuildBtn');
+    if (build) build.textContent = reportDownloadLabel();
+    const name = document.getElementById('reportPreviewName'), b = _reportPv.built;
+    if (name && b) name.textContent = reportFileName(b.meta, b.kind, reportFormat());
+}
 // Download: the report as previewed, built again after the header is
 // stored (so the changes section does not count the header it just got),
-// saved as a file; the dialog closes.
+// saved as a file in the switch's format (reportFormat). The HTML is saved
+// and the dialog closes at once; a PDF takes a moment, said in the status
+// (the buttons are held by reportAction, js/app.js), and the dialog closes
+// once it is saved. A PDF that could not be made says so and the dialog
+// stays; one finished after the dialog was closed is not saved.
 async function downloadReportFromDialog() {
     commitReportAsk();
     const b = await buildFromAsk(reportDialogAsk());
     if (!b) { showToast(t('Nothing to report on yet — save a network first.')); return null; }
+    const format = reportFormat();
+    if (format !== 'pdf') {
+        closeReportDialog();
+        return deliverReport(b.html, b.meta, b.kind, b.onKept);
+    }
+    clearTimeout(_reportPv.timer);
+    const session = _reportPv.session;
+    reportPreviewStatus('Creating the PDF…');
+    const out = await deliverReport(b.html, b.meta, b.kind, b.onKept, 'pdf', () => _reportPv.session === session);
+    if (_reportPv.session !== session) return out;
+    if (out && out.ok === false) { reportPreviewStatus('Could not create the PDF.'); return out; }
     closeReportDialog();
-    return deliverReport(b.html, b.meta, b.kind, b.onKept);
+    return out;
 }
 // The desktop app's answer to "do you print reports yourself?", asked once
 // per app (an app with no such command, or none at all, does not).

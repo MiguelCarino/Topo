@@ -88,7 +88,9 @@ func (s *Server) readDeadlineMW(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !(r.Method == http.MethodGet && r.URL.Path == "/api/events") {
 			d := BodyReadTimeout
-			if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/sites/") && strings.HasSuffix(r.URL.Path, "/revs") {
+			// A revision push may be several MB, and so may a report mail
+			// with its PDF attached (D97).
+			if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/sites/") && (strings.HasSuffix(r.URL.Path, "/revs") || strings.HasSuffix(r.URL.Path, "/report-mail")) {
 				d = RevReadTimeout
 			}
 			_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(d))

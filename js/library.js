@@ -543,7 +543,7 @@ function librarySave(name, id, opts = {}) {
         try { json = JSON.stringify(libraryEntryFor(key, name, prev, opts)); } catch (e) { return null; }
         // The same text writeCards would hold and put for it.
         if (_cards.get(key) !== json) { _cards.set(key, json); issueWrite(new Map([[key, json]]), [], false); }
-        if (!prev && savesOpenDocAsNew(key, opts)) adoptSessionRevisions(key, [state.docRev, state.docBase, ...state.docPrior]);
+        if (!prev && savesOpenDocAsNew(key, opts)) adoptSessionRevisions(key, [state.docRev, state.docBase, ...state.docPrior, ...sessionRevsWhy('part')]);
         return key;
     }
     const lib = loadLibrary();
@@ -551,7 +551,7 @@ function librarySave(name, id, opts = {}) {
     const key = id || mintLibraryId();
     lib[key] = libraryEntryFor(key, name, prev, opts);
     if (!persistLibrary(lib)) return null;
-    if (!prev && savesOpenDocAsNew(key, opts)) adoptSessionRevisions(key, [state.docRev, state.docBase, ...state.docPrior]);
+    if (!prev && savesOpenDocAsNew(key, opts)) adoptSessionRevisions(key, [state.docRev, state.docBase, ...state.docPrior, ...sessionRevsWhy('part')]);
     return key;
 }
 // The canvas becoming a card under its own id (its first autosave, Keep
@@ -1886,7 +1886,10 @@ function claimDocument(name, id, opts = {}, revMeta = null) {
     if (!key) return null;
     if (revMeta) {
         setCardMeta(key, revMeta);
-        adoptSessionRevisions(key, [revMeta.rev, revMeta.base, ...(revMeta.prior || [])]);
+        // The parts sent from it while it was not kept go with it (D93).
+        const parts = sessionRevsWhy('part');
+        if (parts.length) setCardMeta(key, { partRevs: [...new Set([...(libraryEntry(key).partRevs || []), ...parts])] });
+        adoptSessionRevisions(key, [revMeta.rev, revMeta.base, ...(revMeta.prior || []), ...parts]);
     }
     state.libraryId = state.docId = key;
     state.docUpdated = libraryEntry(key).updated;
@@ -1940,7 +1943,9 @@ async function askAboutKnownCopy(incoming, entry, opts = {}) {
     const copy = { id: 'copy', label: opts.copyLabel || t('Open as a copy') };
     const mine = { id: 'mine', label: t('Open mine') };
     const lost = updateWouldLose(entry, incoming.doc, differ);
-    const replace = { id: 'update', label: t('Replace with this copy') };
+    // A provider's part (D93) never replaces the whole network.
+    const partOnly = !!(ctx && ctx.isPart);
+    const replace = partOnly ? null : { id: 'update', label: t('Replace with this copy') };
     const replaceNote = lost ? updateLossNote(lost) : t('Replacing keeps a restore point of yours first.');
     const history = opts.history && typeof trailCanReadIn === 'function' && trailCanReadIn(incoming.doc, incoming.updated)
         && !entry.template && !entry.block && (incoming.updated || 0) < (entry.updated || 0)
@@ -1949,16 +1954,16 @@ async function askAboutKnownCopy(incoming, entry, opts = {}) {
         const head = ctx && ctx.ancestor
             ? t('You already have "{name}" in this browser, and yours already has everything in this copy.', { name })
             : t('You already have "{name}" in this browser, and this copy differs from it.', { name });
-        return askChoice(head + '\n\n' + replaceNote, {
+        return askChoice(head + (replace ? '\n\n' + replaceNote : ''), {
             title: opts.title || '',
-            choices: [copy, ...history, replace, Object.assign(mine, { primary: true })]
+            choices: [copy, ...history, ...(replace ? [replace] : []), Object.assign(mine, { primary: true })]
         });
     }
     const merge = { id: 'merge', primary: true, label: t('Merge into "{name}"', { name }) };
     return askChoice(t('You already have "{name}" in this browser, and this copy differs from it.', { name }) + '\n\n' + mergeModeNote(ctx)
-        + '\n\n' + replaceNote, {
+        + (replace ? '\n\n' + replaceNote : ''), {
         title: opts.title || '',
-        choices: [merge, replace, copy, ...history, mine]
+        choices: [merge, ...(replace ? [replace] : []), copy, ...history, mine]
     });
 }
 

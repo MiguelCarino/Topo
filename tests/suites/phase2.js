@@ -204,7 +204,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     HTMLAnchorElement.prototype.click = function () { downloaded = this.download; };
     const printed = printAssetLabels([{ type: 'node', id: 'nvr' }]);
     // The preview's Download hands over the file, under the labels name.
-    if (printed && printed.previewed) { await printed.ready; document.getElementById('sheetPreviewDownload').click(); }
+    if (printed && printed.previewed) { await printed.ready; setReportFormat('html'); document.getElementById('sheetPreviewDownload').click(); }
     HTMLAnchorElement.prototype.click = realClick;
     window.open = heldOpen;
     ok('Print labels makes a label for the NVR', !!printed && printed.set.devices.length === 1 && /_labels\.html$/.test(downloaded || ''), downloaded);

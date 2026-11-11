@@ -66,14 +66,44 @@ function mergeIdentOf(doc, site) {
     return { id: d.id || (typeof site.id === 'string' ? site.id : null), updated: d.updated || (Number.isFinite(site.updated) ? site.updated : 0),
         rev: validRev(site.rev) || d.rev, base: validRev(site.base) || d.base, prior: validPrior(site.prior).length ? validPrior(site.prior) : d.prior };
 }
-// -> { mine, ancestor, base, baseRev, via: 'rev' | 'snapshot' | null, snapshotAt }
+// Whether copy `theirs` (identity `id`) coming back to card `cardId` is a
+// part: it names a part this card sent, and has not grown since from a
+// whole-network copy of this card. A provider keeps an old part's rev in its
+// prior for a while (PRIOR_MAX); a whole link it merged after is a full
+// revision held here, newer than every part it names and not one those parts
+// carried (their base and prior), and then the copy is the whole network
+// again. A part whose revision is gone (nothing to compare times with) stays
+// a part: two-way, which removes nothing.
+function mergeCopyIsPart(cardId, mine, id, theirs) {
+    const partRevs = typeof cardPartRevs === 'function' ? cardPartRevs(cardId) : new Set();
+    const named = [id.rev, id.base, ...(id.prior || []), ...(theirs ? mergeLogRevs(theirs) : [])].filter((r, i, a) => validRev(r) && a.indexOf(r) === i);
+    const parts = named.filter((r) => partRevs.has(r));
+    if (!parts.length) return false;
+    const recs = revisionsOf(cardId);
+    const heldAt = (rev) => recs.filter((m) => m.rev === rev).reduce((n, m) => Math.max(n, m.at || 0), 0);
+    const heldParts = parts.filter((r) => recs.some((m) => m.rev === r && m.why === 'part'));
+    if (heldParts.length < parts.length) return true;
+    const carried = new Set();
+    heldParts.forEach((r) => { const pm = typeof revisionPartMeta === 'function' ? revisionPartMeta(cardId, r) : null; (pm && pm.from || []).forEach((x) => carried.add(x)); });
+    const newestPart = Math.max(...heldParts.map(heldAt));
+    return !named.some((r) => !partRevs.has(r) && !carried.has(r) && revisionWhy(cardId, r) !== 'part'
+        && mergeRevIsMine(cardId, mine, r) && heldAt(r) > newestPart);
+}
+// -> { mine, ancestor, base, baseRev, via: 'rev' | 'snapshot' | null, snapshotAt,
+//      isPart, part }
 // for copy `theirs` (identity `ident`) coming back to card `cardId`.
+// A copy that names a part this card sent (card.partRevs, js/revisions.js)
+// is a provider's part coming back (D93): only a revision held as 'part' can
+// be its base (a full one would read everything outside the part as removed),
+// else it is two-way; and `part` (partMergeInfo, js/providerpart.js) tells
+// the merge which records the provider only saw as context.
 async function mergeContext(cardId, theirs, ident) {
     const id = ident || docIdentity(theirs);
     const mine = mergeMineNow(cardId);
-    const out = { mine, ancestor: false, base: null, baseRev: null, via: null, snapshotAt: 0 };
+    const out = { mine, ancestor: false, base: null, baseRev: null, via: null, snapshotAt: 0, isPart: false, part: null };
     if (!mine || !theirs) return out;
     if (typeof revisionsReady === 'function') await revisionsReady();
+    out.isPart = mergeCopyIsPart(cardId, mine, id, theirs);
     // Older than yours (A2): it carries one of your revs and still holds
     // what that rev holds (edited since without leaving again, a
     // hand-edited file, that rev is its base instead), or your log merged
@@ -98,14 +128,20 @@ async function mergeContext(cardId, theirs, ident) {
     // deleted since and undo edits, with no conflict to show it.
     const named = [ownRev ? id.rev : null, ...(id.prior || []), id.base, ...mergeLogRevs(theirs).reverse()].filter((r, i, a) => validRev(r) && a.indexOf(r) === i);
     const heldAt = (rev) => revisionsOf(cardId).filter((m) => m.rev === rev).reduce((n, m) => Math.max(n, m.at || 0), 0);
-    const tries = named.filter((rev) => mergeRevIsMine(cardId, mine, rev))
+    const tries = named.filter((rev) => mergeRevIsMine(cardId, mine, rev) && (!out.isPart || revisionWhy(cardId, rev) === 'part'))
         .map((rev, i) => ({ rev, i, at: heldAt(rev) }))
         .sort((a, b) => b.at - a.at || a.i - b.i)
         .map((x) => x.rev);
     for (const rev of tries) {
         const doc = await revisionDoc(cardId, rev);
-        if (doc) { Object.assign(out, { base: doc, baseRev: rev, via: 'rev' }); return out; }
+        if (doc) {
+            Object.assign(out, { base: doc, baseRev: rev, via: 'rev' });
+            if (out.isPart && typeof partMergeInfo === 'function') out.part = await partMergeInfo(cardId, rev);
+            return out;
+        }
     }
+    // A part whose own revision is gone: two-way, which removes nothing.
+    if (out.isPart) { if (typeof partMergeInfo === 'function') out.part = await partMergeInfo(cardId, null); return out; }
     // A copy from before revisions (A19): edited after your last back-up,
     // it is compared with that back-up.
     if (!id.rev && !id.base && !(id.prior || []).length && snap && snap.doc && id.updated && id.updated > snap.at) {
@@ -131,7 +167,7 @@ async function mergeCopyInto(targetId, theirs, opts = {}) {
         return { ok: false, reason: 'ancestor' };
     }
     return openMergeReview({ targetId, theirs, base: ctx.base, theirsRev: ident.rev, source: opts.source, fileName: opts.fileName,
-        reason: opts.reason, name: opts.name, replaceAsked: opts.replaceAsked, open: opts.open });
+        reason: opts.reason, name: opts.name, replaceAsked: opts.replaceAsked, open: opts.open, part: ctx.part || null });
 }
 
 // ---- The landing card's ⇄ Merge… ----
@@ -229,7 +265,7 @@ async function classifyBinderSites(sites) {
         // a guess at the copy both started from, so it is never merged
         // unasked (D17).
         if (row.ctx.via === 'snapshot') { out.push(Object.assign(row, { reason: t('Compared with your last back-up') })); continue; }
-        try { row.plan = planMerge(row.ctx.mine, site.doc, row.ctx.base); } catch (e) {
+        try { row.plan = planMerge(row.ctx.mine, site.doc, row.ctx.base, { part: row.ctx.part || null }); } catch (e) {
             out.push(Object.assign(row, { canReview: false, reason: t('Could not be compared') }));
             continue;
         }
@@ -413,7 +449,7 @@ async function binderMergeSites(sites, opts = {}) {
     }
     for (const r of autos) {
         const res = await commitMerge({ targetId: r.entry.id, theirs: r.site.doc, base: r.ctx.base, theirsRev: r.ident.rev, source, fileName: opts.fileName,
-            reason, open: false, pointTaken: true, quiet: true });
+            reason, open: false, pointTaken: true, quiet: true, part: r.ctx.part || null });
         if (res && res.ok) { result.merged++; result.storedIds.push(r.entry.id); } else { result.failedIds.push(r.entry.id); result.skipped++; }
     }
     if (replaces.length) {

@@ -205,6 +205,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       const r = printLocate([{ type: 'node', id: 'pc' }]);
       const before = downloaded;
       if (r && r.ready) await r.ready;
+      setReportFormat('html');   // the HTML file (the PDF is the sheetpreview suite's)
       el('sheetPreviewDownload').click();
       HTMLAnchorElement.prototype.click = realClick;
       ok('previewed, then the preview\'s Download saves _<date>_locate.html', !!r && r.previewed === true && before === null

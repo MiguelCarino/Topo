@@ -53,6 +53,8 @@ try {
   ok('nothing that is not the app is staged', leaked.length === 0, leaked.join(', '));
   ok('the app is there (index, scripts, fonts, vendor, licence, the clock the navbar loads)',
      ['index.html', 'js/app.js', 'css/app.css', 'fonts/carino-fonts.css', 'vendor/README.md', 'LICENSE', 'carino-clock.js', 'carino-navbar.js'].every((f) => wf.includes(f)));
+  ok('and the report previews\' PDF engine with the html2canvas it loads on the first PDF',
+     ['carino-pdf.js', 'carino-html2canvas.js'].every((f) => wf.includes(f)));
   const kb = wf.reduce((n, f) => n + statSync(join(web, f)).size, 0) / 1024;
   ok('about 4 MB', kb > 2500 && kb < 8000, `${Math.round(kb)} KB`);
 
@@ -63,7 +65,7 @@ try {
     cpSync(STAGE, join(dir, 'desktop', 'stage.sh'));
     writeFileSync(join(dir, 'desktop', 'intro.html'), 'intro');
     for (const d of ['css', 'js', 'fonts', 'vendor']) { mkdirSync(join(dir, d)); writeFileSync(join(dir, d, 'x.txt'), d); }
-    for (const f of ['carino-clock.js', 'carino-lang.js', 'carino-navbar.js', 'carino-theme.css', 'carino-theme.js', 'carino-ui.css', 'carino-ui.js', 'logo.svg', 'logo-color.svg', 'logo.webp', 'LICENSE']) writeFileSync(join(dir, f), f);
+    for (const f of ['carino-clock.js', 'carino-lang.js', 'carino-navbar.js', 'carino-theme.css', 'carino-theme.js', 'carino-ui.css', 'carino-ui.js', 'carino-pdf.js', 'carino-html2canvas.js', 'logo.svg', 'logo-color.svg', 'logo.webp', 'LICENSE']) writeFileSync(join(dir, f), f);
     writeFileSync(join(dir, 'index.html'), html);
     for (const f of drop) rmSync(join(dir, f), { recursive: true });
     return run(join(dir, 'desktop', 'stage.sh'), [join(dir, 'out')]);
@@ -81,6 +83,8 @@ try {
   ok('and so does a stylesheet', css.status !== 0 && /another site/.test(css.stderr), css.stderr.trim());
   const gone = fake('gone', `${head}`, ['logo.webp']);
   ok('a shipped item missing from the source fails it', gone.status !== 0 && /logo\.webp/.test(gone.stderr), gone.stderr.trim());
+  const noH2c = fake('noh2c', `${head}`, ['carino-html2canvas.js']);
+  ok('so does a missing carino-html2canvas.js, which index.html never names (carino-pdf.js loads it)', noH2c.status !== 0 && /carino-html2canvas/.test(noH2c.stderr), noH2c.stderr.trim());
   const twice = fake('twice', `${head}${head}`);
   const twiceDesk = run(join(tmp, 'twice', 'desktop', 'stage.sh'), [join(tmp, 'twice', 'out2'), '--desktop']);
   ok('a --desktop CSP patch that does not match exactly once fails it', twice.status === 0 && twiceDesk.status !== 0 && /not once/.test(twiceDesk.stderr), twiceDesk.stderr.trim());

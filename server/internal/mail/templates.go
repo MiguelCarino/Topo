@@ -10,10 +10,12 @@ package mail
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
@@ -67,6 +69,69 @@ type Message struct {
 	Code string
 	Link string
 	Site string
+	// Attachment is the one file a "report" carries (D97), or nil.
+	Attachment *Attachment
+}
+
+// Attachment is a file sent with a message: a provider report as a PDF.
+type Attachment struct {
+	Name string // cleaned (CleanAttachName)
+	Type string // application/pdf
+	Data []byte
+}
+
+// AttachTypes are the attachment types a client may ask the server to send
+// (D97): a PDF only. An HTML file from the server's own mail account would
+// carry arbitrary markup to anyone, which D87's fixed template rules out,
+// and mail filters hold .html attachments back.
+var AttachTypes = map[string]string{"application/pdf": ".pdf"}
+
+// CleanAttachName makes a client-chosen file name safe for the
+// Content-Disposition: CleanName200's flattening, no path or quote
+// characters, no leading dots, at most 120 runes, and the extension of its
+// type (forced). Empty -> "report" plus the extension.
+func CleanAttachName(name, typ string) string {
+	ext := AttachTypes[typ]
+	if ext == "" {
+		ext = ".bin"
+	}
+	s := CleanName200(name)
+	if i := strings.LastIndexAny(s, `/\`); i >= 0 {
+		s = s[i+1:]
+	}
+	s = strings.Map(func(r rune) rune {
+		switch r {
+		case '"', '\'', ';', '<', '>', '|', '*', '?', ':', '/', '\\':
+			return -1
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+	s = strings.TrimSpace(strings.TrimLeft(s, ". "))
+	if strings.EqualFold(filepathExt(s), ext) {
+		s = s[:len(s)-len(ext)]
+	} else if e := filepathExt(s); e != "" && len([]rune(e)) <= 6 {
+		s = s[:len(s)-len(e)]
+	}
+	s = strings.TrimRight(strings.TrimSpace(s), ". ")
+	if r := []rune(s); len(r) > 120-len(ext) {
+		s = strings.TrimRight(string(r[:120-len(ext)]), ". ")
+	}
+	if s == "" {
+		s = "report"
+	}
+	return s + ext
+}
+
+// filepathExt is the last ".xyz" of s (empty when none).
+func filepathExt(s string) string {
+	i := strings.LastIndexByte(s, '.')
+	if i <= 0 || strings.ContainsAny(s[i:], " ") {
+		return ""
+	}
+	return s[i:]
 }
 
 // ErrHeader is returned when a header value would carry a line break.
@@ -340,6 +405,11 @@ func renderReport(lang string, v Data) (*Message, error) {
 	if pass && link != "" {
 		tb.WriteString(t("report.pass", nil) + "\n")
 	}
+	attached := ""
+	if a := CleanLine(v["attach"]); a != "" {
+		attached = t("report.attached", Data{"name": a})
+		tb.WriteString(attached + "\n")
+	}
 	tb.WriteString("\n-- \n" + footer + "\n")
 
 	var hb strings.Builder
@@ -370,6 +440,9 @@ func renderReport(lang string, v Data) (*Message, error) {
 	}
 	if pass && link != "" {
 		hb.WriteString(`<p style="margin:0 0 16px;color:#5c574b">` + esc(t("report.pass", nil)) + `</p>`)
+	}
+	if attached != "" {
+		hb.WriteString(`<p style="margin:0 0 16px">` + esc(attached) + `</p>`)
 	}
 	hb.WriteString(`<p style="margin:16px 0 0;font-size:13px;color:#6f6a5e">` + esc(footer) + `</p>`)
 	hb.WriteString(`</div></body></html>`)
@@ -459,7 +532,16 @@ func (m *Message) Bytes(from, host string, date time.Time) ([]byte, error) {
 		id = hex.EncodeToString(b)
 	}
 	var buf bytes.Buffer
+	// Without an attachment the body is multipart/alternative, as it always
+	// was; with one (D97) it is multipart/mixed: the alternative first, then
+	// the file.
+	var mixed *multipart.Writer
+	var alt bytes.Buffer
 	mw := multipart.NewWriter(&buf)
+	if m.Attachment != nil {
+		mixed = mw
+		mw = multipart.NewWriter(&alt)
+	}
 	h := func(k, v string) { buf.WriteString(k + ": " + v + "\r\n") }
 	h("From", fa.String())
 	h("To", (&mail.Address{Address: to}).String())
@@ -470,7 +552,11 @@ func (m *Message) Bytes(from, host string, date time.Time) ([]byte, error) {
 	h("Date", date.UTC().Format(time.RFC1123Z))
 	h("Message-ID", "<"+id+"@"+host+">")
 	h("MIME-Version", "1.0")
-	h("Content-Type", `multipart/alternative; boundary="`+mw.Boundary()+`"`)
+	if mixed != nil {
+		h("Content-Type", `multipart/mixed; boundary="`+mixed.Boundary()+`"`)
+	} else {
+		h("Content-Type", `multipart/alternative; boundary="`+mw.Boundary()+`"`)
+	}
 	h("Auto-Submitted", "auto-generated")
 	h("X-Auto-Response-Suppress", "All")
 	if m.Lang != "" {
@@ -496,5 +582,54 @@ func (m *Message) Bytes(from, host string, date time.Time) ([]byte, error) {
 	if err := mw.Close(); err != nil {
 		return nil, err
 	}
+	if mixed != nil {
+		ah := textproto.MIMEHeader{}
+		ah.Set("Content-Type", `multipart/alternative; boundary="`+mw.Boundary()+`"`)
+		w, err := mixed.CreatePart(ah)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := w.Write(alt.Bytes()); err != nil {
+			return nil, err
+		}
+		if err := writeAttachment(mixed, m.Attachment); err != nil {
+			return nil, err
+		}
+		if err := mixed.Close(); err != nil {
+			return nil, err
+		}
+	}
 	return buf.Bytes(), nil
+}
+
+// writeAttachment adds the file part: its type and name (RFC 2231 for a
+// name that is not plain ASCII), base64 in 76-column CRLF lines.
+func writeAttachment(mw *multipart.Writer, a *Attachment) error {
+	typ := a.Type
+	if AttachTypes[typ] == "" {
+		return fmt.Errorf("mail: attachment type %q", typ)
+	}
+	name := CleanAttachName(a.Name, typ)
+	ct := mime.FormatMediaType(typ, map[string]string{"name": name})
+	cd := mime.FormatMediaType("attachment", map[string]string{"filename": name})
+	if ct == "" || cd == "" {
+		ct, cd = typ, "attachment"
+	}
+	ph := textproto.MIMEHeader{}
+	ph.Set("Content-Type", ct)
+	ph.Set("Content-Disposition", cd)
+	ph.Set("Content-Transfer-Encoding", "base64")
+	w, err := mw.CreatePart(ph)
+	if err != nil {
+		return err
+	}
+	enc := base64.StdEncoding.EncodeToString(a.Data)
+	for len(enc) > 76 {
+		if _, err := io.WriteString(w, enc[:76]+"\r\n"); err != nil {
+			return err
+		}
+		enc = enc[76:]
+	}
+	_, err = io.WriteString(w, enc+"\r\n")
+	return err
 }

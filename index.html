@@ -1496,8 +1496,8 @@
                  landing and the landing stays up behind it. -->
             <!-- The fleet's report preview (carino-ui.css 18b .rpv): everything
                  that is read or set in the left column (the title and its ✕,
-                 the status, the questions, the file name), Print and Download
-                 at its foot, the report as it will print on the right, redrawn
+                 the status, the questions, the PDF | HTML switch and the file
+                 name), Print and Download at its foot, the report as it will print on the right, redrawn
                  a moment after each edit (refreshReportPreview, js/report.js).
                  On a phone the column folds: the questions above the report,
                  the buttons along the bottom edge. Below the pinned navbar. -->
@@ -1581,8 +1581,10 @@
                     </div>
                     <p id="reportPreviewName" class="rpv-name"></p>
                     <div class="rpv-actions">
-                        <button id="reportPrintBtn" type="button" class="cs-btn" data-i18n>🖨 Print</button>
-                        <button id="reportBuildBtn" type="button" class="cs-btn primary" data-i18n>⬇ Download</button>
+                        <button id="reportPrintBtn" type="button" class="btn" data-i18n>🖨 Print</button>
+                        <!-- Labelled by the PDF | HTML switch (reportFormat, js/report.js),
+                             which carino-pdf.js puts just above the file name. -->
+                        <button id="reportBuildBtn" type="button" class="btn btn-primary">Download PDF</button>
                     </div>
                   </aside>
                   <div class="rpv-stage">
@@ -1594,8 +1596,8 @@
             <!-- The sheets' print preview (Print labels, Print where they are
                  plugged in; js/sheetpreview.js), on the fleet's report preview
                  (carino-ui.css 18b .rpv): the title and its ✕, the count, the
-                 sheet's note and the file name in the left column, Print and
-                 Download at its foot, the page that is printed or saved on the
+                 sheet's note, the PDF | HTML switch and the file name in the
+                 left column, Print and Download at its foot, the page that is printed or saved on the
                  right. Below the pinned navbar. -->
             <div id="sheetPreviewDialog" class="hidden modal-scrim rpv-scrim topo-dlg sheet-pv-dlg">
                 <div class="rpv" role="dialog" aria-modal="true" aria-labelledby="sheetPreviewTitle">
@@ -1610,8 +1612,8 @@
                     </div>
                     <p id="sheetPreviewName" class="rpv-name"></p>
                     <div class="rpv-actions">
-                        <button id="sheetPreviewPrint" type="button" class="cs-btn" data-i18n>🖨 Print</button>
-                        <button id="sheetPreviewDownload" type="button" class="cs-btn primary" data-i18n>⬇ Download</button>
+                        <button id="sheetPreviewPrint" type="button" class="btn" data-i18n>🖨 Print</button>
+                        <button id="sheetPreviewDownload" type="button" class="btn btn-primary">Download PDF</button>
                     </div>
                   </aside>
                   <div id="sheetPreviewStage" class="rpv-stage">
@@ -1837,6 +1839,16 @@
                         <div id="problemSend" hidden>
                             <p id="problemSendHead" class="restore-name"></p>
                             <p id="problemSendTo" class="dlg-blurb"></p>
+                            <!-- What the link carries (js/incidents.js renderProblemScope, D95): their part by default. -->
+                            <fieldset id="problemScopeRow" class="pb-scope hidden">
+                                <legend class="prop-lbl" data-i18n>What the link carries</legend>
+                                <label class="dlg-check pb-radio"><input type="radio" name="problemScope" value="part" checked> <span id="problemScopePartText"></span></label>
+                                <p id="problemScopeCount" class="pb-scope-count"></p>
+                                <label class="dlg-check pb-radio"><input type="radio" name="problemScope" value="whole"> <span data-i18n>The whole network</span></label>
+                                <!-- Their report as a file with the email (D97): off by default. -->
+                                <label class="dlg-check pb-radio pb-attach"><input type="checkbox" id="problemAttach"> <span data-i18n>Also attach the report</span></label>
+                                <p id="problemAttachNote" class="pb-scope-count hidden" role="status"></p>
+                            </fieldset>
                             <!-- Notes that look like they hold a password (js/assets.js), the client's words included. -->
                             <div id="problemLint" class="alert warn hidden" role="status"></div>
                             <div id="problemPassRow" class="pb-row hidden">
@@ -2276,8 +2288,10 @@
     <script src="js/mergeui.js"></script>
     <script src="js/mergedoors.js"></script>
     <script src="js/assets.js"></script>
+    <script src="js/providerpart.js"></script>
     <script src="js/incidents.js"></script>
     <script src="js/providermode.js"></script>
+    <script src="js/providerreport.js"></script>
     <script src="js/servercrypto.js"></script>
     <script src="js/server.js"></script>
     <script src="js/serversync.js"></script>
@@ -2288,6 +2302,7 @@
 <script src="carino-theme.js" data-mark="logo.svg" data-mark-color="logo-color.svg" defer></script>
 <script src="carino-ui.js" defer></script>
 <script src="carino-lang.js" defer></script>
+<script src="carino-pdf.js" defer></script>
 <script src="js/mobile.js" defer></script>
 </body>
 </html>

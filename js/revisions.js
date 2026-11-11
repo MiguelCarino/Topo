@@ -43,8 +43,16 @@ const REVISION_OPEN_MS = 1000;
 const REVISION_LIMITS = { perCard: 30, totalBytes: 40 * 1024 * 1024, writeMs: 4000, session: 30 };
 // Why a revision was kept: what left (export, backup, binder, link), what
 // arrived and was kept (opened), what was merged in (merge-theirs), what was
-// pulled from or pushed to a Topo server (server; js/serversync.js).
-const REVISION_WHY = ['export', 'backup', 'binder', 'link', 'opened', 'merge-theirs', 'server'];
+// pulled from or pushed to a Topo server (server; js/serversync.js), a
+// provider's part of the network that left as a link or a file, or such a
+// part merged back (part; js/providerpart.js, docs/SCOPE.md D93).
+const REVISION_WHY = ['export', 'backup', 'binder', 'link', 'opened', 'merge-theirs', 'server', 'part'];
+// A part in flight survives the per-card cap: the newest few are held.
+const PART_REVISIONS_HELD = 8;
+// The parts a card ever sent (card.partRevs, ids only): a copy naming one
+// is a part, whose base can only be a part (mergeContext, js/mergedoors.js).
+const PART_REVS_MAX = 64;
+const PART_CONTEXT_MAX = 20000;
 // A card on a Topo server makes a 'server' revision at every push and pull:
 // the newest few are enough (the sync keeps its own base), and they go first,
 // so they never push out the binder's and the links' that findBase needs
@@ -77,8 +85,24 @@ function validRevisionMeta(rec) {
         id: rec.id, cardId: rec.cardId, rev: rec.rev, at: rec.at,
         bytes: Number.isFinite(rec.bytes) && rec.bytes >= 0 ? rec.bytes : 0,
         hash: typeof rec.hash === 'string' ? rec.hash.slice(0, 64) : '',
-        why: REVISION_WHY.includes(rec.why) ? rec.why : 'export'
+        why: REVISION_WHY.includes(rec.why) ? rec.why : 'export',
+        ...(validPartMeta(rec.part) ? { part: validPartMeta(rec.part) } : {})
     };
+}
+// A part's context (the linked devices and the groups kept only to place
+// them, js/providerpart.js): ids, kept with the revision so the merge back
+// can tell a context removal from an item removal. null when not one.
+function validPartMeta(v) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    const ids = (list) => (Array.isArray(list) ? [...new Set(list.filter((x) => typeof x === 'string' && x.length > 0 && x.length <= 200))].slice(0, PART_CONTEXT_MAX) : []);
+    // from: the network's full revisions the part carried as base and prior
+    // (mergeContext tells a later whole-network copy from a part by them).
+    const from = Array.isArray(v.from) ? [...new Set(v.from.filter((x) => validRev(x)))].slice(0, PRIOR_MAX + 1) : [];
+    // all: every device, cable and group id the network held when the part
+    // left, so a record the provider adds is never matched with one of yours
+    // it never saw (mergePartPool, js/merge.js).
+    const all = Array.isArray(v.all) ? [...new Set(v.all.filter((x) => typeof x === 'string' && x.length > 0 && x.length <= 200))].slice(0, 3 * PART_CONTEXT_MAX) : [];
+    return { nodes: ids(v.nodes), groups: ids(v.groups), from, all };
 }
 
 // ---- The content's hash ----
@@ -92,7 +116,8 @@ function revHashOf(doc, canonical = false) {
 }
 
 // ---- Card meta ----
-const CARD_REV_KEYS = ['rev', 'revHash', 'revAt', 'base', 'prior'];
+const CARD_REV_KEYS = ['rev', 'revHash', 'revAt', 'base', 'prior', 'partRevs'];
+const validPartRevs = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => validRev(x)))].slice(-PART_REVS_MAX) : []);
 // A card's revision fields from `src` (a card, a site, a patch), validated;
 // null, an empty list or an invalid value removes the key.
 function applyCardRevision(card, src) {
@@ -102,7 +127,8 @@ function applyCardRevision(card, src) {
         const v = k === 'rev' || k === 'base' ? validRev(src[k])
             : k === 'revHash' ? (typeof src[k] === 'string' && src[k] ? src[k].slice(0, 64) : null)
                 : k === 'revAt' ? (Number.isFinite(src[k]) ? src[k] : null)
-                    : validPrior(src[k]);
+                    : k === 'partRevs' ? validPartRevs(src[k])
+                        : validPrior(src[k]);
         if (v === null || (Array.isArray(v) && !v.length)) delete card[k]; else card[k] = v;
     });
     return card;
@@ -125,7 +151,50 @@ function arrivedCardMeta(site, updated) {
 // first save as a card). Its base is the revision it arrived as, or the one
 // it was started from.
 function sessionCardMeta() {
-    return { rev: state.docRev, revHash: state.docRevHash, revAt: null, base: state.docRev || state.docBase, prior: state.docPrior };
+    return { rev: state.docRev, revHash: state.docRevHash, revAt: null, base: state.docRev || state.docBase, prior: state.docPrior, partRevs: sessionRevsWhy('part') };
+}
+// The tab's revisions held as `why` (oldest first): the parts sent from a
+// network not kept, adopted with it when it is kept.
+const sessionRevsWhy = (why) => [..._revSession.values()].filter((r) => r.why === why).map((r) => r.rev);
+// What `rev` was held as under card `cardId` (or in this tab): its why, or ''.
+function revisionWhy(cardId, rev) {
+    if (!validRev(rev)) return '';
+    const m = cardId ? (_revs.get(cardId) || []).find((x) => x.rev === rev) : null;
+    if (m) return m.why;
+    const s = _revSession.get(rev);
+    return s ? s.why : '';
+}
+// The part's context kept with revision `rev` of card `cardId`, or null.
+function revisionPartMeta(cardId, rev) {
+    const m = (_revs.get(cardId) || []).find((x) => x.rev === rev);
+    if (m && m.part) return m.part;
+    const s = !m || !cardId ? _revSession.get(rev) : null;
+    return s && s.part ? s.part : null;
+}
+// The parts card `cardId` sent (card.partRevs), with those it holds as 'part'.
+function cardPartRevs(cardId) {
+    const card = cardId && typeof libraryEntry === 'function' ? libraryEntry(cardId) : null;
+    const out = new Set(card ? validPartRevs(card.partRevs) : []);
+    (_revs.get(cardId) || []).forEach((m) => { if (m.why === 'part') out.add(m.rev); });
+    return out;
+}
+// A part that left from card `cardId` (or this tab): held as 'part' with its
+// context, and named in card.partRevs so a copy naming it is known for a
+// part even once its revision is dropped. Not an edit: no undo step.
+function recordPartRevision(cardId, rev, doc, hash, context) {
+    const part = validPartMeta(context);
+    if (!cardId) {
+        if (!recordSessionRevision(rev, doc, 'part', hash)) return false;
+        const s = _revSession.get(rev);
+        if (s && part) s.part = part;
+        return true;
+    }
+    const card = typeof libraryEntry === 'function' ? libraryEntry(cardId) : null;
+    if (!card) return false;
+    const held = recordRevision(cardId, rev, doc, 'part', hash, part);
+    const list = validPartRevs(card.partRevs);
+    if (!list.includes(rev)) setCardMeta(cardId, { partRevs: list.concat([rev]) });
+    return !!held;
 }
 // The open document's identity from its card (after a card is made of it).
 function syncDocRevision(card) {
@@ -247,12 +316,15 @@ function revisionFields(ident) {
 // The base a copy of card `cardId` goes out with: the newest revision its
 // log says was merged in and this browser holds under the card, else the
 // card's own (where it was started from).
+// A part merged back (held as 'part') is never a full copy's base: an older
+// merged revision is, else the card's own (D93).
 function outgoingBase(cardId, doc, cardBase) {
     const log = normalizeLog(doc && doc.log);
     for (let i = log.length - 1; i >= 0; i--) {
-        if (log[i].rev && hasRevision(cardId, log[i].rev)) return log[i].rev;
+        if (log[i].rev && hasRevision(cardId, log[i].rev) && revisionWhy(cardId, log[i].rev) !== 'part') return log[i].rev;
     }
-    return validRev(cardBase);
+    const b = validRev(cardBase);
+    return b && revisionWhy(cardId, b) !== 'part' ? b : null;
 }
 // The history entry follows the identity (a reload keeps the rev).
 function refreshLiveEntryQuietly() {
@@ -263,7 +335,7 @@ function refreshLiveEntryQuietly() {
 // Content `doc` of card `cardId` under `rev`. Synchronous: in this tab at
 // once, the write follows. A revision already held is not written again.
 // -> { id, stored } (stored: a promise of whether it reached the disk), or null.
-function recordRevision(cardId, rev, doc, why, hash) {
+function recordRevision(cardId, rev, doc, why, hash, part) {
     if (typeof cardId !== 'string' || !cardId || !validRev(rev) || !doc || !Array.isArray(doc.nodes)) return null;
     const id = revisionKey(cardId, rev);
     const list = _revs.get(cardId) || [];
@@ -274,6 +346,8 @@ function recordRevision(cardId, rev, doc, why, hash) {
     const now = Date.now();
     const meta = { id, cardId, rev, at: now > last ? now : last + 1, bytes: restoreBytes(copy),
         hash: typeof hash === 'string' ? hash : revHashOf(copy), why: REVISION_WHY.includes(why) ? why : 'export' };
+    const pm = validPartMeta(part);
+    if (pm) meta.part = pm;
     list.push(meta);
     _revs.set(cardId, list);
     _revDocs.set(id, copy);
@@ -307,7 +381,7 @@ function adoptSessionRevisions(cardId, revs, why) {
     let n = 0;
     [..._revSession.values()].forEach((r) => {
         if (want && !want.has(r.rev)) return;
-        if (recordRevision(cardId, r.rev, r.doc, why || r.why, r.hash)) n++;
+        if (recordRevision(cardId, r.rev, r.doc, why || r.why, r.hash, r.part)) n++;
         _revSession.delete(r.rev);
     });
     return n;
@@ -323,6 +397,8 @@ function revisionHeld(cardId) {
     if (validRev(card.base)) held.add(card.base);
     const b = card.doc ? outgoingBaseRaw(cardId, card.doc) : null;
     if (b) held.add(b);
+    // The newest parts: a provider may still be working on one (D93).
+    (_revs.get(cardId) || []).filter((m) => m.why === 'part').slice(-PART_REVISIONS_HELD).forEach((m) => held.add(m.rev));
     return held;
 }
 // outgoingBase's log half, without the card.
@@ -570,4 +646,5 @@ function dropRevisions(cardId) {
 window.CarinoRevisions = { REVISION_DB, REVISION_LIMITS, REVISION_WHY, PRIOR_MAX, openRevisionStore, releaseRevisionStore, idbRevisionAdapter,
     recordRevision, recordSessionRevision, adoptSessionRevisions, hasRevision, hasSessionRevision, revisionsOf, revisionDoc, findBase,
     revisionsReady, revisionsFlushed, dropRevisions, stampCard, stampOpenDoc, stampCardDoc, stampSites, outgoingBase, revHashOf,
+    PART_REVISIONS_HELD, PART_REVS_MAX, revisionWhy, revisionPartMeta, cardPartRevs, recordPartRevision, sessionRevsWhy,
     _reset() { _revs.clear(); _revDocs.clear(); _revSession.clear(); } };

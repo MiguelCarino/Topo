@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -188,5 +189,101 @@ func TestReportMailNeedsARelay(t *testing.T) {
 	r := o.b.post("/api/sites/"+site+"/report-mail", map[string]any{"to": []string{"a@x.test"}, "subject": "s", "link": e.origin + "/#x"})
 	if r.Code != 503 {
 		t.Fatalf("send without a relay: %d", r.Code)
+	}
+}
+
+// The provider report attached (D97): a PDF only, at most ReportMaxAttach
+// bytes, its name cleaned; stored once for every address, gone once sent.
+func TestReportMailAttachment(t *testing.T) {
+	e := newAuthEnv(t, "TOPO_OWNER_EMAIL="+ownerEmail)
+	o := e.newPerson(ownerEmail, "")
+	site := o.createSite()
+	e.clk.Add(10 * time.Minute)
+	e.mails()
+	path := "/api/sites/" + site + "/report-mail"
+	pdf := []byte("%PDF-1.7\n" + strings.Repeat("report \x00\xff ", 2000))
+	body := func(att map[string]any) map[string]any {
+		return map[string]any{"to": []string{"a@example.test", "b@example.test", "c@example.test", "d@example.test", "e@example.test"},
+			"subject": "Network problem", "lines": []string{"x"}, "link": e.origin + "/#e~sealed", "lang": "en", "attachment": att}
+	}
+	good := func() map[string]any {
+		return map[string]any{"name": "../../x.exe", "type": "application/pdf", "dataBase64": base64.StdEncoding.EncodeToString(pdf)}
+	}
+	// Five addresses, one stored file, held until they are sent.
+	r := o.b.post(path, body(good()))
+	if r.Code != 202 || r.json()["attachment"] != "x.pdf" {
+		t.Fatalf("send: %d %s", r.Code, r.Body.String())
+	}
+	if n := e.count("SELECT count(*) FROM mail_files"); n != 1 {
+		t.Fatalf("mail_files rows: %d", n)
+	}
+	if n := e.count("SELECT count(*) FROM outbox WHERE file_id IS NOT NULL AND sent IS NULL"); n != 5 {
+		t.Fatalf("rows naming it: %d", n)
+	}
+	m := e.lastMail("c@example.test", "report")
+	if m == nil || m.Attachment != "x.pdf" || m.AttachmentBytes != len(pdf) {
+		t.Fatalf("sink line: %+v", m)
+	}
+	raw, _ := readFile(filepath.Join(e.cfg.MailDir, filepath.Base(m.File)))
+	msg, _ := netmail.ReadMessage(strings.NewReader(raw))
+	mt, params, _ := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+	if mt != "multipart/mixed" {
+		t.Fatalf("type %s", mt)
+	}
+	mr := multipart.NewReader(msg.Body, params["boundary"])
+	mr.NextPart()
+	file, err := mr.NextPart()
+	if err != nil || file.FileName() != "x.pdf" {
+		t.Fatalf("file part: %v", err)
+	}
+	enc, _ := io.ReadAll(file)
+	if got, _ := base64.StdEncoding.DecodeString(strings.ReplaceAll(string(enc), "\r\n", "")); string(got) != string(pdf) {
+		t.Fatal("attachment bytes differ")
+	}
+	if n := e.count("SELECT count(*) FROM mail_files"); n != 0 {
+		t.Fatalf("file kept once sent: %d", n)
+	}
+	// Refused: another type, bad base64, not a PDF, empty, too big.
+	for name, mut := range map[string]func(a map[string]any){
+		"html": func(a map[string]any) {
+			a["type"] = "text/html"
+			a["dataBase64"] = base64.StdEncoding.EncodeToString([]byte("<p>hi"))
+		},
+		"exe":        func(a map[string]any) { a["type"] = "application/octet-stream" },
+		"bad base64": func(a map[string]any) { a["dataBase64"] = "%%%not base64" },
+		"fake pdf": func(a map[string]any) {
+			a["dataBase64"] = base64.StdEncoding.EncodeToString([]byte("MZ\x90 not a pdf"))
+		},
+	} {
+		a := good()
+		mut(a)
+		if r := o.b.post(path, body(a)); r.Code != 400 || r.json()["field"] != "attachment" {
+			t.Errorf("%s: %d %s", name, r.Code, r.Body.String())
+		}
+	}
+	for name, data := range map[string][]byte{"empty": {}, "over the limit": append([]byte("%PDF-"), make([]byte, ReportMaxAttach)...)} {
+		a := good()
+		a["dataBase64"] = base64.StdEncoding.EncodeToString(data)
+		if r := o.b.post(path, body(a)); r.Code != 413 {
+			t.Errorf("%s: %d %s", name, r.Code, r.Body.String())
+		}
+	}
+	if n := e.count("SELECT count(*) FROM mail_files"); n != 0 {
+		t.Fatalf("a refused file was stored: %d", n)
+	}
+	// Refused requests spent nothing: 9 more sends go (10 an hour), with no
+	// attachment as before.
+	for i := 0; i < ReportPerUserHour-1; i++ {
+		if r := o.b.post(path, body(nil)); r.Code != 202 || r.json()["attachment"] != nil {
+			t.Fatalf("send %d: %d %s", i+2, r.Code, r.Body.String())
+		}
+	}
+	// Spent: refused before the body is read, whatever its size.
+	r = o.b.post(path, body(good()))
+	if r.Code != 429 || r.json()["limit"] != "user" {
+		t.Fatalf("over the limit: %d %s", r.Code, r.Body.String())
+	}
+	if n := e.count("SELECT count(*) FROM mail_files"); n != 0 {
+		t.Fatalf("files: %d", n)
 	}
 }

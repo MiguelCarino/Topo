@@ -155,10 +155,13 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- Provider mode ----
     const PM = window.TopoProviderMode, TI = window.TopoIncidents;
     const router = state.nodes.find((n) => n.type === 'router') || state.nodes[0];
-    const incId = TI && await TI.createIncident({ symptom: 'internet', nodeIds: [router.id], text: 'No internet since this morning', name: 'Ana', phone: '555-1', remember: false });
+    // Routed to a provider, so the send step shows what the link carries (D95).
+    const routed = (state.providers || []).slice(0, 1).map((p) => p.id);
+    const incId = TI && await TI.createIncident({ symptom: 'internet', nodeIds: [router.id], text: 'No internet since this morning', name: 'Ana', phone: '555-1', remember: false, routedTo: routed });
     ok('a problem report is filed', typeof incId === 'string');
     if (incId && typeof openIncidentSend === 'function') {
       openIncidentSend(incId); await settle(); await wait(150);
+      if (routed.length) ok('the send step shows what the link carries', shown(el('problemScopeRow')));
       await dialog('Report a problem, its send step', 'problemDialog', '.modal-head .modal-x');
     }
     if (PM && incId) {

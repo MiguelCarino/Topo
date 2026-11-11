@@ -5049,7 +5049,10 @@ function nodeProviders(node, ctx = {}) {
     const providers = ctx.providers || state.providers, groups = ctx.groups || state.groups;
     // The host through the lookup index when it is the live document's (a
     // scan per VM would make the table's every render quadratic).
-    const nodeOf = ctx.nodes ? (id) => ctx.nodes.find((n) => n && n.id === id) || null : (id) => getNode(id) || null;
+    // ctx.nodeOf: a caller's own index over ctx.nodes (js/providerpart.js
+    // asks for every device of a whole network).
+    const nodeOf = typeof ctx.nodeOf === 'function' ? ctx.nodeOf
+        : ctx.nodes ? (id) => ctx.nodes.find((n) => n && n.id === id) || null : (id) => getNode(id) || null;
     const out = [], covered = new Set(), seen = new Set();
     const take = (rec, via) => {
         const add = [];

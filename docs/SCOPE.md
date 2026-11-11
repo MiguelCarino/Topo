@@ -602,7 +602,8 @@ mail program. On server, send the mail; if no SMTP config is registered,
 open the mail program." And the link, tapped on a phone, opens the network
 in Topo on that phone.
 
-- **D86. Client side: the mail program, the hyperlink by the clipboard.** A
+- **D86. Client side: the mail program, the hyperlink by the clipboard.**
+  (Amended by D94: the copy runs on every press.) A
   `mailto:` carries plain text only, and a page can neither paste into the
   mail program nor put "text with a hidden URL" in a `mailto:` body. So
   **Email** (the report's, and the visit's **Email the client**) first copies
@@ -623,7 +624,8 @@ in Topo on that phone.
   **Share…** stays plain text with the raw URL (share sheets take text). A
   visit's **Copy link** stays the plain URL. The clipboard is a hook
   (`TopoIncidents.hooks.copyRich`) the suites stub.
-- **D87. On a Topo server: the server sends the email.** When the chosen
+- **D87. On a Topo server: the server sends the email.** (Amended by D95:
+  it waits for a press of Send by email; D97 adds the attachment.) When the chosen
   providers are not all members (so D75's "Sent through the server" does not
   apply), **Save and send** makes the locked link as before, then, if the
   server can send mail, one request `POST /api/sites/{id}/report-mail` emails
@@ -679,6 +681,178 @@ in Topo on that phone.
   *tú*, so the anchor text differs by register ("Siga el enlace de la
   infraestructura" in the server's email, "Sigue el enlace de la
   infraestructura" in the client's own clipboard). Japanese: インフラのリンクを開く.
+
+**The provider's part (owner's decisions, 2026-11-10)**
+
+The owner: "At least copy the link when the user presses the mail button, so
+the user doesn't have to copy and paste the link manually (if he decides to
+mail it), only the password. Client chooses what the link carries." On the
+part: "Inherited coverage: yes, give the provider all the items within the
+group. Linked devices: include two hops." On the report and the
+attachment: "Do as you suggested", "Do attach on servers".
+
+- **D91. The part rule** (js/providerpart.js `providerPart(doc, ids,
+  {incidentId})`, pure: it reads a serialized document, never `state`). For
+  each chosen provider, their **items**, in full: every device, cable and
+  group they answer for, named on it, through its host chain (D35, per
+  service) or through a group; and **a group naming them brings all its
+  members, nested groups included**, even a member a nearer provider of the
+  same service covers (D35 would give it to that one; the part does not).
+  Every cable between two items is an item. A host override is not extended:
+  a provider named on a physical server gets its guests only through D35, a
+  group or a cable hop. Several providers: the union. No chosen provider in
+  the network: there is no part, and the whole network goes (as before).
+  Ids are the network's own everywhere (the merge back matches by them).
+- **D92. Linked devices: two cable hops.** Counted in cables from the items:
+  the far end of their cables is hop 1, one cable further hop 2. A VPN tunnel
+  is not a hop; a radio association and a patch panel are. No cap: a core
+  switch at hop 1 can bring most of a site at hop 2, and the send step shows
+  the counts. Also kept as context, at no hop: the hosts every kept device
+  runs on (or the loader would drop `host`), and every device a kept report
+  names, at any distance ("Where the problem is"; or the report would lose
+  where it is). Guests of an item's host are not context. A **linked
+  device** keeps only id, type, name, place (x, y, group, `host` when kept),
+  its port layout (count, scheme, face), the ports facing a kept cable
+  (`portAttrs` and the interface in full: address, MAC, VLANs) and, of its
+  other interfaces, those with an address as `{id, name, ip}`. Never its
+  notes, vendor, model, OS, serial, asset tag, location, status, upkeep,
+  custom fields, rack place, PoE, NAT or providers. **Cables**: every cable
+  whose two ends are kept; one between two linked devices goes reduced (ends,
+  ports, medium, Wi-Fi). **Groups**: the items' groups and every group (with
+  its parents) needed to place a kept device or a kept report. **Providers**:
+  only the chosen ones, without the client's notes about them. **Reports**:
+  the one being sent, and the chosen providers' reports on their items that
+  are open or have a visit of theirs; `routedTo` cut to them, their visits
+  only, a visit's changes cut to the part. **Log**: those reports' entries
+  and their visits, the "(to n)" summaries recounted, no merge entry (its
+  revision would offer a full base and it names sources), chained again from
+  the first dropped entry so the provider's copy verifies. **Header**: the
+  site and the client only (not the engineer, the reference, the date or
+  the scope notes); subnets the kept devices use (by address, VLAN or Wi-Fi),
+  their Wi-Fi networks, custom columns the items use, expected lives.
+  Accepted findings, pins, annotations, saved searches and the table layout
+  stay home.
+- **D93. The part's base: absent is not removed.** The part leaves canonical
+  (as the provider's loader reads it), recorded here as a revision held as
+  `part` with its context ids (linked devices and placing-only groups), and
+  named on the card (`card.partRevs`, so a copy naming it is known for a part
+  even after its revision is dropped). Its identity is the network's id and
+  updated, the new revision, and as base and prior the network's own full
+  revisions (so a provider holding an older full copy merges the part
+  three-way and does not send stale values back). The card's own revision,
+  base and prior are untouched. On the way back (js/mergedoors.js
+  `mergeContext`): a copy naming a part may only merge against a `part`
+  revision, else two-way, never against a full one (which would read
+  everything outside the part as removed). Then: a record the part did not
+  carry is unchanged, never removed; a field a linked device went without is
+  blank in base and theirs, so the client's value stays; ports and custom
+  fields merge per key, so an edit to a facing port merges alone; a provider
+  filling a field the client never filled is taken, and one the client has is
+  a conflict that defaults to the client's; removing a linked device or a
+  context group is a conflict that defaults to keep, and its cables (also to
+  devices the provider never saw) stay with it; a record only the provider's
+  copy holds whose id any held revision of the card knew (the client deleted
+  it since) does not come back. A record the provider adds is matched with
+  one of the client's only by id, or (by name, address, MAC, serial, path or
+  ends) with one the client added after the part left: never with one outside
+  the part the provider never saw (the part keeps every id the network held
+  when it left, `part.all`), so a new "AP-9" is added as new beside the
+  client's own AP-9 elsewhere. A copy is a part only while a part is the
+  newest thing it grew from: one that names an old part in its prior but also
+  a full revision held here after it (a whole link the provider merged since),
+  which that part did not carry as base or prior (`part.from`), is the whole
+  network again and merges against that full revision; a part whose revision
+  is gone stays a part (two-way). A part merged back is held as `part` (the
+  base of their next return); a whole-network link never names a part as its
+  base (`outgoingBase` skips them); the newest 8 parts survive the per-card
+  cap of 30. A part sent from a network not kept is held in the tab and
+  adopted with it when it is kept. "Replace with this copy" is never offered
+  for a part. What the owner should know: a provider who opens the part on a
+  device holding their older full copy ends with the part: merged three-way
+  there against that full copy, what the part leaves out reads as removed,
+  so their copy shrinks to the part (the client's network loses nothing:
+  their copy coming back is still a part).
+- **D94. Email copies the link on every press** (amends D86). Every press of
+  **Email** (the send step's, and provider mode's **Email the client**)
+  copies the link first (the rich "Follow the infrastructure link" and the
+  plain URL), then opens the mail program; the client handles only the
+  passphrase. The copy is the first await of the press, so it runs inside the
+  user's activation in Chromium and Firefox (both checked by
+  tests/email-copy-check.mjs). The step then says "Link copied: paste it in
+  the email under "Infrastructure link:" (Ctrl+V, or on a phone press and
+  hold, then Paste). The passphrase goes another way, such as a call or a
+  text." (provider mode: "The client already has the passphrase."). A
+  failed copy shows and selects the link and stops once ("The link could
+  not be copied. Copy it from the box below; Email opens your mail program
+  on the next press."); the next press tries the copy again and opens the
+  mail program whatever happens. A press after **Copy passphrase** copies
+  the link again.
+- **D95. The send step chooses what the link carries.** A row "What the link
+  carries": **Only what {names} look(s) after** ({n} devices of theirs, {m}
+  linked devices around them), the default every time and never remembered,
+  or **The whole network** (as before the part). Hidden when no provider is
+  chosen or the send goes through the server to members (D75). Changing it
+  makes a new link with no new commit (one undo step for the send), runs
+  the password-in-notes check again on the copy as it leaves (a linked
+  device's notes do not travel, so they do not warn for the part), and a
+  file fallback (too big, no lock) carries the part, never the whole
+  network. **Amends D87:** on a Topo server that sends mail, nothing is
+  mailed when the step opens; the button reads **✉ Send by email** and the
+  server mails the link on that press ("Press Send by email: the server
+  emails the locked link to {names}."). After a refusal or no answer it is
+  the mail-program Email again.
+- **D96. The provider's report, "Your part of this network"**
+  (js/providerreport.js, one builder for provider mode, the attachment and
+  the Providers tab). A4, 16 x 14 mm margins, in the existing sheet preview
+  (Print, Download PDF or HTML by the report format; HTML only without the
+  PDF engine), named `topo_<org>_<site>_<date>_<provider>.pdf|.html`.
+  Sections: the header (the site, the client, the reporter as the client's
+  contact, the date, the provider's own record: service, contact, phone,
+  email, contract, hours; the counts); this problem; their devices in full
+  (model, serial, asset tag, OS, group path, rack, location, host,
+  interfaces with address, MAC and VLANs, ports and VLANs, upkeep, notes,
+  and how they answer for it: named on it, through its host, through the
+  group); linked devices (Hop 1, Hop 2, "Runs their devices" for a host
+  with no hop, "Where the problem is"), with the ports facing theirs and
+  their addresses; cables, theirs first, ports both ends; the diagram of the
+  part only (drawn before the preview opens); their other open problems;
+  their own past visits. No findings: worked out on a part they would be
+  false. Titled "Your part of this network" for the provider, "{name}'s part
+  of this network" for the client, "The part of this network {names} look
+  after" for several (one union report). **CSV**: Devices CSV (their devices)
+  and Cables CSV (their cables and every cable at one of their devices),
+  `…_<provider>-devices.csv` / `…_<provider>-cables.csv` with the BOM, as
+  Topo's CSV importer reads them. The `provider` and `cable_provider`
+  columns are left out: the part names only this provider, so read back into
+  the whole network they would take other providers off shared devices.
+  Read back into the network or into the part, they plan no change. In
+  provider mode: "Your part of this network", "Devices CSV" and "Cables CSV"
+  under "You look after". Translated (es, pt-BR, ja, ru; Japanese says PC).
+- **D97. Also attach the report** (off by default, in the send step's row).
+  Ticking it builds the report once (never inside Email's press, which must
+  keep its activation: "Preparing the report…", Email disabled meanwhile);
+  several providers get one union report. **Mail program**: Email copies the
+  link, downloads the report once per build, then opens the mail program;
+  the body says "Report: attached ({file})" and the step says to attach the
+  file that just downloaded. **Topo server**: the server attaches it, as a
+  PDF only, 6 MB at most (an HTML file from the server's own address to any
+  five recipients would get around D87's "only this server's link" rule, and
+  mail filters hold .html); an HTML report or a bigger PDF is downloaded for
+  the client to send. `POST …/report-mail` takes an optional `attachment
+  {name, type: application/pdf, dataBase64}` (docs/SERVER.md), stored once
+  (not per recipient) until sent, and sent as `multipart/mixed`. **The
+  end-to-end exception, chosen by the owner**: the server sends the report
+  unlocked, so the dialog says, once the box is ticked on the server route:
+  "The server sends the report unlocked, so the server (and whoever runs
+  it) can read it. The link stays locked." Rate limits are unchanged.
+- **D98. Report for this provider, Share their part.** Each provider card in
+  the full editor's Providers tab has **Report for this provider** (the D96
+  report, titled for the client; a read-only network still prints it) and
+  **Share their part** (the share dialog, mode `doc` with a scope, not a new
+  mode: titled "Share their part", the counts in its blurb, no reports row;
+  Copy makes a part as in D93 and seals it with a passphrase), any time, not
+  only with a problem. A way in from the Simple view is deferred: it has no
+  provider line with actions to hang it on.
 
 Left for later (not in 5a): a per-session list with revoke in the account
 sheet (only "sign out everywhere else"); "Keep my copy as a separate network"
@@ -737,5 +911,6 @@ phpIPAM. Every import goes through the merge.
   merge (js/serversync.js), email notifications, the client (js/server.js,
   js/serverui.js), docs/SERVER.md, tests/server-e2e.mjs. Decisions D51–D85
   above; the infrastructure link and the server's report email D86–D90
+  (2026-11-10); the provider's part, its report and the attachment D91–D98
   (2026-11-10). Next: 5b (backups to a folder and WebDAV), then 5c.
 - [ ] 6. Importers and spec.
