@@ -5,7 +5,12 @@
 # Builds are unsigned (no signing secrets exist); see desktop/release-notes.md.
 #
 # Versions: a dispatch builds YY.M.RUN (26.11.37), which only grows and fits
-# an MSI (255.255.65535); a tag v1.2.3 builds 1.2.3.
+# an MSI (255.255.65535); a tag v1.2.3 builds 1.2.3, and so does a dispatch
+# given the tag v1.2.3 (into that tag's draft, without pushing the tag).
+#
+# Platforms: a dispatch can build only the x64 or only the Arm apps; the rest
+# can be built elsewhere (an Arm Mac) and uploaded to the same draft with
+# `gh release upload v1.2.3 <files>`. A tag push builds them all.
 #
 # One release per tag: a re-run (all jobs or failed ones) reuses its own
 # draft and replaces the zip in it. A tag that already has a published
@@ -15,6 +20,16 @@ name: Builds
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag to build into its draft (v1.2.3); empty builds YY.M.RUN'
+        required: false
+        default: ''
+      platforms:
+        description: 'Desktop apps to build'
+        type: choice
+        options: [all, x64, arm64]
+        default: all
   push:
     tags: ['v*']
 
@@ -33,6 +48,7 @@ jobs:
       release_id: ${{ steps.draft.outputs.id }}
       version: ${{ steps.version.outputs.version }}
       skip: ${{ steps.existing.outputs.skip }}
+      matrix: ${{ steps.platforms.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
 
@@ -43,10 +59,13 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           RUN_NUMBER: ${{ github.run_number }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           if [ "$REF_TYPE" = tag ]; then
             v="${REF_NAME#v}"
+          elif [ -n "$INPUT_TAG" ]; then
+            v="${INPUT_TAG#v}"
           else
             v="$(date -u +%y).$(date -u +%-m).$RUN_NUMBER"
           fi
@@ -59,6 +78,29 @@ jobs:
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "tag=v$v" >> "$GITHUB_OUTPUT"
+
+      # The desktop apps to build: all of them, or a dispatch's x64 or Arm half.
+      - name: Platforms
+        id: platforms
+        shell: bash
+        env:
+          PLATFORMS: ${{ inputs.platforms || 'all' }}
+        run: |
+          set -euo pipefail
+          # 22.04 for the lowest glibc the Linux builds then need; native Arm
+          # Linux because an AppImage cannot be cross-built.
+          all='[
+            {"name":"macos-arm64","arch":"arm64","os":"macos-latest","target":"aarch64-apple-darwin","args":"--target aarch64-apple-darwin"},
+            {"name":"macos-x64","arch":"x64","os":"macos-latest","target":"x86_64-apple-darwin","args":"--target x86_64-apple-darwin"},
+            {"name":"linux-x64","arch":"x64","os":"ubuntu-22.04","target":"","args":""},
+            {"name":"linux-arm64","arch":"arm64","os":"ubuntu-22.04-arm","target":"","args":""},
+            {"name":"windows-x64","arch":"x64","os":"windows-latest","target":"","args":""},
+            {"name":"windows-arm64","arch":"arm64","os":"windows-latest","target":"aarch64-pc-windows-msvc","args":"--target aarch64-pc-windows-msvc"}
+          ]'
+          case "$PLATFORMS" in all|x64|arm64) ;; *) echo "::error::platforms '$PLATFORMS' is not all, x64 or arm64"; exit 1 ;; esac
+          m=$(jq -c --arg p "$PLATFORMS" '[.[] | select($p == "all" or .arch == $p)]' <<< "$all")
+          echo "Building: $(jq -r '[.[].name] | join(", ")' <<< "$m")"
+          echo "matrix=$m" >> "$GITHUB_OUTPUT"
 
       - name: Existing release for the tag
         id: existing
@@ -146,33 +188,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: macos-arm64
-            os: macos-latest
-            target: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin
-          - name: macos-x64
-            os: macos-latest
-            target: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin
-          # 22.04 for the lowest glibc the Linux builds then need.
-          - name: linux-x64
-            os: ubuntu-22.04
-            target: ''
-            args: ''
-          # Native Arm: an AppImage cannot be cross-built.
-          - name: linux-arm64
-            os: ubuntu-22.04-arm
-            target: ''
-            args: ''
-          - name: windows-x64
-            os: windows-latest
-            target: ''
-            args: ''
-          - name: windows-arm64
-            os: windows-latest
-            target: aarch64-pc-windows-msvc
-            args: --target aarch64-pc-windows-msvc
+        include: ${{ fromJSON(needs.release.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       # Windows runners check out with core.autocrlf=true. .gitattributes

@@ -4315,9 +4315,9 @@ it asked, from the PC that asked, and for nothing else.
 - **D389. Which links carry a tag.** A problem report's link (part or
   whole) and Share their part when locked: a new tag per link made. The
   share dialog's own links and binder links carry none and stay version 1,
-  so Topo 0.0.1 to 0.0.3 read them as before. A version 2 link in those
-  builds reads as "damaged", not "made by a newer Topo" as D368 hoped: they
-  were released before the word existed. From this build on, a version
+  so Topo 0.0.1 reads them as before. A version 2 link in 0.0.1 reads as
+  "damaged", not "made by a newer Topo" as D368 hoped: it was released
+  before the word existed. (Step 8 ships in 0.0.3, D424.) From this build on, a version
   above 2 says "This link was made by a newer Topo. Update Topo to open it."
 - **D390. The provider's side.** The tag is held in memory beside the
   passphrase that opened the link (D44), and goes back only with that
@@ -4559,6 +4559,19 @@ it asked, from the PC that asked, and for nothing else.
   contextmenu at the finger's point, as the touch suite does. Check now was
   not run against a real device (no app session): the Rust check is the
   monitor's, tested there.
+
+**8g. The release (2026-11-12)**
+
+- **D424. Step 8 ships in 0.0.3.** The v0.0.3 draft (step 7) was never
+  published, so it and its tag were deleted, as were the v0.0.4 tag and
+  draft built for a moment, and 0.0.3 is rebuilt from step 8's commit with
+  one "New in 0.0.3" note: step 7's items, then step 8's, files at version
+  20 (0.0.1 opens them read-only). The Builds workflow's dispatch gained
+  `tag` (build that version into its draft without pushing the tag; the
+  owner's publishing makes it) and `platforms` (all, x64 or arm64). 0.0.3's
+  x64 apps (macOS, Linux, Windows) and the zip are built there; the Arm
+  apps are built on an Arm Mac and uploaded to the same draft (`gh release
+  upload v0.0.3 <files>`).
 
 ### Phases
 
@@ -5199,7 +5212,6 @@ Stop after each phase and report the counts and failures as they are.
     them), and the step's clock times follow the page's language. The docs:
     FEATURES, SERVER and FORMAT (v20) were written with their phases; the
     README gains step 8 and its scanner promise reads "an address someone
-    wrote down". The release note is "New in 0.0.4" above 0.0.3, which is
-    still a draft the owner may publish first; the build is the tag v0.0.4.
+    wrote down". The release note and the build: D424.
     The browser pass: every phase's pass (8a, 8b-8c, 8d, 8f, 8h) rerun on
     the finished tree at 360, 390 and 1280 in Gold and Colourful.
