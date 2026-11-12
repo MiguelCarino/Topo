@@ -4455,6 +4455,32 @@ it asked, from the PC that asked, and for nothing else.
   so the alarm skipping a Record only outage is tested in Rust and the
   page with a stand-in monitor only.
 
+**8e. TLS certificate and Check the Internet (2026-11-12)**
+
+- **D411. Host names, looked up (fixes 8d).** The monitor took only an IP
+  literal and skipped anything else as "address", so a watched address
+  given as a name was never checked. The app now looks a name up with the
+  system's resolver at each check (an IPv4 address first), sends it as the
+  TLS server name (SNI) and the HTTP Host, and a name that does not resolve
+  is a failure ("resolve": "The name does not resolve from this PC."), not
+  a skip. Still never a range or a URL. The page sends a device's own
+  addresses only, so a device's check never looks a name up; the step 7
+  test "names are never looked up" now says the opposite for a name.
+- **D412. The TLS certificate check.** Protocol `tls` (v20, the schema's
+  list grew in the same version, unreleased until this commit), port 443
+  when none is given: connect, one handshake, the end date, close_notify.
+  Nothing else is sent. It answers whatever the certificate's trust (as
+  HTTPS's does); 14 days before its end the line warns. Tested against a
+  loopback TLS server: the end date read, nothing received after the
+  handshake, a plain TCP port and a closed one not answering.
+- **D413. Check the Internet.** Three prompts (the gateway, the resolver,
+  the HTTPS address), each skippable, Cancel adds nothing; the gateway
+  offered from the internet-facing router's own gateway field, the resolver
+  1.1.1.1. The DNS question asks the HTTPS service's name when it is one,
+  else example.com. Reached through the router linked to a cloud (else the
+  first routing device), the HTTPS one and the gateway on the internet
+  providers. More than room left (64): the first that fit.
+
 ### Phases
 
 Stop after each phase and report the counts and failures as they are.
@@ -5085,7 +5111,7 @@ Stop after each phase and report the counts and failures as they are.
   - [x] 8b. The part is the path (2026-11-12, eccd1bc; D395-D399).
   - [x] 8c. Report a problem to them (2026-11-12, eccd1bc; D400-D402).
   - [x] 8d. Watched addresses (2026-11-12; D403-D410).
-  - [ ] 8e. TLS certificate and Check the Internet.
+  - [x] 8e. TLS certificate and Check the Internet (2026-11-12; D411-D413).
   - [ ] 8f. Connections.
   - [ ] 8h. Trace to a target.
   - [ ] 8g. i18n, docs and the browser pass.

@@ -605,7 +605,7 @@ pub(super) fn mail(ip: IpAddr, spec: &Spec, kind: Mail, timeout: Duration) -> Ou
         Err(e) => return Outcome::fail(io_status(&e)),
     };
     if spec.tls == "implicit" {
-        let (mut s, cert) = match tls_over(tcp, ip) {
+        let (mut s, cert) = match tls_over(tcp, ip, &spec.host) {
             Ok(x) => x,
             Err(e) => return Outcome::fail(e),
         };
@@ -633,7 +633,7 @@ pub(super) fn mail(ip: IpAddr, spec: &Spec, kind: Mail, timeout: Duration) -> Ou
         Ok(true) => {
             // Nothing was read past the server's yes (lines are read a byte
             // at a time), so the handshake goes on the same socket.
-            let (mut tls, cert) = match tls_over(s, ip) {
+            let (mut tls, cert) = match tls_over(s, ip, &spec.host) {
                 Ok(x) => x,
                 Err(e) => return Outcome::fail(e),
             };

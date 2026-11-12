@@ -61,7 +61,7 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOLS: [&str; 14] = ["ping", "tcp", "http", "https", "dns", "smtp", "dicom", "ntp", "rtsp", "sip", "mllp", "ipp", "imap", "pop"];
+pub const PROTOCOLS: [&str; 15] = ["ping", "tcp", "http", "https", "dns", "smtp", "dicom", "ntp", "rtsp", "sip", "mllp", "ipp", "imap", "pop", "tls"];
 pub const DEFAULT_TIMEOUT_MS: u64 = 5000;
 /// DICOM and SMTP say more than one thing before they are done.
 pub const LONG_TIMEOUT_MS: u64 = 10_000;
@@ -74,7 +74,9 @@ const LINE_MAX: usize = 4096;
 #[serde(rename_all = "camelCase", default)]
 pub struct Spec {
     pub proto: String,
-    /// The device's address, an IP literal.
+    /// The device's address, an IP literal; or a watched address's host name
+    /// (step 8d), looked up once per check and sent as the TLS server name
+    /// and the HTTP Host.
     pub host: String,
     /// 0: the protocol's own (80, 443, 53, 25, 104).
     pub port: u16,
@@ -115,6 +117,7 @@ impl Spec {
             "ipp" => 631,
             "imap" => 143,
             "pop" => 110,
+            "tls" => 443,
             _ => 0,
         }
     }
@@ -193,9 +196,34 @@ pub fn cert_days_left(not_after: i64, now: i64) -> i64 {
 #[allow(dead_code)]
 pub const CERT_WARN_DAYS: i64 = 14;
 
+/// A host name as a watched address may hold one (letters, digits, dots,
+/// hyphens and underscores, at most 253): never a URL, a list or a range.
+fn host_name_ok(h: &str) -> bool {
+    !h.is_empty() && h.len() <= 253 && h.chars().any(|c| c.is_ascii_alphabetic())
+        && h.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+        && !h.starts_with('.') && !h.contains("..")
+}
+/// A host name's address, looked up by the system (an IPv4 one first, as
+/// most of what a site checks answers there). None when it does not resolve.
+pub fn resolve(name: &str) -> Option<IpAddr> {
+    use std::net::ToSocketAddrs;
+    let all: Vec<IpAddr> = (name, 0u16).to_socket_addrs().ok()?.map(|a| a.ip()).collect();
+    all.iter().find(|ip| ip.is_ipv4()).or_else(|| all.first()).copied()
+}
+
 /// Runs one check. Never panics on what a device sends.
 pub fn run(spec: &Spec) -> Outcome {
-    let Ok(ip) = spec.host.trim().parse::<IpAddr>() else { return Outcome::skip("address") };
+    let host = spec.host.trim();
+    let ip = match host.parse::<IpAddr>() {
+        Ok(ip) => ip,
+        // A watched address's host name (step 8d): looked up now; one that
+        // does not resolve is not answering, as far as this PC can tell.
+        Err(_) if host_name_ok(host) => match resolve(host) {
+            Some(ip) => ip,
+            None => return Outcome::fail("resolve"),
+        },
+        Err(_) => return Outcome::skip("address"),
+    };
     let timeout = spec.timeout();
     match spec.proto.as_str() {
         "ping" => ping(ip, spec, timeout),
@@ -217,6 +245,7 @@ pub fn run(spec: &Spec) -> Outcome {
         "ipp" => ipp(ip, spec, timeout),
         "imap" => mail(ip, spec, Mail::Imap, timeout),
         "pop" => mail(ip, spec, Mail::Pop, timeout),
+        "tls" => tls_cert(ip, spec, timeout),
         _ => Outcome::skip("protocol"),
     }
 }
@@ -586,7 +615,7 @@ impl ServerCertVerifier for Keep {
 type Tls<S = TcpStream> = rustls::StreamOwned<rustls::ClientConnection, S>;
 
 /// The handshake over `tcp`; the stream and the certificate's end date.
-fn tls_over<S: Read + Write>(tcp: S, ip: IpAddr) -> Result<(Tls<S>, Option<i64>), String> {
+fn tls_over<S: Read + Write>(tcp: S, ip: IpAddr, host: &str) -> Result<(Tls<S>, Option<i64>), String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let keep = Arc::new(Keep { provider: provider.clone(), cert: Mutex::new(None) });
     let cfg = rustls::ClientConfig::builder_with_provider(provider)
@@ -595,7 +624,13 @@ fn tls_over<S: Read + Write>(tcp: S, ip: IpAddr) -> Result<(Tls<S>, Option<i64>)
         .dangerous()
         .with_custom_certificate_verifier(keep.clone())
         .with_no_client_auth();
-    let conn = rustls::ClientConnection::new(Arc::new(cfg), ServerName::IpAddress(ip.into())).map_err(|_| "tls".to_string())?;
+    // A host name goes as the server name (SNI), so a service behind a
+    // shared address shows its own certificate; an address goes as itself.
+    let name = match host.trim().parse::<IpAddr>() {
+        Ok(_) => ServerName::IpAddress(ip.into()),
+        Err(_) => ServerName::try_from(host.trim().to_string()).unwrap_or(ServerName::IpAddress(ip.into())),
+    };
+    let conn = rustls::ClientConnection::new(Arc::new(cfg), name).map_err(|_| "tls".to_string())?;
     let mut tls = rustls::StreamOwned::new(conn, tcp);
     while tls.conn.is_handshaking() {
         if let Err(e) = tls.conn.complete_io(&mut tls.sock) {
@@ -686,6 +721,15 @@ pub fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 
 // ---- HTTP(S) ----
 
+/// The Host a request names: a watched address's host name as given, an
+/// address as host_header writes it.
+fn host_header_for(host: &str, ip: IpAddr, port: u16, tls: bool) -> String {
+    let h = host.trim();
+    if h.parse::<IpAddr>().is_ok() || h.is_empty() {
+        return host_header(ip, port, tls);
+    }
+    if (tls && port == 443) || (!tls && port == 80) { h.to_string() } else { format!("{h}:{port}") }
+}
 fn host_header(ip: IpAddr, port: u16, tls: bool) -> String {
     let h = match ip {
         IpAddr::V4(a) => a.to_string(),
@@ -740,6 +784,26 @@ fn read_line_limited<R: Read>(r: &mut R) -> std::io::Result<String> {
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
+/// TLS certificate (docs/SCOPE.md D375, step 8e): on any port, one
+/// handshake, the certificate's end date read, then closed. Nothing is sent
+/// after the handshake but the close (no request, no login).
+fn tls_cert(ip: IpAddr, spec: &Spec, timeout: Duration) -> Outcome {
+    let t = Instant::now();
+    let tcp = match connect(ip, spec.port(), timeout) {
+        Ok(s) => s,
+        Err(e) => return Outcome::fail(io_status(&e)),
+    };
+    match tls_over(tcp, ip, &spec.host) {
+        Ok((mut s, cert)) => {
+            let rtt = ms_since(t);
+            s.conn.send_close_notify();
+            let _ = s.flush();
+            Outcome { ok: true, rtt_ms: Some(rtt), status: "TLS".into(), cert_not_after: cert, ..Default::default() }
+        }
+        Err(e) => Outcome::fail(e),
+    }
+}
+
 fn http(ip: IpAddr, spec: &Spec, tls: bool, timeout: Duration) -> Outcome {
     let port = spec.port();
     let t = Instant::now();
@@ -750,7 +814,7 @@ fn http(ip: IpAddr, spec: &Spec, tls: bool, timeout: Duration) -> Outcome {
     let req = format!(
         "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: Topo answer check\r\nAccept: */*\r\nConnection: close\r\n\r\n",
         http_path(&spec.path),
-        host_header(ip, port, tls)
+        host_header_for(&spec.host, ip, port, tls)
     );
     let ask = |s: &mut dyn ReadWrite| -> Result<String, String> {
         s.write_all(req.as_bytes()).map_err(|e| io_status(&e))?;
@@ -759,7 +823,7 @@ fn http(ip: IpAddr, spec: &Spec, tls: bool, timeout: Duration) -> Outcome {
         read_line_limited(&mut r).map_err(|e| io_status(&e))
     };
     let (line, cert) = if tls {
-        match tls_over(tcp, ip) {
+        match tls_over(tcp, ip, &spec.host) {
             Ok((mut s, cert)) => {
                 let line = ask(&mut s);
                 s.conn.send_close_notify();
@@ -939,7 +1003,7 @@ fn smtp(ip: IpAddr, spec: &Spec, timeout: Duration) -> Outcome {
         // Nothing is buffered past the 220 (the server waits for the
         // handshake), so the TLS goes on the same socket.
         drop(r);
-        let (mut s, cert) = match tls_over(w, ip) {
+        let (mut s, cert) = match tls_over(w, ip, &spec.host) {
             Ok(x) => x,
             Err(e) => return Outcome::fail(e),
         };
@@ -1225,12 +1289,13 @@ mod tests {
         assert_eq!(o.status, "refused");
         // No port: cannot be asked.
         assert!(run(&spec("tcp", 0)).skipped);
-        // Names are never looked up.
+        // A name is looked up (a watched address's, step 8d: the page sends a
+        // device's addresses only); one that does not resolve is not answering.
         let mut s = spec("tcp", 80);
-        s.host = "printer.example.com".into();
+        s.host = "printer.invalid".into();
         let o = run(&s);
-        assert!(o.skipped);
-        assert_eq!(o.status, "address");
+        assert!(!o.skipped);
+        assert_eq!(o.status, "resolve");
     }
 
     /// An http server answering one request per connection with `reply`,
@@ -1318,6 +1383,48 @@ mod tests {
         let (port, _rx) = http_fake("HTTP/1.1 200 OK\r\n\r\n", false);
         let o = run(&spec("https", port));
         assert!(!o.ok, "{o:?}");
+    }
+
+    // TLS certificate (D375): one handshake, the end date, nothing sent after.
+    #[test]
+    fn tls_reads_the_end_date_and_sends_nothing() {
+        let (port, rx) = http_fake("HTTP/1.1 200 OK\r\n\r\n", true);
+        let o = run(&spec("tls", port));
+        assert!(o.ok && o.status == "TLS", "{o:?}");
+        assert_eq!(o.cert_not_after, Some(CERT_A_END));
+        assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), "", "nothing sent after the handshake");
+        // Plain TCP on the port: no handshake, not answering.
+        let (port, _rx) = http_fake("HTTP/1.1 200 OK\r\n\r\n", false);
+        assert!(!run(&spec("tls", port)).ok);
+        // Nothing listening.
+        let o = run(&spec("tls", free_port()));
+        assert!(!o.ok && o.status == "refused", "{o:?}");
+        assert_eq!(Spec::default_port("tls"), 443);
+        assert!(PROTOCOLS.contains(&"tls"));
+    }
+
+    // A watched address's host name (step 8d): looked up, sent as the
+    // server name and the Host; one that does not resolve is not answering.
+    #[test]
+    fn a_host_name_is_looked_up() {
+        assert_eq!(resolve("localhost"), Some("127.0.0.1".parse().unwrap()));
+        let (port, rx) = http_fake("HTTP/1.1 204 No Content\r\n\r\n", false);
+        let mut s = spec("http", port);
+        s.host = "localhost".into();
+        let o = run(&s);
+        assert!(o.ok && o.status == "204", "{o:?}");
+        assert!(rx.recv().unwrap().contains(&format!("Host: localhost:{port}\r\n")));
+        s.host = "no-such-host.invalid".into();
+        let o = run(&s);
+        assert!(!o.ok && !o.skipped && o.status == "resolve", "{o:?}");
+        // Never a range or a URL.
+        for bad in ["10.0.0.1-20", "http://x.example", "a b", "", "10.0.0.*"] {
+            s.host = bad.into();
+            assert!(run(&s).skipped, "{bad}");
+        }
+        assert!(host_name_ok("pacs.clinic.local") && !host_name_ok("1.2.3") && !host_name_ok("x..y"));
+        assert_eq!(host_header_for("app.example.com", "10.0.0.1".parse().unwrap(), 443, true), "app.example.com");
+        assert_eq!(host_header_for("10.0.0.1", "10.0.0.1".parse().unwrap(), 8443, true), "10.0.0.1:8443");
     }
 
     #[test]

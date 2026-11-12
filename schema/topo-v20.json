@@ -1646,7 +1646,8 @@
             "mllp",
             "ipp",
             "imap",
-            "pop"
+            "pop",
+            "tls"
           ]
         },
         "ip": {

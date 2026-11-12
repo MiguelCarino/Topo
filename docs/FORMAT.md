@@ -162,7 +162,7 @@ when not given:
 | Key | Value |
 |---|---|
 | `id` | Unique on its device (letters, digits, `_`, `.`, `-`; up to 64). Its states and statistics are kept under `<device id>/<id>`. |
-| `proto` | `ping`, `tcp`, `http`, `https`, `dns`, `smtp`, `dicom`, `ntp`, `rtsp`, `sip`, `mllp` (HL7 MLLP, a connect only), `ipp`, `imap` or `pop`. A block with any other is dropped. |
+| `proto` | `ping`, `tcp`, `http`, `https`, `dns`, `smtp`, `dicom`, `ntp`, `rtsp`, `sip`, `mllp` (HL7 MLLP, a connect only), `ipp`, `imap`, `pop` or (v20) `tls` (one TLS handshake on its port, 443 when absent: the certificate's end date, nothing sent after it). A block with any other is dropped. |
 | `ip` | Which of the device's own addresses to ask. Absent: its first. |
 | `port` | 1 to 65535. Absent: the protocol's own (http 80, https 443, dns 53, smtp 25, dicom 104, ntp 123, rtsp 554, sip 5060, mllp 2575, ipp 631, imap 143, pop 110; imap 993 and pop 995 with `tls` `implicit`). On a `ping`: the TCP port asked where the PC may not ping ("TCP, not ping"); absent there, the first single TCP port of the device's `ports`. A `tcp` check needs one. |
 | `path` | `http`, `https`, `rtsp`: the page or stream asked for, starting with `/`. Absent: `/`. `ipp`: the printer's path. Absent: `/ipp/print`. |

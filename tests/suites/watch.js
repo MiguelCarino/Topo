@@ -245,13 +245,52 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('read back as watched addresses, never as devices', plan9.kind === 'watch' && plan9.counts.change === 1 && plan9.counts.add === 1,
       show({ map, kind: plan9.kind, counts: plan9.counts, errors: plan9.errors, rows: plan9.rows && plan9.rows.map((r) => [r.status, r.why]) }));
 
+    // ---- 11. Step 8e: the TLS certificate check and Check the Internet (D375) ----
+    ok('tls is a check: its port 443', CHECK_PROTOCOLS.includes('tls') && CHECK_PORTS.tls === 443 && CK.protoLabel('tls') === 'TLS certificate'
+      && show(asCheck({ id: 'c', proto: 'tls', port: 636 }, false)) === '{"id":"c","proto":"tls","port":636}');
+    const tlsPlan = CK.monitorPlan({ nodes: [N('dc', 'server', { interfaces: [{ id: 'i1', ip: '10.0.0.9/24' }], checks: [{ id: 't', proto: 'tls', port: 636 }] })], links: [] }, {});
+    ok('…planned with its port, on a device too (LDAPS here)', tlsPlan.items[0].spec.proto === 'tls' && tlsPlan.items[0].spec.port === 636 && tlsPlan.items[0].spec.host === '10.0.0.9');
+    ok('a name that does not resolve says so', /The name does not resolve from this PC\./.test(CK.nowText({ key: 'w:x/c', state: 'down', since: Date.now(), status: 'resolve' }, { id: 'w:x' })));
+    ok('an address on the internet: a URL, a name, an address, an IPv6 address', show(TopoWatch.webTarget('https://status.example.com:8443/health?x=1')) === show({ address: 'status.example.com', port: 8443, path: '/health' })
+      && TopoWatch.webTarget('app.example.com').address === 'app.example.com' && TopoWatch.webTarget('2001:db8::8').address === '2001:db8::8' && TopoWatch.webTarget('10.0.0.0/24') === null);
+    const asked8e = [];
+    let answers = ['200.1.1.254', '9.9.9.9', 'https://status.example.com/health'];
+    setDialogResponder((req) => { asked8e.push(req); if (req.kind === 'prompt') return answers.shift(); return undefined; });
+    batch(() => { getNode('rt').gw = '200.1.1.254'; save(); });
+    const beforeNet = JSON.stringify(serializeDoc());
+    const nWatch = state.watch.length;
+    const made = await TopoWatch.checkTheInternet();
+    ok('Check the Internet asks three things, the router\'s gateway offered first', asked8e.filter((r) => r.kind === 'prompt').length === 3 && asked8e[0].value === '200.1.1.254' && asked8e[1].value === '1.1.1.1',
+      show(asked8e.map((r) => [r.kind, r.value])));
+    const byName = (a) => state.watch.find((w) => w.address === a);
+    ok('…and adds three watched addresses, reached through the router, Record only', made.length === 3 && state.watch.length === nWatch + 3 && made.every((w) => w.via === 'rt' && !w.outage), show(made));
+    ok('…a ping to the gateway on the internet provider', show(byName('200.1.1.254').checks.map((c) => c.proto)) === '["ping"]' && show(byName('200.1.1.254').providers) === '["pI"]');
+    ok('…a DNS question for the service\'s name to the resolver', byName('9.9.9.9').checks[0].proto === 'dns' && byName('9.9.9.9').checks[0].name === 'status.example.com');
+    ok('…HTTPS to the service, its page', byName('status.example.com').checks[0].proto === 'https' && byName('status.example.com').checks[0].path === '/health');
+    undo(); await tick();
+    ok('one undo step takes the three back', JSON.stringify(serializeDoc()) === beforeNet);
+    answers = ['', null];
+    asked8e.length = 0;
+    ok('Cancel on the second question adds nothing', (await TopoWatch.checkTheInternet()) === null && JSON.stringify(serializeDoc()) === beforeNet);
+    answers = ['10.0.0.0/24', '', ''];
+    asked8e.length = 0;
+    ok('a subnet is not one address: said, nothing added', (await TopoWatch.checkTheInternet()) === null && asked8e.some((r) => r.kind === 'tell' && /10\.0\.0\.0\/24 is not one address/.test(r.message))
+      && JSON.stringify(serializeDoc()) === beforeNet);
+    setDialogResponder((req) => (req.kind === 'confirm' ? true : undefined));
+    ok('the tab offers Check the Internet…', !!el('checkInternetBtn') && el('checkInternetBtn').textContent === 'Check the Internet…');
+
     // ---- 10. The strings ----
     const { has, locales } = window.CarinoI18N;
     const strs = ['Watched', '+ Address', 'Add an address', 'Edit the watched address', 'Record only', 'Raises an issue', 'Not checked', 'Add to the map', 'Recorded only',
       'Topo checks only what you ask it to. Anything not checked has no state.', 'Reached through {name}', 'When it is not answering', 'Watched addresses',
       'Record only: in the statistics and the monitoring report, no issue, no alarm', 'Raise an issue: the banner, and the alarm on PCs that show alarms',
       'One address: an IP address or a host name. Not a range, a subnet or a wildcard.', 'Checked: {what}. Anything not checked has no figures here.',
-      'Recorded only: no issue was raised.', '{name} is on the map now, with its checks.', 'Rows of watched addresses: {n}', 'Watched address'];
+      'Recorded only: no issue was raised.', '{name} is on the map now, with its checks.', 'Rows of watched addresses: {n}', 'Watched address',
+      'TLS certificate', 'One handshake on this port: the certificate\'s end date (a warning 14 days before). Nothing is sent after it.', 'The name does not resolve from this PC.',
+      'Check the Internet', 'Check the Internet…', 'The internet provider\'s gateway: the address your router sends everything to. Leave it empty to skip.',
+      'A public resolver to ask for a name. Leave it empty to skip.', 'An address on the internet to open over HTTPS, such as a service you use. Leave it empty to skip.',
+      'Add the checks', 'Public resolver', 'Not added: {list} is not one address (an IP address or a host name).',
+      '1 watched address added. It is checked from the PCs that monitor this network.', '{n} watched addresses added. They are checked from the PCs that monitor this network.', 'Next'];
     locales.forEach((loc) => { const missing = strs.filter((s) => !has(loc, s)); ok(`${loc} carries the strings`, !missing.length, missing.join(' | ')); });
     ok('no console error', !errors.length, errors.slice(0, 3).join(' | '));
   } catch (e) {

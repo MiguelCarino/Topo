@@ -1569,7 +1569,8 @@ const IFACE_FIELDS = [
 // TCP port, a web page, a DNS server, a mail server, a DICOM node). Each:
 //   id        stable within the device, for its states and statistics
 //   proto     ping, tcp, http, https, dns, smtp, dicom, ntp, rtsp, sip,
-//             mllp (HL7, a connect only), ipp, imap or pop
+//             mllp (HL7, a connect only), ipp, imap, pop or (v20, step 8e,
+//             D375) tls: one handshake on any port, the certificate's end
 //   ip        which of the device's own addresses (absent: its first)
 //   port      1-65535 (absent: the protocol's own; a ping's TCP port when
 //             this PC may not ping, "TCP, not ping")
@@ -1591,8 +1592,8 @@ const IFACE_FIELDS = [
 // No secrets: no check takes a password. Each check block is written in
 // this order, keys left out when absent, so a device with none serializes
 // as before.
-const CHECK_PROTOCOLS = ['ping', 'tcp', 'http', 'https', 'dns', 'smtp', 'dicom', 'ntp', 'rtsp', 'sip', 'mllp', 'ipp', 'imap', 'pop'];
-const CHECK_PORTS = { http: 80, https: 443, dns: 53, smtp: 25, dicom: 104, ntp: 123, rtsp: 554, sip: 5060, mllp: 2575, ipp: 631, imap: 143, pop: 110 };
+const CHECK_PROTOCOLS = ['ping', 'tcp', 'http', 'https', 'dns', 'smtp', 'dicom', 'ntp', 'rtsp', 'sip', 'mllp', 'ipp', 'imap', 'pop', 'tls'];
+const CHECK_PORTS = { http: 80, https: 443, dns: 53, smtp: 25, dicom: 104, ntp: 123, rtsp: 554, sip: 5060, mllp: 2575, ipp: 631, imap: 143, pop: 110, tls: 443 };
 // TLS from the start: IMAPS and POP3S.
 const CHECK_TLS_PORTS = { imap: 993, pop: 995 };
 const CHECK_TLS_MODES = ['starttls', 'implicit'];

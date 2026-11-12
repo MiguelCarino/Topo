@@ -661,7 +661,8 @@ function renderProblemContacts() {
     const pinned = _pb.forProvider ? providerById(_pb.forProvider) : null;
     if (!_pb.ticksTouched) {
         _pb.sendTo = defaultSendTo(route);
-        if (pinned && !_pb.sendTo.includes(pinned.id)) _pb.sendTo.unshift(pinned.id);
+        // Theirs first, whatever the routing ticked (D400).
+        if (pinned) _pb.sendTo = [pinned.id].concat(_pb.sendTo.filter((id) => id !== pinned.id));
     }
     const results = route.results.filter((r) => !pinned || r.provider.id !== pinned.id);
     if (pinned) results.unshift(route.results.find((r) => r.provider.id === pinned.id) || { provider: pinned, reason: t('Chosen from their card') });

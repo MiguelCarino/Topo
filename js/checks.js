@@ -69,7 +69,7 @@ function ckListen(name, cb) {
 }
 const hasHost = () => !!_ck.invoke || !!(window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function');
 
-const PROTO_LABELS = { ping: 'Ping', tcp: 'TCP', http: 'HTTP', https: 'HTTPS', dns: 'DNS', smtp: 'SMTP', dicom: 'DICOM C-ECHO', ntp: 'NTP', rtsp: 'RTSP', sip: 'SIP', mllp: 'HL7 MLLP', ipp: 'IPP', imap: 'IMAP', pop: 'POP' };
+const PROTO_LABELS = { ping: 'Ping', tcp: 'TCP', http: 'HTTP', https: 'HTTPS', dns: 'DNS', smtp: 'SMTP', dicom: 'DICOM C-ECHO', ntp: 'NTP', rtsp: 'RTSP', sip: 'SIP', mllp: 'HL7 MLLP', ipp: 'IPP', imap: 'IMAP', pop: 'POP', tls: 'TLS certificate' };
 const protoLabel = (p) => PROTO_LABELS[p] || p;
 const INTERVALS = [30, 60, 120, 300, 600, 900];
 const RETENTIONS = [0, 30, 90, 180, 360, 720, 3650];
@@ -381,9 +381,10 @@ function nowText(s, node) {
         const cause = s.cause ? getNode(s.cause) : null;
         parts.push(cause ? t('Not answering since {time}, because {name} is not answering', { time: dateTimeText(s.since), name: cause.name || cause.id })
             : t('Not answering since {time}', { time: dateTimeText(s.since) }));
-        if (s.status) parts.push(s.status);
+        if (s.status === 'resolve') parts.push(t('The name does not resolve from this PC.'));
+        else if (s.status) parts.push(s.status);
     } else {
-        const why = { 'no-icmp': 'This PC may not ping, and the device documents no TCP port to ask instead.',
+        const why = { 'no-icmp': 'This PC may not ping, and the device documents no TCP port to ask instead.', resolve: 'The name does not resolve from this PC.',
             address: 'The device has no address to ask.', 'no-name': 'Give the name to ask.', 'no-port': 'Give the port to ask.' }[s.status];
         parts.push(why ? t(why) : s.checked ? t('Answering again: not sure yet') : t('Not checked yet'));
     }
@@ -581,7 +582,9 @@ const CHECK_NOTES = {
     mllp: 'Connects and leaves: no message is sent, so nothing can reach the RIS.',
     ipp: 'Asks only the printer\'s state and its reasons. Never a print job.',
     imap: 'Reads the greeting, then LOGOUT. Never a login; with encryption, also the certificate\'s end date.',
-    pop: 'Reads the greeting, then QUIT. Never a login; with encryption, also the certificate\'s end date.'
+    pop: 'Reads the greeting, then QUIT. Never a login; with encryption, also the certificate\'s end date.',
+    // D375 (step 8e): LDAPS, RDP, a PACS's DICOM TLS, any port.
+    tls: 'One handshake on this port: the certificate\'s end date (a warning 14 days before). Nothing is sent after it.'
 };
 
 function checkCardHtml(node, c, ro) {

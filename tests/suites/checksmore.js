@@ -86,7 +86,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('no password anywhere', !JSON.stringify(cs).match(/pass|secret|user/i));
     const schema = JSON.parse(await (await fetch(`schema/topo-v${DOC_VERSION}.json`)).text());
     const chk = schema.$defs.check;
-    ok('the schema names every protocol Topo asks', JSON.stringify(chk.properties.proto.enum) === JSON.stringify(CHECK_PROTOCOLS) && CHECK_PROTOCOLS.length === 14, JSON.stringify(chk.properties.proto.enum));
+    ok('the schema names every protocol Topo asks', JSON.stringify(chk.properties.proto.enum) === JSON.stringify(CHECK_PROTOCOLS) && CHECK_PROTOCOLS.length === 15, JSON.stringify(chk.properties.proto.enum));
     ok('…and the new keys with their values', JSON.stringify(chk.properties.tls.enum) === '["starttls","implicit"]' && chk.properties.transport.const === 'tcp');
     const fmt = await (await fetch('docs/FORMAT.md')).text();
     ok('docs/FORMAT.md names them', /`ntp`, `rtsp`, `sip`, `mllp`/.test(fmt) && /\| `tls` \|/.test(fmt) && /\| `transport` \|/.test(fmt));
@@ -129,7 +129,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     await open('ris');
     const protoSel = cardOf('h').querySelector('[data-f="proto"]');
     const offered = [...protoSel.options].map((o) => o.value);
-    ok('Asks offers the 14 protocols (SMTP only where documented)', NEW.every((p) => offered.includes(p)) && offered.length === 13 && !offered.includes('smtp'), offered.join());
+    ok('Asks offers the 15 protocols (SMTP only where documented; TLS certificate since step 8e)', NEW.every((p) => offered.includes(p)) && offered.length === 14 && offered.includes('tls') && !offered.includes('smtp'), offered.join());
     ok('…named for people', [...protoSel.options].find((o) => o.value === 'mllp').textContent === 'HL7 MLLP' && [...protoSel.options].find((o) => o.value === 'pop').textContent === 'POP');
     const notes = {
       ntp: /stratum and how far this PC's clock is/, rtsp: /status code only\. No video is opened/, sip: /Never a call or a registration/, mllp: /no message is sent, so nothing can reach the RIS/,

@@ -47,6 +47,8 @@ function render(force) {
     const ro = !!state.readOnly;
     const add = el('addWatchBtn');
     if (add) add.classList.toggle('hidden', ro);
+    const net = el('checkInternetBtn');
+    if (net) net.classList.toggle('hidden', ro);
     list.innerHTML = all.length ? all.map((w) => rowHtml(w, ro)).join('')
         : `<p class="rail-none">${escapeHtml(t('No watched addresses. Add one to check an address that is not on the map: the internet provider\'s gateway, a public resolver, a cloud service.'))}</p>`;
 }
@@ -141,6 +143,77 @@ function addToMap(id) {
     showToast(t('{name} is on the map now, with its checks.', { name: locPlainName(node) }), 'ok');
     render(true);
     return node;
+}
+
+// ---- Check the Internet (D375, step 8e) ----
+// Three watched addresses in one step, each asked and each skippable: a
+// ping to the internet provider's gateway (the router's own gateway
+// offered), a DNS question to a public resolver, and HTTPS to an address
+// the owner gives. Reached through the router facing the internet, named
+// on the network's internet providers, Record only as any new one.
+function internetRouter() {
+    const byId = new Map(state.nodes.map((n) => [n.id, n]));
+    const routers = state.nodes.filter((n) => !isRetired(n) && n.type !== 'cloud' && isRoutingDevice(n.type));
+    const toCloud = routers.find((r) => state.links.some((l) => (l.source === r.id || l.target === r.id)
+        && (byId.get(l.source === r.id ? l.target : l.source) || {}).type === 'cloud'));
+    return toCloud || routers[0] || null;
+}
+// "https://app.example.com:8443/status" or "app.example.com" -> { host, port, path } or null.
+function webTarget(text) {
+    const v = String(text || '').trim();
+    if (!v) return null;
+    // A bare address or name first (an IPv6 address holds colons).
+    const plain = asWatchAddress(v);
+    if (plain) return { address: plain, port: undefined, path: undefined };
+    let host = v, port, path;
+    const m = /^(?:https?:\/\/)?(\[[^\]]+\]|[^/:?#]+)(?::(\d{1,5}))?(\/[^?#\s]*)?/i.exec(v);
+    // With no scheme, an address and /24 is a subnet, not a page.
+    if (m && !/^https?:\/\//i.test(v) && /^\/\d{1,3}$/.test(m[3] || '')) return null;
+    if (m) { host = m[1].replace(/^\[|\]$/g, ''); port = m[2] ? asCheckPort(m[2]) : undefined; path = m[3] ? asCheckPath(m[3]) : undefined; }
+    const address = asWatchAddress(host);
+    return address ? { address, port, path } : null;
+}
+async function checkTheInternet() {
+    if (readOnlyRefuses()) return null;
+    const room = WATCH_MAX - (state.watch || []).length;
+    if (room <= 0) { showToast(t('A network holds at most {n} watched addresses.', { n: WATCH_MAX }), 'warn'); return null; }
+    const title = t('Check the Internet');
+    const router = internetRouter();
+    const gw = await askPrompt(t('The internet provider\'s gateway: the address your router sends everything to. Leave it empty to skip.'),
+        { title, value: router && router.gw ? router.gw : '', keys: 'code', ok: t('Next') });
+    if (gw === null) return null;
+    const dns = await askPrompt(t('A public resolver to ask for a name. Leave it empty to skip.'), { title, value: '1.1.1.1', keys: 'code', ok: t('Next') });
+    if (dns === null) return null;
+    const web = await askPrompt(t('An address on the internet to open over HTTPS, such as a service you use. Leave it empty to skip.'), { title, value: '', keys: 'code', ok: t('Add the checks') });
+    if (web === null) return null;
+    const bad = [];
+    const gwA = gw.trim() ? asWatchAddress(gw) : null;
+    if (gw.trim() && !gwA) bad.push(gw.trim());
+    const dnsA = dns.trim() ? asWatchAddress(dns) : null;
+    if (dns.trim() && !dnsA) bad.push(dns.trim());
+    const webT = web.trim() ? webTarget(web) : null;
+    if (web.trim() && !webT) bad.push(web.trim());
+    if (bad.length) { await tell(t('Not added: {list} is not one address (an IP address or a host name).', { list: bad.join(', ') }), { title }); return null; }
+    const via = router ? router.id : undefined;
+    const isp = (state.providers || []).filter((p) => p.service === 'internet').map((p) => p.id);
+    const providers = isp.length ? isp : undefined;
+    const ck = (fields) => Object.assign({ id: nextId('ck') }, fields);
+    const recs = [];
+    if (gwA) recs.push(makeWatch({ name: t('Internet provider\'s gateway'), address: gwA, via, providers, checks: [ck({ proto: 'ping' })] }));
+    // The name asked: the service's own when it is a name, else one that always exists.
+    const asked = webT && !isIpText(webT.address) ? webT.address : 'example.com';
+    if (dnsA) recs.push(makeWatch({ name: t('Public resolver'), address: dnsA, via, checks: [ck({ proto: 'dns', name: asked })] }));
+    if (webT) recs.push(makeWatch({ name: webT.address, address: webT.address, via, providers, checks: [ck({ proto: 'https', port: webT.port, path: webT.path })] }));
+    const add = recs.slice(0, room);
+    if (!add.length) return [];
+    batch(() => {
+        state.watch = normalizeWatch((state.watch || []).concat(add), { nodes: state.nodes, groups: state.groups, providers: state.providers });
+        save();
+        renderCanvasOnly();
+    });
+    render(true);
+    showToast(tn(add.length, '1 watched address added. It is checked from the PCs that monitor this network.', '{n} watched addresses added. They are checked from the PCs that monitor this network.'), 'ok');
+    return add.map((r) => watchById(r.id)).filter(Boolean);
 }
 
 // ---- The sheet: Add an address, Edit ----
@@ -271,6 +344,8 @@ function saveSheet() {
     if (list) { list.addEventListener('click', onListClick); list.addEventListener('change', onListChange); }
     const add = el('addWatchBtn');
     if (add) add.addEventListener('click', () => openSheet(null));
+    const net = el('checkInternetBtn');
+    if (net) net.addEventListener('click', () => { checkTheInternet(); });
     const scrim = el('watchDialog');
     if (scrim) {
         scrim.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeSheet));
@@ -297,7 +372,7 @@ function simpleRows() {
 }
 
 window.TopoWatch = {
-    state: _wt, render, openSheet, closeSheet, saveSheet, readForm, addToMap, simpleRows,
+    state: _wt, render, openSheet, closeSheet, saveSheet, readForm, addToMap, simpleRows, checkTheInternet, webTarget, internetRouter,
     // The document or a state changed: the tab follows while it shows.
     docChanged: () => { if (panelShown()) render(false); else _wt.dirty = true; },
     statusesChanged: () => {
