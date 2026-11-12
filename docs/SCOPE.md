@@ -5193,8 +5193,13 @@ Stop after each phase and report the counts and failures as they are.
   - [x] 8e. TLS certificate and Check the Internet (2026-11-12; D411-D413).
   - [x] 8f. Connections (2026-11-12; D414-D418).
   - [x] 8h. Trace to a target (2026-11-12; D419-D423).
-  - [ ] 8g. i18n, docs and the browser pass. The i18n is done (2026-11-12):
-    every literal t() of watch.js, connections.js, tracetarget.js, issues.js
-    and changes.js is in es, pt-BR, ja and ru (tests/suites/i18n.js sweeps
-    them), and the step's clock times follow the page's language. Docs, the
-    release note and the browser pass remain.
+  - [x] 8g. i18n, docs and the browser pass (2026-11-12). The i18n: every
+    literal t() of watch.js, connections.js, tracetarget.js, issues.js and
+    changes.js is in es, pt-BR, ja and ru (tests/suites/i18n.js sweeps
+    them), and the step's clock times follow the page's language. The docs:
+    FEATURES, SERVER and FORMAT (v20) were written with their phases; the
+    README gains step 8 and its scanner promise reads "an address someone
+    wrote down". The release note is "New in 0.0.4" above 0.0.3, which is
+    still a draft the owner may publish first; the build is the tag v0.0.4.
+    The browser pass: every phase's pass (8a, 8b-8c, 8d, 8f, 8h) rerun on
+    the finished tree at 360, 390 and 1280 in Gold and Colourful.

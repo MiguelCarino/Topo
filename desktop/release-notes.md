@@ -1,5 +1,19 @@
 Topo for working offline: the same editor as https://topo.carino.systems/, as a desktop app or as a folder to open in a browser.
 
+## New in 0.0.4
+
+- **Watched addresses** (the Watched tab): check addresses that are not on the map, such as the internet provider's gateway, a public resolver or a cloud service, with the same answer checks as a device. **Check the Internet…** adds those three in one step. A host name is looked up by this PC each time it is checked.
+- **Record only**: a device or watched address can record its outages in the statistics and the monitoring report without raising an issue, a banner or an alarm. A new watched address starts this way.
+- **TLS certificate** check: one handshake on any port (443 by default) that reads the certificate's end date, warned 14 days before.
+- **Anything not checked has no state.** Topo never shows an unchecked device as down, unknown or offline, and the reports count only what was checked.
+- **Does A reach B?** Right-click a device, then right-click another (a long-press on each on a phone, or **Trace to…** in the Trace box): the map lights the path, or says where it stops and the first reason it records (no cable, a retired device, the port, the VLAN, no gateway, NAT, no route). **On port** and **And back?** ask about one service and the way back. It is the map's answer, not a live test.
+- **Check now** (the desktop app): asks a device, a watched address or the target of Does A reach B? once from this PC, and keeps nothing.
+- **Watch this PC's connection** (Settings, Monitoring, off as shipped; on a Topo server): the people who share a site are told when a PC loses its connection to the server and when it comes back, the PC says when the server stops answering, and the monitoring report has a **Connections** section.
+- **Providers.** A provider's part of the network is now the path from the problem to the router, not the whole network around it. **Report a problem to them** is on each provider's card, and **Provider report…** is in the Export menu. **Open a link…** opens a link back from a provider in the desktop app.
+- Files are now document version 20. Topo 0.0.3 opens them read-only.
+- A Topo server needs this version for Watch this PC's connection; its database gains two tables on first start.
+- Built and tested on Linux. The new desktop pieces (the TLS check, host-name lookup, Check now, the connection heartbeat) were not run on Windows or macOS before this release.
+
 ## New in 0.0.3
 
 There was no 0.0.2: this release follows 0.0.1.
