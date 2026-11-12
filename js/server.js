@@ -76,6 +76,10 @@ function setStatus(st) { if (S.status !== st) { S.status = st; changed(); } }
 // Called by the boot (js/app.js) without waiting. Nothing at all without the marker.
 function openServerClient() {
     if (!serverMarked()) return Promise.resolve(false);
+    // A locked window reads nothing from the server (js/idlelock.js, D214,
+    // D225): the boot that follows the unlock opens it. The desktop app's
+    // client (js/desktopclient.js) may call this before the boot's gate.
+    if (window.TopoLock && typeof TopoLock.held === 'function' && TopoLock.held()) return Promise.resolve(false);
     if (S.opening) return S.opening;
     S.opening = (async () => {
         S.on = true;
@@ -199,6 +203,29 @@ async function verifyCode(challenge, code, email) {
     const r = await api('POST', '/api/auth/verify', { challenge, code: String(code || '').replace(/\D/g, ''), deviceId: await knownDevice(email || pendingEmail()) });
     return signedIn(r.user);
 }
+// The idle lock's sign-in (js/idlelock.js, D220): the code checked, the new
+// session bound to this browser's device as at sign-in, and nothing else
+// done (no keys, sites or sync: the screen is still locked). The boot that
+// follows the unlock opens the client on this session.
+// The session open before the lock is closed once the new one exists, so
+// each unlock by sign-in does not leave one more live session behind (D226).
+async function verifyCodeOnly(challenge, code, email) {
+    try { await C.openKeyStore(); } catch (e) { /* no device to bind */ }
+    let deviceId;
+    try { deviceId = await knownDevice(email || pendingEmail()); } catch (e) { deviceId = undefined; }
+    let oldSid = null;
+    try {
+        const list = await api('GET', '/api/me/sessions');
+        const cur = list && Array.isArray(list.sessions) ? list.sessions.find((x) => x && x.current) : null;
+        oldSid = cur && cur.id ? String(cur.id) : null;
+    } catch (e) { oldSid = null; }   // signed out or expired meanwhile: nothing to close
+    const r = await api('POST', '/api/auth/verify', { challenge, code: String(code || '').replace(/\D/g, ''), deviceId });
+    try { localStorage.removeItem(PENDING_EMAIL_KEY); } catch (e) { /* fine */ }
+    const who = r && r.user ? r.user : null;
+    // Only one's own (the server refuses another person's), and never the new one.
+    if (who && oldSid) { try { await api('DELETE', '/api/me/sessions/' + encodeURIComponent(oldSid)); } catch (e) { /* it ends on its own */ } }
+    return who;
+}
 async function signInWithLink(token) {
     const r = await api('POST', '/api/auth/link', { token, deviceId: await knownDevice(pendingEmail()) });
     return signedIn(r.user);
@@ -209,9 +236,19 @@ async function signedIn(me) {
     await afterSignIn(true);
     return S.me;
 }
+// The lock forgot this person's networks (js/idlelock.js D346): their keys
+// in this browser go too and the page is signed out, with no server asked
+// (it did not answer); the session it may still hold opens nothing here.
+async function forgetHere(userId) {
+    try { await C.ksDel('keys', recKey(userId)); } catch (e) { /* none kept */ }
+    await signedOutHere();
+}
 async function signOut() {
     try { await api('POST', '/api/auth/signout'); } catch (e) { /* signed out here anyway */ }
     await signedOutHere();
+    // The person's own sign-out (never an expired session or a lock): a
+    // visit monitor started under it ends (js/visitmonitor.js, D148).
+    emit('signed-out');
 }
 
 // ---- This browser's keys (design §9.1, D58, A2) ----
@@ -405,7 +442,9 @@ async function personKeys(user, encPub, sigPub) {
 }
 
 // ---- The live stream (D65, C8) ----
-const EVENT_NAMES = ['head', 'roster', 'epoch', 'invite-accepted', 'granted', 'site-removed', 'site-added', 'link-request', 'link-approved', 'link-denied', 'keys-changed', 'roster-needed', 'me'];
+// 'monitor-status', 'record', 'monitor' and 'monitors': the site monitors
+// (step 7h), read by js/monitors.js.
+const EVENT_NAMES = ['head', 'roster', 'epoch', 'invite-accepted', 'granted', 'site-removed', 'site-added', 'link-request', 'link-approved', 'link-denied', 'keys-changed', 'roster-needed', 'me', 'visits', 'monitor-status', 'record', 'monitor', 'monitors'];
 function startEvents() {
     if (!S.me || S.evStarted) return;
     S.evStarted = true;
@@ -469,6 +508,8 @@ async function handleEvent(name, data) {
         case 'keys-changed': await refreshSites(); changed(); break;
         case 'roster-needed': await refreshSites(); changed(); break;
         case 'me': await refreshMe(); changed(); break;
+        // A visit copy uploaded or answered (docs/SCOPE.md D154).
+        case 'visits': if (sync()) sync().onVisits(data.site, data); break;
         default: break;
     }
     emit('event:' + name, data);
@@ -489,7 +530,7 @@ window.serverHashToken = serverHashToken;
 window.openServerClient = openServerClient;
 window.TopoServer = {
     _hooks, _reset, state: S, api, ServerError, on, emit, changed, serverMarked, openServerClient, serverHashToken,
-    refreshMe, refreshSites, site, requestCode, verifyCode, signInWithLink, signOut, ensureKeys, setUpKeys, resetKeys,
+    refreshMe, refreshSites, site, requestCode, verifyCode, verifyCodeOnly, signInWithLink, signOut, forgetHere, ensureKeys, setUpKeys, resetKeys,
     startLink, cancelLink, linkRequests, approveLink, denyLink, recover, newRecoveryKey, ownBundle, myRecord,
     pins, pinPerson, personKeys, patchMe, startEvents, stopEvents, handleEvent, deviceLabel,
     ready: () => S.status === 'ready', me: () => S.me, keys: () => S.keys

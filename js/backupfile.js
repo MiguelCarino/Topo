@@ -291,6 +291,18 @@ async function unlockBackup(b, opts = {}) {
     // from the owners trust started from (step 2). Otherwise it is said.
     const anchored = viaSiteKey || (wrapAnchored && !!anchor && anchor.ok.has(headR.seq));
     if (!anchored) note = joinSentences([note, t('Topo could not confirm who made this backup: its member list is not signed by you or by an owner you trust. Restore it only if you expect it.')]);
+    // 5. The records not yet folded when the backup was made (a site
+    // monitor's issues and the people's acts on them, D159): checked as
+    // js/monitors.js checks any record (the author on the file's lists in a
+    // role that may write it, its signature, a provider's act on what they
+    // cover) and folded in, so a restore loses no open issue or act.
+    if (Array.isArray(b.records) && b.records.length && window.TopoMonitors && window.TopoIssues) {
+        const keyOf = async (e) => (e === rv.epoch ? key : (Y() ? Y().siteKey(site, e) : Promise.reject(new Error('no-key'))));
+        try {
+            const recs = await TopoMonitors.backupIssues(b.records, keyOf, rosters, pubs, null, env.doc);
+            if (recs.length) env.doc = await TopoIssues.foldRecordsIntoDoc(env.doc, recs);
+        } catch (e) { console.warn('Topo: the backup\'s issue records could not be folded:', e); }
+    }
     let name = typeof env.name === 'string' ? env.name : '';
     if (!name && typeof b.name === 'string') name = b.name;
     if (!name && b.nameCt && b.nameCt.epoch === rv.epoch) { try { name = (await C.openName(key, site, b.nameCt)) || ''; } catch (e) { name = ''; } }

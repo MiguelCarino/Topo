@@ -323,3 +323,129 @@ func TestMailFilesCleanup(t *testing.T) {
 		t.Fatalf("waiting file swept: %v", err)
 	}
 }
+
+// A v0.0.1 database (migrations 1-3) with a site whose history holds a
+// provider's revision opens under 0004: the history is untouched, the
+// visit copies table is there, and a waiting copy holds its base from
+// pruning (D154).
+func TestVisitCopiesMigrationOnAV001Database(t *testing.T) {
+	ms, err := migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) < 4 || ms[3].name != "0004_visit_copies.sql" {
+		t.Fatalf("migrations: %v", ms)
+	}
+	dir := t.TempDir()
+	w, _ := sql.Open("sqlite", dsn(filepath.Join(dir, "x.db"), true))
+	w.SetMaxOpenConns(1)
+	defer w.Close()
+	s := &Store{W: w, R: w}
+	ctx := context.Background()
+	if err := applyMigrations(ctx, s, ms[:3]); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		"INSERT INTO users(id, email, email_norm, lang, server_role, created) VALUES('u_o','o@x.test','o@x.test','en','owner',1),('u_p','p@x.test','p@x.test','en','member',1)",
+		"INSERT INTO sites(id, created, created_by, epoch, head_n, head_h, roster_seq, updated) VALUES('s_1',1,'u_o',1,2,'h2',2,1)",
+		"INSERT INTO members(site_id, user_id, role, status, added) VALUES('s_1','u_o','owner','granted',1),('s_1','u_p','provider','granted',1)",
+		"INSERT INTO revisions(site_id, n, base, prev, epoch, rseq, author, device, at, received, size, ct_hash, sig, h) VALUES('s_1',1,0,'g',1,2,'u_o','d_o',1,1,3,'c1','s1','h1'),('s_1',2,1,'h1',1,2,'u_p','d_p',2,2,3,'c2','s2','h2')",
+		"INSERT INTO rev_bodies(site_id, n, iv, ct) VALUES('s_1',1,'iv',x'010203'),('s_1',2,'iv',x'040506')",
+	} {
+		if _, err := w.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if err := applyMigrations(ctx, s, ms); err != nil {
+		t.Fatal(err)
+	}
+	r, err := RevByN(ctx, w, "s_1", 2)
+	if err != nil || r.Author != "u_p" || r.H != "h2" || r.Pruned {
+		t.Fatalf("the provider's revision after 0004: %v %+v", err, r)
+	}
+	if err := (&Store{W: w, R: w}).Tx(ctx, func(tx *sql.Tx) error {
+		_, err := PutVisit(ctx, tx, &VisitCopy{ID: "v_1", SiteID: "s_1", Author: "u_p", Device: "d_p", Slot: "slot_one_x", BaseN: 1, Epoch: 1, RSeq: 2, At: 3, Received: 3, Size: 1, CTHash: "c", Sig: "s", IV: "iv", CT: []byte{1}})
+		if err != nil {
+			return err
+		}
+		_, err = Prune(ctx, tx, DBBlobs{R: w}, "s_1", 2, 1, 0, 0)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := RevByN(ctx, w, "s_1", 1); r.Pruned {
+		t.Fatal("a waiting copy's base was pruned")
+	}
+}
+
+// A v0.0.1 database (migrations 1-3, then 0004) takes 0005: the members
+// keep their roles and statuses, 'monitor' is now a role the CHECK allows,
+// sites keep 360 days of statistics, and the monitor tables are there
+// (docs/SCOPE.md step 7h, D146).
+func TestMonitorRoleMigrationOnAV001Database(t *testing.T) {
+	ms, err := migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) < 5 || ms[4].name != "0005_monitors.sql" {
+		t.Fatalf("migrations: %v", ms)
+	}
+	dir := t.TempDir()
+	w, _ := sql.Open("sqlite", dsn(filepath.Join(dir, "x.db"), true))
+	w.SetMaxOpenConns(1)
+	defer w.Close()
+	s := &Store{W: w, R: w}
+	ctx := context.Background()
+	if err := applyMigrations(ctx, s, ms[:3]); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		"INSERT INTO users(id, email, email_norm, lang, server_role, created) VALUES('u_o','o@x.test','o@x.test','en','owner',1),('u_p','p@x.test','p@x.test','en','member',1),('u_v','v@x.test','v@x.test','en','member',1)",
+		"INSERT INTO sites(id, created, created_by, epoch, head_n, head_h, roster_seq, updated) VALUES('s_1',1,'u_o',1,0,'g',1,1)",
+		"INSERT INTO members(site_id, user_id, role, status, added, granted, muted) VALUES('s_1','u_o','owner','granted',1,1,0),('s_1','u_p','provider','granted',2,2,1),('s_1','u_v','viewer','waiting',3,NULL,0)",
+	} {
+		if _, err := w.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if _, err := w.Exec("INSERT INTO members(site_id, user_id, role, status, added) VALUES('s_1','u_o','monitor','granted',1)"); err == nil {
+		t.Fatal("v0.0.1 accepted the role monitor")
+	}
+	if err := applyMigrations(ctx, s, ms); err != nil {
+		t.Fatal(err)
+	}
+	got, err := SiteMembers(ctx, w, "s_1")
+	if err != nil || len(got) != 3 {
+		t.Fatalf("members after 0005: %v %+v", err, got)
+	}
+	want := map[string][3]any{"u_o": {"owner", "granted", false}, "u_p": {"provider", "granted", true}, "u_v": {"viewer", "waiting", false}}
+	for _, m := range got {
+		x := want[m.UserID]
+		if m.Role != x[0] || m.Status != x[1] || m.Muted != x[2] {
+			t.Fatalf("member changed by 0005: %+v", m)
+		}
+	}
+	m := &Monitor{ID: "m_0123456789abcdef012345", SiteID: "s_1", Name: "PC", ByUser: "u_o", Created: 5, IntervalMs: 60000, EncPub: "e", SigPub: "s"}
+	if err := InsertMonitor(ctx, w, m, []byte("tokenhash")); err != nil {
+		t.Fatal(err)
+	}
+	if mm, err := monitorMemberOf(ctx, w, m.ID); err != nil || mm.Role != "monitor" || mm.Status != "waiting" {
+		t.Fatalf("monitor member: %v %+v", err, mm)
+	}
+	if _, err := w.Exec("INSERT INTO members(site_id, user_id, role, status, added) VALUES('s_1','u_v','nobody','granted',1)"); err == nil {
+		t.Fatal("the CHECK lets any role in")
+	}
+	if d, err := SiteStatsDays(ctx, w, "s_1"); err != nil || d != 360 {
+		t.Fatalf("stats days: %v %d", err, d)
+	}
+	if got, err := MonitorByToken(ctx, w, []byte("tokenhash")); err != nil || got.Name != "PC" {
+		t.Fatalf("by token: %v %+v", err, got)
+	}
+	var fk int
+	w.QueryRow("SELECT count(*) FROM pragma_foreign_key_check").Scan(&fk)
+	if fk != 0 {
+		t.Fatalf("%d foreign key problems after 0005", fk)
+	}
+}
+
+func monitorMemberOf(ctx context.Context, q Q, id string) (*Member, error) { return MemberOf(ctx, q, "s_1", id) }

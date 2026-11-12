@@ -17,8 +17,12 @@
 //   server_question        whether to ask "Use this PC as the server…?"
 //   server_question_done   asked: never again
 //   server_open            one of the running server's addresses, in the
-//                          system browser (this window never syncs with its
-//                          own server: its CSP is connect-src 'self' ipc:)
+//                          system browser (no longer offered here)
+//
+// "Open it in this window" connects this window to it, at 127.0.0.1,
+// through the app (js/desktopclient.js, D144): it replaces opening its
+// address in a browser. Its certificate (Other PCs on this network) is the
+// one this PC made, so there is nothing to compare.
 //
 // The section shows only when window.__TAURI__ is there and server_info
 // answers with the bundled binary found: never on the website or in the
@@ -164,10 +168,7 @@ function dsRender(info, note, isErr) {
         const copy = document.createElement('button');
         copy.type = 'button'; copy.className = 'btn'; copy.textContent = t('Copy');
         copy.addEventListener('click', () => dsCopy(u));
-        const open = document.createElement('button');
-        open.type = 'button'; open.className = 'btn'; open.textContent = t('Open in browser');
-        open.addEventListener('click', () => { dsInvoke('server_open', { url: u }).catch((e) => dsRender(_ds.info, dsErrText(e), true)); });
-        li.append(code, copy, open);
+        li.append(code, copy);
         if (i === 0 && info.urls.length > 1) {
             const more = document.createElement('span');
             more.className = 'dlg-dim ds-more';
@@ -180,6 +181,13 @@ function dsRender(info, note, isErr) {
     dsEl('setDsFpRow').hidden = !fp;
     dsEl('setDsFp').textContent = fp;
     dsEl('setDsStart').hidden = !!info.running;
+    // This window and its own server (js/desktopclient.js): offered while it
+    // runs, unless this window already uses it.
+    const DC = window.CarinoDesktopClient;
+    const port = info.settings && info.settings.port;
+    const here = !!(DC && port && DC.connectedTo() === DC.ownUrl(port, lan));
+    dsEl('setDsHere').hidden = !info.running || !DC || !port || here || (lan && !info.fingerprint);
+    if (info.running && here && !note) status.textContent = line + ' ' + t('This window is connected to it.');
     dsEl('setDsStart').classList.toggle('btn-primary', !canSvc);
     dsEl('setDsStop').hidden = !info.running && info.error !== 'already-running';
     // The service: always at startup, so the app's own tick goes; set up
@@ -260,6 +268,16 @@ async function dsStart() {
     return dsAct('server_start');
 }
 
+// Connects this window to the server this PC runs (the page reloads as a
+// client of it).
+async function dsOpenHere() {
+    const info = _ds.info, DC = window.CarinoDesktopClient;
+    if (!info || !info.running || !DC) return;
+    const lan = !!(info.settings && info.settings.lan);
+    try { await DC.dcConnectOwn(info.settings.port, lan, info.fingerprint || ''); }
+    catch (e) { dsRender(info, DC.dcErrText(e), true); }
+}
+
 // Settings opens: fill from the saved settings, then follow the log while
 // the dialog is open.
 function renderDesktopServerSettings() {
@@ -285,6 +303,7 @@ function renderDesktopServerSettings() {
     dsEl('setDsStop').addEventListener('click', () => { dsAct('server_stop'); });
     dsEl('setDsService').addEventListener('click', () => { dsInstallService(); });
     dsEl('setDsRemove').addEventListener('click', () => { dsRemoveService(); });
+    dsEl('setDsHere').addEventListener('click', () => { dsOpenHere(); });
     // The tick is kept at once, like every other setting.
     dsEl('setDsEnabled').addEventListener('change', async (e) => {
         const box = e.target;
@@ -294,12 +313,15 @@ function renderDesktopServerSettings() {
     });
 })();
 
-// ---- The first-run question (D125) ----
-// Once, in the desktop app only, on a PC that can run the server as a
-// service and does not yet (and whose Windows installer did not already
-// ask). Yes opens Settings at this section to fill in the owner and the
-// email, then "Run it in the background from startup" sets it up; any
-// other answer, Esc included, is "not now". Either way it is not asked again.
+// ---- The first-run question (D125, D170) ----
+// On Linux and macOS the question is the welcome's step 3 choice "Make this
+// PC the server" (js/welcome.js, D170): asked once, and any other answer,
+// or skipping the step, is "not now". dsFirstRun is what is left of the old
+// standalone prompt: the welcome calls it only on a start where the welcome
+// itself does not run (an install that was already in use, a start by a
+// link), so the question is still asked once where the app says to ask it
+// (server_question: a PC that can run the service and does not yet, whose
+// Windows installer did not already ask). Either way it is not asked again.
 async function dsFirstRun() {
     if (!dsHasHost() || !dsEl('setDsSec')) return false;
     let askIt = false;
@@ -309,6 +331,13 @@ async function dsFirstRun() {
         { title: t('Use this PC as the server for your network?'), ok: t('Yes, set it up'), cancel: t('Not now') });
     try { await dsInvoke('server_question_done', { answer: yes ? 'yes' : 'no' }); } catch (e) { /* asked anyway */ }
     if (!yes) return false;
+    await dsOpenSetUp();
+    return true;
+}
+// "Yes, set it up" (the old prompt, or the welcome's Make this PC the
+// server): Settings opens at this section to fill in the owner and the
+// email, then "Run it in the background from startup" sets it up.
+async function dsOpenSetUp() {
     if (typeof openSettings === 'function') openSettings();
     await dsRefresh(true);
     const sec = dsEl('setDsSec');
@@ -318,10 +347,6 @@ async function dsFirstRun() {
         const owner = dsEl('setDsOwner');
         if (owner) owner.focus({ preventScroll: true });
     }
-    return true;
 }
-// After boot, once the page has settled (a question already open waits:
-// questions queue, js/dialog.js).
-if (dsHasHost()) window.addEventListener('load', () => { setTimeout(() => { dsFirstRun(); }, 1500); });
 
-window.CarinoDesktopServer = { state: _ds, dsErrText, dsFormSettings, dsRefresh, renderDesktopServerSettings, dsSave, dsStart, dsInstallService, dsRemoveService, dsFirstRun };
+window.CarinoDesktopServer = { state: _ds, dsErrText, dsOpenHere, dsFormSettings, dsRefresh, renderDesktopServerSettings, dsSave, dsStart, dsInstallService, dsRemoveService, dsFirstRun, dsOpenSetUp, dsHasHost, dsInvoke };

@@ -167,7 +167,7 @@ async function mergeCopyInto(targetId, theirs, opts = {}) {
         return { ok: false, reason: 'ancestor' };
     }
     return openMergeReview({ targetId, theirs, base: ctx.base, theirsRev: ident.rev, source: opts.source, fileName: opts.fileName,
-        reason: opts.reason, name: opts.name, replaceAsked: opts.replaceAsked, open: opts.open, part: ctx.part || null, note: opts.note || '' });
+        reason: opts.reason, name: opts.name, replaceAsked: opts.replaceAsked, open: opts.open, part: ctx.part || null, note: opts.note || '', ident });
 }
 
 // ---- The landing card's ⇄ Merge… ----
@@ -273,7 +273,11 @@ async function classifyBinderSites(sites) {
         }
         const c = row.plan.counts;
         const conflicts = mergeConflictKeys(row.plan) ? (c.conflicts || 1) : 0;
-        if (!conflicts) row.kind = c.added + c.changed + c.removed ? 'auto' : 'kept';
+        // A provider's visit nobody has decided on waits for its owner, every
+        // time (D139, D153): asked, never merged on its own.
+        const visit = typeof visitReviewInfo === 'function' ? visitReviewInfo(site.doc, mine) : null;
+        if (visit) row.reason = t('A visit to review');
+        else if (!conflicts) row.kind = c.added + c.changed + c.removed ? 'auto' : 'kept';
         else row.reason = t(conflicts === 1 ? '{n} conflict' : '{n} conflicts', { n: conflicts });
         out.push(row);
     }

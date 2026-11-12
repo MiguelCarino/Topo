@@ -1,8 +1,8 @@
-# The Topo file format (document version 18)
+# The Topo file format (document version 19)
 
 This is the published description of the files Topo writes and reads, for
 anyone writing another tool that reads or produces them. The machine-readable
-schema is [`schema/topo-v18.json`](../schema/topo-v18.json) (JSON Schema 2020-12),
+schema is [`schema/topo-v19.json`](../schema/topo-v19.json) (JSON Schema 2020-12),
 and a server backup is described by [`schema/topo-backup-v1.json`](../schema/topo-backup-v1.json).
 Every sample network, built-in block, migrated old document and importer result
 is checked against the schema by `tests/suites/formatschema.js`, and a new field
@@ -16,14 +16,14 @@ is right and this page is a bug.
 - Plain JSON, UTF-8, saved with the extension `.json`. The media type is
   `application/vnd.carino.topo+json`.
 - The first key is `"$schema"`, the address of the schema for the document
-  version it was written at: `https://topo.carino.systems/schema/topo-v18.json`.
+  version it was written at: `https://topo.carino.systems/schema/topo-v19.json`.
   Readers ignore it, and nothing fetches it. A file without it still opens.
 - File names are `topo_<organization>_<site>_<date>[_<kind>].json`, each part
   lower case, accents folded, other scripts kept, `_` inside a part turned into
   `-`, empty parts left out (`topo_acme_casa-roma_2026-11-09.json`). `network`
   stands in when there is nothing, `networks` for a binder naming no single
   organization. A browser's ` (1)` suffix is not part of the name.
-- The document carries its version in `v` (18 here). A reader migrates an
+- The document carries its version in `v` (19 here). A reader migrates an
   older one on opening (section 10). A document from a newer Topo is opened
   read-only and is never re-saved by an older build, because saving it would
   drop what the newer build added.
@@ -35,8 +35,8 @@ Three outer shapes, recognised by `kind`:
 **One network** (Back up this network):
 
 ```json
-{ "$schema": "https://topo.carino.systems/schema/topo-v18.json",
-  "kind": "nettopology", "version": 1, "name": "Casa Roma", "doc": { "v": 18, "nodes": [], "links": [] } }
+{ "$schema": "https://topo.carino.systems/schema/topo-v19.json",
+  "kind": "nettopology", "version": 1, "name": "Casa Roma", "doc": { "v": 19, "nodes": [], "links": [] } }
 ```
 
 `version` is the envelope's own version (1). `name` is the network's name in the
@@ -63,7 +63,13 @@ server and the drive company cannot read it:
 - `owners`: for each owner at backup time, their wrap of the network's key for
   that epoch and their locked recovery copy (`escrow`, or null);
 - `name` in clear only when the owner allowed it, `originHash` (SHA-256 of the
-  server's address) so a browser knows it is on the same server.
+  server's address) so a browser knows it is on the same server;
+- `records` (absent when there are none): the site monitors' issues
+  and the people's acts and quiet windows not yet folded into the document,
+  each sealed with the network's key and signed by its author as the server
+  stores it. Opening the backup checks each (its author a monitor on the
+  file's member lists, with the key that signed it) and folds the issues in,
+  so a restore loses no open issue.
 
 **Opening one with no server**: Open a file in Topo checks `ctHash` and the
 chain, trusts the head roster (or compares it with what this browser already
@@ -83,7 +89,7 @@ empty one is not written), except `nodes` and `links`.
 
 | Key | Holds |
 |---|---|
-| `v` | The document version, 18. |
+| `v` | The document version, 19. |
 | `id`, `updated`, `rev`, `base`, `prior` | Identity (section 8). Not content. |
 | `nodes` | Devices. |
 | `links` | Cables, radio associations and VPN links. |
@@ -141,6 +147,42 @@ custom column (`columns` and a device's `extra`) for data of your own.
 | `portsFace` | `ports_face` | `front` or `rear`, when not its type's side. |
 | `host` | `runs_on` | A VM or container: the device it runs on. |
 | `providers` | `provider` | Provider ids (a list since v18). |
+| `checks` | | Answer checks (v19, below): what a PC that monitors asks this device. |
+| `target` | | Availability target in percent (v19), above 0 and below 100, such as `99.5`. |
+
+### Answer checks (`nodes[].checks`, v19)
+
+What a Topo desktop app turned into a monitor asks the device: one request
+and its reply each, "are you answering?" (docs/SCOPE.md D155, D156). At most
+8 per device, each an object with only these keys, in this order, absent
+when not given:
+
+| Key | Value |
+|---|---|
+| `id` | Unique on its device (letters, digits, `_`, `.`, `-`; up to 64). Its states and statistics are kept under `<device id>/<id>`. |
+| `proto` | `ping`, `tcp`, `http`, `https`, `dns`, `smtp`, `dicom`, `ntp`, `rtsp`, `sip`, `mllp` (HL7 MLLP, a connect only), `ipp`, `imap` or `pop`. A block with any other is dropped. |
+| `ip` | Which of the device's own addresses to ask. Absent: its first. |
+| `port` | 1 to 65535. Absent: the protocol's own (http 80, https 443, dns 53, smtp 25, dicom 104, ntp 123, rtsp 554, sip 5060, mllp 2575, ipp 631, imap 143, pop 110; imap 993 and pop 995 with `tls` `implicit`). On a `ping`: the TCP port asked where the PC may not ping ("TCP, not ping"); absent there, the first single TCP port of the device's `ports`. A `tcp` check needs one. |
+| `path` | `http`, `https`, `rtsp`: the page or stream asked for, starting with `/`. Absent: `/`. `ipp`: the printer's path. Absent: `/ipp/print`. |
+| `name` | `dns`: the name asked for (a host name). A DNS check without one is not asked. |
+| `starttls` | `smtp`: `true` to read the certificate's end date through STARTTLS. |
+| `tls` | `imap`, `pop`: `starttls` (STARTTLS, or STLS for POP) or `implicit` (TLS from the start), to read the certificate's end date. Absent: neither. |
+| `transport` | `sip`: `tcp` to send the OPTIONS over TCP. Absent: UDP. |
+| `calledAe`, `callingAe` | `dicom`: the AE titles, 1 to 16 printable ASCII characters, no backslash. Absent: `ANY-SCP` and `TOPO`. |
+| `interval` | Seconds between checks, 30 to 900. Absent: 60. |
+| `slowMs` | Slow when the median of the last 5 answers is above this many milliseconds (1 to 600000). Absent: never slow. |
+| `monitors` | Which site monitors check it (on a Topo server): their ids (`m_` and 22 hex digits), up to 8; two to compare where it answers from. Absent: the monitors whose groups hold the device (a monitor given no groups checks the whole site); a PC with no server checks every block. |
+
+What each asks, and what counts as answering, is docs/SCOPE.md D232 and
+D315-D324. None logs in, sends a message, places a call or prints: an
+`mllp` check connects and sends nothing, `imap` and `pop` read the
+greeting and leave (LOGOUT, QUIT), `ipp` asks only `printer-state` and
+`printer-state-reasons`.
+
+No check takes a password, and none is stored. The states, response times
+and statistics are never in the document: they live on the monitoring PC
+(and, for a site monitor, as records and daily blobs on the Topo server,
+encrypted with the network's key: docs/SERVER.md).
 
 ### Interfaces (`nodes[].interfaces`)
 
@@ -194,7 +236,14 @@ three or more as a range (`10,11,20-23`).
 
 `id`, `name`, `service` (`internet`, `phone`, `it`, `security`, `power`,
 `vendor`, `cloud`, `other`), `contact`, `phone`, `email`, `account`, `hours`,
-`notes`.
+`notes`, and (v19) `target`, the availability target in percent for the
+devices they cover (above 0 and below 100, at most three decimals; a
+device's own `target` comes first), and `targetHours` (`true` or absent:
+the target counts only during their support hours, when `hours` reads as
+days and times). providers.csv carries them as `availability_target` and
+`target_support_hours`: a target out of range is a conflict on its row, a
+"no" under `target_support_hours` clears the tick, and a blank cell leaves
+either as it is.
 
 ### Custom columns (`columns`) and `extra`
 
@@ -205,7 +254,8 @@ by column id: text, a number, `YYYY-MM-DD`, or true/false.
 ## 4. Ids
 
 - Ids are text. Topo mints `n_…`, `i…`, `l_…`, `net_…`, `g_…`, `wf_…`, `pv_…`
-  (a prefix, then a clock and a counter in base 36), `c<n>` for columns, `sq_<n>`
+  (a prefix, then a clock, a counter and, since 0.0.2, four random
+  characters, all in base 36), `c<n>` for columns, `sq_<n>`
   for searches, random tokens for log entries and problem reports. Any unique
   text is accepted; a repeated one is minted again on reading.
 - References (a link's ends, a device's group and host, a Wi-Fi network's
@@ -242,6 +292,19 @@ open); `symptom` is `internet`, `wifi`, `phone`, `camera`, `printer`, `power` or
 `other`; it names the devices and groups affected, the providers it was sent
 to, and the ids of its visits (`visit` log entries). The schema lists every key.
 
+An **outage** (v19) is an incident too: an issue a PC that monitors raised
+when a device stopped answering, folded into the document by the next
+editable page that has the network open. It has `kind: "outage"`, its
+`nodeIds` the one device not answering (the root cause), a `symptom` from
+that device's type, `outages` (`[{ from, to? }]`, each time it went down while
+the issue was open, oldest first; no `to` while it goes on), `behind` (the
+devices down because of it), `monitor` (the PC that saw it), `flapping` and
+`gone` (`true` or absent), and `acts` (`[{ act, at, by?, note?, reportId? }]`,
+`act` being `ack` (Acknowledge), `report` (Report a problem, with the
+report's id) or `expected` (maintenance or planned work), oldest first). The
+first act closes it (`status: "closed"`, `closedAt` its time). Two copies
+merge an outage's acts and times down as unions, never as a question.
+
 ## 7. The network log (`log`)
 
 What was done to the network from outside, oldest first, at most 500. Every
@@ -249,11 +312,31 @@ entry is `{ id, at (ms since 1970), kind }` and the keys of its kind:
 
 - `merge`: `source`, `by`, `counts` (`added`, `changed`, `removed`,
   `conflicts`), `summary`, `mode` (`two-way` or `three-way`), `rev`;
-- `incident`: `incidentId`, `event` (`opened`, `sent`, `closed`, `reopened`),
+- `incident`: `incidentId`, `event` (`opened`, `sent`, `closed`, `reopened`;
+  for an outage, v19: `outage`, `acknowledged`, `reported`, `expected`),
   `symptom`, `routedTo`, `summary`;
 - `visit`: `incidentId`, `providerId`, `provider`, `by`, `arrived`, `left`,
   `outcome` (`fixed`, `partly`, `not-fixed`, `follow-up`), `notes`, `changes`,
-  `signoff`, `summary`.
+  `signoff`, `summary`, and (v19) `monitoring`: what "Monitor during this
+  visit" saw. `from` and `to` (ms); `items`, at most 60, each `node`,
+  `check`, `name`, `proto`, `via` (`tcp`: a ping asked over TCP), `asked`,
+  `answered`, `loss`, `avail` and `coverage` (0 to 1), `med` and `p95` (ms),
+  the chart (`step` in ms, `rtt` and `states`, at most 48 points; states
+  `u` up, `s` slow, `d` down, `q` quiet, `-` unknown) and `before` (`med`,
+  `p95`, `avail`, `coverage` of the site monitor's 7 days before the visit);
+  `outages`, at most 100, each `node`, `name`, `from`, `to` (absent: it went
+  on to the end), `cause` and `causeName`; `compared` (true: a site
+  monitor's figures were read), `unread` (true: the site has a monitor
+  whose figures could not be read, so there is no comparison) and `more`
+  (checks past the first 60);
+- `decision` (v19): an owner's answer on a provider's visit. `visits` (the
+  ids of the `visit` entries it answers; a rejected visit's entries stay in
+  its copy, not in this log), `incidentId`, `providerId`, `provider`,
+  `visitBy` (the technician), `by` (who decided), `result` (`approved`: the
+  copy's changes applied as reviewed, or `rejected`: nothing applied),
+  `outcome` (`successful`: the report was marked fixed; `not-successful`: it
+  was opened again one round up; `undecided`), `note` (to the provider),
+  `file` (the file a rejected copy was kept as), `summary`.
 
 **The hash chain**: from the second entry on, `prev` is the SHA-256 (64 hex
 digits) of the previous entry's stable JSON (keys sorted, absent values left
@@ -316,18 +399,19 @@ reviewed.
 | 16 | DHCP pools, saved searches, vendor and model, tagged VLANs and PoE. |
 | 17 | The network log; `rev`, `base` and `prior`. |
 | 18 | Provider lists (`provider: "pv_1"` becomes `providers: ["pv_1"]`); problem reports. |
+| 19 | The log's `decision` entries: an owner's answer on a provider's visit; a device's answer checks (`checks`) and availability target (`target`); a provider's `target` and `targetHours`; outages (`kind: "outage"` incidents) and their `incident` events; a visit's `monitoring` section. Nothing converts: a v18 document only changes its `v`. |
 
 ## 11. Writing files for Topo
 
-- Write `$schema` first and `v: 18`. Leave out what you do not know; do not
+- Write `$schema` first and `v: 19`. Leave out what you do not know; do not
   write empty strings for absent facts where the table says "omitted".
 - Give every record an id, and make references by id. If your records have
   stable keys of their own, use them (prefixed with your tool's name) so a
   second import updates the first.
 - Addresses always carry their prefix length.
 - Never put passwords or keys in any field: a network file travels.
-- Validate against `schema/topo-v18.json`. Topo reads anything the schema
+- Validate against `schema/topo-v19.json`. Topo reads anything the schema
   allows, and a file it opens is what it will save back, so a key the schema
   does not list is dropped.
 - A newer version of this format will have a new schema address
-  (`topo-v19.json`); Topo opens a newer document read-only.
+  (`topo-v20.json`); Topo opens a newer document read-only.

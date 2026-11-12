@@ -1329,6 +1329,9 @@ function renderLanding() {
     const backup = backupStatus();
     status.textContent = backup ? backup.text : '';
     status.classList.toggle('stale', !!backup && backup.stale);
+    // Over the revision budget with only parts still out left (D175).
+    const space = document.getElementById('revisionSpaceWarn');
+    if (space) space.hidden = !(typeof revisionsOverBudget === 'function' && revisionsOverBudget());
 }
 
 // ---- Binding the binder to a real file (File System Access API) ----
@@ -1702,6 +1705,8 @@ function landingCard(entry, opts = {}) {
     const changed = opts.guest ? '' : cardChangesText(cardChanges(entry));
     // Its problem reports not closed (js/incidents.js): how many, the newest.
     const problems = !opts.guest && !entry.template && !entry.block && typeof landingProblemsText === 'function' ? landingProblemsText(entry.doc) : '';
+    // Provider visits waiting for the owner's review (js/visits.js).
+    const visits = !opts.guest && !entry.template && !entry.block && typeof landingVisitsText === 'function' ? landingVisitsText(entry.id) : '';
     // Its state on a Topo server ("Synced", "Needs merge: tap to review"; js/serverui.js).
     const sync = !opts.guest && typeof serverCardText === 'function' ? serverCardText(entry.id) : null;
     const card = document.createElement('div');
@@ -1724,7 +1729,8 @@ function landingCard(entry, opts = {}) {
         <span class="landing-card-stats">${escapeHtml(t(s.devices === 1 ? '{n} device' : '{n} devices', { n: s.devices }))} · ${escapeHtml(t(s.subnets === 1 ? '{n} subnet' : '{n} subnets', { n: s.subnets }))}</span>
         <span class="landing-card-badges">${badges}</span>${changed ? `
         <span class="landing-card-changes">± ${escapeHtml(changed)}</span>` : ''}${problems ? `
-        <span class="landing-card-problems">⚠ ${escapeHtml(problems)}</span>` : ''}${sync ? `
+        <span class="landing-card-problems">⚠ ${escapeHtml(problems)}</span>` : ''}${visits ? `
+        <span class="landing-card-visits">⇆ ${escapeHtml(visits)}</span>` : ''}${sync ? `
         <span class="landing-card-sync ${escapeHtml(sync.cls)}">${escapeHtml(sync.text)}</span>` : ''}
         <span class="landing-card-when">${escapeHtml(libraryWhen(entry.updated))}</span>`;
     open.onclick = () => (opts.guest ? openGuestSite(entry.id) : openFromLibrary(entry.id));

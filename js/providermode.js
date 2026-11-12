@@ -154,6 +154,9 @@ function noteArrival(origin, json, only) {
         const visited = (state.incidents || []).filter((x) => x.status === 'visited' && (incidentRank(x) > incidentRank(mine.get(x.id)) || newVisit(x)));
         if (visited.length) {
             _pm.arrival = { docId, origin, rev: state.docRev || null, at: _incHooks.now(), kind: 'visited', ids: visited.map((x) => x.id) };
+            // It waits for the owner in Visits waiting until decided, even
+            // if this tab closes (js/visits.js, D153).
+            if (typeof visitArrived === 'function' && (origin === 'link' || origin === 'file')) visitArrived(docId, origin).catch(() => {});
             return;
         }
     }
@@ -213,7 +216,7 @@ function renderIncidentBanner() {
     if (!text) { syncProviderBarHeight(); return; }
     if (a.kind !== 'visited') pmPreferMap(true);
     pmEl('incidentBannerText').textContent = `⚠ ${text}`;
-    pmEl('incidentBannerGo').textContent = a.kind === 'visited' ? t('Merge into my network') : t('I am the provider');
+    pmEl('incidentBannerGo').textContent = a.kind === 'visited' ? t('Review the visit') : t('I am the provider');
     pmEl('incidentBannerLater').textContent = t('Not now');
     syncProviderBarHeight();
 }
@@ -223,6 +226,16 @@ async function incidentBannerGo() {
     if (a.kind === 'visited') {
         _pm.arrival = null;
         renderIncidentBanner();
+        // Every visit opens the review (D139, D153): straight into it, the
+        // copy on screen merged into the network it came back to; Cancel
+        // leaves it in Visits waiting.
+        const known = a.docId ? libraryEntry(a.docId) : null;
+        if (known && !known.template && !known.block && typeof mergeCopyInto === 'function') {
+            const theirs = serializeDoc();
+            const ident = { id: state.docId, updated: state.docUpdated, rev: state.docRev, base: state.docBase, prior: (state.docPrior || []).slice() };
+            await mergeCopyInto(known.id, theirs, { ident, source: a.origin === 'link' ? 'link' : '', reason: a.origin === 'link' ? 'Before merging a link' : undefined, replaceAsked: true });
+            return;
+        }
         if (typeof keepThisNetwork === 'function') await keepThisNetwork();
         return;
     }
@@ -348,6 +361,26 @@ function exitProviderView() {
 }
 function leaveProviderMode() {
     const docId = _pm.docId;
+    // The visit's session goes with provider mode: once it is left the visit
+    // can no longer be recorded, so nothing is kept for it (D296). Ask first
+    // when it runs or holds figures (then this returns a promise).
+    const VM = window.TopoVisitMonitor;
+    if (VM && VM.heldHere()) {
+        const i = VM.state.info || {};
+        if (i.running || i.hasFigures) {
+            return (async () => {
+                if (!(await askConfirm(t('Leave provider mode? The monitoring of this visit stops and its figures are dropped.'), { ok: t('Leave provider mode') }))) return false;
+                await VM.end();
+                leaveProviderModeNow(docId);
+                return true;
+            })();
+        }
+        VM.end();
+    }
+    leaveProviderModeNow(docId);
+    return true;
+}
+function leaveProviderModeNow(docId) {
     exitProviderView();
     dropProviderSession(docId);
     renderProviderChrome();
@@ -504,12 +537,16 @@ function renderProviderPanel() {
         held.forEach((e) => {
             const li = pmNode('li', 'pm-visit', visitLineText(e));
             if (e.notes) li.appendChild(pmNode('span', 'pm-visit-notes', e.notes));
+            if (e.monitoring && window.TopoVisitMonitor) li.appendChild(pmNode('span', 'pm-visit-notes', TopoVisitMonitor.summaryText(e.monitoring)));
             ul.appendChild(li);
         });
         sec.appendChild(ul);
         if (held.length < ids.length) sec.appendChild(pmNode('p', 'dlg-dim', t(ids.length - held.length === 1 ? 'One earlier visit is not in this copy.' : '{n} earlier visits are not in this copy.', { n: ids.length - held.length })));
         panel.appendChild(sec);
     }
+    // Monitor during this visit (the desktop app, js/visitmonitor.js, D148).
+    const vm = window.TopoVisitMonitor ? TopoVisitMonitor.section() : null;
+    if (vm) panel.appendChild(vm);
     const acts = pmNode('div', 'pb-acts');
     acts.appendChild(pmButton(`✍ ${t('Record visit')}`, 'btn btn-primary', () => openVisitDialog()));
     acts.appendChild(pmButton(t('Leave provider mode'), 'btn', leaveProviderMode));
@@ -588,7 +625,7 @@ function visitDraftProblems(d) {
     if (d.arrived && d.left && d.left < d.arrived) out.push(t('The time you left is before the time you arrived.'));
     return out;
 }
-// d: { incidentId?, providerId?, by, arrived?, left?, outcome, notes?, signoff?, changes? }
+// d: { incidentId?, providerId?, by, arrived?, left?, outcome, notes?, signoff?, changes?, monitoring? }
 // The visit entry, the report visited (never back from closed), one undo
 // step. -> the entry, or null.
 async function recordVisit(d) {
@@ -604,7 +641,7 @@ async function recordVisit(d) {
             if (incidentStatusIndex(x.status) < incidentStatusIndex('visited')) x.status = 'visited';
         }
         const entry = visitLogEntry({ id: entryId, at: _incHooks.now(), incidentId: x ? x.id : undefined, providerId: p ? p.id : undefined, provider: p ? p.name || p.id : undefined,
-            by: String(d.by).trim(), arrived: d.arrived, left: d.left, outcome: d.outcome, notes: d.notes, changes: d.changes, signoff: d.signoff });
+            by: String(d.by).trim(), arrived: d.arrived, left: d.left, outcome: d.outcome, notes: d.notes, changes: d.changes, signoff: d.signoff, monitoring: d.monitoring });
         return { incident: x, entry };
     });
     if (!res) return null;
@@ -645,6 +682,7 @@ function composeVisitMessage({ incident, entry, site, link = '', file = '', seal
             lines.push('', n ? t(n === 1 ? 'Changes to the network: 1.' : 'Changes to the network: {n}.', { n }) : t('No changes to the network were recorded.'));
         }
         if (e.signoff) lines.push(t('Signed off by: {name}', { name: e.signoff }));
+        if (e.monitoring && window.TopoVisitMonitor) lines.push(TopoVisitMonitor.summaryText(e.monitoring));
         lines.push('');
         return lines;
     };
@@ -703,7 +741,8 @@ function openVisitDialog(incidentId) {
         providerId: providerSelfOf(_pm.docId || state.docId) || soleRoutedProvider(id ? incidentById(id) : null),
         arrived: s && s.lastVisitAt && lastVisitHeld(s) ? s.lastVisitAt : (s ? s.at : now), left: now,
         outcome: '', notes: '', by: reportEngineerDefault(), signoff: '',
-        changes: undefined, changesState: 'loading', entry: null, ret: null
+        changes: undefined, changesState: 'loading', entry: null, ret: null,
+        monitoring: undefined, monState: 'loading', monRunning: false
     };
     const vd = _pm.vd;
     const scrim = pmEl('visitDialog');
@@ -711,6 +750,16 @@ function openVisitDialog(incidentId) {
     else scrim.hidden = false;
     renderVisitDialog();
     loadVisitChanges(vd);
+    loadVisitMonitoring(vd);
+}
+// The visit monitor's section (js/visitmonitor.js): worked out once on
+// opening, and again at Save while it still runs.
+async function loadVisitMonitoring(vd) {
+    let r = { state: 'none' };
+    try { if (window.TopoVisitMonitor) r = await TopoVisitMonitor.forVisit(); } catch (e) { console.warn('Visit: monitoring', e); r = { state: 'none' }; }
+    if (_pm.vd !== vd) return;
+    vd.monState = r.state; vd.monitoring = r.monitoring; vd.monRunning = !!r.running;
+    renderVisitDialog();
 }
 async function loadVisitChanges(vd) {
     let base = null;
@@ -730,6 +779,29 @@ function closeVisitDialog() {
     _pm.vd = null;
 }
 const visitDialogOpen = () => !!_pm.vd;
+// The idle lock (js/idlelock.js, D218): the open form's draft, and its
+// reopening after the unlock. What changed is worked out again on reopening.
+function visitDraftForLock() {
+    const vd = _pm.vd;
+    if (!vd || vd.stage !== 'form') return null;
+    readVisitForm();
+    return { incidentId: vd.incidentId, providerId: vd.providerId, arrived: vd.arrived, left: vd.left, outcome: vd.outcome, notes: vd.notes, by: vd.by, signoff: vd.signoff };
+}
+function reopenVisitDraft(d) {
+    if (!d || typeof d !== 'object' || state.readOnly) return false;
+    openVisitDialog(typeof d.incidentId === 'string' ? d.incidentId : null);
+    const vd = _pm.vd;
+    if (!vd) return false;
+    const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+    if (typeof d.providerId === 'string') vd.providerId = d.providerId;
+    if (Number.isFinite(d.arrived)) vd.arrived = d.arrived;
+    if (Number.isFinite(d.left)) vd.left = d.left;
+    vd.outcome = VISIT_OUTCOMES.includes(d.outcome) ? d.outcome : '';
+    vd.notes = str(d.notes, VISIT_NOTES_MAX); vd.by = str(d.by, 120); vd.signoff = str(d.signoff, 120);
+    renderVisitDialog();
+    return true;
+}
+
 function readVisitForm() {
     const vd = _pm.vd;
     if (!vd || vd.stage !== 'form') return;
@@ -750,7 +822,7 @@ function renderVisitDialog() {
     pmEl('visitCancelBtn').classList.toggle('hidden', !form);
     pmEl('visitSaveBtn').classList.toggle('hidden', !form);
     pmEl('visitDoneBtn').classList.toggle('hidden', form);
-    pmEl('visitSaveBtn').disabled = vd.busy || vd.changesState === 'loading';
+    pmEl('visitSaveBtn').disabled = vd.busy || vd.changesState === 'loading' || vd.monState === 'loading';
     pmEl('visitSaveBtn').textContent = t('Save visit');
     if (form) renderVisitForm(); else renderVisitReturn();
 }
@@ -788,6 +860,16 @@ function renderVisitForm() {
         sum.textContent = n ? t('{added} added, {changed} changed, {removed} removed', c) : t('No changes to the network were recorded.');
         (vd.changes.items || []).forEach((x) => list.appendChild(pmNode('li', 'vs-change', visitChangeText(x))));
     }
+    // Monitoring during the visit: shown only when there is something to say.
+    const mon = pmEl('visitMonitoring');
+    if (mon) {
+        const say = vd.monState === 'ok' ? joinSentences([TopoVisitMonitor.summaryText(vd.monitoring), t('Added to the visit and its report.'),
+            vd.monRunning ? t('Saving the visit ends the monitoring.') : ''])
+            : vd.monState === 'off' ? t('Statistics are off: the visit gets no monitoring section.')
+                : vd.monState === 'loading' ? t('Working out the monitoring figures…') : '';
+        mon.hidden = !say;
+        pmEl('visitMonitoringText').textContent = say;
+    }
 }
 
 async function saveVisit() {
@@ -805,30 +887,51 @@ async function saveVisit() {
     vd.busy = true; renderVisitDialog();
     let entry = null;
     try {
+        // Still running: the figures up to now.
+        // Statistics turned Off meanwhile drop the section (D295).
+        if ((vd.monRunning || vd.monState === 'ok') && window.TopoVisitMonitor) {
+            const r = await TopoVisitMonitor.forVisit();
+            if (r.state === 'ok') vd.monitoring = r.monitoring;
+            else if (r.state === 'off') { vd.monState = 'off'; vd.monitoring = undefined; }
+        }
         entry = await recordVisit({ incidentId: vd.incidentId, providerId: vd.providerId, by: vd.by, arrived: vd.arrived, left: vd.left,
-            outcome: vd.outcome, notes: vd.notes, signoff: String(vd.signoff || '').trim() || undefined, changes: vd.changes });
+            outcome: vd.outcome, notes: vd.notes, signoff: String(vd.signoff || '').trim() || undefined, changes: vd.changes,
+            monitoring: vd.monState === 'ok' ? vd.monitoring : undefined });
     } finally { vd.busy = false; }
     if (_pm.vd !== vd) return;
     if (!entry) { err.textContent = t('The visit could not be saved.'); renderVisitDialog(); return; }
+    // The session ends with the visit (D148): its samples and figures go.
+    if (window.TopoVisitMonitor && vd.monState !== 'none') TopoVisitMonitor.visitRecorded();
     showToast(t('Visit recorded.'), 'ok');
     enterReturnStage(entry);
 }
 
 // ---- Sending it back ----
-function enterReturnStage(entry) {
+async function enterReturnStage(entry) {
     const vd = _pm.vd;
     vd.stage = 'return';
     vd.entry = entry;
     pmEl('visitError').textContent = '';
-    // A network on a Topo server: the visit is pushed and the client gets
-    // an email; there is no link to send back (D75, js/serversync.js).
+    // A network on a Topo server: there is no link to send back (D75,
+    // js/serversync.js). A provider member's visit goes to the owner as a
+    // visit copy, which waits for their review (D154); an owner's own
+    // visit is pushed, and the client gets an email.
     if (typeof serverReturnRoute === 'function' && serverReturnRoute(state.libraryId)) {
         flushAutosave();
-        if (typeof serverPushNow === 'function') serverPushNow(state.libraryId);
-        vd.ret = { pass: '', samePass: false, shown: false, hits: [], busy: false, copied: '', server: true,
-            result: { ok: true, url: null, file: '', why: 'server', message: composeVisitMessage({ incident: entry && entry.incidentId ? incidentById(entry.incidentId) : null, entry, link: '', file: '' }) } };
+        const cardId = state.libraryId;
+        const proposes = typeof serverIsProvider === 'function' && serverIsProvider(cardId);
+        vd.ret = { pass: '', samePass: false, shown: false, hits: [], busy: proposes, copied: '', server: true,
+            result: { ok: true, url: null, file: '', why: proposes ? 'server-sending' : 'server', message: composeVisitMessage({ incident: entry && entry.incidentId ? incidentById(entry.incidentId) : null, entry, link: '', file: '' }) } };
         if (_pm.session && !state.readOnly) writeProviderSession(Object.assign({}, _pm.session, { lastVisitJson: JSON.stringify(serializeDoc()), lastVisitId: entry.id }));
         renderVisitDialog();
+        if (!proposes) { if (typeof serverPushNow === 'function') serverPushNow(cardId); return; }
+        const r = vd.ret;
+        let why = 'server-owner';
+        try { await serverUploadVisit(cardId, { incidentId: entry.incidentId || null, providerId: entry.providerId || null }); }
+        catch (e) { why = 'server-failed'; r.err = e; }
+        r.busy = false;
+        r.result.why = why;
+        if (_pm.vd === vd) renderVisitDialog();
         return;
     }
     const held = _pm.pass.get(_pm.docId || state.docId || null);
@@ -886,6 +989,10 @@ function renderVisitReturn() {
     if (r.busy) status.textContent = canSeal() ? t('Locking the link…') : '';
     else if (!res) status.textContent = '';
     else if (res.why === 'server') status.textContent = t('Saved to the server. The client will get an email.');
+    else if (res.why === 'server-sending') status.textContent = t('Sending the visit to the owner…');
+    else if (res.why === 'server-owner') status.textContent = t('Sent to the owner for review. Your changes become the site\'s once they approve them; you will get an email.');
+    else if (res.why === 'server-failed') status.textContent = joinSentences([t('The visit could not be sent to the owner yet. It is kept here: record the visit again to send it.'),
+        r.err && typeof TopoServerUI !== 'undefined' && TopoServerUI.errText ? TopoServerUI.errText(r.err) : ''].filter(Boolean));
     else if (res.why === 'link') status.textContent = t('Send it back to the client: they open it in Topo and keep it, and the visit joins their network.');
     else if (res.why === 'too-long') status.textContent = t('This network is too big for a link, so the file {file} was downloaded: send it to the client.', { file: res.file });
     else if (res.why === 'no-seal') status.textContent = t('This page cannot lock a link (it needs https), so the file {file} was downloaded: send it to the client.', { file: res.file });
@@ -918,6 +1025,8 @@ function renderVisitReturn() {
     copyMsg.textContent = `📋 ${t('Copy message')}`;
     copyLink.textContent = r.copied === 'linkonly' ? `✓ ${t('Link copied')}` : `🔗 ${t('Copy link')}`;
     file.textContent = res && res.file ? `⬇ ${t('Download the file again')}` : `⬇ ${t('Download the file')}`;
+    const repBtn = pmEl('visitReportBtn');
+    if (repBtn) { repBtn.classList.toggle('hidden', !vd.entry || !window.TopoVisitMonitor); repBtn.textContent = `📄 ${t('Visit report')}`; }
     // Through the server: nothing to send by hand.
     if (r.server) [email, call, share, copyMsg, copyLink, file, pmEl('visitPassRow'), make].forEach((b) => b.classList.add('hidden'));
 }
@@ -1019,6 +1128,8 @@ function providerModeLocale() {
     pmEl('visitCopyMsgBtn').addEventListener('click', visitCopyMessage);
     pmEl('visitCopyLinkBtn').addEventListener('click', visitCopyLink);
     pmEl('visitFileBtn').addEventListener('click', visitFile);
+    const vr = pmEl('visitReportBtn');
+    if (vr) vr.addEventListener('click', () => { if (_pm.vd && _pm.vd.entry && window.TopoVisitMonitor) TopoVisitMonitor.openVisitReport(_pm.vd.entry); });
 })();
 
 // Published for tests/suites/providermode.js (and the Incidents tab later).
@@ -1027,5 +1138,5 @@ window.TopoProviderMode = {
     providerDocLoaded, providerMergeArrival, enterProviderMode, leaveProviderMode, exitProviderView, readProviderSession,
     incidentMapIds, incidentBannerText, renderIncidentBanner, dismissIncidentBanner, incidentBannerGo,
     providerSelfOf, setProviderSelf, visitBaseDoc, visitChangesOf, visitDraftProblems, recordVisit, composeVisitMessage, buildVisitReturn,
-    openVisitDialog, closeVisitDialog, saveVisit, makeVisitReturn, renderProviderPanel, visitLineText, visitChangeText, openProviderPanel
+    openVisitDialog, closeVisitDialog, visitDraftForLock, reopenVisitDraft, saveVisit, makeVisitReturn, renderProviderPanel, visitLineText, visitChangeText, openProviderPanel
 };

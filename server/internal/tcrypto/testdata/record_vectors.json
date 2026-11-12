@@ -1,0 +1,82 @@
+{
+  "note": "Written by tests/crypto-cross.mjs --write with js/servercrypto.js. Test data only: these keys protect nothing.",
+  "site": "s_9HtWsDMdXKYGBR8VzKen2A",
+  "siteKey": "dDOb4Ccd8cxg4fKsj-0l2DLh5n6-8Rw1Nxg5HfoMBp8",
+  "owner": {
+    "id": "u_Xfqj4iquhvO7U9ne8W27JA",
+    "encPub": "BJ21wJrWBzsKT40s_wOw1IUUREc-GtyVc68nlhh5dHde0vA1Nf9DkjLSAFKWY2s45F-DcPSCxoSyQIxnAwptS2w",
+    "sigPub": "BNIFSId8fVRw5863fBkhAqdPE_av6JrFheBnZEoRJtob-Q47CS2kiF0tUCMCFOBmA5XXy37Fz2hBrWTv4MOXEcw"
+  },
+  "monitor": {
+    "id": "m_0ed7792f3173df1c9dcb65",
+    "encPub": "BJRu_5XItmSz_XQkBEjHsjdFQzo5soM31fZDwxGByr6jpyX4D0LfuErgB5Er0W4BEo1MFTlj2qOxLJcJgYUpnsU",
+    "sigPub": "BBaZOzPwPk0qb2nTLEXH9Om1C7fqWX_iPpXODEV7vvAc7peEjge0blfKKlNQBQJbQVp9ws9foSHC10FsrrTkAaw",
+    "encPkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgcn1JvptkLWJpiJGBbJoK_OAkwPm4DY2rcjETlPMmT_uhRANCAASUbv-VyLZks_10JARIx7I3RUM6ObKDN9X2Q8MRgcq-o6cl-A9C37hK4AeRK9FuARKNTBU5Y9qjsSyXCYGFKZ7F",
+    "sigPkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgPComkfkfV6zpqQ4UbVpDN-a5haI9VFe-9kCLiHNju22hRANCAAQWmTsz8D5NKm9p0yxFx_TptQu36ll_4j6VzgxFe77wHO6XhI4HtG5XyipTUAUCW0FafcLPX6EhwtdBbK605AGs"
+  },
+  "monitorWrap": {
+    "v": 1,
+    "alg": "P256-HKDF256-A256GCM",
+    "to": "_JKcJbGjXGI3ay58Bj0sQy",
+    "ctx": "site:s_9HtWsDMdXKYGBR8VzKen2A|epoch:1|user:m_0ed7792f3173df1c9dcb65",
+    "epk": "BBt2vWSV55tdk9pQkvxVRfmWlrdcCuN35MSEkWmfV5dL-NEwY6Z6S9I3zdP9vfmoPtnSLdjngwN9mKgdAkV9kF0",
+    "salt": "OCdDB5xYP4zpNW14RduKJQ",
+    "iv": "F2l38Jn7_V3wXo9m",
+    "ct": "60JwSR2Kh4E4SB2tkweb8qSBKXUbuAgYExeWLCep6Zpwf-gMaKf-qBFEkFdPSV75",
+    "by": "u_Xfqj4iquhvO7U9ne8W27JA",
+    "sig": "on82UyOhrIwzmJYfBF3W5U3-lxwAuoiXU1p9XeL1qNCyj3nB-T6yCcFgUUKsvJc3F6Q4JMA15I1624Yr9LnAeA"
+  },
+  "records": [
+    {
+      "record": {
+        "v": 1,
+        "site": "s_9HtWsDMdXKYGBR8VzKen2A",
+        "kind": "status",
+        "id": "m_0ed7792f3173df1c9dcb65",
+        "epoch": 1,
+        "author": "m_0ed7792f3173df1c9dcb65",
+        "at": 1762900000000,
+        "ctHash": "GnKOug4hlWfuwsEWSGTdsxsWAimfSSrE29X-deZII54",
+        "sig": "C-nVHcmIm5XOobWUCDuT41SQK5jLoh7GC-hVGFsD2fjbyBcmC7VA-c3rgR7lNOv9Ro8RHsFG-Ar5kMn6hMDzcA",
+        "iv": "u-YNVYVDs_xLKxan",
+        "ct": "ZVECIK82N3qSHnBTrZJ8w85B1_9FEYLnZV45PJl-J_MMapPtwPsHPqHNqajYnWKbO6xzLM65Z7sh5A_EX0epumV2rQdWT_lTRHrFZ58"
+      },
+      "signed": "topo-record-v1\ns_9HtWsDMdXKYGBR8VzKen2A\nstatus\nm_0ed7792f3173df1c9dcb65\n1\nm_0ed7792f3173df1c9dcb65\n1762900000000\nGnKOug4hlWfuwsEWSGTdsxsWAimfSSrE29X-deZII54",
+      "plaintext": "{\"v\":1,\"items\":{\"n1\":{\"state\":\"down\",\"since\":1762900000000}}}"
+    },
+    {
+      "record": {
+        "v": 1,
+        "site": "s_9HtWsDMdXKYGBR8VzKen2A",
+        "kind": "issue",
+        "id": "in0123456789",
+        "epoch": 1,
+        "author": "m_0ed7792f3173df1c9dcb65",
+        "at": 1762900000001,
+        "ctHash": "mdB0mdhT9vHcjK0vqRaec5PhCeMqa8NOxabQO9QCkuE",
+        "sig": "jlg-0mdtjxjAr6wECCk4OVggR3eiSYHfoIMr_gsKTlyKJ3Du5OlAE2OiK8OI5iW4Yo_qy7nBdo-c_4tlqtzDhg",
+        "iv": "Uq3f-d5l31ITgwMz",
+        "ct": "nx8PXMEocifPvKh6ArnP3XU_WLVZ3SpFp-u9-OdjSLeTIZrNQTXvlMVRIsRPLp3y8wHXdxk2vM1KSGrojOySJvKMO6UNN-weAuz3C9M8YfxknXJ6"
+      },
+      "signed": "topo-record-v1\ns_9HtWsDMdXKYGBR8VzKen2A\nissue\nin0123456789\n1\nm_0ed7792f3173df1c9dcb65\n1762900000001\nmdB0mdhT9vHcjK0vqRaec5PhCeMqa8NOxabQO9QCkuE",
+      "plaintext": "{\"v\":1,\"node\":\"n1\",\"start\":1762900000000,\"end\":null,\"behind\":[\"n2\"]}"
+    },
+    {
+      "record": {
+        "v": 1,
+        "site": "s_9HtWsDMdXKYGBR8VzKen2A",
+        "kind": "stats",
+        "id": "m_0ed7792f3173df1c9dcb65|2026-11-11",
+        "epoch": 1,
+        "author": "m_0ed7792f3173df1c9dcb65",
+        "at": 1762900000002,
+        "ctHash": "fdAfDyT4-DY6irPtkcXPTX4rNTmjBUBxve4FyXYw7MI",
+        "sig": "Q8CPIY8dQpjaHnnHrg9-h8GQhEj7_Dn0SEI6Thpwsh8Z_XUF7n-haoCjfePyLjaE9r553_NWYqv5ye9LkSIK3Q",
+        "iv": "OgYQocZ2h8bgyT05",
+        "ct": "DHxjaGCKd87nQWLhelFZAk7a7xDZhpvD-QriJuYXXXrLSaJ2M-lrX9laK0m_odM86o3fvZM"
+      },
+      "signed": "topo-record-v1\ns_9HtWsDMdXKYGBR8VzKen2A\nstats\nm_0ed7792f3173df1c9dcb65|2026-11-11\n1\nm_0ed7792f3173df1c9dcb65\n1762900000002\nfdAfDyT4-DY6irPtkcXPTX4rNTmjBUBxve4FyXYw7MI",
+      "plaintext": "{\"v\":1,\"day\":\"2026-11-11\",\"hours\":[]}"
+    }
+  ]
+}

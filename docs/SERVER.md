@@ -2,8 +2,9 @@
 
 `topo-server` is one program that serves the Topo app and keeps networks in
 step between the people who work on them: the client, their providers, and
-anyone they invite. It is step 5a of docs/SCOPE.md; the decisions behind it
-are D51 onward there.
+anyone they invite. It is step 5 of docs/SCOPE.md (decisions D51 to D125)
+with what step 7 added (section 7, D126 onward): provider visits through
+the owner, site monitors, and the desktop app as a client.
 
 - **You host it.** Carino does not run a shared server. The client (or a
   provider for them) runs it on a PC, a NAS, a VPS or in a container.
@@ -12,9 +13,10 @@ are D51 onward there.
 - **End-to-end encrypted.** Networks are encrypted in each browser before they
   are sent, with keys the server never sees. The server stores ciphertext,
   wrapped keys, public keys and a little metadata (who, when, sizes, roles,
-  member emails). It cannot read a network, so it cannot merge one either: a
-  browser pulls the newer revision, merges it with Topo's own merge and
-  pushes again.
+  member emails). It cannot read a network, so it cannot merge one either: an
+  owner's browser pulls the newer revision, merges it with Topo's own merge
+  and pushes again. Only owners save versions of a site; a provider's
+  visit goes to them as a visit copy that waits for their review.
 - **Notifications by email only**, with no network content in them; and,
   for a client reporting a problem to providers who are not on the server,
   the problem report itself (below, "Problem reports by email"), with the
@@ -31,8 +33,15 @@ are D51 onward there.
   unit, a Windows service, a macOS LaunchDaemon, or the desktop app on a PC
   on site ("Install"). Only the Linux packages were built and inspected
   here; the Windows and macOS installers are build-tested recipes.
+- **Site monitors (step 7):** a PC with the desktop app that an owner
+  turned into the site's monitor checks the documented devices ("are you
+  answering?") and sends its status, its issues and its hourly figures
+  through the server, sealed with the site key and signed by that PC, so
+  every signed-in page sees them. The server never checks anything itself
+  and never reads a result. See "People, sites and access".
 - **What it does not do (yet):** Postgres or blob stores (later; the
-  settings are reserved), signed installers.
+  settings are reserved), signed installers. It sends no alarm: outages
+  are shown on screen only, never by email, call, SMS or push.
 
 Without a server Topo works exactly as before: the same app served by any
 static host never talks to a server and shows nothing of this.
@@ -169,6 +178,7 @@ that holds the value (podman and docker secrets).
 | TOPO_BACKUP_FOLDERS | `$TOPO_DATA/backups` (made at start) | the folders a "folder on the server" backup may be in, as an OS path list (`:` on Linux and macOS, `;` on Windows). Set by whoever installs the server, so an owner's session cannot make the server write anywhere else |
 | TOPO_BACKUP_DEBOUNCE | 2m | how long a network must be quiet after an edit before it is backed up (30 s after a visit; at most 15 minutes after the first edit). 0s writes at the next tick |
 | TOPO_BACKUP_TICK | 30s | how often the backup engine looks for work (1s to 1h) |
+| TOPO_MONITOR_SWEEP | 30s | how often the server looks for site monitors that stopped reporting (100ms to 10m; short only for tests) |
 | TOPO_SERVER_KEY | `$TOPO_DATA/server.key` | where `server.key` is. Set, the file must exist: a missing file stops the start (a new key is never made there) |
 
 The backup destination itself is not an environment setting: the server
@@ -434,8 +444,10 @@ browser is lost. Make a second site owner as well.
   someone as *staff*, who may put networks on the server, or *member*;
   disable). Someone invited to a site comes in as a member.
 - **A site** is one network. Its roles: **owner** (invites, removes, changes
-  roles, deletes), **provider** (may push changes, gets the problems routed to
-  them, records visits), **viewer** (reads only).
+  roles, deletes, and is the only role that saves versions of the site),
+  **provider** (gets the problems routed to them, edits their copy and
+  records visits: each visit goes to the owners as a visit copy that waits
+  for their review), **viewer** (reads only).
 - **Invite** by email from the site's Members. The invitation lasts 14 days;
   accepting needs a sign-in as that address. The newcomer then waits ("Waiting
   for the owner to give you access", with their safety code) until an owner's
@@ -447,8 +459,63 @@ browser is lost. Make a second site owner as well.
 - **Removing someone** makes a new site key, so they cannot read anything
   pushed after; what they already opened stays with them. Someone who
   **leaves** keeps the old key until an owner presses Rotate in Members.
+- **Site monitors** (docs/SCOPE.md D146-D162, D258-D285). An owner turns a PC
+  with the desktop app into the site's monitor (Settings, Monitor from this
+  PC, "Make this PC the site's monitor"). The app makes the PC's own keys and
+  keeps them in the system keychain (the Secret Service through `secret-tool`
+  on Linux, the login keychain on macOS, the Credential Manager on Windows;
+  on Linux with no keychain service, a file only that user can read, and
+  Settings says so). The owner's browser registers them (`POST
+  /api/sites/{site}/monitors`, which answers a token shown once), gives the
+  monitor access like any member (the signed roster names it with the role
+  **monitor**, and the site key is wrapped to its key), and hands the token
+  and the roster it trusts to the app. A monitor is a credential, not a
+  person: it has no email and never signs in; it sends
+  `Authorization: Topo-Monitor <token>`, so it keeps working with no one
+  signed in and after the owner who turned it on signs out. It may read the
+  site and write records: its status (the heartbeat, at least once a
+  minute), its issues and its hourly statistics, each sealed with the site
+  key and signed with its own key; the server checks the signature against
+  the key it registered and refuses anything else, a revision above all.
+  Members lists it as "Monitor: PC name (turned on by X on date)" with its
+  last report. **Revoke** (or removing it from Members) deletes the token and
+  rotates the site key; the owner's browser wraps the new key for every
+  member left, the other monitors included. A monitor that misses 3
+  intervals is said as "Monitor at X stopped reporting" on every page signed
+  in to the site and, as a notification, on every app with Show alarms on
+  this PC.
+  A PC is the monitor of one site, and reports only that site's network
+  (while its monitor watches another network, only an empty heartbeat
+  goes). Owners' quiet windows (maintenance, from the app or a signed-in
+  page) reach the monitors as signed records. A database fault while
+  looking up a monitor's token is 503, never 401; the app forgets its keys
+  only after the server's own 401 on two turns in a row. A site keeps at
+  most 5000 records (status aside): records already in the document are
+  deleted first to make room, and a monitor's issue is never refused for
+  it; an issue folded into the document takes the acts on it along.
+- **Keep statistics** is the site's (Members, Settings; 360 days as shipped,
+  Off keeps none). The server deletes the days past it every 10 minutes and
+  at once when it is shortened (after a question naming how many days go);
+  every monitor follows it on its own PC.
 
 ## Threat model
+
+Site monitors change nothing below: the server keeps their records (status,
+issues, people's acts and quiet windows) and statistics as ciphertext,
+checks only who signed them, and can only withhold them. A
+browser uses a record only when its author is on the trusted roster with the
+key that signed it and in a role allowed to write it (only a monitor opens an
+issue; a provider's act counts only on the devices they cover, which the
+owner's browser checks because only it can read the network); anything else
+is dropped and shown to the owners. A monitor's token alone reads only
+ciphertext: writing a record also needs the PC's private key (the server
+checks the signature), and the site key is wrapped to that key alone. An
+owner revokes a lost PC in Members. A monitor PC holds the site key (in its
+keychain, or a file only its user can read), so a stolen monitor PC reads
+the site like a stolen member's browser until it is revoked, which
+rotates the key. A provider's visit monitor (Monitor during this visit)
+sends nothing to the server while it runs; its figures travel inside the
+visit copy, encrypted like the rest of it.
 
 What the host (whoever runs the server, or someone who breaks into it) **can**
 do, and what it **cannot**.
@@ -461,8 +528,12 @@ It **cannot**:
 - **forge or change content** without the browsers noticing: every revision is
   signed (ECDSA P-256) by its author and chained to the one before; a browser
   accepts a revision only from someone who was an owner or provider in the
-  owner-signed member list (the roster) in force, and a roster only when an
-  owner of the previous one signed it;
+  owner-signed member list (the roster) in force (providers stopped writing
+  revisions with 0.0.2, but a server that kept their earlier pushes still
+  serves them, and they still verify), and a roster only when an owner of
+  the previous one signed it. A provider's visit copy is signed the same
+  way, and an owner's browser opens one only when its author is a provider
+  of the roster it names;
 - **give itself or anyone access**: only an owner's browser wraps the site key
   for a member, and wraps are signed by an owner. When an owner's browser
   writes a new member list (a grant, a role change, a removal, a rotation),
@@ -477,7 +548,19 @@ It **can**:
 
 - **see who and when**: member emails, roles, sign-in times and addresses,
   which browsers, when revisions were pushed and their sizes, and when a
-  member joined or was removed;
+  member joined or was removed; when a provider uploaded a visit copy, how
+  big it is, which revision it was made on, whether a later one replaced it
+  (a copy names its report by a hash only), and whether an owner approved or
+  rejected it;
+- **see the monitors' metadata**: each monitor's PC name (as the owner
+  typed it), who turned it on and when, its reporting interval and when it
+  last reported (the heartbeat, which is how it says "stopped reporting"
+  without reading anything), and for each record its kind (status, issue,
+  act, quiet window), author, time and size, and for statistics which
+  monitor sent a blob for which day. A quiet window's record is named by
+  the scope and the Topo id of what it quiets (an opaque id such as
+  `node|n_…`, never a name or an address). So it can tell that a site had
+  an issue at a given time, not which device or why;
 - **see the kinds of events** a browser declares so the right people get an
   email: that a report was sent, a visit recorded or a report closed on a
   site, and to which members. Not what, where or why;
@@ -497,8 +580,11 @@ It **can**:
   the comparison;
 - **serve different JavaScript**. The browser runs the app the server sends.
   A dishonest host could serve an app that leaks keys. `/api/health` reports
-  `appHash`, the SHA-256 of the app it serves, to compare with a release; the
-  desktop apps (later) carry their own copy;
+  `appHash`, the SHA-256 of the app it serves, to compare with a release. The
+  desktop app connected to a server (Connect to a Topo server, D144) runs its
+  own bundled copy and takes only data from the server, so this does not
+  apply to it; a self-signed server it connects to is pinned by its
+  certificate's fingerprint, and a different certificate is refused;
 - **send a client-written message under its own name**: a problem report
   (`report-mail`) is the one email whose words a member wrote. It goes out
   From the server's address with Reply-To the member, so the recipient sees
@@ -519,9 +605,29 @@ It **can**:
 
 What members can do to each other:
 
-- a **provider** can change the whole network (as in Topo without a server),
-  and it is signed and in the history; a **viewer** cannot push (the server
-  refuses, and the browser does not try);
+- a **provider** proposes, an **owner** approves (docs/SCOPE.md D139, D154):
+  a provider's browser never pushes a revision. Its edits stay in its copy
+  ("Your changes go to the owner when you record a visit"); Record visit
+  uploads a **visit copy** (the network as the provider has it, sealed with
+  the site key and signed, on top of the revision it was made on), which
+  waits in the owners' **Visits waiting** list, every time, even when
+  nothing needs deciding. An owner's browser reviews it three-way against
+  that revision (whose body the server keeps while the copy waits), with a
+  change to anything outside what that provider covers marked and left out
+  unless applied; the owner applies or rejects it and judges the visit; the
+  result is an ordinary revision of the owner's, and the provider is told
+  by email and takes the server's version (a rejected copy, or edits the
+  server's version lacks, are offered to them as a file first). A decided
+  copy stays on the server until the provider's browser has taken the
+  answer, so a later copy that still carries a rejected copy's edits shows
+  them marked as rejected before (D191); removing a provider, or changing
+  their role, deletes their copies. The server refuses a revision push from every role
+  but owner (403 `owners-only`, with "update Topo" for an app older than
+  0.0.2); pushes a provider made before stay in the history. A provider
+  can still **read** the whole site: the site key opens all of it, and
+  limiting what a provider reads would need per-provider keys, which is out
+  of scope. A **viewer** cannot push or upload (the server refuses, and the
+  browser does not try);
 - a **removed** member keeps whatever they downloaded and the old keys; they
   cannot read revisions after the rotation. A member who **left** can read new
   revisions until an owner rotates;
@@ -1078,8 +1184,8 @@ section talks to the service instead and this way is not offered.
   codes can be sent by email or shown in the section's log.
 - **Other PCs on this network**: https on every address of the PC, with the
   self-signed certificate above (`TOPO_TLS_SELF`). The section lists each
-  address (`https://192.168.1.20:7380`) with Copy and Open in browser, and
-  the certificate's fingerprint to compare. Sign-in codes must go by email
+  address (`https://192.168.1.20:7380`) with Copy, and the certificate's
+  fingerprint to compare. Sign-in codes must go by email
   (SMTP), since nobody on another PC can read this PC's log. The OS firewall
   may ask to let "topo-desktop-server" in. Give the PC a fixed address.
   **Address to give people** picks the one that goes into sign-in links and
@@ -1094,11 +1200,74 @@ section talks to the service instead and this way is not offered.
   `~/Library/Application Support/systems.carino.topo/server`), with
   `server.pid` so a second copy of the app (or this one after a crash) never
   starts a second server on the same data.
-- The app's own window does not sync with its server (its page may talk only
-  to the app): open the address in a browser on this PC too.
+- **Open it in this window** (D144, step 7c) makes the app's own window a
+  client of it, at `127.0.0.1` through the app (below, "The desktop app as a
+  client"), pinned to the certificate this PC made: nothing to compare. It
+  replaces opening the address in a browser.
 - "Start it when Topo opens" starts it with the app.
 - Its data folder is the app's, not the service's: a server tried this way
   first does not carry over to the service.
+
+### Site monitors' routes
+
+| Route | Who | What |
+|---|---|---|
+| `POST /api/sites/{site}/monitors` | owner | register a PC's keys as a waiting monitor; answers `{monitor, token}` |
+| `GET /api/sites/{site}/monitors` | member | the monitors, each with its last report and `stale`; the site's `statsDays` |
+| `POST /api/sites/{site}/monitors/{mid}/revoke` | owner | as `/remove`: a new epoch for everyone left, the token deleted |
+| `PATCH /api/sites/{site}/stats-days` | owner | Keep statistics (0 = Off); shortening needs `confirm` (409 `confirm` with `deletes`) |
+| `PUT /api/sites/{site}/status` | the monitor | its latest status, kept alone: the heartbeat |
+| `POST /api/sites/{site}/records` | monitor, owner, provider | an issue (monitors only), an act or a quiet window (people) |
+| `GET /api/sites/{site}/records?since=n` | member | every record after n |
+| `POST /api/sites/{site}/records/folded` | owner | the records now in the document (they leave the backups, and go after 30 days) |
+| `PUT /api/sites/{site}/stats/{day}` | the monitor | its hourly figures of one UTC day (refused while Off) |
+| `GET /api/sites/{site}/stats?from=&to=` | member | the days' blobs, every monitor |
+| `GET /api/monitor` | the monitor | who it is, its site's epoch and Keep statistics |
+
+Records not yet folded go into the site's backup file (`records`), so a
+restore loses no open issue. Migration 0005 adds the role `monitor` (the
+members table is made again with it in its CHECK), the tables `monitors`,
+`site_records` and `monitor_stats`, and `sites.stats_days`.
+
+### The desktop app as a client
+
+Settings, **Connect to a Topo server** (the desktop app only, D144, D193 to
+D203 in docs/SCOPE.md): the app's window keeps networks on a Topo server,
+this PC's own or another one, exactly as a browser on the server's address
+does (sign-in by email code, keys, sync, the live events). What differs is
+the transport: the page never fetches the server. js/desktopclient.js gives
+js/server.js a fetch and an EventSource that call the app's commands
+(desktop/src-tauri/src/clientcmd.rs over src/client.rs, Rust with rustls),
+so:
+
+- the window's CSP stays `connect-src 'self'` (plus Tauri's IPC), with no
+  CORS on the server;
+- the app sends each request with `X-Topo: 1` and
+  `Sec-Fetch-Site: same-origin` and no `Origin` (the server's CSRF check
+  takes that, as from its own page; the app is not a page another site can
+  drive), and only to the connected server's `/api/`;
+- the session cookie is kept by the app (`<app data>/client/session.json`,
+  readable by this user only, written whole or not at all), never by the
+  page, so a restart stays signed in; the address and the pin are in `<app config>/client.json`;
+- plain http only to this PC (`127.0.0.1`, `::1`, `localhost`); another PC
+  needs https;
+- a server with a certificate from a public authority connects with no
+  question; one that signs its own (`TOPO_TLS_SELF`) shows the certificate's
+  SHA-256 fingerprint to compare with the server's (its log, or Settings on
+  the server PC) and is pinned to it. A different certificate later is
+  refused, the page says so, and Settings offers **Check the certificate
+  again** to compare the new one (the same server keeps the session). A
+  server with no pin whose certificate stops passing the check (expired, a
+  proxy's own) is refused the same way, not retried;
+- the sign-in link in the email opens in a browser and signs in that
+  browser, not the app: type the code from the email in the app;
+- **Connect backups to Google Drive or OneDrive** (Account, Backups) finishes
+  in a browser on the server's address, where the provider sends it back
+  (the server ties it to the session that started it): in the app, Backups
+  shows the redirect address to register and **Open the server in a
+  browser** instead of Connect;
+- Disconnect signs out and forgets the address, the pin and the session; the
+  networks stay on the server, and the ones in the window stay on this PC.
 
 How it is built: `desktop/sidecar.sh [target]` stages the app into the
 server and builds `topo-server` for the target into

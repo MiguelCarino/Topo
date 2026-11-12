@@ -55,6 +55,8 @@ type Snapshot struct {
 		Wrap   json.RawMessage `json:"wrap"`
 		Escrow json.RawMessage `json:"escrow"`
 	} `json:"owners"`
+	// Records not yet folded (step 7h), absent when there are none.
+	Records []json.RawMessage `json:"records,omitempty"`
 }
 
 // SnapRev is the revision inside a backup.
@@ -163,6 +165,13 @@ func BuildSnapshot(ctx context.Context, st *store.Store, blobs store.Blobs, site
 	if err != nil {
 		return nil, err
 	}
+	// Records not yet folded into the document (issues, acts, quiet
+	// windows; docs/SCOPE.md D159): beside it, so a restore loses no open
+	// issue. Encrypted and signed as stored.
+	unfolded, err := store.UnfoldedRecords(ctx, tx, site, 5000)
+	if err != nil {
+		return nil, err
+	}
 	tx.Rollback()
 
 	iv, rc, _, err := blobs.Get(ctx, site, rev.N)
@@ -219,6 +228,13 @@ func BuildSnapshot(ctx context.Context, st *store.Store, blobs store.Blobs, site
 		"rosters": rosterList,
 		"pubs":    pubs,
 		"owners":  ownerList,
+	}
+	if len(unfolded) > 0 {
+		recs := make([]any, 0, len(unfolded))
+		for _, r := range unfolded {
+			recs = append(recs, json.RawMessage(r))
+		}
+		doc["records"] = recs
 	}
 	body, err := json.Marshal(doc)
 	if err != nil {

@@ -148,6 +148,14 @@ func (s *Server) pushRev(w http.ResponseWriter, r *http.Request) {
 		if me == nil || me.Status != "granted" || (me.Role != "owner" && me.Role != "provider") {
 			return fail(http.StatusForbidden, ErrForbidden)
 		}
+		// Only owners write versions of the site (D139, D154): a
+		// provider's edits come as a visit copy an owner reviews. A Topo
+		// from before 0.0.2 still pushes; it is told to update. Pushes it
+		// made before stay valid history.
+		if me.Role != "owner" {
+			return failWith(http.StatusForbidden, ErrOwnersOnly, map[string]any{"update": true,
+				"message": "Only owners save versions of this site. Update Topo: your visit then goes to the owner for review."})
+		}
 		// The key verified above must still be the author's (a reset in
 		// between would make the signature meaningless).
 		if me.SigPub != author.SigPub || me.KeysAt != author.KeysAt {

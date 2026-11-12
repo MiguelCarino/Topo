@@ -15,8 +15,10 @@
 //   - Save sends the form and the SMTP password once (never shown again:
 //     "Saved (type to replace)"); a refusal is said in words;
 //   - Start saves what is on screen, then starts; Running shows each address
-//     with Copy and Open in browser (server_open with that address), the
-//     fingerprint in LAN mode, Stop; Stop stops;
+//     with Copy, the fingerprint in LAN mode, Stop; "Open it in this window"
+//     connects this window to it at 127.0.0.1 with that fingerprint
+//     (js/desktopclient.js, D144; it replaces Open in browser), and is not
+//     offered once this window uses it; Stop stops;
 //   - a server left running by an earlier run says so and offers Stop;
 //   - the log follows while Settings is open;
 //   - the tick "Start it when Topo opens" goes back when it cannot be kept;
@@ -94,6 +96,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     if (cmd === 'server_question') return host.ask;
     if (cmd === 'server_question_done') { host.answers.push(args.answer); host.ask = false; return null; }
     if (cmd === 'server_open') { if (!urls().includes(args.url)) throw 'not-ours'; return null; }
+    if (cmd === 'client_connect') { host.client = { url: args.url, pin: args.pin || '' }; return Object.assign({}, host.client); }
     throw new Error('unknown ' + cmd);
   };
   try {
@@ -152,13 +155,25 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('Start saves what is on screen, then starts', await until(() => host.running) && calls.map((c) => c.cmd).filter((c) => c !== 'server_info').join(',') === 'server_save,server_start');
     ok('Running: give the other PCs this address', await until(() => /Give the other PCs this address/.test(el('setDsStatus').textContent)));
     const items = [...el('setDsUrls').querySelectorAll('.ds-url')];
-    ok('every LAN address, https, with Copy and Open in browser', items.length === 2 && items[0].querySelector('code').textContent === 'https://192.168.1.20:7380'
-      && items.every((li) => [...li.querySelectorAll('button')].map((b) => b.textContent).join(',') === 'Copy,Open in browser'), items.map((li) => li.textContent).join(' | '));
+    ok('every LAN address, https, with Copy (no Open in browser)', items.length === 2 && items[0].querySelector('code').textContent === 'https://192.168.1.20:7380'
+      && items.every((li) => [...li.querySelectorAll('button')].map((b) => b.textContent).join(',') === 'Copy'), items.map((li) => li.textContent).join(' | '));
     ok('the fingerprint to compare', !el('setDsFpRow').hidden && el('setDsFp').textContent === host.fp);
     ok('Stop, no Start', !el('setDsStop').hidden && el('setDsStart').hidden);
     calls.length = 0;
-    items[1].querySelectorAll('button')[1].click();
-    ok('Open in browser asks the app to open that address', await until(() => calls.some((c) => c.cmd === 'server_open')) && calls.find((c) => c.cmd === 'server_open').args.url === 'https://10.8.0.3:7380');
+    const DC = window.CarinoDesktopClient;
+    let reloads = 0;
+    DC.state.invoke = invoke; DC.state.reload = () => { reloads++; };
+    ok('"Open it in this window" while it runs', !el('setDsHere').hidden);
+    el('setDsHere').click();
+    ok('…connects this window to it at 127.0.0.1, pinned to its own certificate, and reloads', await until(() => reloads === 1)
+      && JSON.stringify(calls.find((c) => c.cmd === 'client_connect').args) === JSON.stringify({ url: 'https://127.0.0.1:7380', pin: host.fp })
+      && localStorage.getItem(DC.MIRROR_KEY) === JSON.stringify({ url: 'https://127.0.0.1:7380' }), JSON.stringify(calls));
+    await DS.dsRefresh(false);
+    ok('…and once this window uses it, it says so instead', el('setDsHere').hidden && /This window is connected to it/.test(el('setDsStatus').textContent));
+    DC.state.info = null; DC.state.invoke = null;
+    localStorage.removeItem(DC.MIRROR_KEY);
+    await DS.dsRefresh(false);
+    ok('no Open in browser is offered any more', !calls.some((c) => c.cmd === 'server_open') && !/Open in browser/.test(el('setDsSec').textContent));
     host.log.push('level=INFO msg="sign-in code sent"');
     el('setDsSec').querySelector('details').open = true;
     ok('the log follows while Settings is open', await until(() => /sign-in code sent/.test(el('setDsLog').textContent), 200));

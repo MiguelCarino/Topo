@@ -307,3 +307,119 @@ func TestParseRejects(t *testing.T) {
 		t.Fatal("site id shape")
 	}
 }
+
+// A record sealed and signed by the app's Rust (desktop/src-tauri
+// src/servercrypto.rs, TOPO_WRITE_VECTORS=1 cargo test rust_vectors)
+// verifies here: the path a real monitor's status takes (the Rust P1363
+// signature and ctHash against Go's checks), and under no other key.
+func TestVectorRustRecord(t *testing.T) {
+	raw, err := os.ReadFile("../../../desktop/src-tauri/src/testdata/rust_vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		Monitor struct {
+			ID     string `json:"id"`
+			SigPub string `json:"sigPub"`
+		} `json:"monitor"`
+		Owner struct {
+			SigPub string `json:"sigPub"`
+		} `json:"owner"`
+		Record json.RawMessage `json:"record"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	r, err := ParseRecord(v.Record)
+	if err != nil {
+		t.Fatalf("parse the Rust record: %v", err)
+	}
+	if r.Author != v.Monitor.ID || !ValidMonitorID(r.Author) {
+		t.Fatalf("author %q", r.Author)
+	}
+	if err := r.Verify(v.Monitor.SigPub); err != nil {
+		t.Fatalf("the Rust record does not verify: %v", err)
+	}
+	if r.Verify(v.Owner.SigPub) == nil {
+		t.Fatal("verified under another key")
+	}
+	r.Epoch++
+	if r.Verify(v.Monitor.SigPub) == nil {
+		t.Fatal("a changed header verified")
+	}
+}
+
+// Records sealed by js/servercrypto.js (tests/crypto-cross.mjs --write)
+// verify here under the monitor's key and no other; a monitor's roster line
+// is accepted only as a monitor's.
+func TestVectorRecords(t *testing.T) {
+	raw, err := os.ReadFile("testdata/record_vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		Monitor struct {
+			ID     string `json:"id"`
+			SigPub string `json:"sigPub"`
+		} `json:"monitor"`
+		Owner struct {
+			SigPub string `json:"sigPub"`
+		} `json:"owner"`
+		Records []struct {
+			Record json.RawMessage `json:"record"`
+			Signed string          `json:"signed"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	if !ValidMonitorID(v.Monitor.ID) || ValidUserID(v.Monitor.ID) {
+		t.Fatalf("monitor id %q", v.Monitor.ID)
+	}
+	if len(v.Records) == 0 {
+		t.Fatal("no records")
+	}
+	for _, x := range v.Records {
+		r, err := ParseRecord(x.Record)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if r.SignedString() != x.Signed {
+			t.Fatalf("signed text differs:\n%s\n%s", r.SignedString(), x.Signed)
+		}
+		if err := r.Verify(v.Monitor.SigPub); err != nil {
+			t.Fatalf("%s: %v", r.Kind, err)
+		}
+		if r.Verify(v.Owner.SigPub) == nil {
+			t.Fatal("verified under another key")
+		}
+		r.At++
+		if r.Verify(v.Monitor.SigPub) == nil {
+			t.Fatal("a changed header verified")
+		}
+	}
+	// A changed ciphertext no longer matches its hash.
+	var m map[string]any
+	json.Unmarshal(v.Records[0].Record, &m)
+	m["ct"] = "AAAA" + m["ct"].(string)[4:]
+	b, _ := json.Marshal(m)
+	if _, err := ParseRecord(b); err == nil {
+		t.Fatal("a changed ciphertext parsed")
+	}
+	for _, line := range []RosterMember{
+		{U: v.Monitor.ID, Email: v.Monitor.ID, Role: "monitor"},
+	} {
+		if !rosterLineOK(line) {
+			t.Fatalf("monitor line refused: %+v", line)
+		}
+	}
+	for _, line := range []RosterMember{
+		{U: v.Monitor.ID, Email: v.Monitor.ID, Role: "owner"},
+		{U: v.Monitor.ID, Email: "pc@x.test", Role: "monitor"},
+		{U: "u_AAAAAAAAAAAAAAAAAAAAAA", Email: "a@x.test", Role: "monitor"},
+	} {
+		if rosterLineOK(line) {
+			t.Fatalf("line accepted: %+v", line)
+		}
+	}
+}

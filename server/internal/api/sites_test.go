@@ -259,7 +259,10 @@ func TestRolesRemoveRotateLeaveDelete(t *testing.T) {
 	if r := p.b.post("/api/sites/"+site+"/invites", map[string]any{"email": "x@example.test", "role": "viewer"}); r.Code != 403 {
 		t.Fatalf("provider invite: %d", r.Code)
 	}
-	if r := p.push(site, "doc1"); r.Code != 201 {
+	if r := o.push(site, "doc1"); r.Code != 201 {
+		t.Fatalf("owner push: %d %s", r.Code, r.Body.String())
+	}
+	if r := p.push(site, "doc1b"); r.Code != 403 || r.json()["error"] != ErrOwnersOnly {
 		t.Fatalf("provider push: %d %s", r.Code, r.Body.String())
 	}
 
@@ -270,8 +273,11 @@ func TestRolesRemoveRotateLeaveDelete(t *testing.T) {
 	if r.Code != 200 {
 		t.Fatalf("role: %d %s", r.Code, r.Body.String())
 	}
-	if r := v.push(site, "doc2"); r.Code != 201 {
+	if r := v.push(site, "doc2"); r.Code != 403 || r.json()["error"] != ErrOwnersOnly {
 		t.Fatalf("new provider push: %d %s", r.Code, r.Body.String())
+	}
+	if r := v.putVisit(site, "", "slot_doc2_aaaa", "doc2"); r.Code != 201 {
+		t.Fatalf("new provider visit copy: %d %s", r.Code, r.Body.String())
 	}
 	// The last owner cannot be demoted.
 	_, _, epoch, rseq = o.head(site)
@@ -322,8 +328,11 @@ func TestRolesRemoveRotateLeaveDelete(t *testing.T) {
 	if r := v.pushAt(site, n, h, 1, rseq, "old epoch"); r.Code != 409 || r.json()["error"] != ErrStaleEpoch {
 		t.Fatalf("old epoch push: %d %s", r.Code, r.Body.String())
 	}
-	if r := v.push(site, "new epoch"); r.Code != 201 {
+	if r := o.push(site, "new epoch"); r.Code != 201 {
 		t.Fatalf("new epoch push: %d %s", r.Code, r.Body.String())
+	}
+	if r := v.putVisit(site, "", "slot_new_epoch", "new epoch visit"); r.Code != 201 {
+		t.Fatalf("new epoch visit copy: %d %s", r.Code, r.Body.String())
 	}
 
 	// A provider leaves: the owners are told; the next owner action rotates.

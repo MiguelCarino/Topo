@@ -151,6 +151,9 @@ function cardSync(cardId) {
     if (T().state.status === 'locked' || T().state.status === 'needs-keys') st = 'locked';
     else if (T().state.status === 'signed-out') st = 'signed-out';
     else if (s && s.status === 'waiting') st = 'waiting';
+    // A provider never pushes (D154): edits stay here until Record visit
+    // sends them to the owner as a visit copy, which then waits.
+    else if (r.role === 'provider' && (st === 'synced' || st === 'pending')) st = visitsWaitingOf(r).length ? 'visit-waiting' : dirty(r) ? 'proposed' : st;
     else if (st === 'synced' && dirty(r)) st = typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'pending';
     if (st === 'offline' || (st === 'pending' && navigator.onLine === false)) st = 'offline';
     return { state: st, changes: st === 'offline' ? localChanges(r) : 0, since: r.needsMergeSince || 0, long: !!r.needsMergeSince && _hooks.now() - r.needsMergeSince > NEEDS_MERGE_LONG_MS, err: r.err, role: r.role, siteId: r.siteId };
@@ -448,7 +451,9 @@ async function pushCard(r) {
     const cardId = r.cardId;
     if (state.libraryId === cardId && isKept()) flushAutosave();
     const card = libraryEntry(cardId);
-    if (!card || r.role === 'viewer') return 'same';
+    // Only owners write revisions (D139, D154): a viewer looks, a provider's
+    // edits go to the owner as a visit copy (uploadVisit).
+    if (!card || r.role === 'viewer' || r.role === 'provider') return 'same';
     if (r.baseN > 0 && revHashOf(card.doc) === r.baseHash) return 'same';
     const me = T().me(), K = T().keys();
     const t = await trust(r.siteId);
@@ -523,6 +528,15 @@ async function doSync(r, opts) {
     if (s && s.status === 'waiting') { setState(r, 'waiting'); return 'waiting'; }
     if (s && s.role && s.role !== r.role) { r.role = s.role; putRec(r); }
     try {
+        // A provider takes the owner's answers on its visit copies first
+        // (D154, D187): once all are answered the card becomes the server's
+        // version as it is, never merged with it first (a merge it is about
+        // to replace could only stop it with a question).
+        if (r.role === 'provider' && !opts.pull && await providerDecisions(r)) {
+            if (r.state !== 'error' && r.state !== 'update-needed') setState(r, 'synced');
+            r.lastSyncAt = _hooks.now(); putRec(r);
+            return 'pulled';
+        }
         for (let round = 0; round < 3; round++) {
             if (r.state !== 'needs-merge' || opts.force) setState(r, 'pulling');
             const p = await pullHead(r);
@@ -532,12 +546,21 @@ async function doSync(r, opts) {
                 if (res === 'applied' || res === 'merged' || res === 'own') readableAfterSync(r);
             } else if (r.state === 'needs-merge' && await getDoc(r.cardId, 'pending')) { setState(r, 'needs-merge'); return 'needs-merge'; }
             if (opts.pull) { setState(r, 'synced'); return 'pulled'; }
+            // A provider syncs read-only (D154).
+            if (r.role === 'provider') {
+                if (r.state !== 'error') setState(r, 'synced');
+                r.lastSyncAt = _hooks.now(); putRec(r);
+                return 'pulled';
+            }
             const pushed = await pushCard(r);
             if (pushed === 'conflict') continue;
             if (pushed === 'refresh') { _keys.delete(r.siteId); await walkRosters(r.siteId); continue; }
             if (r.state !== 'error') setState(r, 'synced');
             r.lastSyncAt = _hooks.now(); putRec(r);
             if (pushed === 'pushed') readableAfterSync(r);
+            // An owner's answers on visit copies go once what they wrote is
+            // on the server (the provider then takes that revision).
+            if (r.role === 'owner' && (r.decisions || []).length) await flushDecisions(r);
             return pushed;
         }
         setState(r, 'error', { err: 'catch-up' });
@@ -546,7 +569,15 @@ async function doSync(r, opts) {
         if (e.offline) { setState(r, 'offline'); return 'offline'; }
         if (e.code === 'history-mismatch') { setState(r, 'history-mismatch'); return 'history-mismatch'; }
         if (e.status === 404) { await T().refreshSites(); setState(r, T().site(r.siteId) ? 'error' : 'removed', { err: 'not-found' }); return 'removed'; }
-        if (e.status === 403) { await T().refreshSites(); const s2 = T().site(r.siteId); setState(r, s2 && s2.status === 'waiting' ? 'waiting' : 'error', { err: e.code }); return 'error'; }
+        if (e.status === 403) {
+            await T().refreshSites();
+            const s2 = T().site(r.siteId);
+            // A role that changed meanwhile (an owner made a provider): the
+            // edits stay here, for a visit copy.
+            if (e.code === 'owners-only' && s2 && s2.role && s2.role !== r.role) { r.role = s2.role; putRec(r); setState(r, 'synced'); return 'pulled'; }
+            setState(r, s2 && s2.status === 'waiting' ? 'waiting' : 'error', { err: e.code });
+            return 'error';
+        }
         if (e.status === 401) { await T().refreshMe(); T().changed(); return 'signed-out'; }
         console.warn('Topo server: sync', r.cardId, e.code || e);
         setState(r, 'error', { err: e.code || 'error' });
@@ -563,6 +594,7 @@ const _timers = new Map();   // cardId -> { timer, first }
 function afterSave(cardId) {
     const r = rec(cardId);
     if (!r || !T().ready() || r.role === 'viewer') return;
+    if (r.role === 'provider') { T().changed(); return; }   // nothing to push (D154)
     const now = _hooks.now();
     const t = _timers.get(cardId) || { timer: 0, first: now };
     clearTimeout(t.timer);
@@ -576,7 +608,8 @@ function syncNow(cardId) {
     if (t) { clearTimeout(t.timer); _timers.delete(cardId); }
     return syncCard(cardId, { force: true });
 }
-function flushAll() { [..._timers.keys()].forEach((id) => syncNow(id)); }
+// -> a promise of every push it started (the idle lock waits on it, D214).
+function flushAll() { return Promise.all([..._timers.keys()].map((id) => syncNow(id))).catch(() => false); }
 
 // ---- Several tabs (C8): who has which card open ----
 const TAB = Math.random().toString(36).slice(2);
@@ -590,7 +623,12 @@ const openElsewhere = (cardId) => [..._open.values()].some((o) => o.card === car
 
 // ---- Events from js/server.js ----
 function onHead(siteId) { const r = recBySite(siteId); if (r) syncCard(r.cardId, { pull: false }); }
-function onRoster(siteId) { const r = recBySite(siteId); _members.delete(siteId); if (r) syncCard(r.cardId); }
+function onRoster(siteId) {
+    const r = recBySite(siteId);
+    _members.delete(siteId);
+    _visitList.delete(siteId);   // a provider removed takes their copies with them (D191)
+    if (r) { syncCard(r.cardId); if (typeof visitsWaitingChanged === 'function') visitsWaitingChanged(r.cardId); }
+}
 function onGranted(siteId) { _members.delete(siteId); const r = recBySite(siteId); if (r) { setState(r, 'synced'); syncCard(r.cardId); } T().changed(); }
 function onRemoved(siteId) {
     const r = recBySite(siteId);
@@ -991,6 +1029,234 @@ function warmMembers(cardId) { const r = cardId && rec(cardId); if (r && T().rea
 const returnRoute = (cardId) => { const r = cardId ? rec(cardId) : null; return !!r && T().ready() && r.role !== 'viewer'; };
 const provider = { sendRoute, returnRoute, warmMembers, mailRoute, reportMail };
 
+// ---- Provider visits through the owner (docs/SCOPE.md D139, D153, D154) ----
+// A provider member never pushes. Record visit uploads a visit copy: the
+// card as it is, sealed with the site key and signed, on top of the server
+// revision the card is built on (r.baseN), for the report (slot: a hash of
+// the site, the report and the provider, so the server learns neither). It
+// waits for an owner, every time. One copy per provider and report: a new
+// one replaces the one waiting. Once an owner has answered every copy of
+// theirs, the provider's browser takes the server's version (a rejected
+// copy, or edits the owner never got, offered as a file first) and deletes
+// its copies.
+const visitsWaitingOf = (r) => Object.values((r && r.visits) || {}).filter((v) => v && v.state === 'waiting');
+async function visitSlot(siteId, incidentId, providerId) {
+    return C.b64u(await C.sha256(C.utf8(['topo-visit-slot-v1', siteId, incidentId || '', providerId || ''].join('\n')))).slice(0, 22);
+}
+// info: { incidentId, providerId }. -> the copy's header; throws a
+// ServerError or 'forbidden' | 'needs-merge' | 'storage'.
+async function uploadVisit(cardId, info = {}) {
+    const r = rec(cardId);
+    if (!r || r.role !== 'provider' || !T().ready()) throw fail('forbidden');
+    if (state.libraryId === cardId && isKept()) flushAutosave();
+    // Built on the newest revision first: a merge here keeps the edits. A
+    // pull only: the owner's answers on older copies wait for the next sync.
+    await syncCard(cardId, { force: true, pull: true });
+    if (r.state === 'needs-merge') throw fail('needs-merge');
+    const me = T().me(), K = T().keys();
+    const slot = await visitSlot(r.siteId, info.incidentId, info.providerId);
+    for (let round = 0; round < 2; round++) {
+        const t = await trust(r.siteId);
+        const ro = latest(t);
+        if (!ro) throw fail('untrusted-roster');
+        const ident = stampCard(cardId, 'server');
+        const card = libraryEntry(cardId);
+        if (!ident || !card) throw fail('storage');
+        const plain = await C.packDoc({ v: 1, kind: 'visit', id: cardId, name: card.name, rev: ident.rev, base: ident.base, prior: ident.prior, doc: card.doc,
+            baseN: r.baseN, incidentId: info.incidentId || null, providerId: info.providerId || null });
+        const max = T().state.health && T().state.health.maxRevBytes;
+        if (max && plain.length > max) throw fail('too-large');
+        const key = await siteKey(r.siteId, ro.epoch);
+        const env = await C.sealVisit({ site: r.siteId, id: C.newId('v_'), slot, baseN: r.baseN, epoch: ro.epoch, rseq: ro.seq, author: me.id, dev: K.deviceId, at: _hooks.now() },
+            key, K.uSig, plain);
+        delete env.site;
+        try {
+            const res = await T().api('POST', `/api/sites/${r.siteId}/visits`, { copy: env });
+            const held = {};
+            Object.values(r.visits || {}).forEach((v) => { if (v && v.id && !(v.slot === slot && v.state === 'waiting')) held[v.id] = v; });
+            held[env.id] = { id: env.id, slot, state: 'waiting', at: _hooks.now() };
+            r.visits = held;
+            putRec(r);
+            T().changed();
+            return res.visit;
+        } catch (e) {
+            if ((e.code === 'stale-epoch' || e.code === 'stale-roster') && round === 0) { _keys.delete(r.siteId); await walkRosters(r.siteId); continue; }
+            throw e;
+        }
+    }
+    throw fail('catch-up');
+}
+// The provider's side of the owner's answers (doSync, before its pull):
+// the copies' states, then, when none is waiting any more and one was
+// answered, the server's version taken. -> true when it was taken.
+async function providerDecisions(r) {
+    const me = T().me();
+    let list;
+    try { list = ((await T().api('GET', `/api/sites/${r.siteId}/visits`)) || {}).visits || []; }
+    catch (e) { return false; }
+    const mine = list.filter((v) => me && v.author === me.id);
+    r.visits = {};
+    mine.forEach((v) => { r.visits[v.id] = { id: v.id, slot: v.slot, state: v.state, at: v.received }; });
+    putRec(r);
+    const decided = mine.filter((v) => v.state === 'approved' || v.state === 'rejected');
+    if (!decided.length || mine.some((v) => v.state === 'waiting')) { T().changed(); return false; }
+    const p = await pullHead(r);
+    const rejected = decided.some((v) => v.state === 'rejected');
+    const lost = rejected ? 0 : await providerUnsent(r, p);
+    if (rejected || lost) await offerOwnCopy(r, rejected ? 'rejected' : 'unsent');
+    await takeServerVersion(r, p);
+    for (const v of decided) { try { await T().api('DELETE', `/api/sites/${r.siteId}/visits/${v.id}`); } catch (e) { /* the next sync */ } }
+    r.visits = {};
+    putRec(r);
+    if (typeof showToast === 'function') showToast(rejected ? t('The owner did not accept your visit. This network now follows the site again.') : t('The owner approved your visit.'), rejected ? '' : 'ok');
+    T().changed();
+    return true;
+}
+// What taking the server's version would lose (D187): the parts the
+// provider changed since the revision the card is built on that the
+// server's version does not have as the provider left them (edits made
+// after the upload with no new Record visit, and rows the owner left out),
+// and a visit recorded here that the server's version has not got. A
+// report the owner judged in the same revisions is the owner's answer, not
+// a loss. p: pullHead's result (null: the head is the card's base). -> a
+// count.
+async function providerUnsent(r, p) {
+    const card = libraryEntry(r.cardId);
+    if (!card || !card.doc) return 0;
+    const base = ((await getDoc(r.cardId, 'base')) || {}).doc || null;
+    const head = p ? p.env.doc : base;
+    if (!head) return revHashOf(card.doc) !== r.baseHash ? 1 : 0;
+    const headLog = (head.log || []).filter(Boolean);
+    const baseLogIds = new Set(((base && base.log) || []).filter(Boolean).map((e) => e.id));
+    const judged = new Set(headLog.filter((e) => e.kind === 'decision' && !baseLogIds.has(e.id) && e.incidentId).map((e) => 'incidents:' + e.incidentId));
+    let n = 0;
+    try {
+        const mineParts = base ? docChangeParts(base, card.doc) : null;
+        const differ = docChangeParts(head, card.doc);
+        differ.forEach((part) => { if ((!mineParts || mineParts.has(part)) && !judged.has(part)) n++; });
+    } catch (e) { n = revHashOf(card.doc) !== r.baseHash ? 1 : 0; }
+    const onServer = new Set(headLog.map((e) => e.id));
+    n += ((card.doc.log) || []).filter((e) => e && e.kind === 'visit' && !onServer.has(e.id)).length;
+    return n;
+}
+// Before the server's version replaces the card: the card as a file, if
+// the provider wants it. why: 'rejected' | 'unsent'. -> the file name or ''.
+async function offerOwnCopy(r, why) {
+    const card = libraryEntry(r.cardId);
+    if (!card) return '';
+    const msg = why === 'rejected'
+        ? t('The owner did not accept your visit, so this network goes back to the site\'s version. Keep your copy as a file first?')
+        : t('The owner answered your visit. This network now goes back to the site\'s version, which does not have your later changes. Keep your copy as a file first?');
+    const ask = _hooks.ask || ((m, o) => (typeof askChoice === 'function' ? askChoice(m, o) : Promise.resolve(null)));
+    const answer = await ask(msg, { title: t('Your visit'), choices: [{ id: 'file', label: t('Download my copy'), primary: true }, { id: 'no', label: t('Not now') }], why });
+    if (answer !== 'file') return '';
+    const f = networkJsonFile(card.name || '', r.cardId, card.updated || _hooks.now(), card.doc, todayISO(new Date(_hooks.now())), { rev: card.rev });
+    const fileName = f.fileName.replace(/\.json$/, '_my-visit.json');
+    if (typeof downloadJson === 'function') downloadJson(f.payload, fileName);
+    return fileName;
+}
+// The card becomes the server's version as it is (the base when nothing is
+// newer): on screen, one undo step.
+async function takeServerVersion(r, pulled) {
+    if (state.libraryId === r.cardId && isKept()) flushAutosave();
+    const p = pulled !== undefined ? pulled : await pullHead(r);
+    if (p) {
+        if (migrateDoc(p.env.doc).newer) { await putDoc(r.cardId, 'pending', { n: p.n, h: p.h, env: p.env, epoch: p.epoch, rseq: p.rseq }); setState(r, 'update-needed'); return; }
+        await fastForward(r, p);
+        await setBase(r, p, p.env.doc);
+    } else {
+        let b = await getDoc(r.cardId, 'base');
+        if (!b || !b.doc) { const d = await refetchBase(r); b = d ? { doc: d, rev: null } : null; }
+        if (!b) return;
+        await fastForward(r, { env: { doc: cloneData(b.doc), rev: b.rev || null } });
+        r.baseHash = revHashOf(libraryEntry(r.cardId).doc);
+        putRec(r);
+    }
+    await putDoc(r.cardId, 'pending', null);
+    setState(r, 'synced');
+}
+
+// ---- The owner's side ----
+// The copies on a site, oldest first (headers; the owner's list holds every
+// provider's, a provider's their own).
+async function siteVisits(siteId) { return ((await T().api('GET', `/api/sites/${siteId}/visits`)) || {}).visits || []; }
+// One copy opened: its signature checked against the trusted roster (its
+// author a provider of the roster it names), decrypted, and its base (the
+// server revision it was made on) with it. -> { env, base (a document, or
+// null when the server pruned it: two-way), baseRev, author, email }.
+// Throws 'bad-chain' (a copy that does not check out) or a ServerError.
+async function openVisitCopy(siteId, hd, opts = {}) {
+    const t = await walkRosters(siteId);
+    const ro = t.rosters.find((x) => x.seq === hd.rseq);
+    const line = ro ? C.rosterMember(ro, hd.author) : null;
+    if (!line || line.role !== 'provider') throw fail('bad-chain');
+    // ...and still one now (D191): a copy from someone removed, or no
+    // longer a provider, is listed but never opened.
+    const now = latest(t);
+    const nowLine = now ? C.rosterMember(now, hd.author) : null;
+    if (!nowLine || nowLine.role !== 'provider') throw fail('not-provider');
+    const pub = await trustedSigPub(t, ro, hd.author);
+    const h = { site: siteId, id: hd.id, slot: hd.slot, baseN: hd.baseN, epoch: hd.epoch, rseq: hd.rseq, author: hd.author, dev: hd.dev, at: hd.at, ctHash: hd.ctHash };
+    if (!pub || !(await C.verify(pub, C.visitSigned(h), hd.sig))) throw fail('bad-chain');
+    const res = await T().api('GET', `/api/sites/${siteId}/visits/${hd.id}`);
+    let env;
+    try { env = await C.unpackDoc(await C.openVisit(h, res.body, await siteKey(siteId, hd.epoch))); }
+    catch (e) { if (e.code) throw e; throw fail('bad-chain'); }
+    if (!env || env.v !== 1 || !env.doc || !Array.isArray(env.doc.nodes)) throw fail('bad-chain');
+    let base = null, baseRev = null;
+    if (opts.base === false) return { env, base, baseRev, author: hd.author, email: hd.email || '' };
+    try {
+        const b = await T().api('GET', `/api/sites/${siteId}/revs/${hd.baseN}`);
+        const bh = Object.assign({ site: siteId }, b.rev);
+        const bro = t.rosters.find((x) => x.seq === bh.rseq);
+        const bline = bro ? C.rosterMember(bro, bh.author) : null;
+        const bpub = bline ? await trustedSigPub(t, bro, bh.author) : null;
+        if (await C.chainHash(C.revSigned(bh), b.rev.sig) === b.rev.h && bpub && await C.verify(bpub, C.revSigned(bh), b.rev.sig)) {
+            const benv = await C.unpackDoc(await C.openRevision(bh, b.body, await siteKey(siteId, bh.epoch)));
+            if (benv && benv.doc && Array.isArray(benv.doc.nodes)) { base = benv.doc; baseRev = validRev(benv.rev); }
+        }
+    } catch (e) { base = null; }   // pruned (410) or not checked: two-way
+    return { env, base, baseRev, author: hd.author, email: hd.email || '' };
+}
+// An owner's answer, kept on the card until what it wrote is on the server
+// (doSync sends it after the push): { id, decision }.
+function queueDecision(cardId, id, decision) {
+    const r = rec(cardId);
+    if (!r) return null;
+    r.decisions = (r.decisions || []).filter((d) => d.id !== id).concat([{ id, decision }]);
+    putRec(r);
+    return syncNow(cardId);
+}
+async function flushDecisions(r) {
+    const left = [];
+    for (const d of r.decisions || []) {
+        try { await T().api('POST', `/api/sites/${r.siteId}/visits/${d.id}/decide`, { decision: d.decision, n: r.baseN }); }
+        catch (e) { if (!(e.status === 409 || e.status === 404)) left.push(d); }
+    }
+    r.decisions = left;
+    putRec(r);
+    _visitList.delete(r.siteId);
+    if (typeof visitsWaitingChanged === 'function') visitsWaitingChanged(r.cardId);
+}
+// The owner's list, cached briefly per site (the landing reads it).
+const _visitList = new Map();   // siteId -> { at, list }
+async function ownerVisits(siteId, fresh) {
+    const c = _visitList.get(siteId);
+    if (!fresh && c && _hooks.now() - c.at < 30000) return c.list;
+    const list = (await siteVisits(siteId)).filter((v) => v.state === 'waiting');
+    _visitList.set(siteId, { at: _hooks.now(), list });
+    return list;
+}
+// The live `visits` event: a provider looks at its copies again; an
+// owner's list is read again.
+function onVisits(siteId) {
+    const r = recBySite(siteId);
+    _visitList.delete(siteId);
+    if (r && r.role === 'provider') syncCard(r.cardId);
+    if (r && typeof visitsWaitingChanged === 'function') visitsWaitingChanged(r.cardId);
+    T().changed();
+}
+
 // ---- The History on the server (design §9.3) ----
 async function history(siteId) {
     const res = await T().api('GET', `/api/sites/${siteId}/revs?since=0&limit=1000`);
@@ -1003,6 +1269,7 @@ function _reset() {
     _timers.forEach((t) => clearTimeout(t.timer)); _timers.clear();
     _running.clear(); _again.clear(); _open.clear();
     _readable.forEach((st) => clearTimeout(st.timer)); _readable.clear();
+    _visitList.clear();
 }
 
 window.serverCardIds = serverCardIds;
@@ -1014,6 +1281,7 @@ window.TopoServerSync = {
     onHead, onRoster, onGranted, onRemoved, signedOut, keysReset, putCard, openSite, reviewMerge, trustServerHistory, removeCard, unlinkCard,
     grant, setRole, removeMember, rotate, invite, setShowName, leave, siteName, deriveEvents, provider, history, onDocLoaded,
     nameSlugOf, sendReadable, setReadable, deleteReadable, siteBackups, flushReadable,
+    uploadVisit, providerDecisions, takeServerVersion, offerOwnCopy, siteVisits, openVisitCopy, queueDecision, flushDecisions, ownerVisits, onVisits, visitSlot,
     SERVER_REASON, dirty: (cardId) => { const r = rec(cardId); return !!r && dirty(r); }
 };
 })();

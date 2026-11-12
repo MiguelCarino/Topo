@@ -786,7 +786,7 @@ func (s *Server) grant(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			m := byID[u]
-			if m.Disabled {
+			if m.Disabled || m.Role == "monitor" {
 				continue
 			}
 			if err := store.InsertMail(ctx, tx, &store.Mail{ID: store.NewID("o_"), Kind: "granted", To: m.Email, UserID: u, SiteID: site,
@@ -823,13 +823,14 @@ func (s *Server) setRole(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	if !tcrypto.ValidRole(req.Role) {
+	site, uid := r.PathValue("site"), r.PathValue("uid")
+	// A monitor's role is never changed, nor anyone made a monitor (step 7h).
+	if !tcrypto.ValidRole(req.Role) || store.IsMonitorID(uid) {
 		writeError(w, http.StatusBadRequest, ErrBadRequest, map[string]any{"field": "role"})
 		return
 	}
 	sess := SessionFrom(r.Context())
 	ctx := r.Context()
-	site, uid := r.PathValue("site"), r.PathValue("uid")
 	ms := s.d.Now().UnixMilli()
 	var members []string
 	err := s.d.Store.Tx(ctx, func(tx *sql.Tx) error {
@@ -979,6 +980,12 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 			rotated = true
 		}
 		members = keys(roles)
+		if store.IsMonitorID(req.User) {
+			// Removing a monitor from the members list revokes it (D149).
+			if err := store.RevokeMonitor(ctx, tx, site, req.User); err != nil {
+				return err
+			}
+		}
 		return store.DeleteMember(ctx, tx, site, req.User)
 	})
 	if err != nil {

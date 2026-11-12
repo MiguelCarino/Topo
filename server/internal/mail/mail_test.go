@@ -897,3 +897,27 @@ func TestBackupMails(t *testing.T) {
 		t.Fatalf("unknown code: %s", m.Text)
 	}
 }
+
+// The provider is told what the owner decided on their visit (D153, D154):
+// its own subject and sentence in every language, the site's name when
+// it is shown, nothing of the network.
+func TestVisitDecisionMail(t *testing.T) {
+	for _, lang := range []string{"en", "es", "pt-BR", "ja", "ru"} {
+		for _, reason := range []string{"approved", "rejected"} {
+			plain, err := Render("visit-recorded", lang, Data{"url": "https://topo.example.com/", "reason": reason})
+			if err != nil {
+				t.Fatal(err)
+			}
+			named, _ := Render("visit-recorded", lang, Data{"url": "https://topo.example.com/", "reason": reason, "name": "Clínica Sol"})
+			recorded, _ := Render("visit-recorded", lang, Data{"url": "https://topo.example.com/"})
+			if plain.Subject == recorded.Subject || plain.Text == recorded.Text || !strings.Contains(named.Text, "Clínica Sol") {
+				t.Errorf("%s %s: %q / %q", lang, reason, plain.Subject, named.Text)
+			}
+		}
+	}
+	a, _ := Render("visit-recorded", "en", Data{"url": "https://topo.example.com/", "reason": "approved"})
+	r, _ := Render("visit-recorded", "en", Data{"url": "https://topo.example.com/", "reason": "rejected"})
+	if a.Subject != "The owner approved your visit" || r.Subject != "The owner did not accept your visit" || !strings.Contains(r.Text, "keep your copy as a file") {
+		t.Errorf("en: %q %q %q", a.Subject, r.Subject, r.Text)
+	}
+}

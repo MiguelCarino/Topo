@@ -130,10 +130,11 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func
 	// The mail worker and housekeeping stop with the base context; serve
 	// waits for them (an in-flight send finishes) before closing the store.
 	var bg sync.WaitGroup
-	bg.Add(3)
+	bg.Add(4)
 	go func() { defer bg.Done(); worker.Run(baseCtx) }()
 	go func() { defer bg.Done(); backups.Run(baseCtx) }()
 	go func() { defer bg.Done(); housekeeping(baseCtx, st, handler, cfg, log) }()
+	go func() { defer bg.Done(); monitorSweep(baseCtx, handler, cfg.MonitorSweep) }()
 	defer func() { cancelBase(); bg.Wait() }()
 	srv := &http.Server{
 		Handler:           handler,
@@ -238,6 +239,25 @@ func housekeeping(ctx context.Context, st *store.Store, h *api.Server, cfg *conf
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+	}
+}
+
+// monitorSweep looks for site monitors that stopped reporting (missed 3
+// heartbeat intervals, docs/SCOPE.md D151) every TOPO_MONITOR_SWEEP (30 s;
+// the end-to-end test shortens it) until ctx ends.
+func monitorSweep(ctx context.Context, h *api.Server, every time.Duration) {
+	if every <= 0 {
+		every = 30 * time.Second
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			h.SweepMonitors(ctx)
 		}
 	}
 }

@@ -375,7 +375,7 @@ window.addEventListener('load', async () => {
     replaceDocument(backDoc, { origin: 'link' });
     ok('the client\'s network, not kept: the visited banner', state.docId === 'pm-net' && !isKept() && visible('incidentBanner'));
     ok('it names who came and how it went', /^⚠ Juan Pérez recorded a visit on .+: Fixed\.$/.test(el('incidentBannerText').textContent), el('incidentBannerText').textContent);
-    ok('and offers the merge', el('incidentBannerGo').textContent === 'Merge into my network');
+    ok('and offers the review (every visit opens it, D153)', el('incidentBannerGo').textContent === 'Review the visit');
     const ctx = await mergeContext('pm-net', backDoc, docIdentity(backDoc));
     ok('the merge is three-way from the revision both started from', !!ctx.base && ctx.via === 'rev' && ctx.baseRev === clientRev, `${ctx.via} ${ctx.baseRev}`);
     // A merge that brings a sent report: the provider's banner.

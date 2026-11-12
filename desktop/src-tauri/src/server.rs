@@ -26,8 +26,9 @@
 //   so "No email" is refused here.
 //
 // Only the standard library and what the app already depends on (no new
-// crate). The app window never talks to its own server (its CSP is
-// connect-src 'self' ipc:); the address opens in the system browser.
+// crate). The app's own window reaches it like any other server, through
+// src/client.rs at 127.0.0.1 (D144, step 7c): its CSP stays connect-src
+// 'self'.
 //
 // Settings live in <app config>/server.json; the SMTP password in
 // <app data>/server/smtp.pass (0600, the child's) or handed to the service
@@ -984,7 +985,7 @@ pub fn server_open(app: AppHandle, st: State<'_, ServerState>, url: String) -> R
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
-fn write_private(path: &Path, data: &[u8]) -> Result<(), String> {
+pub(crate) fn write_private(path: &Path, data: &[u8]) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::io::Write;

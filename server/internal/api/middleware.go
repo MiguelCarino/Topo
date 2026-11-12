@@ -256,6 +256,10 @@ func (s *Server) sessionMW(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.d.Sessions != nil && strings.HasPrefix(r.URL.Path, "/api/") {
 			if sess := s.d.Sessions(r); sess != nil {
+				if sess.unavailable {
+					writeError(w, http.StatusServiceUnavailable, ErrUnavailable, map[string]any{"retryAfter": 30})
+					return
+				}
 				r = r.WithContext(WithSession(r.Context(), sess))
 			}
 		}

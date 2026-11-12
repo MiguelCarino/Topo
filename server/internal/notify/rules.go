@@ -87,7 +87,7 @@ func Recipients(kind, author string, to []string, members []store.Member) []stor
 	}
 	var out []store.Member
 	for _, m := range members {
-		if m.UserID == author || m.Status != "granted" || m.Disabled || m.Muted || m.Email == "" {
+		if m.UserID == author || m.Status != "granted" || m.Disabled || m.Muted || m.Email == "" || m.Role == "monitor" {
 			continue
 		}
 		var want bool

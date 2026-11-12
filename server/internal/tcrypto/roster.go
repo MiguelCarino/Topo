@@ -33,8 +33,9 @@ type Roster struct {
 const MaxRosterMembers = 200
 
 var (
-	userIDRe = regexp.MustCompile(`^u_[A-Za-z0-9_-]{22}$`)
-	siteIDRe = regexp.MustCompile(`^s_[A-Za-z0-9_-]{22}$`)
+	userIDRe    = regexp.MustCompile(`^u_[A-Za-z0-9_-]{22}$`)
+	monitorIDRe = regexp.MustCompile(`^m_[0-9a-f]{22}$`)
+	siteIDRe    = regexp.MustCompile(`^s_[A-Za-z0-9_-]{22}$`)
 )
 
 // ValidUserID and ValidSiteID check the id shapes (prefix + 16 random bytes
@@ -42,8 +43,22 @@ var (
 func ValidUserID(s string) bool { return userIDRe.MatchString(s) }
 func ValidSiteID(s string) bool { return siteIDRe.MatchString(s) }
 
-// ValidRole is owner, provider or viewer.
+// ValidMonitorID checks a site monitor's id (step 7h): m_ and 22 lowercase
+// hex digits, so the id itself is its roster "email" (lowercase, no "@").
+func ValidMonitorID(s string) bool { return monitorIDRe.MatchString(s) }
+
+// ValidRole is owner, provider or viewer: the roles a person can be given.
+// A monitor's role is 'monitor', only ever on a monitor's id (rosterLineOK).
 func ValidRole(r string) bool { return r == "owner" || r == "provider" || r == "viewer" }
+
+// rosterLineOK: a person with a person's role, or a monitor (its id as its
+// email) with the role 'monitor'.
+func rosterLineOK(m RosterMember) bool {
+	if ValidMonitorID(m.U) {
+		return m.Role == "monitor" && m.Email == m.U
+	}
+	return ValidUserID(m.U) && ValidRole(m.Role)
+}
 
 // ParseRoster decodes and shape-checks a roster. It does not verify the
 // signature (Verify does, with the signer's key).
@@ -61,7 +76,7 @@ func ParseRoster(raw []byte) (*Roster, error) {
 	}
 	seen := map[string]bool{}
 	for _, m := range r.Members {
-		if !ValidUserID(m.U) || seen[m.U] || !ValidRole(m.Role) || !ValidFingerprint(m.Enc) || !ValidFingerprint(m.Sig) ||
+		if !rosterLineOK(m) || seen[m.U] || !ValidFingerprint(m.Enc) || !ValidFingerprint(m.Sig) ||
 			m.Email == "" || len(m.Email) > 254 || m.Email != strings.ToLower(m.Email) || strings.ContainsAny(m.Email, "|\n\r") {
 			return nil, ErrShape
 		}

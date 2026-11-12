@@ -16,6 +16,13 @@
 //   * what the findings would do: open findings now and after, and which;
 //   * Apply / Cancel. Apply is always enabled while there is something to
 //     merge: every conflict has a default.
+//   * a provider's visit (docs/SCOPE.md D139, D153, js/visits.js): the foot
+//     asks two things more, the changes (apply as reviewed, or reject:
+//     nothing applied) and the visit (Successful, Not successful,
+//     Undecided), with a note for the provider; Apply is enabled even with
+//     nothing to merge, since the visit is still to be judged. On a server,
+//     a row outside what the provider covers asks Leave it out (the
+//     default) or Apply it (D154).
 //
 // Apply hands the answers to commitMerge (js/mergeapply.js), which closes
 // this first (A13), keeps a restore point, plans again from the network as
@@ -164,7 +171,7 @@ function mergeForce(plan, choices) {
     const force = {};
     plan.items.forEach((it) => {
         if (!it.conflict || it.conflict.type !== 'ambiguous') return;
-        const c = choices[it.key];
+        const c = choices[it.key] || mergeAmbiguousDefault(it);
         if (typeof c === 'string' && c && c !== 'skip') force[`${it.kind}:${it.theirsId}`] = c === 'add' ? 'add' : c;
     });
     return force;
@@ -173,7 +180,7 @@ function mergeShownPlan(ctx) {
     const force = mergeForce(ctx.plan, ctx.choices);
     if (!Object.keys(force).length) return ctx.plan;
     try {
-        return planMerge(ctx.mine, ctx.plan.inputs.theirs, ctx.plan.inputs.base, { force: Object.assign({}, ctx.plan.force || {}, force), part: ctx.plan.part });
+        return planMerge(ctx.mine, ctx.plan.inputs.theirs, ctx.plan.inputs.base, { force: Object.assign({}, ctx.plan.force || {}, force), part: ctx.plan.part, scope: ctx.plan.scope });
     } catch (e) {
         return ctx.plan;
     }
@@ -215,7 +222,7 @@ const mergeFieldTake = (ctx, item, f) => {
 function mergeItemTake(ctx, item) {
     const c = ctx.choices[item.key];
     const type = item.conflict && item.conflict.type;
-    if (type === 'ambiguous') return typeof c === 'string' && c ? c : 'skip';
+    if (type === 'ambiguous') return typeof c === 'string' && c ? c : mergeAmbiguousDefault(item);
     return c === 'remove' ? 'remove' : 'keep';
 }
 // Every field conflict in the rows shown (children too) to one side.
@@ -309,7 +316,11 @@ function mergeItemQuestion(ctx, item) {
         add(t('Keep theirs'), 'keep');
         add(t('Leave it removed'), 'remove');
     } else if (type === 'ambiguous') {
-        q.textContent = t('It matches more than one of yours by {how}: which is it?', { how: t(MERGE_MATCHED_BY[item.conflict.by] || item.conflict.by || 'name') });
+        const how = t(MERGE_MATCHED_BY[item.conflict.by] || item.conflict.by || 'name');
+        // One another provider's copy added since this part left: the same
+        // name is no proof, so Add as new is the default (D152.2).
+        q.textContent = item.conflict.other ? t('Another provider added one with the same {how} since this part left: is it the same one?', { how })
+            : t('It matches more than one of yours by {how}: which is it?', { how });
         // Each candidate by its name and what tells it apart (its first
         // address, else its MAC, else its id): two of mine often share a name.
         (item.conflict.candidates || []).forEach((id) => {
@@ -326,6 +337,27 @@ function mergeItemQuestion(ctx, item) {
         add(t('Skip'), 'skip');
     }
     acts.setAttribute('aria-label', q.textContent);
+    box.append(q, acts);
+    return box;
+}
+// A visit copy's change to an item outside what its provider covers (D154):
+// left out unless applied.
+function mergeOutsideQuestion(ctx, item) {
+    if (!item.outside) return null;
+    const box = document.createElement('div');
+    box.className = 'merge-field merge-asks merge-outside';
+    const q = document.createElement('span');
+    q.className = 'merge-fname';
+    const name = (ctx.plan.scope && ctx.plan.scope.name) || (ctx.opts.visit && (ctx.opts.visit.provider || ctx.opts.visit.visitBy)) || '';
+    q.textContent = item.rejectedBefore ? t('This change came in a visit you rejected before.')
+        : name ? t('Outside what {name} covers.', { name }) : t('Outside what this provider covers.');
+    const acts = document.createElement('div');
+    acts.className = 'merge-acts';
+    acts.setAttribute('role', 'group');
+    acts.setAttribute('aria-label', q.textContent);
+    const key = `${item.key}@outside`;
+    const take = ctx.choices[key] === 'apply' ? 'apply' : 'skip';
+    acts.append(mergeButton(t('Leave it out'), { key, choice: 'skip' }, take === 'skip'), mergeButton(t('Apply it'), { key, choice: 'apply' }, take === 'apply'));
     box.append(q, acts);
     return box;
 }
@@ -358,6 +390,8 @@ function mergeRow(ctx, item, child) {
     status.textContent = ' (' + t(MERGE_CHIPS.find((c) => c.status === item.status).label) + ')';
     head.appendChild(status);
     row.appendChild(head);
+    const out = mergeOutsideQuestion(ctx, item);
+    if (out) { row.classList.add('merge-out'); row.appendChild(out); }
     const q = mergeItemQuestion(ctx, item);
     if (q) row.appendChild(q);
     (item.fields || []).forEach((f) => row.appendChild(mergeFieldRow(ctx, item, f)));
@@ -386,7 +420,10 @@ function mergeIncidentLabel(ctx, item) {
 // changes."). The log itself joins by id (unionLogs, js/merge.js).
 function mergeVisitNotes(ctx) {
     const held = new Set(((ctx.mine && ctx.mine.log) || []).map((e) => e && e.id));
-    return ((ctx.plan && ctx.plan.theirsLog) || []).filter((e) => e && e.kind === 'visit' && !held.has(e.id))
+    // A visit someone already decided on (a 'decision' entry, v19) is
+    // history, not one to judge.
+    const decided = typeof visitDecidedIds === 'function' ? visitDecidedIds(ctx.mine, { log: (ctx.plan && ctx.plan.theirsLog) || [] }) : new Set();
+    return ((ctx.plan && ctx.plan.theirsLog) || []).filter((e) => e && e.kind === 'visit' && !held.has(e.id) && !decided.has(e.id))
         .sort((a, b) => (a.at || 0) - (b.at || 0))
         .map((e) => (typeof visitLineText === 'function' ? visitLineText(e) : e.summary || ''));
 }
@@ -429,8 +466,9 @@ function renderMergeCounts() {
     sel.value = ctx.kind;
     const work = counts.added + counts.changed + counts.removed + counts.conflict;
     const apply = mrEl('mergeApplyBtn');
-    apply.disabled = !work;
-    apply.textContent = work ? t('Apply') : t('Nothing to merge');
+    const v = ctx.visit;
+    apply.disabled = !work && !v;
+    apply.textContent = v && v.changes === 'reject' ? t('Reject the changes') : work ? t('Apply') : v ? t('Save the decision') : t('Nothing to merge');
     const anyAsk = ctx.shown.items.some(function asks(it) { return (it.fields || []).some((f) => f.conflict) || (it.children || []).some(asks); });
     mrEl('mergeAllMine').disabled = !anyAsk;
     mrEl('mergeAllTheirs').disabled = !anyAsk;
@@ -477,6 +515,41 @@ function renderMergeList() {
     notes.hidden = !notes.children.length;
 }
 
+// ---- A provider's visit: the foot's two questions (D153) ----
+const MERGE_VISIT_OUTCOMES = [
+    { id: 'successful', label: 'Successful' }, { id: 'not-successful', label: 'Not successful' }, { id: 'undecided', label: 'Undecided' }
+];
+function renderMergeVisit() {
+    const ctx = _mr;
+    const box = mrEl('mergeVisit');
+    if (!box) return;
+    box.hidden = !ctx || !ctx.visit;
+    if (!ctx || !ctx.visit) return;
+    const v = ctx.visit, info = v.info || {};
+    const who = typeof visitWho === 'function' ? visitWho(info) : (info.visitBy || info.provider || '');
+    const head = [t('A visit by {who} waits for your decision.', { who })];
+    if (info.count > 1) head.push(t('This copy holds {n} visits: it replaced the one that was waiting.', { n: info.count }));
+    mrEl('mergeVisitHead').textContent = joinSentences(head);
+    const press = (sel, attr, value) => box.querySelectorAll(sel).forEach((b) => b.setAttribute('aria-pressed', b.dataset[attr] === value ? 'true' : 'false'));
+    box.querySelectorAll('[data-visit-changes]').forEach((b) => { b.textContent = b.dataset.visitChanges === 'apply' ? t('Apply as reviewed') : t('Reject: apply nothing'); });
+    box.querySelectorAll('[data-visit-outcome]').forEach((b) => { const o = MERGE_VISIT_OUTCOMES.find((x) => x.id === b.dataset.visitOutcome); b.textContent = t(o.label); });
+    press('[data-visit-changes]', 'visitChanges', v.changes);
+    press('[data-visit-outcome]', 'visitOutcome', v.outcome);
+    mrEl('mergeVisitChangesLabel').textContent = t('The changes');
+    mrEl('mergeVisitOutcomeLabel').textContent = t('The visit');
+    mrEl('mergeVisitNoteLabel').textContent = t('A note for the provider (optional)');
+    const note = mrEl('mergeVisitNote');
+    if (note.value !== v.note) note.value = v.note;
+    const says = [];
+    if (v.changes === 'reject') says.push(t('Nothing of this copy is applied; it is kept as a file.'));
+    if (info.incidentId) {
+        says.push(v.outcome === 'successful' ? t('The problem is marked fixed.') : v.outcome === 'not-successful'
+            ? t('The problem opens again for another round, and the provider gets your note.') : t('The problem stays as it is.'));
+    }
+    if (info.serverId) says.push(t('The provider is told by email.'));
+    mrEl('mergeVisitSays').textContent = joinSentences(says);
+}
+
 // ---- What the findings would do ----
 const mergeFindingsOf = (doc) => withDoc(doc, () => withLookupPass(() => topologyFindings()));
 const mergeOpenCount = (list) => list.filter((f) => (typeof isCountedFinding === 'function' ? isCountedFinding(f) : true)).length;
@@ -484,6 +557,7 @@ const mergeOpenCount = (list) => list.filter((f) => (typeof isCountedFinding ===
 // -> { now, after, delta } or null when it cannot be worked out.
 function mergeReviewDelta(ctx = _mr) {
     if (!ctx) return null;
+    if (ctx.visit && ctx.visit.changes === 'reject') return { now: mergeOpenCount(ctx.before), after: mergeOpenCount(ctx.before), delta: findingsDelta(ctx.before, ctx.before) };
     try {
         const { doc } = applyMergePlan(ctx.mine, ctx.plan, ctx.choices);
         const after = mergeFindingsOf(doc);
@@ -540,8 +614,10 @@ function showMergeReview(req) {
     return new Promise((resolve) => {
         _mr = {
             opts: req, mine: req.mine, plan: req.plan, shown: req.plan, choices: Object.assign({}, req.choices || {}),
-            statuses: new Set(['added', 'changed', 'removed', 'conflict']), kind: '', before: [], timer: 0, resolve, items: []
+            statuses: new Set(['added', 'changed', 'removed', 'conflict']), kind: '', before: [], timer: 0, resolve, items: [],
+            visit: req.visit ? Object.assign({ changes: 'apply', outcome: 'undecided', note: '' }, req.choices && req.choices.$visit, { info: req.visit }) : null
         };
+        delete _mr.choices.$visit;
         // "a link", "a binder", "a copy" are words of this language and take
         // the title's capitals; only a file's name keeps its own.
         const src = mergeSourceName(req.source);
@@ -553,6 +629,7 @@ function showMergeReview(req) {
             : t('Two-way: no copy both started from was found, so nothing is removed. Where the two differ, yours is kept unless you choose theirs; a blank of yours is filled from theirs.')]);
         try { _mr.before = mergeFindingsOf(req.mine); } catch (e) { _mr.before = []; }
         renderMergeList();
+        renderMergeVisit();
         mrEl('mergeDelta').textContent = '';
         if (window.CarinoUI) CarinoUI.modal.open(scrim, { onDismiss: () => finishMergeReview(null) });
         else scrim.hidden = false;
@@ -601,20 +678,41 @@ async function openMergeReview(opts = {}) {
     }
     const sourceText = logSourceText(mergeSourceName(opts.source));
     let choices = Object.assign({}, opts.choices || {});
+    // A provider's visit (D139, D153): a server's visit copy says so; any
+    // other copy (a link, a file, a binder site) that brings a visit nobody
+    // has decided on is one. A server's revision or a backup is the site's
+    // history, never a visit to judge.
+    const src = mergeSourceName(opts.source);
+    let visit = opts.visit || null;
+    if (!visit && src !== 'server' && src !== 'backup' && typeof visitReviewInfo === 'function') {
+        try { visit = visitReviewInfo(opts.theirs, mergeMineNow(opts.targetId)); } catch (e) { visit = null; }
+    }
     for (let round = 0; round < 3; round++) {
         const mine = mergeMineNow(opts.targetId);
         if (!mine) return { ok: false, reason: 'target' };
         let plan;
         try {
-            plan = planMerge(mine, opts.theirs, opts.base || null, { part: opts.part || null });
+            plan = planMerge(mine, opts.theirs, opts.base || null, { part: opts.part || null, scope: opts.scope || null });
         } catch (e) {
             if (!(e instanceof MergeRefused)) throw e;
             if (e.reason === 'newer') showToast(t('This copy was made by a newer version of Topo, so it cannot be merged. Open it as a copy to read it.'));
             return { ok: false, reason: e.reason };
         }
-        const answer = await showMergeReview({ plan, mine, targetId: opts.targetId, name: card.name, source: opts.source, sourceText, choices, note: opts.note || '' });
-        if (!answer) return { ok: false, reason: 'cancelled' };
-        choices = answer;
+        const answer = await showMergeReview({ plan, mine, targetId: opts.targetId, name: card.name, source: opts.source, sourceText, choices, note: opts.note || '', visit });
+        if (!answer) {
+            // A visit by link or file not decided on stays in Visits waiting.
+            if (visit && !visit.serverId && typeof visitKeepWaiting === 'function') await visitKeepWaiting({ targetId: opts.targetId, theirs: opts.theirs, ident: opts.ident, source: opts.source, fileName: opts.fileName }, visit);
+            return { ok: false, reason: 'cancelled' };
+        }
+        const dec = answer.$visit || null;
+        choices = Object.assign({}, answer);
+        delete choices.$visit;
+        if (visit && typeof commitVisitDecision === 'function') {
+            const res = await commitVisitDecision(opts, visit, dec || {}, (finish) => commitMerge(Object.assign({}, opts, { plan, choices, finish })));
+            if (dec) choices.$visit = dec;
+            if (res.ok || res.reason !== 'stale') return res;
+            continue;
+        }
         const res = await commitMerge(Object.assign({}, opts, { plan, choices }));
         if (res.ok || res.reason !== 'stale') return res;
     }
@@ -628,8 +726,23 @@ async function openMergeReview(opts = {}) {
     scrim.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeMergeDialog));
     mrEl('mergeApplyBtn').addEventListener('click', () => {
         if (!_mr) return;
-        finishMergeReview(Object.assign({}, _mr.choices));
+        const v = _mr.visit;
+        finishMergeReview(Object.assign({}, _mr.choices, v ? { $visit: { changes: v.changes, outcome: v.outcome, note: v.note } } : {}));
     });
+    // The visit's two questions and the note (D153).
+    const vbox = mrEl('mergeVisit');
+    if (vbox) {
+        vbox.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-visit-changes], [data-visit-outcome]');
+            if (!b || !_mr || !_mr.visit) return;
+            if (b.dataset.visitChanges) _mr.visit.changes = b.dataset.visitChanges;
+            else _mr.visit.outcome = b.dataset.visitOutcome;
+            renderMergeVisit();
+            renderMergeCounts();
+            scheduleMergeDelta();
+        });
+        mrEl('mergeVisitNote').addEventListener('input', (e) => { if (_mr && _mr.visit) _mr.visit.note = e.target.value; });
+    }
     mrEl('mergeAllMine').addEventListener('click', () => mergeUseAll('mine'));
     mrEl('mergeAllTheirs').addEventListener('click', () => mergeUseAll('theirs'));
     mrEl('mergeKind').addEventListener('change', (e) => { if (!_mr) return; _mr.kind = e.target.value; renderMergeList(); });
@@ -669,5 +782,5 @@ async function openMergeReview(opts = {}) {
 window.TopoMergeUI = {
     openMergeReview, showMergeReview, closeMergeDialog, setMergeResponder, mergeDialogOpen, refreshMergeDelta, mergeReviewDelta,
     mergeUseAll, mergeFieldKey, mergeFieldText, mergeValueText, mergeKindText, MERGE_KIND_ONE, MERGE_KIND_MANY, MERGE_CHIPS,
-    MERGE_MATCHED_BY, MERGE_ROWS_MAX, mergeIncidentLabel, mergeVisitNotes, review: () => _mr
+    MERGE_MATCHED_BY, MERGE_ROWS_MAX, mergeIncidentLabel, mergeVisitNotes, renderMergeVisit, review: () => _mr
 };

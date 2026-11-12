@@ -124,6 +124,8 @@ function providerCardHtml(p) {
                 title="${escapeHtml(t('Select every device and cable this provider is responsible for and show them on the map'))}">${escapeHtml(t('Select what it covers'))}</button>
             <button type="button" class="link-btn" data-act="report" data-pv="${id}"
                 title="${escapeHtml(t('What this provider looks after here, the devices around it, the cables and their problems: print it, or save it as a PDF or HTML'))}">${escapeHtml(t('Report for this provider'))}</button>
+            ${window.TopoReports ? `<button type="button" class="link-btn" data-act="monitoring" data-pv="${id}"
+                title="${escapeHtml(t('Availability of their devices against their target, response times and outages over a period'))}">${escapeHtml(t('Monitoring report'))}</button>` : ''}
             <button type="button" class="link-btn" data-act="sharepart" data-pv="${id}"
                 title="${escapeHtml(t('A locked link that carries only what this provider looks after'))}">${escapeHtml(t('Share their part'))}</button>
             <button type="button" class="link-btn" data-act="edit" data-pv="${id}" aria-expanded="${open}">${escapeHtml(t(open ? 'Close' : 'Edit'))}</button>
@@ -142,6 +144,11 @@ function providerCardHtml(p) {
             ${field('email', 'Email')}
             ${field('account', 'Account / contract')}
             ${field('hours', 'Support hours / SLA', '', '')}
+            <div>
+                <label class="prop-lbl" for="pv-${id}-target">${escapeHtml(t('Availability target (%)'))}</label>
+                <input id="pv-${id}-target" type="text" class="input mono" data-field="target" data-pv="${id}" maxlength="7"${keyboardAttrs('dec')} placeholder="99.5" value="${escapeHtml(p.target != null ? String(p.target) : '')}">
+            </div>
+            <label class="span2 pv-tick"><input type="checkbox" data-field="targetHours" data-pv="${id}"${p.targetHours ? ' checked' : ''}> <span>${escapeHtml(t('Judge the target only during their support hours'))}</span></label>
             <div class="span2">
                 <label class="prop-lbl" for="pv-${id}-notes">${escapeHtml(t('Notes'))}</label>
                 <textarea id="pv-${id}-notes" class="input" rows="3" data-field="notes" data-pv="${id}" maxlength="${PROVIDER_NOTES_MAX}"${keyboardAttrs('prose')}>${escapeHtml(p.notes || '')}</textarea>
@@ -183,6 +190,10 @@ function onProviderField(e) {
     }
     if (e.type !== 'change') return;
     if (key === 'service') { const v = asProviderService(el.value); if (v) p.service = v; else delete p.service; }
+    // The availability target (v19, step 7j), when the field is left: one
+    // undo step; what does not read as a target clears it.
+    if (key === 'target') { const v = asTarget(el.value); if (v === undefined) delete p.target; else p.target = v; }
+    if (key === 'targetHours') { if (el.checked) p.targetHours = true; else delete p.targetHours; }
     save();
     renderCanvasOnly();
     refreshProviderViews(true);
@@ -202,6 +213,8 @@ async function onProviderAction(e) {
     if (act === 'covers') { selectProviderCovers(id); return; }
     // Their report (D98): a read-only network prints too.
     if (act === 'report') { if (typeof openProviderReport === 'function') await openProviderReport(id, { doc: serializeDoc(), audience: 'client' }); return; }
+    // Their monitoring report (js/reports.js, step 7j).
+    if (act === 'monitoring') { if (window.TopoReports) await TopoReports.openMonitoringReport({ scope: 'provider', id, period: 'month' }); return; }
     if (readOnlyRefuses()) return;
     // Their part as a locked link (js/share.js), any time.
     if (act === 'sharepart') { openShareDialog('doc', { providerIds: [id] }); return; }

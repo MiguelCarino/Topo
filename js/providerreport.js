@@ -226,7 +226,7 @@ function providerReportModel(doc, providerId, opts = {}) {
 // The sheet. Phone-first: no table, so nothing is wider than a phone; each
 // block (.dev-block) stays whole on paper and the preview counts the pages
 // by them (measureSheetPreview, js/sheetpreview.js).
-function providerReportHtml(model, image = null) {
+function providerReportHtml(model, image = null, monitoring = null) {
     const esc = escapeHtml;
     const m = model;
     const kv = (label, value, mono = false) => (value ? `<div><dt>${esc(label)}</dt><dd${mono ? ' class="mono"' : ''}>${esc(value)}</dd></div>` : '');
@@ -258,6 +258,9 @@ ${c.facing.length ? `<ul class="lines">${c.facing.map((f) => `<li>${f.port ? `<b
     const cables = m.cables.length ? section('cables', t('Cables'), `<div class="dev-block"><ul class="lines">${m.cables.map(cabLine).join('')}</ul></div>`) : '';
     const diagram = image && image.url ? section('diagram', t('Diagram'), `<div class="dev-block figure"><img src="${image.url}" alt="${esc(t('Diagram of their part of the network'))}"></div>`) : '';
     const others = m.problems.length ? section('problems', t('Open problems on their devices'), m.problems.map((x) => incBlock(x, false)).join('')) : '';
+    // Their monitoring section (js/reports.js, step 7j): availability against
+    // their target, response times and outages, since their last visit.
+    const mon = monitoring && window.TopoReports ? section('monitoring', t('Monitoring'), `<div class="dev-block">${TopoReports.providerSectionHtml(monitoring)}</div>`) : '';
     const visits = m.visits.length ? section('visits', t('Their past visits'), `<div class="dev-block"><ul class="lines">${m.visits.map((v) => `<li>${esc(v.line)}${v.notes ? `<br><span class="dim">${esc(v.notes)}</span>` : ''}</li>`).join('')}</ul></div>`) : '';
     const blurb = m.audience === 'provider'
         ? t('What you look after here, the devices around it and this problem. Keep it with your own records.')
@@ -299,7 +302,7 @@ blockquote { margin: 6px 0 0; padding: 4px 10px; border-left: 3px solid var(--ma
 }
 </style></head><body>
 <div class="toolbar"><span>${esc(blurb)}</span></div>
-<div class="sheet">${head}${problem}${devices}${context}${cables}${diagram}${others}${visits}</div></body></html>`;
+<div class="sheet">${head}${problem}${devices}${mon}${context}${cables}${diagram}${others}${visits}</div></body></html>`;
 }
 
 // The diagram of the part, drawn on the canvas (withDocRendered, js/report.js)
@@ -308,6 +311,14 @@ blockquote { margin: 6px 0 0; padding: 4px 10px; border-left: 3px solid var(--ma
 async function providerReportImage(partDoc) {
     try { return await withDocRendered(partDoc, () => captureReportDiagram(todayISO(), PROVIDER_REPORT_DIAGRAM_BASE)); }
     catch (e) { console.warn('Provider report: could not draw the diagram; continuing without it.', e); return null; }
+}
+
+// Their monitoring section's figures, or null (no check on their devices, or
+// no reports here); never a reason for the report itself to fail.
+async function providerMonitoringOf(doc, ids) {
+    if (!window.TopoReports) return null;
+    try { return await TopoReports.providerMonitoring(doc, ids); }
+    catch (e) { console.warn('Provider report: the monitoring section could not be made; continuing without it.', e); return null; }
 }
 
 // The report shown in the print preview. opts: { doc (default the open
@@ -320,13 +331,14 @@ async function openProviderReport(providerId, opts = {}) {
     const image = await providerReportImage(part.doc);
     const first = providerReportModel(doc, providerId, opts);
     if (!first) return null;
+    const monitoring = await providerMonitoringOf(doc, [providerId]);
     const kind = providerSheetKind(first.name);
     let model = first;
     const out = openSheetPreview({ kind, meta: first.meta, build: () => {
         model = providerReportModel(doc, providerId, opts) || model;
-        return providerReportHtml(model, image);
+        return providerReportHtml(model, image, monitoring);
     } });
-    return Object.assign({ model, image }, out);
+    return Object.assign({ model, image, monitoring }, out);
 }
 
 // The report as a file, without the preview: what a problem's email carries
@@ -343,7 +355,8 @@ async function providerReportFile(providerIds, opts = {}) {
     const image = await providerReportImage(part.doc);
     const model = providerReportModel(doc, ids, { incidentId: opts.incidentId || null, audience: opts.audience || 'client' });
     if (!model) return null;
-    const html = providerReportHtml(model, image);
+    const monitoring = await providerMonitoringOf(doc, ids);
+    const html = providerReportHtml(model, image, monitoring);
     let format = opts.format === 'html' || opts.format === 'pdf' ? opts.format : reportFormat();
     let blob = null;
     if (format === 'pdf') {

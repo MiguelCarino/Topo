@@ -13,12 +13,44 @@ publish = false
 tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
-tauri = { version = "2.12", features = [] }
+# tray-icon: the tray's icon while this PC monitors (D131, step 7f).
+tauri = { version = "2.12", features = ["tray-icon"] }
 tauri-plugin-opener = "2.7"
 # Already in Cargo.lock through tauri (no new crate): the built-in server's
 # settings file and command arguments (src/server.rs).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# "Connect to a Topo server" (src/client.rs, docs/SCOPE.md D144, D193): the
+# server's API over http(s) with rustls (ring), the certificate pinned by
+# its SHA-256. ureq 2 (MIT/Apache-2.0) brings rustls (Apache-2.0/ISC/MIT),
+# ring (Apache-2.0/ISC), webpki-roots (CDLA-Permissive-2.0, the public
+# authorities) and base64 (MIT/Apache-2.0); sha2 and url were already in
+# Cargo.lock through tauri. No gzip, cookies or proxy features.
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "0.26"
+sha2 = "0.10"
+url = "2"
+base64 = "0.22"
+# "Monitor from this PC" (src/checks.rs, src/stats.rs; D161, D167, D227):
+# ring was already in Cargo.lock through rustls (the checks' random ids);
+# rusqlite 0.40 (MIT) with SQLite bundled (public domain, compiled in) keeps
+# the samples and the hourly figures.
+ring = "0.17"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+# Monitors through the server (src/servercrypto.rs, docs/SCOPE.md D136,
+# step 7h): js/servercrypto.js's wraps, signatures and records in Rust.
+# p256 0.13 (MIT/Apache-2.0, RustCrypto) for ECDH and ECDSA on P-256 (ring
+# cannot keep a static ECDH key); AES-256-GCM, HKDF-SHA-256 and the random
+# bytes come from ring, already here, so aes-gcm and hkdf are not added.
+p256 = { version = "0.13", default-features = false, features = ["ecdh", "ecdsa", "pkcs8", "std"] }
+
+# "Add this computer" (src/thiscomputer.rs, D166, D204): getifaddrs and
+# gethostname on Linux and macOS. libc (MIT/Apache-2.0) was already in
+# Cargo.lock through tauri, so no crate is added; Windows declares
+# GetAdaptersAddresses itself.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [profile.release]
 strip = true

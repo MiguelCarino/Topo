@@ -48,12 +48,14 @@ window.addEventListener('load', () => {
     return { id: link.id || nextId('l'), source: link.source, target: link.target, attachment: link.attachment, medium: link.medium, sourceIface: link.sourceIface || null, targetIface: link.targetIface || null };
   }
 
-  // Date.now and Math.random feed the ids minted for legacy `ips` interfaces
-  // and id-less nodes; frozen, so both pipelines mint the same ones.
+  // Date.now, Math.random and crypto.getRandomValues (nextId's random part,
+  // D178) feed the ids minted for legacy `ips` interfaces and id-less nodes;
+  // frozen, so both pipelines mint the same ones. The stand-in is an own
+  // property of crypto; deleting it brings back the prototype's.
   const frozen = (fn) => {
     const now = Date.now, rnd = Math.random;
-    Date.now = () => 1700000000000; Math.random = () => 0.5;
-    try { return fn(); } finally { Date.now = now; Math.random = rnd; }
+    Date.now = () => 1700000000000; Math.random = () => 0.5; crypto.getRandomValues = (a) => a.fill(0);
+    try { return fn(); } finally { Date.now = now; Math.random = rnd; delete crypto.getRandomValues; }
   };
   const pipe = (doc, norm, ser, normL, serL) => JSON.stringify({
     nodes: cloneData(doc.nodes || []).map(norm).map(ser),

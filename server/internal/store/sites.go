@@ -177,10 +177,18 @@ func GrantMember(ctx context.Context, q Q, site, user string, now int64) error {
 	return err
 }
 
-// SetMemberRole changes a member's role.
+// SetMemberRole changes a member's role. A member who is no longer a
+// provider has no visit copies any more (D191): an owner cannot review a
+// copy whose author is not a provider, and it would hold its base from
+// pruning for good.
 func SetMemberRole(ctx context.Context, q Q, site, user, role string) error {
-	_, err := q.ExecContext(ctx, "UPDATE members SET role = ? WHERE site_id = ? AND user_id = ?", role, site, user)
-	return err
+	if _, err := q.ExecContext(ctx, "UPDATE members SET role = ? WHERE site_id = ? AND user_id = ?", role, site, user); err != nil {
+		return err
+	}
+	if role == "provider" {
+		return nil
+	}
+	return DropUserVisits(ctx, q, site, user)
 }
 
 // SetMemberMuted sets the per-site notification mute.
@@ -189,9 +197,13 @@ func SetMemberMuted(ctx context.Context, q Q, site, user string, muted bool) err
 	return err
 }
 
-// DeleteMember removes a membership and every wrap the person had.
+// DeleteMember removes a membership, every wrap the person had and their
+// visit copies (D191).
 func DeleteMember(ctx context.Context, q Q, site, user string) error {
 	if _, err := q.ExecContext(ctx, "DELETE FROM site_wraps WHERE site_id = ? AND user_id = ?", site, user); err != nil {
+		return err
+	}
+	if err := DropUserVisits(ctx, q, site, user); err != nil {
 		return err
 	}
 	_, err := q.ExecContext(ctx, "DELETE FROM members WHERE site_id = ? AND user_id = ?", site, user)

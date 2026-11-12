@@ -120,7 +120,9 @@ window.addEventListener('load', async () => {
   const fragOf = (url) => url.slice(url.indexOf('#') + 1);
   const unseal = async (url) => (await unsealFragment(fragOf(url), PASS)).json;
   const incOf = (id) => (state.incidents || []).find((x) => x.id === id) || null;
-  const lastLog = (id) => { const log = (libraryEntry(id) || { doc: {} }).doc.log || []; return log[log.length - 1] || null; };
+  // The newest merge entry (a visit's decision, v19, follows it in the same undo step).
+  const lastLog = (id) => { const log = ((libraryEntry(id) || { doc: {} }).doc.log || []).filter((e) => e.kind === 'merge'); return log[log.length - 1] || null; };
+  const newestLog = (id) => { const log = (libraryEntry(id) || { doc: {} }).doc.log || []; return log[log.length - 1] || null; };
   // A provider: the link opened in a fresh state, provider mode, the work,
   // the visit, the copy back. -> { entry, url }.
   let clientRevs = null;   // the client's revisions while a provider works on another device
@@ -252,7 +254,7 @@ window.addEventListener('load', async () => {
 
     // ---- 4. The client merges what came back ----
     const m1 = await clientMerges(clientLib, A1.url);
-    ok('4.1 the visited banner offers the merge', /^⚠ Juan Pérez recorded a visit on .+: Fixed\.$/.test(m1.banner) && m1.go === 'Merge into my network', m1.banner);
+    ok('4.1 the visited banner offers the review', /^⚠ Juan Pérez recorded a visit on .+: Fixed\.$/.test(m1.banner) && m1.go === 'Review the visit', m1.banner);
     ok('4.2 three-way, from the revision the provider received', m1.ctx.via === 'rev' && m1.ctx.baseRev === clientRev && !!m1.review && m1.review.mode === 'three-way', `${m1.ctx.via} ${m1.review && m1.review.mode}`);
     const incRow = m1.review && m1.review.rows.find((r) => r.kind === 'Problem report');
     ok('4.3 the review: the report in plain words, where it stands now', !!incRow && incRow.label === 'No internet at Reception PC. Now: Visited', show(m1.review && m1.review.rows.map((r) => r.label)));
@@ -260,7 +262,8 @@ window.addEventListener('load', async () => {
     ok('4.5 merged into K: the rename and the switch', state.libraryId === K && isKept() && getNode('rt').name === 'Core router' && !!getNode('sw2'));
     ok('4.6 the report visited, its visit listed', incOf(incId).status === 'visited' && show(incOf(incId).visits) === show([A1.entry.id]), show(incOf(incId)));
     const kinds = state.log.map((e) => (e.kind === 'incident' ? e.event : e.kind));
-    ok('4.7 the log: opened, sent, visit, merge', ['opened', 'sent', 'visit', 'merge'].every((k) => kinds.includes(k)) && kinds.indexOf('visit') < kinds.lastIndexOf('merge') && lastLog(K).kind === 'merge', show(kinds));
+    ok('4.7 the log: opened, sent, visit, merge, then the decision (D153)', ['opened', 'sent', 'visit', 'merge', 'decision'].every((k) => kinds.includes(k)) && kinds.indexOf('visit') < kinds.lastIndexOf('merge')
+       && newestLog(K).kind === 'decision' && newestLog(K).result === 'approved' && (newestLog(K).visits || []).includes(A1.entry.id), show(kinds));
     ok('4.8 chained end to end', (await TopoMerge.verifyLog(state.log)) === -1);
     ok('4.9 the merge log says three-way', lastLog(K).mode === 'three-way');
     renderCanvasOnly();
@@ -327,7 +330,7 @@ window.addEventListener('load', async () => {
     ok('6.3 the first merged three-way from the revision sent', mA.ctx.via === 'rev' && mA.ctx.baseRev === rev2 && mA.review && mA.review.mode === 'three-way');
     ok('6.4 its edits in', getNode('sw').name === 'Switch A' && getNode('pc').notes === 'A note' && show(incOf(inc2).visits) === show([VA.entry.id]));
     const mB = await clientMerges(CarinoLibrary.loadLibrary(), VB.url);
-    ok('6.5 the second visit, on a report already visited, still gets the banner and its merge', /^⚠ Beto Fibra recorded a visit on .+: Fixed\.$/.test(mB.banner) && mB.go === 'Merge into my network', mB.banner);
+    ok('6.5 the second visit, on a report already visited, still gets the banner and its review', /^⚠ Beto Fibra recorded a visit on .+: Fixed\.$/.test(mB.banner) && mB.go === 'Review the visit', mB.banner);
     ok('6.6 the second merged three-way too', mB.ctx.via === 'rev' && mB.ctx.baseRev === rev2 && mB.review && mB.review.mode === 'three-way', `${mB.ctx.via} ${mB.ctx.baseRev} ${rev2}`);
     const pcItem = mB.review && mB.review.req.plan.items.find((it) => it.kind === 'nodes' && it.mineId === 'pc');
     ok('6.7 the field both changed asks', !!pcItem && pcItem.fields.some((f) => f.field === 'notes' && f.conflict && f.take === 'mine'), show(pcItem && pcItem.fields));

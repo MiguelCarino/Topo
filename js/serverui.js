@@ -25,7 +25,7 @@ let _responder = null;
 function setServerResponder(fn) { const prev = _responder; _responder = typeof fn === 'function' ? fn : null; return prev; }
 
 // ---- Words ----
-const ROLE = { owner: 'Owner', provider: 'Provider', viewer: 'Viewer' };
+const ROLE = { owner: 'Owner', provider: 'Provider', viewer: 'Viewer', monitor: 'Monitor' };
 const roleText = (r) => t(ROLE[r] || r);
 const ERR = {
     'bad-email': 'That does not look like an email address.',
@@ -54,7 +54,11 @@ const ERR = {
     'stale-epoch': 'Someone else changed this first. Try again.',
     'catch-up': 'Could not catch up with the server. Try again.',
     'waiting': 'Waiting for the owner to give you access.',
-    'storage': 'Could not save — browser storage is unavailable (private mode or full).'
+    'storage': 'Could not save — browser storage is unavailable (private mode or full).',
+    'owners-only': 'Only owners save versions of this site. Your visits go to the owner for review.',
+    'visits-full': 'Too many visits are waiting for the owner on this site. Ask them to review some first.',
+    'needs-merge': 'Review the merge with the server first, then record the visit again.',
+    'not-provider': 'Whoever recorded this visit is no longer a provider on this site, so it cannot be reviewed.'
 };
 function errText(e) {
     const code = (e && (e.code || e.message)) || '';
@@ -170,7 +174,10 @@ function openSignIn(opts = {}) {
         code.value = st.code;
         const again = btn(t('Send a new code'), send);
         again.disabled = Date.now() - st.sentAt < 30000 || st.busy;
-        return [para(t('If {email} can sign in here, a code is on its way. Type it here, or open the link in the email in this browser.', { email: st.email })),
+        // In the desktop app's window (js/desktopclient.js) the email's link
+        // would sign in a browser, not this window (D196): only the code.
+        return [para(T()._hooks.desktop ? t('If {email} can sign in here, a code is on its way. Type the code from the email here.', { email: st.email })
+            : t('If {email} can sign in here, a code is on its way. Type it here, or open the link in the email in this browser.', { email: st.email })),
             field(t('Code from the email'), code), errBox(st.err),
             h('div', { class: 'srv-acts' }, btn(st.busy ? t('Signing in…') : t('Sign in'), verify, 'btn primary'), again,
                 btn(t('Use another email'), () => { st.step = 'email'; st.err = ''; rerender(); }))];
@@ -447,6 +454,8 @@ async function openMembers(siteId) {
         try {
             st.d = await Y().siteDetail(siteId, true);
             st.name = await Y().siteName(siteId);
+            // The site's monitors: their names and last reports (step 7h).
+            if (window.TopoMonitors && st.d.site.status === 'granted') { try { st.mons = await TopoMonitors.loadMonitors(siteId); } catch (e) { st.mons = null; } }
             for (const m of st.d.members || []) {
                 if (m.encPub && m.sigPub) {
                     st.codes[m.user] = await C.safetyCode(m.encPub, m.sigPub);
@@ -471,6 +480,22 @@ async function openMembers(siteId) {
         const out = [h('p', { class: 'restore-name', text: st.name || t('A shared network') })];
         const list = h('div', { class: 'srv-list' });
         (d.members || []).forEach((m) => {
+            // A site monitor (D147, D149): "Monitor: PC name (turned on by X
+            // on date)", when it last reported, and Revoke for an owner.
+            if (m.role === 'monitor') {
+                const mt = window.TopoMonitors ? TopoMonitors.memberMonitorText(siteId, m.user) : null;
+                const row = h('div', { class: 'srv-row' + (mt && mt.stale ? ' srv-danger' : '') },
+                    h('span', { class: 'srv-row-text' }, h('span', {}, h('b', { text: mt ? mt.title : t('Monitor') })),
+                        h('span', { class: 'srv-sub', text: mt ? mt.last : t('Revoked or not set up') })));
+                const acts = h('span', { class: 'srv-row-acts' });
+                if (owner) acts.append(btn(t('Revoke'), async () => {
+                    if (!(await askConfirm(t('Revoke this monitor? It stops reporting, and the network key changes for everyone left.'), { ok: t('Revoke'), danger: true }))) return;
+                    act(() => Y().removeMember(siteId, m.user))();
+                }));
+                row.append(acts);
+                list.append(row);
+                return;
+            }
             const k = st.keys[m.user] || { state: 'none' };
             const lines = [h('b', { text: m.email }), ' · ', roleText(m.role)];
             const sub = [];
@@ -522,6 +547,19 @@ async function openMembers(siteId) {
                 h('label', { class: 'srv-tick' }, show, h('span', { text: t('Show the name in emails') })),
                 para(t('The server can then read the name. Everything else stays encrypted.'), 'srv-p srv-dim'),
                 h('div', { class: 'srv-acts' }, btn(t('Lock out anyone who left from new changes'), act(() => Y().rotate(siteId))))));
+            // Keep statistics, for the whole site (D162): the server and every
+            // monitor keep the hourly figures this long; Off keeps none.
+            if (window.TopoMonitors && st.mons) {
+                const days = st.mons.statsDays;
+                const keep = h('select', { class: 'select', 'aria-label': t('Keep statistics'), onchange: (e) => act(async () => {
+                    const r = await TopoMonitors.setStatsDays(siteId, Number(e.target.value));
+                    if (r) showToast(t('Saved.'), 'ok');
+                })() }, [0, 30, 90, 180, 360, 720, 3650].map((v) => h('option', { value: String(v), text: v === 0 ? t('Off: keep nothing') : v === 3650 ? t('10 years') : v === 360 ? t('360 days (default)') : t('{n} days', { n: v }) })));
+                keep.value = String(days);
+                out.push(h('fieldset', { class: 'srv-group' }, h('legend', { text: t('Statistics of the site\'s monitors') }),
+                    field(t('Keep statistics'), keep),
+                    para(t('Hourly figures of every monitor, kept on the server and on each monitor PC for this long. Off keeps none; the states and the issues still show.'), 'srv-p srv-dim')));
+            }
             // Backups of this network, while the server makes them (D106, D107).
             if (d.backups && d.backups.on) out.push(h('fieldset', { class: 'srv-group' }, h('legend', { text: t('Backups') }),
                 para(d.backups.readable ? t('The server backs this network up, encrypted, and keeps a readable copy too.') : t('The server backs this network up, encrypted.'), 'srv-p srv-dim'),
@@ -693,10 +731,15 @@ function saveText(text, name) { saveBlob(new Blob([text], { type: 'application/j
 // Where the provider sends the browser back: on the server machine itself
 // http://localhost (Google and Microsoft take no LAN address), else the
 // public address (server/internal/api/backups_oauth.go oauthRedirect).
+// The server's address, not the page's: in the desktop app's window the
+// page is the app's own (tauri://localhost) and the server is
+// TopoServer._hooks.origin (js/desktopclient.js).
 function oauthRedirectHere(d) {
-    const host = location.hostname.replace(/^\[|\]$/g, '');
-    if (host === 'localhost' || /^127\./.test(host) || host === '::1') return location.protocol + '//localhost' + (location.port ? ':' + location.port : '') + '/api/backups/oauth/callback';
-    return (d && d.oauthRedirect) || location.origin + '/api/backups/oauth/callback';
+    let u;
+    try { u = new URL(T()._hooks.origin || location.origin); } catch (e) { u = null; }
+    const host = u ? u.hostname.replace(/^\[|\]$/g, '') : '';
+    if (u && /^https?:$/.test(u.protocol) && (host === 'localhost' || /^127\./.test(host) || host === '::1')) return u.protocol + '//localhost' + (u.port ? ':' + u.port : '') + '/api/backups/oauth/callback';
+    return (d && d.oauthRedirect) || (u ? u.origin : location.origin) + '/api/backups/oauth/callback';
 }
 function navigateTo(url) {
     const nav = T()._hooks.navigate;
@@ -814,11 +857,18 @@ async function openBackups(arrived) {
         if (BACKUP_OAUTH[st.kind]) {
             const linked = st.kind === st.savedKind && d.config.connected;
             const box = h('fieldset', { class: 'srv-group', 'data-k': 'connect' }, h('legend', { text: t('Connection') }));
-            box.append(para(linked ? (d.config.account ? t('Connected as {account}.', { account: d.config.account }) : t('Connected.'))
+            // The desktop app's window cannot finish it: the provider brings
+            // a browser back, signed in there or not, and the server ties
+            // the sign-in to the session that started it (D196, D200).
+            const inApp = !!T()._hooks.desktop;
+            if (linked || !inApp) box.append(para(linked ? (d.config.account ? t('Connected as {account}.', { account: d.config.account }) : t('Connected.'))
                 : t('Not connected yet. Connect opens the sign-in page of {provider}; after you allow Topo, it brings you back here.', { provider: BACKUP_OAUTH[st.kind] }), 'srv-p'));
             box.append(para(t('Topo asks only for its own folder: it cannot see your other files.'), 'srv-p srv-dim'));
             box.append(para(t('Redirect address to register in the app: {url}', { url: oauthRedirectHere(d) }), 'srv-p srv-dim'));
-            box.append(h('div', { class: 'srv-acts' }, btn(linked ? t('Connect again') : t('Connect'), connect, linked ? 'btn' : 'btn primary')));
+            if (inApp) {
+                box.append(para(t('In this window, Connect cannot finish: {provider} sends you back to a browser, not to this window. Open the server in a browser, sign in as the owner, and press Connect in Backups there.', { provider: BACKUP_OAUTH[st.kind] })));
+                box.append(h('div', { class: 'srv-acts' }, btn(t('Open the server in a browser'), () => navigateTo(T()._hooks.origin + '/'), 'btn')));
+            } else box.append(h('div', { class: 'srv-acts' }, btn(linked ? t('Connect again') : t('Connect'), connect, linked ? 'btn' : 'btn primary')));
             out.push(box);
         }
         if (st.kind) {
@@ -947,12 +997,13 @@ async function openSiteBackups(siteId) {
 // ---- Cards: the line and the tools ----
 const STATE_TEXT = {
     synced: 'Synced', pushing: 'Saving to the server…', pulling: 'Checking the server…', pending: 'Changes not saved to the server yet',
+    proposed: 'Your changes go to the owner when you record a visit', 'visit-waiting': 'Your visit is waiting for the owner\'s review',
     offline: 'Offline: {n} local changes', 'needs-merge': 'Needs merge: tap to review', waiting: 'Waiting for the owner to give you access',
     locked: 'Open this account on this browser first', 'history-mismatch': 'The server sent an older or different history',
     removed: 'You were removed from this site', 'update-needed': 'Saved by a newer Topo. Reload or update to open it.', error: 'Not saved to the server',
     'signed-out': 'Sign in to keep it in step with the server'
 };
-const STATE_CLS = { synced: 'ok', pushing: 'busy', pulling: 'busy', pending: 'busy', offline: 'warn', 'needs-merge': 'warn', waiting: 'warn', locked: 'warn',
+const STATE_CLS = { synced: 'ok', pushing: 'busy', pulling: 'busy', pending: 'busy', proposed: 'busy', 'visit-waiting': 'busy', offline: 'warn', 'needs-merge': 'warn', waiting: 'warn', locked: 'warn',
     'history-mismatch': 'bad', removed: 'bad', 'update-needed': 'warn', error: 'bad', 'signed-out': 'warn' };
 function syncText(s) {
     if (!s) return '';
@@ -1004,7 +1055,7 @@ window.serverDocBar = (bar, status) => {
     }
     b.hidden = false;
     b.className = 'docbar-sync ' + (STATE_CLS[s.state] || '');
-    const short = { synced: 'Synced', pushing: 'Saving…', pulling: 'Saving…', pending: 'Saving…', offline: 'Offline · {n}', 'needs-merge': 'Merge', error: 'Not saved' }[s.state] || 'Server';
+    const short = { synced: 'Synced', pushing: 'Saving…', pulling: 'Saving…', pending: 'Saving…', proposed: 'Proposed', 'visit-waiting': 'With the owner', offline: 'Offline · {n}', 'needs-merge': 'Merge', error: 'Not saved' }[s.state] || 'Server';
     b.textContent = '☁ ' + t(short, { n: s.changes || 0 });
     b.title = syncText(s);
     b.setAttribute('aria-label', syncText(s));
@@ -1151,6 +1202,10 @@ window.serverMailRoute = (cardId) => (on() && Y() ? Y().provider.mailRoute(cardI
 window.serverReportMail = (siteId, body) => (on() && Y() ? Y().provider.reportMail(siteId, body) : Promise.reject(new Error('no server')));
 window.serverReturnRoute = (cardId) => (on() && Y() ? Y().provider.returnRoute(cardId) : false);
 window.serverPushNow = (cardId) => { if (on() && Y() && cardId) Y().syncNow(cardId); };
+// A provider member on this card's site: its visits go to the owner as visit
+// copies (docs/SCOPE.md D154).
+window.serverIsProvider = (cardId) => { const r = on() && Y() && cardId ? Y().rec(cardId) : null; return !!r && r.role === 'provider'; };
+window.serverUploadVisit = (cardId, info) => Y().uploadVisit(cardId, info);
 
 // Wired once the client opens (js/server.js), never on a static page.
 let _wired = false;

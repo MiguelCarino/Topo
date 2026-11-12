@@ -62,12 +62,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
     try { fn(); } finally { state.links = real; }
     return n;
   };
-  // The same new ids on every run: nextId is the clock plus a counter.
+  // The same new ids on every run: nextId is the clock, a counter and four
+  // random characters (D178), all three held still.
   const fixedIds = (fn) => {
     const realNow = Date.now, s0 = idSeq;
     Date.now = () => 1767225600000;
+    crypto.getRandomValues = (a) => a.fill(0);
     idSeq = 50000;
-    try { return fn(); } finally { Date.now = realNow; idSeq = Math.max(s0, idSeq); }
+    try { return fn(); } finally { Date.now = realNow; delete crypto.getRandomValues; idSeq = Math.max(s0, idSeq); }
   };
   // fn with every lookup pass a plain call: the answers without the indexes.
   const realPass = window.withLookupPass;

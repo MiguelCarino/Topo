@@ -86,6 +86,10 @@ type Config struct {
 	BackupFoldersDefaulted bool          // the default above (serve creates it)
 	BackupDebounce         time.Duration // TOPO_BACKUP_DEBOUNCE, default 2m (0 = at once)
 	BackupTick             time.Duration // TOPO_BACKUP_TICK, default 30s
+	// MonitorSweep is TOPO_MONITOR_SWEEP: how often the server looks for
+	// site monitors that stopped reporting (default 30s, 100ms to 10m;
+	// short only for the end-to-end test).
+	MonitorSweep time.Duration
 	// ServerKeyPath is TOPO_SERVER_KEY: server.key somewhere else. Set, the
 	// file must exist (it is never created there, amendment 21).
 	ServerKeyPath string
@@ -171,6 +175,7 @@ var known = []key{
 	{"TOPO_BACKUP_FOLDERS", false},
 	{"TOPO_BACKUP_DEBOUNCE", false},
 	{"TOPO_BACKUP_TICK", false},
+	{"TOPO_MONITOR_SWEEP", false},
 	{"TOPO_SERVER_KEY", false},
 }
 
@@ -740,6 +745,10 @@ func build(v map[string]string, o Options) (*Config, []string, error) {
 	c.BackupTick = durKey(v, "TOPO_BACKUP_TICK", 30*time.Second, fail)
 	if c.BackupTick < time.Second || c.BackupTick > time.Hour {
 		fail("TOPO_BACKUP_TICK %s: want 1s to 1h", c.BackupTick)
+	}
+	c.MonitorSweep = durKey(v, "TOPO_MONITOR_SWEEP", 30*time.Second, fail)
+	if c.MonitorSweep < 100*time.Millisecond || c.MonitorSweep > 10*time.Minute {
+		fail("TOPO_MONITOR_SWEEP %s: want 100ms to 10m", c.MonitorSweep)
 	}
 	if p := v["TOPO_SERVER_KEY"]; p != "" {
 		if !filepath.IsAbs(p) {

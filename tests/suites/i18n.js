@@ -247,7 +247,7 @@ window.addEventListener('load', () => { setTimeout(() => {
   const grpKeys = new Map();
   ['js/groups.js', 'js/groupmap.js', 'js/rackview.js', 'js/ui.js', 'js/add.js', 'js/diagnostics.js', 'js/app.js',
    'js/report.js', 'js/csv.js', 'js/library.js', 'js/share.js', 'js/table.js', 'js/providers.js', 'js/locate.js', 'js/searches.js', 'js/restore.js',
-   'js/mergeapply.js', 'js/mergeui.js', 'js/mergedoors.js', 'js/routing.js', 'js/incidents.js', 'js/providermode.js', 'js/providerreport.js', 'js/desktopserver.js', 'js/importui.js', 'js/netboxexport.js'].forEach((file) => {
+   'js/mergeapply.js', 'js/mergeui.js', 'js/mergedoors.js', 'js/routing.js', 'js/incidents.js', 'js/providermode.js', 'js/providerreport.js', 'js/desktopserver.js', 'js/importui.js', 'js/netboxexport.js', 'js/thiscomputer.js', 'js/monitors.js', 'js/visitmonitor.js', 'js/reports.js', 'js/checks.js', 'js/welcome.js'].forEach((file) => {
     const req = new XMLHttpRequest(); req.open('GET', file, false); req.send();
     firstArgKeys(req.responseText).forEach((k) => grpKeys.set(k.replace(/\\n/g, '\n').replace(/\\(['"\\])/g, '$1'), file));
   });
@@ -295,6 +295,60 @@ window.addEventListener('load', () => { setTimeout(() => {
     setLocale('en'); applyLocale();
     select(null, null);
     if (keep) replaceDocument(keep, { origin: 'file', docId: 'i18n-back' });
+  }
+
+  // A key written twice in one locale: the object literal keeps the later
+  // value and drops the first without a word, so one English key used in two
+  // grammatical places ("The whole network" in the share dialog's accusative
+  // and as the report's scope) silently changes the other place's text. The
+  // source is read as text, because the loaded MESSAGES has already lost the
+  // first copy. KNOWN: the 13 conflicting copies from before step 7, left as
+  // they were (D342); any other key repeated with a different value fails.
+  {
+    const req = new XMLHttpRequest(); req.open('GET', 'js/i18n.js', false); req.send();
+    const text = req.responseText;
+    const toks = [];
+    let i = text.indexOf('{', text.indexOf('const MESSAGES = {')), depth = 0;
+    for (; i < text.length; i++) {
+      const c = text[i];
+      if (/\s/.test(c)) continue;
+      if (c === '/' && text[i + 1] === '/') { i = text.indexOf('\n', i); continue; }
+      if (c === '/' && text[i + 1] === '*') { i = text.indexOf('*/', i) + 1; continue; }
+      if (c === '"' || c === "'" || c === '`') {
+        let j = i + 1, s = '';
+        while (text[j] !== c) { if (text[j] === '\\') { s += text[j + 1]; j += 2; } else s += text[j++]; }
+        toks.push({ s }); i = j; continue;
+      }
+      if (c === '{') depth++;
+      if (c === '}' && --depth === 0) break;
+      if (/[\w$]/.test(c)) { let j = i; while (/[\w$-]/.test(text[j + 1])) j++; toks.push({ w: text.slice(i, j + 1) }); i = j; continue; }
+      toks.push({ p: c });
+    }
+    const conflicts = [];
+    let d = 0, loc = null, seen = null, entries = 0;
+    for (let k = 0; k < toks.length; k++) {
+      const tk = toks[k];
+      if (tk.p === '{') { if (++d === 2) { loc = toks[k - 2].s || toks[k - 2].w; seen = new Map(); } continue; }
+      if (tk.p === '}') { d--; continue; }
+      if (d === 2 && tk.s !== undefined && toks[k + 1] && toks[k + 1].p === ':') {
+        let v = '', m = k + 2;
+        while (m < toks.length && toks[m].p !== ',' && toks[m].p !== '}') { if (toks[m].s !== undefined) v += toks[m].s; m++; }
+        entries++;
+        if (seen.has(tk.s) && seen.get(tk.s) !== v) conflicts.push(`${loc}:${tk.s}`);
+        else seen.set(tk.s, v);
+        k = m - 1;
+      }
+    }
+    const KNOWN = new Set(['es:Change', 'es:Past the {total}-port faceplate', 'es:Back up now',
+      'pt-BR:Change', 'pt-BR:Past the {total}-port faceplate',
+      'ru:Change', 'ru:Past the {total}-port faceplate', 'ru:Status', 'ru:Where',
+      'ja:Type', 'ja:Past the {total}-port faceplate', 'ja:Status', 'ja:Where']);
+    const fresh = conflicts.filter((c) => !KNOWN.has(c));
+    ok('no key is written twice in one locale with two different translations', entries > 4 * 1000 && fresh.length === 0,
+       `${entries} entries read; ${fresh.slice(0, 4).join(' | ')}`);
+    ok('the share dialog\'s "The whole network" and the report\'s "Whole network" are two keys',
+       MESSAGES.ru['The whole network'] === 'Всю сеть' && MESSAGES.ru['Whole network'] === 'Вся сеть'
+       && locales.every((l) => MESSAGES[l]['Whole network']), `${MESSAGES.ru['The whole network']} / ${MESSAGES.ru['Whole network']}`);
   }
 
   // Switching back has to actually switch back, or one language test poisons

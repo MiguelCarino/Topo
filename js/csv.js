@@ -950,7 +950,14 @@ const CSV_PARSERS = {
         const net = state.networks.find((n) => n.id === v || (cidr && n.cidr === cidr));
         return net ? { value: net.id } : { error: true };
     },
-    'wf:hidden': (text) => tvBoolParse(text)
+    'wf:hidden': (text) => tvBoolParse(text),
+    // A provider's availability target (v19, step 7j): a percentage above 0
+    // and below 100 ("99,5" and "99.5 %" read); anything else is a conflict
+    // on its row, never dropped unsaid. A blank cell leaves it as it is.
+    'pv:target': (text) => { const v = asTarget(String(text)); return v === undefined ? { error: true } : { value: v }; },
+    // A provider's target counted only in their support hours (v19, step 7j):
+    // yes sets it, no clears it.
+    'pv:targetHours': (text) => tvBoolParse(text)
 };
 // A radio's parts (RADIO_CSV_PARTS, js/model.js), each read as the record
 // holds it: the standard's key, the bands as "2.4 5", a band's numbers, and
@@ -2963,8 +2970,9 @@ function csvPlanProviders(rows, plan) {
     const results = [];
     const claimed = new Set();
     const label = (key) => csvTargetLabel(csvTarget(`pv:${key}`));
-    const show = (key, v) => (key === 'service' ? providerServiceLabel(v) : (v === undefined || v === null ? '' : String(v)));
-    const same = (a, b) => String(a == null ? '' : a).trim() === String(b == null ? '' : b).trim();
+    const isFlag = (key) => { const x = PROVIDER_FIELDS.find((y) => y.key === key); return !!x && x.kind === 'flag'; };
+    const show = (key, v) => (key === 'service' ? providerServiceLabel(v) : isFlag(key) ? (v ? t('Yes') : (v === false ? t('No') : '')) : (v === undefined || v === null ? '' : String(v)));
+    const same = (a, b, key) => (key && isFlag(key) ? !!a === !!b : String(a == null ? '' : a).trim() === String(b == null ? '' : b).trim());
     let room = PROVIDER_MAX - (state.providers || []).length;
     rows.forEach(({ index, vals }) => {
         if (!Object.keys(vals).length) return;
@@ -2978,7 +2986,14 @@ function csvPlanProviders(rows, plan) {
             else values[key.slice(3)] = res.value;
         });
         const f = (k) => PROVIDER_FIELDS.find((x) => x.key === k);
-        Object.keys(values).forEach((k) => { if (k !== 'id' && f(k)) { const v = fieldRead(f(k))(values[k], values); if (v === undefined) delete values[k]; else values[k] = v; } });
+        // A flag the sheet says no to is a change that clears it (the record
+        // drops a false flag), not a blank cell.
+        Object.keys(values).forEach((k) => {
+            if (k === 'id' || !f(k)) return;
+            if (f(k).kind === 'flag' && values[k] === false) return;
+            const v = fieldRead(f(k))(values[k], values);
+            if (v === undefined) delete values[k]; else values[k] = v;
+        });
         out.name = values.name || values.id || '';
         if (errors.length) { conflict(errors.join(' ')); return; }
         let p = values.id ? providerById(values.id) : null;
@@ -2999,7 +3014,7 @@ function csvPlanProviders(rows, plan) {
             room--;
             claimed.add(`new:${values.name.toLowerCase()}`);
             const fieldsIn = {};
-            fields.forEach((k) => { fieldsIn[k] = values[k]; });
+            fields.forEach((k) => { if (values[k] !== false || !isFlag(k)) fieldsIn[k] = values[k]; });
             const rec = makeProvider(Object.assign({ id: values.id && !providerById(values.id) ? values.id : undefined }, fieldsIn));
             claimed.add(`id:${rec.id}`);
             plan.ops.push({ pv: { create: rec } });
@@ -3014,7 +3029,7 @@ function csvPlanProviders(rows, plan) {
         out.name = providerLabel(p);
         const set = {};
         fields.forEach((k) => {
-            if (same(p[k], values[k])) return;
+            if (same(p[k], values[k], k)) return;
             set[k] = values[k];
             out.changes.push({ field: label(k), before: show(k, p[k]), after: show(k, values[k]) });
         });

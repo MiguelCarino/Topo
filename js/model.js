@@ -109,11 +109,20 @@ const ifaceIsWireless = (iface) => !iface ? false
     : (iface.wireless !== undefined ? !!iface.wireless : WIRELESS_NAME_RE.test(iface.name || ''));
 
 // Date.now() alone collides when a node + link + iface are created in one tick.
+// The clock and the counter alone collide across PCs: the counter starts at 0
+// on every page load, so two PCs minting in the same millisecond make the same
+// id. Four random base-36 characters follow (docs/SCOPE.md D152.3, D178); ids
+// are opaque strings, so the format does not change.
 let idSeq = 0;
 let _idClock = null;    // set by withFixedIds: a fixed clock instead of Date.now()
-const nextId = (prefix) => `${prefix}_${(_idClock !== null ? _idClock : Date.now()).toString(36)}${(idSeq++).toString(36)}`;
+const ID_RANDOM_SPAN = 36 ** 4;
+const idRandom = () => (crypto.getRandomValues(new Uint32Array(1))[0] % ID_RANDOM_SPAN).toString(36).padStart(4, '0');
+const nextId = (prefix) => (_idClock !== null
+    ? `${prefix}_${_idClock.toString(36)}${(idSeq++).toString(36)}`
+    : `${prefix}_${Date.now().toString(36)}${(idSeq++).toString(36)}${idRandom()}`);
 // fn() with the ids it mints made the same way every time: a fixed clock and
-// a sequence from 0, the live sequence put back after. For comparing two
+// a sequence from 0, and no random part (the ids of before D178), the live
+// sequence put back after. For comparing two
 // documents through the serializer (canonicalDoc): a record with no id, or a
 // repeated one, gets an id there, and two passes over the same document must
 // give it the same one or the copy looks changed.
@@ -1545,6 +1554,116 @@ const IFACE_FIELDS = [
       write: (v, rec) => (rec && ifaceIsWireless(rec) ? normalizeRadio(v) : undefined) }
 ];
 
+// ---- Answer checks (document v19, docs/SCOPE.md D155-D156, D227-D231) ----
+// What a desktop app turned into a monitor asks a device, one question
+// each: "are you answering?" (js/checks.js, desktop/src-tauri/src/checks.rs).
+// A device holds a list of check blocks (node.checks, at most CHECKS_MAX):
+// one for the device itself (a ping), or one per service it documents (a
+// TCP port, a web page, a DNS server, a mail server, a DICOM node). Each:
+//   id        stable within the device, for its states and statistics
+//   proto     ping, tcp, http, https, dns, smtp, dicom, ntp, rtsp, sip,
+//             mllp (HL7, a connect only), ipp, imap or pop
+//   ip        which of the device's own addresses (absent: its first)
+//   port      1-65535 (absent: the protocol's own; a ping's TCP port when
+//             this PC may not ping, "TCP, not ping")
+//   path      http(s), rtsp: the page or stream asked for (absent: /);
+//             ipp: the printer's path (absent: /ipp/print)
+//   name      dns: the name asked for (required for a DNS check to run)
+//   starttls  smtp: true to read the certificate's end date
+//   tls       imap, pop: "starttls" (STARTTLS or STLS) or "implicit" (TLS
+//             from the start, 993 and 995), to read the certificate's end
+//             date (absent: neither)
+//   transport sip: "tcp" (absent: UDP)
+//   calledAe, callingAe  dicom: the AE titles (absent: ANY-SCP and TOPO)
+//   interval  seconds, 30 to 900 (absent: 60)
+//   slowMs    "slow above", milliseconds (absent: never slow)
+//   monitors  which monitors check it (7h; absent: every monitor of the
+//             site; a PC with no server checks every block)
+// And a device's availability target (node.target, a percentage below
+// 100, such as 99.5), which the reports compare against (7j).
+// No secrets: no check takes a password. Each check block is written in
+// this order, keys left out when absent, so a device with none serializes
+// as before.
+const CHECK_PROTOCOLS = ['ping', 'tcp', 'http', 'https', 'dns', 'smtp', 'dicom', 'ntp', 'rtsp', 'sip', 'mllp', 'ipp', 'imap', 'pop'];
+const CHECK_PORTS = { http: 80, https: 443, dns: 53, smtp: 25, dicom: 104, ntp: 123, rtsp: 554, sip: 5060, mllp: 2575, ipp: 631, imap: 143, pop: 110 };
+// TLS from the start: IMAPS and POP3S.
+const CHECK_TLS_PORTS = { imap: 993, pop: 995 };
+const CHECK_TLS_MODES = ['starttls', 'implicit'];
+const CHECK_INTERVAL_DEFAULT = 60;
+const CHECK_INTERVAL_MIN = 30;
+const CHECK_INTERVAL_MAX = 900;
+const CHECK_SLOW_MAX = 600000;
+const CHECKS_MAX = 8;
+const CHECK_ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
+const CHECK_AE_RE = /^[\x20-\x5b\x5d-\x7e]{1,16}$/;   // printable ASCII, no backslash
+const CHECK_NAME_RE = /^(?=.{1,253}$)([A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)(\.[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)*\.?$/;
+const asCheckPort = (v) => { const n = typeof v === 'string' && /^\d+$/.test(v.trim()) ? Number(v) : v; return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : undefined; };
+function asCheckInterval(v) {
+    const n = typeof v === 'string' && /^\d+$/.test(v.trim()) ? Number(v) : v;
+    if (!Number.isFinite(n)) return undefined;
+    const c = Math.min(CHECK_INTERVAL_MAX, Math.max(CHECK_INTERVAL_MIN, Math.round(n)));
+    return c === CHECK_INTERVAL_DEFAULT ? undefined : c;
+}
+const asCheckSlow = (v) => { const n = typeof v === 'string' && /^\d+$/.test(v.trim()) ? Number(v) : v; return Number.isInteger(n) && n >= 1 && n <= CHECK_SLOW_MAX ? n : undefined; };
+const asCheckAe = (v) => { const s = typeof v === 'string' ? v.trim() : ''; return CHECK_AE_RE.test(s) ? s : undefined; };
+function asCheckPath(v) {
+    const s = typeof v === 'string' ? v.trim() : '';
+    return s && s !== '/' && s.length <= 512 && s.startsWith('/') && !s.startsWith('//') && !/[\s\u0000-\u001f\u007f]/.test(s) ? s : undefined;
+}
+const asCheckName = (v) => { const s = typeof v === 'string' ? v.trim() : ''; return CHECK_NAME_RE.test(s) ? s.replace(/\.$/, '') : undefined; };
+const asCheckIp = (v) => { const s = typeof v === 'string' ? v.trim() : ''; return s && isIpText(s) ? s : undefined; };
+function asCheckMonitors(v) {
+    if (!Array.isArray(v)) return undefined;
+    const out = [...new Set(v.filter((x) => typeof x === 'string' && CHECK_ID_RE.test(x)))].slice(0, 8);
+    return out.length ? out : undefined;
+}
+// One check block, or null when it is not one (no protocol Topo asks).
+// `mint`: a block with no id gets one (reading); writing never mints.
+function asCheck(v, mint) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    const proto = typeof v.proto === 'string' ? v.proto.trim().toLowerCase() : '';
+    if (!CHECK_PROTOCOLS.includes(proto)) return null;
+    const id = typeof v.id === 'string' && CHECK_ID_RE.test(v.id) ? v.id : (mint ? nextId('ck') : null);
+    if (!id) return null;
+    const out = { id, proto, ip: asCheckIp(v.ip), port: asCheckPort(v.port) };
+    if (proto === 'http' || proto === 'https' || proto === 'rtsp' || proto === 'ipp') out.path = asCheckPath(v.path);
+    if (proto === 'dns') out.name = asCheckName(v.name);
+    if (proto === 'smtp' && v.starttls === true) out.starttls = true;
+    if ((proto === 'imap' || proto === 'pop') && CHECK_TLS_MODES.includes(v.tls)) out.tls = v.tls;
+    if (proto === 'sip' && v.transport === 'tcp') out.transport = 'tcp';
+    if (proto === 'dicom') { out.calledAe = asCheckAe(v.calledAe); out.callingAe = asCheckAe(v.callingAe); }
+    out.interval = asCheckInterval(v.interval);
+    out.slowMs = asCheckSlow(v.slowMs);
+    out.monitors = asCheckMonitors(v.monitors);
+    Object.keys(out).forEach((k) => { if (out[k] === undefined) delete out[k]; });
+    return out;
+}
+// A device's list: the blocks that are ones, one per id (a repeated id is
+// reminted when reading, dropped when writing), at most CHECKS_MAX, or
+// undefined for none.
+function asChecks(v, mint) {
+    if (!Array.isArray(v)) return undefined;
+    const seen = new Set(), out = [];
+    v.forEach((x) => {
+        if (out.length >= CHECKS_MAX) return;
+        let c = asCheck(x, mint);
+        if (!c) return;
+        if (seen.has(c.id)) { if (!mint) return; c = Object.assign({}, c, { id: nextId('ck') }); }
+        seen.add(c.id);
+        out.push(c);
+    });
+    return out.length ? out : undefined;
+}
+// A target such as 99.5: above 0, below 100, at most three decimals.
+function asTarget(v) {
+    const n = typeof v === 'string' ? Number(v.trim().replace(',', '.').replace(/%$/, '')) : v;
+    if (typeof n !== 'number' || !Number.isFinite(n)) return undefined;
+    // Rounded first, so 99.9996 cannot become 100 (outside the v19 schema).
+    const r = Math.round(n * 1000) / 1000;
+    return r > 0 && r < 100 ? r : undefined;
+}
+const checkPortOf = (c) => (c && (c.port || (c.tls === 'implicit' && CHECK_TLS_PORTS[c.proto]) || CHECK_PORTS[c.proto])) || null;
+
 const NODE_FIELDS = [
     { key: 'id', kind: 'raw', read: (v) => v || nextId('n'), label: 'ID', csv: 'id' },
     { key: 'type', kind: 'raw', read: (v) => asOptionalText(v) || 'custom', label: 'Type', csv: 'type', bulk: true, table: 'show' },
@@ -1733,7 +1852,13 @@ const NODE_FIELDS = [
     // names none for comes from its host or its group (nodeProviders). In a
     // spreadsheet it is the providers' names, separated by "; ".
     { key: 'providers', kind: 'raw', label: 'Providers', read: asProviderRefs, write: asProviderRefs, csv: 'provider', bulk: true,
-      toText: (v) => providerRefsText(v) }
+      toText: (v) => providerRefsText(v) },
+    // ---- Answer checks (document v19, "Answer checks" above) ----
+    // Last, so a device without them serializes byte for byte as before. Not
+    // in the spreadsheet: they are what this site's monitors ask, not the
+    // register's facts (D229).
+    { key: 'checks', kind: 'raw', label: 'Answer checks', read: (v) => asChecks(v, true), write: (v) => asChecks(v, false) },
+    { key: 'target', kind: 'raw', label: 'Availability target (%)', read: asTarget, write: asTarget }
 ];
 
 // A cable's own facts (link.cable, plan section 4): the label on both ends of
@@ -4968,7 +5093,12 @@ const PROVIDER_FIELDS = [
       validate: providerEmailOk },
     { key: 'account', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Account / contract', keys: 'code', csv: 'account' },
     { key: 'hours', kind: 'raw', read: providerLine(PROVIDER_TEXT_MAX), write: providerLine(PROVIDER_TEXT_MAX), label: 'Support hours / SLA', keys: 'prose', csv: 'support_hours' },
-    { key: 'notes', kind: 'raw', read: providerNotes, write: providerNotes, label: 'Notes', keys: 'prose', csv: 'notes' }
+    { key: 'notes', kind: 'raw', read: providerNotes, write: providerNotes, label: 'Notes', keys: 'prose', csv: 'notes' },
+    // v19 (step 7j): the availability their devices are held to in the
+    // reports, and whether it counts only during their support hours. A
+    // contract's fact, so it travels in providers.csv (D299).
+    { key: 'target', kind: 'raw', read: asTarget, write: asTarget, label: 'Availability target (%)', csv: 'availability_target' },
+    { key: 'targetHours', kind: 'flag', label: 'Judge the target only during their support hours', csv: 'target_support_hours' }
 ];
 // Load: coerced through the table, one record per id (a repeated id is
 // reminted), at most PROVIDER_MAX. Mutates nothing it is given.
@@ -5365,6 +5495,16 @@ function normalizeSearchRefs(searches = state.searches, columns = state.columns)
 //                   convert: a document with no report writes no key. A v17
 //                   build would read no provider at all and drop the reports,
 //                   so it opens a v18 document read-only.
+//   v 19            the log's 'decision' kind (an owner's answer on a
+//                   provider's visit, D180) and a device's answer checks
+//                   and availability target (node.checks, node.target,
+//                   "Answer checks" above; D156), a provider's target and
+//                   targetHours (D299), outages as incidents (kind
+//                   'outage', D246) with their incident log events, and a
+//                   visit entry's monitoring section (D289). Nothing to
+//                   convert. A v18
+//                   build would drop them, so it opens a v19 document
+//                   read-only.
 //
 // A document with a higher `v` was written by a newer Topo. Its unknown fields
 // cannot be kept — the serializer is an allowlist, and that is a privacy rule,
@@ -5726,7 +5866,8 @@ function serializeTableView(v) {
 // hand shows. The fields are an allowlist per kind (LOG_FIELDS), as every
 // other list in the document is; an entry of a kind this build does not
 // know is dropped (a document that has one comes from a newer Topo, and
-// opens read-only). Step 4 adds its kinds (incidents, visits) here.
+// opens read-only). Step 4 adds its kinds (incidents, visits) here, and
+// v19 the owner's decision on a visit (decision).
 //   merge   source (a file's name, 'link', 'binder' or a card's name), by
 //           (Settings' prepared-by name, if any), counts { added, changed,
 //           removed, conflicts }, summary (English, the fallback text),
@@ -5800,6 +5941,33 @@ const LOG_FIELDS = {
         notes: (v) => logProse(v, VISIT_NOTES_MAX),
         changes: (v) => visitChanges(v),
         signoff: logText(120),
+        // v19 (step 7i, docs/SCOPE.md D148): what the visit monitor saw.
+        monitoring: (v) => visitMonitoring(v),
+        summary: logText(LOG_SUMMARY_MAX)
+    },
+    // An owner's answer on a provider's visit (v19, docs/SCOPE.md D153,
+    // D180): which visit entries it answers (visits, their ids; a rejected
+    // visit's entries are not in this log, they stay in its copy), the
+    // report, the provider (id, and name as it was), the technician
+    // (visitBy), who decided (by), whether the changes were applied
+    // (result) and how the visit went (outcome), the note to the provider,
+    // and the file a rejected copy was kept as.
+    decision: {
+        visits: (v) => {
+            if (!Array.isArray(v)) return undefined;
+            const out = [];
+            v.forEach((x) => { if (logRef(x) && !out.includes(x) && out.length < 20) out.push(x); });
+            return out.length ? out : undefined;
+        },
+        incidentId: (v) => logRef(v),
+        providerId: (v) => logDocRef(v),
+        provider: logText(PROVIDER_NAME_MAX),
+        visitBy: logText(120),
+        by: logText(120),
+        result: (v) => (VISIT_RESULTS.includes(v) ? v : undefined),
+        outcome: (v) => (VISIT_JUDGEMENTS.includes(v) ? v : undefined),
+        note: (v) => logProse(v, INCIDENT_TEXT_MAX),
+        file: logText(200),
         summary: logText(LOG_SUMMARY_MAX)
     }
 };
@@ -5892,12 +6060,40 @@ function withoutIncidents(doc) {
 //             hold fewer of them than this lists (a link carries the newest
 //             LOG_LINK_MAX entries), so it is never checked against the log
 //   closedAt, closedNote   when the client marked it fixed, and why
+// An outage (v19, docs/SCOPE.md D158, step 7g) is an incident too: an issue
+// record a monitoring PC raised, folded in by js/issues.js. Its id is the
+// record's, so a fold never adds it twice. It has:
+//   kind      'outage'
+//   nodeIds   the device that is not answering (the root cause)
+//   symptom   from the device's type (a printer 'printer', a router
+//             'internet'...), so the lists and the routing read it as any
+//   outages   [{ from, to? }]: each time it went down while the issue was
+//             open (a repeat joins it), oldest first; no `to` while it goes
+//             on, and the last `to` is "answering again since"
+//   behind    the devices down because of it (root cause), by id
+//   monitor   the PC that saw it ("Checked by monitor ...")
+//   flapping  true when it kept going down and coming back
+//   gone      true when the device left the monitored checks while down
+//   acts      [{ act, at, by?, note?, reportId? }]: Acknowledge ('ack'),
+//             Report a problem ('report', with the report's id) or Expected
+//             ('expected', its time counted as maintenance), oldest first;
+//             the first closes it (status 'closed', closedAt its time)
 // Not a spreadsheet sheet, like the log. At most INCIDENT_MAX: the oldest
 // closed go first, then the oldest of any status.
 const INCIDENT_STATUSES = ['open', 'sent', 'visited', 'closed'];
 const INCIDENT_SYMPTOMS = ['internet', 'wifi', 'phone', 'camera', 'printer', 'power', 'other'];
-const INCIDENT_EVENTS = ['opened', 'sent', 'closed', 'reopened'];
+// 'outage' (an outage folded in) and the acts on one (v19, step 7g).
+const INCIDENT_EVENTS = ['opened', 'sent', 'closed', 'reopened', 'outage', 'acknowledged', 'expected', 'reported'];
+const OUTAGE_ACTS = ['ack', 'report', 'expected'];
+const OUTAGE_ACT_EVENT = { ack: 'acknowledged', report: 'reported', expected: 'expected' };
+const OUTAGE_SPANS_MAX = 50;
+const OUTAGE_ACTS_MAX = 20;
+const OUTAGE_BEHIND_MAX = 500;
 const VISIT_OUTCOMES = ['fixed', 'partly', 'not-fixed', 'follow-up'];
+// The owner's answer on a visit (v19 'decision' entries): the changes
+// applied or not, and whether the visit succeeded.
+const VISIT_RESULTS = ['approved', 'rejected'];
+const VISIT_JUDGEMENTS = ['successful', 'not-successful', 'undecided'];
 const INCIDENT_MAX = 200;
 const INCIDENT_TEXT_MAX = 2000;
 const VISIT_NOTES_MAX = 4000;
@@ -5919,6 +6115,73 @@ function visitChanges(v) {
         });
     const out = { counts };
     if (items.length) out.items = items;
+    return out;
+}
+// A visit's monitoring section (v19, step 7i, docs/SCOPE.md D148, D174):
+// what "Monitor during this visit" saw on the provider's PC, in no
+// language. { from, to, compared, items: [{ node, check, name, proto, via,
+// asked, answered, loss, avail, coverage, med, p95, step, rtt, states,
+// before }], outages: [{ node, name, from, to, cause, causeName }], more }.
+// Times in ms, loss/avail/coverage as 0..1, response times in ms. `rtt`
+// and `states` are the chart: one point per `step` ms from `from` (states:
+// u up, s slow, d down, q quiet, - unknown). `before`: the site monitor's
+// 7 days before the visit (`compared` says they were read). `more`: the
+// checks left out past VISIT_MON_ITEMS_MAX.
+const VISIT_MON_ITEMS_MAX = 60;
+const VISIT_MON_OUTAGES_MAX = 100;
+const VISIT_MON_POINTS_MAX = 48;
+const VISIT_MON_PROTOS = ['ping', 'tcp', 'http', 'https', 'dns', 'smtp', 'dicom', 'ntp', 'rtsp', 'sip', 'mllp', 'ipp', 'imap', 'pop'];
+function visitMonitoring(v) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+    const time = (x) => (Number.isFinite(x) && x > 0 ? Math.round(x) : undefined);
+    const share = (x) => (Number.isFinite(x) && x >= 0 && x <= 1 ? Math.round(x * 1e6) / 1e6 : undefined);
+    const ms = (x) => (Number.isFinite(x) && x >= 0 && x < 1e7 ? Math.round(x * 10) / 10 : undefined);
+    const count = (x) => (Number.isInteger(x) && x >= 0 && x < 1e9 ? x : 0);
+    const ref = (x) => (docRefOk(x) ? x : undefined);
+    const name = (x) => (typeof x === 'string' && x.trim() ? x.trim().slice(0, 120) : undefined);
+    const from = time(v.from), to = time(v.to);
+    if (!from || !to || to < from) return undefined;
+    const put = (o, k, x) => { if (x !== undefined) o[k] = x; };
+    const figs = (x) => {
+        const o = {};
+        put(o, 'med', ms(x.med)); put(o, 'p95', ms(x.p95)); put(o, 'avail', share(x.avail)); put(o, 'coverage', share(x.coverage));
+        return o;
+    };
+    const items = [];
+    (Array.isArray(v.items) ? v.items : []).forEach((x) => {
+        if (!x || typeof x !== 'object' || !ref(x.node) || items.length >= VISIT_MON_ITEMS_MAX) return;
+        const o = { node: x.node };
+        put(o, 'check', typeof x.check === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(x.check) ? x.check : undefined);
+        put(o, 'name', name(x.name));
+        o.proto = VISIT_MON_PROTOS.includes(x.proto) ? x.proto : 'ping';
+        if (x.via === 'tcp') o.via = 'tcp';
+        o.asked = count(x.asked);
+        o.answered = Math.min(o.asked, count(x.answered));
+        put(o, 'loss', share(x.loss)); put(o, 'avail', share(x.avail));
+        o.coverage = share(x.coverage) || 0;
+        put(o, 'med', ms(x.med)); put(o, 'p95', ms(x.p95));
+        const states = typeof x.states === 'string' && /^[usdq-]*$/.test(x.states) ? x.states.slice(0, VISIT_MON_POINTS_MAX) : '';
+        const rtt = Array.isArray(x.rtt) ? x.rtt.slice(0, states.length).map((r) => (r === null ? null : ms(r) === undefined ? null : ms(r))) : [];
+        if (states && rtt.length === states.length && Number.isInteger(x.step) && x.step >= 1000 && x.step <= 864e5) { o.step = x.step; o.rtt = rtt; o.states = states; }
+        if (x.before && typeof x.before === 'object' && !Array.isArray(x.before)) { const b = figs(x.before); if (Object.keys(b).length) o.before = b; }
+        items.push(o);
+    });
+    const outages = [];
+    (Array.isArray(v.outages) ? v.outages : []).forEach((x) => {
+        if (!x || typeof x !== 'object' || !ref(x.node) || !time(x.from) || outages.length >= VISIT_MON_OUTAGES_MAX) return;
+        const o = { node: x.node };
+        put(o, 'name', name(x.name));
+        o.from = time(x.from);
+        if (time(x.to) && x.to >= x.from) o.to = time(x.to);
+        put(o, 'cause', ref(x.cause));
+        put(o, 'causeName', name(x.causeName));
+        outages.push(o);
+    });
+    const out = { from, to, items, outages };
+    if (v.compared === true) out.compared = true;
+    else if (v.unread === true) out.unread = true;
+    const more = count(v.more) + Math.max(0, (Array.isArray(v.items) ? v.items.length : 0) - VISIT_MON_ITEMS_MAX);
+    if (more) out.more = more;
     return out;
 }
 const incidentStatusIndex = (s) => Math.max(0, INCIDENT_STATUSES.indexOf(s));
@@ -5963,8 +6226,46 @@ function normalizeIncident(x, ctx = {}) {
     const note = logProse(x.closedNote, INCIDENT_TEXT_MAX);
     if (note) out.closedNote = note;
     if (Number.isInteger(x.reopened) && x.reopened > 0) out.reopened = Math.min(x.reopened, 9999);
+    if (x.kind === 'outage') normalizeOutageFields(x, out, ids, nodeIds);
     return out;
 }
+// An outage's own fields (v19, "Problem reports" above), onto out.
+function normalizeOutageFields(x, out, ids, nodeIds) {
+    out.kind = 'outage';
+    const spans = [];
+    (Array.isArray(x.outages) ? x.outages : []).forEach((o) => {
+        const from = o && logTime(o.from);
+        if (!from) return;
+        const r = { from };
+        const to = logTime(o.to);
+        if (to && to >= from) r.to = to;
+        spans.push(r);
+    });
+    spans.sort((a, b) => a.from - b.from);
+    if (spans.length) out.outages = spans.slice(-OUTAGE_SPANS_MAX);
+    const behind = ids(x.behind, nodeIds).slice(0, OUTAGE_BEHIND_MAX);
+    if (behind.length) out.behind = behind;
+    const mon = incidentLine(120)(x.monitor);
+    if (mon) out.monitor = mon;
+    if (x.flapping === true) out.flapping = true;
+    if (x.gone === true) out.gone = true;
+    const acts = [];
+    (Array.isArray(x.acts) ? x.acts : []).forEach((a) => {
+        if (!a || !OUTAGE_ACTS.includes(a.act) || !logTime(a.at)) return;
+        const r = { act: a.act, at: logTime(a.at) };
+        const by = incidentLine(120)(a.by);
+        if (by) r.by = by;
+        const note = logProse(a.note, INCIDENT_TEXT_MAX);
+        if (note) r.note = note;
+        if (a.act === 'report' && typeof a.reportId === 'string' && LOG_ID_RE.test(a.reportId)) r.reportId = a.reportId;
+        if (!acts.some((y) => outageActKey(y) === outageActKey(r))) acts.push(r);
+    });
+    acts.sort((a, b) => a.at - b.at);
+    if (acts.length) out.acts = acts.slice(0, OUTAGE_ACTS_MAX);
+}
+// One act, as a key: the same act by the same person at the same time is one.
+const outageActKey = (a) => `${a.act}|${a.at}|${a.by || ''}`;
+const isOutage = (inc) => !!inc && inc.kind === 'outage';
 // At most INCIDENT_MAX, in their order: over it, the oldest closed go first,
 // then the oldest of any status. Mutates nothing it is given.
 function capIncidents(list, max = INCIDENT_MAX) {
@@ -6000,13 +6301,24 @@ function incidentLogEntry({ id, at, incident, event, routedTo }) {
     return normalizeLogEntry({ id, at, kind: 'incident', incidentId: inc.id, event, symptom: inc.symptom, routedTo: routedTo || inc.routedTo, summary });
 }
 // A 'visit' log entry.
-function visitLogEntry({ id, at, incidentId, providerId, provider, by, arrived, left, outcome, notes, changes, signoff }) {
+function visitLogEntry({ id, at, incidentId, providerId, provider, by, arrived, left, outcome, notes, changes, signoff, monitoring }) {
     const c = changes && changes.counts ? changes.counts : null;
-    const summary = `Visit by ${by || 'a technician'}${provider ? ` (${provider})` : ''}: ${outcome || 'recorded'}${c ? `, ${(c.added || 0) + (c.changed || 0) + (c.removed || 0)} changes` : ''}.`;
-    return normalizeLogEntry({ id, at, kind: 'visit', incidentId, providerId, provider, by, arrived, left, outcome, notes, changes, signoff, summary });
+    const m = visitMonitoring(monitoring);
+    const mon = m ? `; monitored ${m.items.length + (m.more || 0)} checks, ${m.outages.length} outages` : '';
+    const summary = `Visit by ${by || 'a technician'}${provider ? ` (${provider})` : ''}: ${outcome || 'recorded'}${c ? `, ${(c.added || 0) + (c.changed || 0) + (c.removed || 0)} changes` : ''}${mon}.`;
+    return normalizeLogEntry({ id, at, kind: 'visit', incidentId, providerId, provider, by, arrived, left, outcome, notes, changes, signoff, monitoring: m, summary });
 }
 
-const DOC_VERSION = 18;
+// A 'decision' log entry (v19).
+function decisionLogEntry({ id, at, visits, incidentId, providerId, provider, visitBy, by, result, outcome, note, file }) {
+    const who = visitBy || provider || 'a provider';
+    const short = note ? String(note).replace(/\s+/g, ' ').slice(0, 80) : '';
+    const summary = result === 'rejected' ? `Visit by ${who} rejected${short ? `: ${short}` : '.'}`
+        : `Visit by ${who} approved: ${outcome || 'undecided'}.`;
+    return normalizeLogEntry({ id, at, kind: 'decision', visits, incidentId, providerId, provider, visitBy, by, result, outcome, note, file, summary });
+}
+
+const DOC_VERSION = 19;
 
 // ---- What a Topo file says it is ----
 // Every .json Topo writes (a network's back-up, a binder) opens with a
@@ -6201,7 +6513,14 @@ const MIGRATIONS = [
             ['nodes', 'links', 'groups'].forEach((k) => { if (Array.isArray(doc[k])) out[k] = doc[k].map(lift); });
             return out;
         }
-    }
+    },
+    // The log gains its 'decision' kind (an owner's answer on a provider's
+    // visit, docs/SCOPE.md D153, D180), and a device its answer checks and
+    // availability target (node.checks, node.target, D156): new keys and a
+    // new kind of entry, nothing to convert. A build that reads only v18
+    // would drop them (and break the log's chain with the entries), so it
+    // opens a v19 document read-only.
+    { from: 18, to: 19, run: (doc) => ({ ...doc, v: 19 }) }
 ];
 
 // The v2 interface zone flags of `src`, put back on the same node as written.

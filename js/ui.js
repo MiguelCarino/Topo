@@ -722,6 +722,7 @@ function renderCanvasOnly() {
         renderTableView(false, live());   // js/table.js: so does the table view, while it shows
         renderRackView(false, live());    // js/rackview.js: and the rack view, and the switch's Rack
         if (typeof updateQueryBar === 'function') updateQueryBar();   // js/query.js: the match count
+        if (typeof checksDocChanged === 'function') checksDocChanged();   // js/checks.js: the monitor's plan, a moment later
         return live;
     } finally {
         _canvasRendering--;
@@ -1549,6 +1550,9 @@ function drawCanvas() {
         if (problemIds && problemIds.size && (problemIds.has(node.id) || (!!inFold && inFold.some((x) => problemIds.has(x.id))))) {
             g.appendChild(problemMarkEl(-19, 15));
         }
+        // Answer checks (js/checks.js): its state from this PC's monitor, a
+        // dot at the top centre. Only in the app, on the network it monitors.
+        if (typeof checkMarkEl === 'function') { const ck = checkMarkEl(node); if (ck) g.appendChild(ck); }
 
         // Little ✕ on the selected node — the touch twin of the Delete key and
         // the sidebar's Delete button. Top-LEFT corner: the severity badge owns
@@ -2479,6 +2483,8 @@ function renderSidebarData(node) {
     // The Vendor field's MAC hint (js/assets.js): a NIC cleared, deleted,
     // added or unbonded changes what the MACs say.
     if (typeof renderVendorHint === 'function') renderVendorHint(node);
+    // Its answer checks (js/checks.js): the desktop app only.
+    if (typeof renderCheckSection === 'function') renderCheckSection(node);
 }
 
 // The bond's mode, on its own line beneath it. Active-backup and LACP differ in

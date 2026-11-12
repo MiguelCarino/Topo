@@ -36,6 +36,7 @@ const _mergeApply = { applying: false };
 function mergeConflictKeys(plan) {
     const keys = [];
     const walk = (it) => {
+        if (it.outside) keys.push(`${it.key}@outside`);
         if (it.conflict && it.conflict.type !== 'fields') keys.push(`${it.key}@${it.conflict.type}`);
         (it.fields || []).forEach((f) => { if (f.conflict) keys.push(`${it.key}#${f.field}`); });
         (it.children || []).forEach(walk);
@@ -75,6 +76,8 @@ function logEntryText(e) {
     // js/providermode.js), in the reader's language.
     if (e.kind === 'incident' && typeof incidentLogText === 'function') return incidentLogText(e);
     if (e.kind === 'visit' && typeof visitLineText === 'function') return visitLineText(e);
+    // The owner's answer on a provider's visit (v19, js/visits.js).
+    if (e.kind === 'decision' && typeof visitDecisionText === 'function') return visitDecisionText(e);
     return e.summary || e.kind;
 }
 const logModeText = (e) => (e && e.mode === 'three-way' ? t('Three-way merge') : e && e.mode === 'two-way' ? t('Two-way merge') : '');
@@ -154,7 +157,7 @@ async function commitMerge(opts = {}) {
         const mineJson = live ? JSON.stringify(serializeDoc()) : JSON.stringify((libraryEntry(targetId) || {}).doc || null);
         const mine = JSON.parse(mineJson);
         if (!mine) return { ok: false, reason: 'target' };
-        const plan = planMerge(mine, theirs, base, { part: opts.part || null });
+        const plan = planMerge(mine, theirs, base, { part: opts.part || null, scope: opts.scope || null });
         if (opts.plan && mergeConflictKeys(opts.plan) !== mergeConflictKeys(plan)) {
             showToast(t('The network changed since the merge was reviewed: review it again.'));
             return { ok: false, reason: 'stale', plan };
@@ -162,7 +165,10 @@ async function commitMerge(opts = {}) {
         const { doc, counts, notes } = applyMergePlan(mine, plan, choices);
         const by = typeof reportEngineerDefault === 'function' ? reportEngineerDefault() : '';
         const entry = mergeLogEntry({ id: 'lg_' + randomToken(), at: Date.now(), source, by, counts, mode: plan.mode, rev: theirsRev || undefined });
-        const merged = await appendLogEntry(doc, entry);
+        let merged = await appendLogEntry(doc, entry);
+        // What the door adds in the same undo step (a visit's decision,
+        // js/visits.js: the report's state and a 'decision' entry).
+        if (typeof opts.finish === 'function') merged = await opts.finish(merged);
         // The chain's digest is the one await after planning: anything that
         // moved the network meanwhile is not overwritten.
         const nowJson = live ? (state.libraryId === targetId ? JSON.stringify(serializeDoc()) : null)
@@ -188,13 +194,22 @@ async function commitMerge(opts = {}) {
         // A provider's part merged back (D93) is held as a part: the base of
         // that provider's next return, never a full copy's (outgoingBase).
         const theirsWhy = opts.part ? 'part' : 'merge-theirs';
+        // With the part's context and ids, as the part that left was
+        // (recordPartRevision): the next return from it asks before a
+        // context removal and never pairs a new record with one of yours.
+        // And what it answers (the part it was merged on, now let go) and
+        // the reports that part went out for, which hold this copy instead
+        // (heldParts, js/revisions.js, D176).
+        const partMeta = opts.part ? {
+            nodes: [...(opts.part.nodes || [])], groups: [...(opts.part.groups || [])], all: [...(opts.part.known || [])],
+            back: true, answers: opts.part.rev ? [opts.part.rev] : [], incidents: [...(opts.part.incidents || [])] } : undefined;
+        // And whose copy it is, when that is known (a part for two providers
+        // is answered by both, not by two copies of one: D179).
+        const from = opts.part && typeof partCopyFrom === 'function' ? partCopyFrom(opts.part, theirs, mine) : null;
+        if (partMeta && from) partMeta.by = from;
         if (theirsRev && typeof recordRevision === 'function' && !hasRevision(targetId, theirsRev)) {
-            if (typeof hasSessionRevision === 'function' && hasSessionRevision(theirsRev)) adoptSessionRevisions(targetId, [theirsRev], theirsWhy);
-            // With the part's context and ids, as the part that left was
-            // (recordPartRevision): the next return from it asks before a
-            // context removal and never pairs a new record with one of yours.
-            else recordRevision(targetId, theirsRev, theirs, theirsWhy, undefined, opts.part ? {
-                nodes: [...(opts.part.nodes || [])], groups: [...(opts.part.groups || [])], all: [...(opts.part.known || [])] } : undefined);
+            if (typeof hasSessionRevision === 'function' && hasSessionRevision(theirsRev)) adoptSessionRevisions(targetId, [theirsRev], theirsWhy, partMeta);
+            else recordRevision(targetId, theirsRev, theirs, theirsWhy, undefined, partMeta);
         }
         if (typeof landingIsOpen === 'function' && landingIsOpen() && typeof renderLanding === 'function') renderLanding();
         // A report brought in open or sent: the provider's banner (an IT firm
@@ -203,7 +218,7 @@ async function commitMerge(opts = {}) {
         if (live && typeof providerMergeArrival === 'function') providerMergeArrival(mine);
         // All four counts: a merge that removed devices says so.
         if (!opts.quiet) showToast(t(counts.conflicts === 1 ? 'Merged {source}: {added} added, {changed} changed, {removed} removed, {conflicts} conflict.' : 'Merged {source}: {added} added, {changed} changed, {removed} removed, {conflicts} conflicts.', Object.assign({ source: logSourceText(source) }, counts)), 'ok');
-        return { ok: true, counts, entry: (merged.log || [])[merged.log.length - 1] || entry, notes, mode: plan.mode };
+        return { ok: true, counts, entry: (merged.log || []).find((e) => e && e.id === entry.id) || entry, notes, mode: plan.mode };
     } finally {
         _mergeApply.applying = false;
     }

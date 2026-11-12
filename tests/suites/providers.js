@@ -45,7 +45,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const saved = () => serializeDoc();
   const heldSettings = Object.assign({}, state.settings);
   const site = (extra = {}) => Object.assign({ v: DOC_VERSION,
-    providers: [{ id: 'pT', name: 'Telmex', service: 'internet', phone: '800 123 4567', email: 'soporte@telmex.example', account: 'ACC-1', hours: '24/7' },
+    providers: [{ id: 'pT', name: 'Telmex', service: 'internet', phone: '800 123 4567', email: 'soporte@telmex.example', account: 'ACC-1', hours: '24/7', target: 99.5, targetHours: true },
                 { id: 'pA', name: 'Acme IT', service: 'it', contact: 'Ana López', phone: '55 1234 5678' }],
     groups: [{ id: 'gB', name: 'Building', kind: 'building' }, { id: 'gR', name: 'Server room', kind: 'room', parent: 'gB', provider: 'pA' }],
     nodes: [
@@ -78,7 +78,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a document that never named a provider has no providers key', !/"providers?"/.test(JSON.stringify(saved())));
     open(site({ nodes: site().nodes.concat(N('ghost', 'pc', { provider: 'nobody' })) }));
     ok('a reference to a provider the document does not hold is dropped', getNode('ghost').providers === undefined && (getNode('gw').providers || []).join() === 'pT');
-    ok('they are written in order, every field', JSON.stringify(saved().providers[0]) === '{"id":"pT","name":"Telmex","service":"internet","phone":"800 123 4567","email":"soporte@telmex.example","account":"ACC-1","hours":"24/7"}', JSON.stringify(saved().providers[0]));
+    ok('they are written in order, every field', JSON.stringify(saved().providers[0]) === '{"id":"pT","name":"Telmex","service":"internet","phone":"800 123 4567","email":"soporte@telmex.example","account":"ACC-1","hours":"24/7","target":99.5,"targetHours":true}', JSON.stringify(saved().providers[0]));
     const who = (id) => nodeProviders(getNode(id)).map((r) => `${r.provider.id}/${r.via}/${r.from.id}`).join();
     ok('a device\'s own provider', who('gw') === 'pT/own/gw');
     ok('else its innermost group\'s', who('srv') === 'pA/group/gR' && who('pc') === '');
@@ -238,7 +238,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const sheetOf = (text) => { const p = csvParse(text); return csvSheet(p, csvHasHeadingRow(p.rows)); };
     const planOf = (text) => { const s = sheetOf(text); return csvPlan(s, csvAutoMap(s)); };
     const pvSheet = csvProvidersSheet();
-    ok('providers.csv: every field, the service as its key', pvSheet.headers.join() === 'provider_id,name,service,contact,phone,email,account,support_hours,notes'
+    ok('providers.csv: every field, the service as its key', pvSheet.headers.join() === 'provider_id,name,service,contact,phone,email,account,support_hours,notes,availability_target,target_support_hours'
        && pvSheet.rows[0].slice(0, 3).join() === 'pT,Telmex,internet', pvSheet.headers.join());
     ok('offered once there is a provider', CSV_SHEETS.find((x) => x.key === 'providers').shown());
     ok('devices.csv names the provider', (() => { const d = csvDevicesSheet(); const i = d.headers.indexOf('provider'); return i > -1 && d.rows.find((r) => r.includes('Gateway'))[i] === 'Telmex'; })());
@@ -246,6 +246,19 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('groups.csv too', (() => { const g = csvGroupsSheet(); const i = g.headers.indexOf('provider'); return i > -1 && g.rows.find((r) => r[0] === 'gR')[i] === 'Acme IT'; })());
     const pPlan = planOf(csvText(pvSheet));
     ok('providers.csv is read as a sheet of providers, unchanged', pPlan.kind === 'providers' && pPlan.counts.same === 2 && !pPlan.ops.length, JSON.stringify(pPlan.counts));
+    // The v19 target and its support-hours tick (step 7j): "no" clears the
+    // tick, a blank cell leaves the target, a target out of range is a
+    // conflict on its row, never dropped unsaid.
+    const clr = planOf('provider_id,availability_target,target_support_hours\r\npT,,no\r\n');
+    applyCsvPlan(clr);
+    const cleared = Object.assign({}, providerById('pT'));
+    undo();
+    ok('providers.csv: "no" clears the support-hours tick, a blank target stays', clr.counts.change === 1 && cleared.targetHours === undefined && cleared.target === 99.5
+       && providerById('pT').targetHours === true, JSON.stringify([clr.counts, cleared.target, cleared.targetHours]));
+    const badT = planOf('provider_id,availability_target\r\npT,150\r\n');
+    const newT = planOf('provider_id,availability_target\r\npT,"99,9 %"\r\n');
+    ok('providers.csv: a target out of range is a conflict; "99,9 %" reads as 99.9', badT.counts.conflict === 1 && /150/.test(badT.rows[0].why) && newT.counts.change === 1
+       && newT.ops[0].pv.set.target === 99.9, JSON.stringify([badT.rows.map((r) => r.why), newT.ops]));
     const edited = planOf('provider_id,name,phone,service\r\n,Telmex,800 999 0000,isp\r\n,New Alarm Co,55 1111 2222,alarm\r\n');
     ok('by name: a change, and a new one', edited.counts.change === 1 && edited.counts.add === 1, JSON.stringify(edited.rows.map((r) => r.status + ':' + r.why)));
     applyCsvPlan(edited);

@@ -54,6 +54,19 @@ const NOTE_TEXT = {
     'port-two-vlans': 'Ports seen in two VLANs take the VLAN with more addresses; the other is carried tagged: {list}.',
     'dates-ambiguous': '{file}: the dates in "{column}" could be day-first or month-first, so they were left empty.'
 };
+// This computer's information lines (js/thiscomputer.js, D166): shown in
+// the review, never added.
+const INFO_TEXT = {
+    'tc-gateway': 'Default gateway {address} ({name}): shown here only, it is not added.',
+    'tc-no-gateway': 'This PC has no default gateway.',
+    'tc-dns': 'DNS servers: {list}.',
+    'tc-no-dns': 'This PC lists no DNS servers.',
+    'tc-mtu': '{name}: MTU {mtu}.',
+    'tc-extra': '{name} also has {list}: Topo keeps one address per interface, so these are not added.',
+    'tc-virtual': '{n} virtual interfaces left out: {list}.',
+    'tc-virtual-1': 'A virtual interface left out: {list}.',
+    'tc-down': 'Not connected, left out: {list}.'
+};
 const PART_LABELS = { wired: 'Clients (wired)', wireless: 'Clients (wireless)', leases: 'DHCP leases' };
 const REFUSED_TEXT = {
     'unifi-backup': 'A UniFi controller backup (.unf) is a locked file Topo cannot read. Export the devices and clients from the controller instead.',
@@ -69,7 +82,7 @@ function issueText(x) {
     if (x.row !== undefined) p.where = t('{file}, row {row}', { file: x.file || '', row: x.row });
     else if (x.line !== undefined) p.where = t('{file}, line {line}', { file: x.file || '', line: x.line });
     if (x.file !== undefined && p.file === undefined) p.file = x.file;
-    const key = WARN_TEXT[x.code] || NOTE_TEXT[x.code];
+    const key = WARN_TEXT[x.code] || NOTE_TEXT[x.code] || INFO_TEXT[x.code];
     return key ? t(key, p) : `${x.code}`;
 }
 
@@ -81,9 +94,14 @@ function openDialog() {
     if (!s) return;
     if (window.CarinoUI) { if (!CarinoUI.modal.isOpen(s)) CarinoUI.modal.open(s, { onClose: () => { _imp = null; } }); } else s.hidden = false;
 }
+function setTitle(direct) {
+    const h = el('importTitle');
+    if (h) h.textContent = direct ? t('Add this computer') : t('Import from another tool');
+}
 function closeImportDialog() {
     const s = scrim();
     if (!s) return;
+    setTitle(false);
     if (window.CarinoUI && CarinoUI.modal.isOpen(s)) CarinoUI.modal.close(s, 'answered');
     else s.hidden = true;
     _imp = null;
@@ -92,9 +110,18 @@ function closeImportDialog() {
 // { name, text } / { name, bytes } for tests).
 async function openImport(files) {
     _imp = { files: [], step: 1, results: null, target: '' };
+    setTitle(false);
     openDialog();
     render();
     if (files && files.length) await addFiles(files);
+}
+// A result read some other way than from files (This computer,
+// js/thiscomputer.js): straight to "What was understood", with no Back.
+function openResult(res) {
+    _imp = { files: [], step: 2, results: [res], target: '', direct: true };
+    setTitle(true);
+    openDialog();
+    render();
 }
 async function addFiles(files) {
     if (!_imp) _imp = { files: [], step: 1, results: null, target: '' };
@@ -123,6 +150,11 @@ async function addFiles(files) {
 }
 
 const importerLabel = (id) => { const imp = TopoImporters.get(id); return imp ? imp.label : id; };
+// A result's own label (This computer has no importer), else its importer's.
+// Kept in English, as the importers' labels are: it goes into the log and
+// the merge's source, which must not depend on the editor's language (D212).
+// Only the review's heading translates it.
+const resultLabel = (res) => res.label || importerLabel(res.importer);
 
 function renderFiles() {
     const imps = TopoImporters.list();
@@ -158,12 +190,16 @@ function renderUnderstood() {
         const ri = _imp.results.indexOf(res);
         const ticks = (res.parts || []).map((p) => `<label class="check imp-part"><input type="checkbox" data-imp-part="${ri}:${esc(p.key)}"${p.on ? ' checked' : ''}> <span>${esc(t(PART_LABELS[p.key] || p.key))} (${p.ids.length})</span></label>`);
         const ask = res.askName ? `<label class="imp-ask"><span class="prop-lbl">${esc(t('This switch\'s name'))}</span><input type="text" class="input" data-imp-name="${ri}" value="${esc(res.switchName || '')}" autocomplete="off" placeholder="${esc(t('As its prompt shows it'))}"></label>` : '';
-        return `<section class="imp-res" data-imp-res="${esc(res.importer)}"><h3 class="imp-res-head">${esc(importerLabel(res.importer))}
+        const info = (res.info || []).map((n) => `<li>${esc(issueText(n))}</li>`);
+        const opts = (res.options || []).map((o) => `<label class="check imp-part"><input type="checkbox" data-imp-opt="${ri}:${esc(o.key)}"${o.on ? ' checked' : ''}> <span>${esc(t(o.label, { n: o.n }))}</span></label>`);
+        return `<section class="imp-res" data-imp-res="${esc(res.importer)}"><h3 class="imp-res-head">${esc(res.label ? t(res.label) : resultLabel(res))}
             <span class="imp-res-files">${esc(res.files.join(', '))}</span></h3>
             ${counts.length ? `<div class="imp-counts">${counts.join('')}</div>` : `<p class="ask-msg">${esc(t('Nothing was understood in these files.'))}</p>`}
             ${warns.length ? `<p class="imp-warn-head">${esc(t('Not read: {n}', { n: warns.length }))}</p><ul class="imp-warns">${shown.join('')}${more}</ul>` : ''}
             ${notes.length ? `<ul class="imp-notes">${notes.join('')}</ul>` : ''}
-            ${ticks.length ? `<fieldset class="imp-parts"><legend class="prop-lbl">${esc(t('Include'))}</legend>${ticks.join('')}</fieldset>` : ''}${ask}</section>`;
+            ${ticks.length ? `<fieldset class="imp-parts"><legend class="prop-lbl">${esc(t('Include'))}</legend>${ticks.join('')}</fieldset>` : ''}${ask}
+            ${opts.length ? `<fieldset class="imp-parts"><legend class="prop-lbl">${esc(t('Include'))}</legend>${opts.join('')}</fieldset>` : ''}
+            ${info.length ? `<p class="imp-warn-head">${esc(t('For information, not added'))}</p><ul class="imp-notes imp-info">${info.join('')}</ul>` : ''}</section>`;
     });
     const here = isKept() && !state.readOnly && state.libraryId && libraryEntry(state.libraryId);
     const target = _imp.target || (here ? 'here' : 'new');
@@ -183,7 +219,7 @@ function render() {
     if (_imp.step === 2) {
         next.textContent = t('Continue');
         next.disabled = !_imp.results.some((r) => (r.doc.nodes || []).length || (r.doc.networks || []).length || (r.doc.groups || []).length);
-        back.classList.remove('hidden');
+        back.classList.toggle('hidden', !!_imp.direct);
     } else {
         next.textContent = t('Read the files');
         next.disabled = !usable;
@@ -215,6 +251,13 @@ function render() {
         if (!part) return;
         part.on = c.checked;
         TopoImporters.applyParts(res);
+        render();
+    }));
+    body.querySelectorAll('[data-imp-opt]').forEach((c) => c.addEventListener('change', () => {
+        const [ri, key] = c.dataset.impOpt.split(':');
+        const old = _imp.results[Number(ri)];
+        if (!old || typeof old.rebuild !== 'function') return;
+        _imp.results[Number(ri)] = old.rebuild({ [key]: c.checked });
         render();
     }));
     body.querySelectorAll('[data-imp-name]').forEach((inp) => inp.addEventListener('change', () => {
@@ -268,10 +311,10 @@ async function continueImport() {
         // The merge keeps a source's last path part (mergeSourceName), so a
         // label's "/" ("Cisco CDP / MAC table", "MikroTik /export") is the
         // look-alike U+2215, or the title would read "MAC table: …".
-        const label = `${importerLabel(res.importer).replace(/\//g, '∕')}: ${res.files.join(', ')}`.slice(0, 200);
+        const label = `${resultLabel(res).replace(/\//g, '∕')}: ${res.files.join(', ')}`.slice(0, 200);
         const fileName = res.files.length === 1 ? res.files[0] : label;
         if (target === 'new') {
-            const name = res.name || String(res.files[0] || '').replace(/\.[^.]+$/, '') || importerLabel(res.importer);
+            const name = res.name || String(res.files[0] || '').replace(/\.[^.]+$/, '') || resultLabel(res);
             out.push(openImportedAsNewCard(TopoImporters.withoutTransientIds(res.doc), name, null));
         } else {
             out.push(await mergeCopyInto(targetId, res.doc, { source: label, fileName, reason: 'Before importing {file}', name: label }));
@@ -296,5 +339,5 @@ const _state = () => _imp;
     if (nb) nb.addEventListener('click', () => TopoNetbox.exportNetbox());
 })();
 
-window.TopoImportUI = { openImport, addFiles, readFiles, continueImport, closeImportDialog, issueText, WARN_TEXT, NOTE_TEXT, REFUSED_TEXT, COUNT_LABELS, PART_LABELS, _state };
+window.TopoImportUI = { openImport, openResult, INFO_TEXT, addFiles, readFiles, continueImport, closeImportDialog, issueText, WARN_TEXT, NOTE_TEXT, REFUSED_TEXT, COUNT_LABELS, PART_LABELS, _state };
 })();

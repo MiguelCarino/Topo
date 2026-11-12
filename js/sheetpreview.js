@@ -26,6 +26,12 @@
 //
 // Opened as a file (the offline zip) a blob: frame is another origin, so
 // there the sheet goes in as srcdoc, as the report's preview does.
+//
+// A sheet may bring its own choices and a spreadsheet (the monitoring
+// report, js/reports.js, step 7j): cfg.controls(box) fills the left column's
+// options under the note each time the sheet is built, and cfg.csv() ->
+// { text, name } shows a CSV button between Print and Download that saves
+// it. A sheet with neither shows the column as before.
 
 const SP_MM = 96 / 25.4;
 const SHEET_PREVIEW = {
@@ -146,13 +152,23 @@ function refreshSheetPreview() {
     const note = doc.querySelector('.toolbar span');
     sheetPvEl('sheetPreviewBlurb').textContent = note ? note.textContent : '';
     const opts = sheetPvEl('sheetPreviewOpts');
-    if (opts) opts.hidden = !note;
+    if (opts) opts.hidden = !note && !cfg.controls;
+    const ctl = sheetPvEl('sheetPreviewControls');
+    if (ctl) {
+        // Kept while the person is choosing in it: a rebuild would take the
+        // focus out of the select they are on.
+        if (!cfg.controls) ctl.innerHTML = '';
+        else if (!ctl.contains(document.activeElement) || !ctl.childElementCount) cfg.controls(ctl);
+        ctl.hidden = !cfg.controls;
+    }
+    const csv = sheetPvEl('sheetPreviewCsv');
+    if (csv) { csv.hidden = !cfg.csv; csv.disabled = true; }
     sheetPvEl('sheetPreviewName').textContent = reportFileName(cfg.meta, cfg.kind, reportFormat());
     const dl = sheetPvEl('sheetPreviewDownload');
     if (dl) dl.textContent = reportDownloadLabel();
     _sheetPv.status = '';
     sheetPreviewStatus('');
-    ['sheetPreviewPrint', 'sheetPreviewDownload'].forEach((id) => { const b = sheetPvEl(id); if (b) b.disabled = true; });
+    ['sheetPreviewPrint', 'sheetPreviewDownload', 'sheetPreviewCsv'].forEach((id) => { const b = sheetPvEl(id); if (b) b.disabled = true; });
     const shownHtml = sheetPreviewHtml(html, cfg.kind);
     const inline = location.protocol === 'file:';
     const url = inline ? null : URL.createObjectURL(new Blob([shownHtml], { type: 'text/html;charset=utf-8' }));
@@ -170,7 +186,7 @@ function refreshSheetPreview() {
             try { status = measureSheetPreview(frame, cfg.kind); } catch (e) { console.warn('Print preview: could not measure the pages.', e); }
             _sheetPv.status = status;
             sheetPreviewStatus(status);
-            ['sheetPreviewPrint', 'sheetPreviewDownload'].forEach((id) => { const b = sheetPvEl(id); if (b) b.disabled = false; });
+            ['sheetPreviewPrint', 'sheetPreviewDownload', 'sheetPreviewCsv'].forEach((id) => { const b = sheetPvEl(id); if (b) b.disabled = false; });
             done(built);
         };
         frame.onload = shown;
@@ -211,6 +227,10 @@ function closeSheetPreview() {
     if (frame) { frame.onload = null; frame.removeAttribute('src'); frame.removeAttribute('srcdoc'); Object.assign(frame.style, { width: '', height: '', transform: '' }); }
     if (_sheetPv.url) URL.revokeObjectURL(_sheetPv.url);
     _sheetPv.url = null; _sheetPv.cfg = null; _sheetPv.built = null; _sheetPv.ready = null;
+    const ctl = sheetPvEl('sheetPreviewControls');
+    if (ctl) { ctl.innerHTML = ''; ctl.hidden = true; }
+    const csv = sheetPvEl('sheetPreviewCsv');
+    if (csv) csv.hidden = true;
     const back = _sheetPv.back;
     _sheetPv.back = null;
     try { if (back && back.isConnected && typeof back.focus === 'function') back.focus(); } catch (e) { /* gone */ }
@@ -272,12 +292,25 @@ function downloadSheetPreview() {
     });
 }
 
+// CSV: the sheet's own spreadsheet (cfg.csv), saved as it is; the dialog
+// stays, for the print or the PDF too. -> { name, url } or null.
+function csvSheetPreview() {
+    const cfg = _sheetPv.cfg;
+    if (!cfg || typeof cfg.csv !== 'function') return null;
+    const out = cfg.csv();
+    if (!out || typeof out.text !== 'string') return null;
+    const url = saveBlob(new Blob([out.text], { type: 'text/csv;charset=utf-8' }), out.name);
+    return { name: out.name, url };
+}
+
 (function wireSheetPreview() {
     const dialog = sheetPvEl('sheetPreviewDialog');
     if (!dialog) return;
     dialog.addEventListener('click', (e) => { if (e.target === dialog) closeSheetPreview(); });   // the backdrop
     sheetPvEl('sheetPreviewClose').onclick = () => closeSheetPreview();
     sheetPvEl('sheetPreviewDownload').onclick = () => downloadSheetPreview();
+    const csv = sheetPvEl('sheetPreviewCsv');
+    if (csv) csv.onclick = () => csvSheetPreview();
     sheetPvEl('sheetPreviewPrint').onclick = async () => {
         const btn = sheetPvEl('sheetPreviewPrint');
         btn.disabled = true;

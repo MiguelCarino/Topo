@@ -525,6 +525,9 @@ func (s *Server) authSignout(w http.ResponseWriter, r *http.Request) {
 // by its SHA-256, valid while within both the idle and the absolute limit
 // and the user is enabled. last_seen moves at most hourly (D56).
 func (s *Server) resolveSession(r *http.Request) *Session {
+	if m := s.resolveMonitor(r); m != nil {
+		return m
+	}
 	tok := cookieToken(r, s.sessionCookie())
 	if tok == "" {
 		return nil

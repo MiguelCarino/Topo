@@ -38,16 +38,17 @@ window.addEventListener('load', () => {
     ok('each later holder gets an id of its own',
        /^q_/.test(items[1].id) && /^q_/.test(items[3].id) && items[1].id !== items[3].id, ids(items));
     // nextId is a const and cannot be stood in for, so the clash is built:
-    // the id the repeat is about to be given is worked out from the clock and
-    // the counter and placed on a record after it. A tick can pass between
-    // the guess and the walk, so it is tried until the guess was right.
+    // the id the repeat is about to be given is worked out and placed on a
+    // record after it. A live id ends in four random characters (D178), so
+    // it is guessed under withFixedIds, whose ids are the clock 0 and the
+    // counter only.
     let landed = false, clash = [];
-    for (let i = 0; i < 20 && !landed; i++) {
-      const next = `q_${Date.now().toString(36)}${idSeq.toString(36)}`;
+    withFixedIds(() => {
+      const next = `q_0${idSeq.toString(36)}`;
       clash = [{ id: 'z' }, { id: 'z' }, { id: next }];
       keepIdsUnique(clash, 'q');
       landed = clash[1].id === next;
-    }
+    });
     ok('the minted id was the one guessed', landed, ids(clash));
     ok('a later item holding a just-minted id is reminted too',
        new Set(clash.map((x) => x.id)).size === 3 && clash[0].id === 'z' && /^q_/.test(clash[2].id), ids(clash));

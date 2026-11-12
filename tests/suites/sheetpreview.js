@@ -170,8 +170,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
       ok('it reads File  PDF | HTML', !!fmt && fmt.querySelector('.rpv-format-label').textContent === 'File'
         && [...fmt.querySelectorAll('.toggle-btn')].map((b) => b.textContent).join('|') === 'PDF|HTML');
       ok('on HTML: Download HTML, the .html name', el('sheetPreviewDownload').textContent === 'Download HTML' && /_labels\.html$/.test(el('sheetPreviewName').textContent));
-      const acts = [...el('sheetPreviewDialog').querySelector('.rpv-actions').children];
-      ok('the foot: Print, then one Download (btn btn-primary, last)', acts.length === 2 && acts[0] === el('sheetPreviewPrint')
+      // The CSV button is a sheet's own (the monitoring report, js/reports.js): hidden here.
+      const acts = [...el('sheetPreviewDialog').querySelector('.rpv-actions').children].filter((b) => !b.hidden);
+      ok('the foot: Print, then one Download (btn btn-primary, last); no CSV for labels', el('sheetPreviewCsv').hidden && getComputedStyle(el('sheetPreviewCsv')).display === 'none' && acts.length === 2 && acts[0] === el('sheetPreviewPrint')
         && acts[1] === el('sheetPreviewDownload') && acts[1].classList.contains('btn') && acts[1].classList.contains('btn-primary'));
       fmt.querySelector('[data-format="pdf"]').click();
       ok('PDF picked: Download PDF, the .pdf name', reportFormat() === 'pdf' && el('sheetPreviewDownload').textContent === 'Download PDF'

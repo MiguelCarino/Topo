@@ -50,6 +50,8 @@
          A file rather than inline, because of the CSP above. -->
     <meta name="theme-color" content="#050505" id="carinoThemeColor">
     <script src="js/theme-boot.js"></script>
+    <!-- The idle lock (js/idlelock.js): in <head> so a locked tab is covered before it paints. -->
+    <script src="js/idlelock.js"></script>
     <link rel="stylesheet" href="carino-ui.css">
     <link rel="stylesheet" href="fonts/carino-fonts.css">
     <link rel="stylesheet" href="css/app.css">
@@ -150,6 +152,8 @@
                     <button id="saveNetworkBtn" class="cs-menu-item" role="menuitem">💾 Keep this network</button>
                     <div class="cs-menu-div" data-adv></div>
                     <button id="reportBtn" class="cs-menu-item" role="menuitem">📋 Site report <span class="cs-menu-note">printable</span></button>
+                    <!-- Availability, response times and outages (js/reports.js, step 7j). -->
+                    <button id="monitorReportBtn" class="cs-menu-item" role="menuitem" data-i18n>📈 Monitoring report</button>
                     <!-- A problem to report to the network's providers (js/incidents.js). Every view. -->
                     <button id="reportProblemMenuBtn" class="cs-menu-item" role="menuitem" data-i18n>⚠ Report a problem…</button>
                     <div class="cs-menu-div" data-adv></div>
@@ -213,6 +217,9 @@
                     <!-- Many at once (js/add.js): kinds × counts, a name pattern,
                          onto the selected switch or AP's next free ports. -->
                     <button id="addDevicesBtn" type="button" class="btn add-devices-btn" data-i18n>＋ Add devices…</button>
+                    <!-- This PC, read by the desktop app (js/thiscomputer.js, D166):
+                         through the Import… review. Hidden on the website. -->
+                    <button id="addThisPcBtn" type="button" class="btn add-devices-btn hidden" data-adv data-i18n>＋ Add this computer…</button>
                     <!-- The Simple and imagenology views' Report a problem
                          (js/incidents.js); the full editor has it in Export. -->
                     <button id="reportProblemBtn" type="button" class="btn report-problem-btn" data-i18n>⚠ Report a problem</button>
@@ -299,6 +306,7 @@
                      not closed, with Send again and Mark fixed
                      (renderProblemsSimpleAll, js/incidents.js). -->
                 <div id="problemsSimpleAll" class="inc-simple hidden" aria-live="polite"></div>
+                <section id="visitsWaitingSimple" class="vw-box inc-simple hidden" aria-live="polite"></section>
 
                 <!-- Several devices and/or cables selected (renderSelection,
                      js/ui.js): their counts and what applies to all of them.
@@ -776,6 +784,15 @@
                              in Simple view is ticked. Never in Full, which has the
                              section above; empty, and so hidden, by default. -->
                         <div id="historySimple" class="hist-simple" aria-live="polite"></div>
+                        <!-- Answer checks (js/checks.js, D155-D157, step 7f): what a
+                             PC that monitors asks this device, how it is now and
+                             its last 24 h. The desktop app only (hidden on the
+                             website and the zip, which never probe); Full editor
+                             only. -->
+                        <details id="checkGroup" class="asset-group check-group" data-adv hidden>
+                            <summary class="asset-sum"><span data-i18n>Answer checks</span><span id="checkSummary" class="asset-sum-note"></span></summary>
+                            <div id="checkBody" class="ck-body"></div>
+                        </details>
                         <!-- The Simple views: this device's problems not closed
                              (renderProblemsSimple, js/incidents.js). Never in
                              Full, which has the Problems tab. -->
@@ -928,6 +945,8 @@
                 <div id="cfgPanel-incidents" data-adv class="cfg-panel inc-panel hidden">
                     <p class="rail-note grp-intro" data-i18n>The problems reported on this network and the visits recorded for them.</p>
                     <p id="incidentsSummary" class="dlg-dim"></p>
+                    <!-- Provider visits waiting for the owner (js/visits.js). -->
+                    <section id="visitsWaiting" class="vw-box hidden" aria-live="polite"></section>
                     <p id="incidentsEmpty" class="rail-empty hidden" data-i18n>No problem has been reported on this network.</p>
                     <ul id="incidentList" class="inc-list"></ul>
                 </div>
@@ -996,6 +1015,10 @@
                  the visitor says so — autosaving those would fill the library
                  with copies of the example, or keep a client's network in
                  this browser without asking (renderDocBar, js/library.js). -->
+            <!-- The site monitors' open issues and a monitor that stopped
+                 reporting, on a page signed in to a Topo server (step 7h,
+                 js/monitors.js). A banner, not the app's card. -->
+            <div id="srvIssueBanner" class="srv-issue-banner" role="status" aria-live="polite" hidden></div>
             <div id="docBar" class="topo-docbar hidden" role="status" aria-live="polite">
                 <button id="docBarName" type="button" class="docbar-name" data-i18n-title title="Rename"></button>
                 <span id="docBarStatus" class="docbar-status"></span>
@@ -1373,6 +1396,10 @@
                              changed since — the only form of "back this up" anyone
                              reads twice. -->
                         <p id="binderStatus" class="landing-binder-status"></p>
+                        <!-- Parts sent to providers are kept until a copy comes back or
+                             the report is closed (docs/SCOPE.md D175): over the store's
+                             budget with only those left, this says so instead. -->
+                        <p id="revisionSpaceWarn" class="landing-binder-status stale" hidden data-i18n>Old sent copies are taking up space: close or merge them.</p>
                         <!-- Where the binder goes, once it is bound to a real file.
                              Ships hidden and stays hidden on every browser without
                              the File System Access API, so Firefox and Safari never
@@ -1451,6 +1478,55 @@
                                 <span><span data-i18n>Show address history in Simple view</span><br><span class="dlg-dim" data-i18n>A few plain lines under the selected device: the addresses, names and sockets it had at earlier back-ups and reports. Read only. Off by default.</span></span>
                             </label>
                         </section>
+                        <!-- The idle lock (js/idlelock.js, D165, D169, D213-D222):
+                             this PC's, never the document's; the website and
+                             the desktop app alike. -->
+                        <section class="set-sec" id="setLockSec" aria-labelledby="setLockHead">
+                            <h3 id="setLockHead" class="set-head" data-i18n>Screen lock</h3>
+                            <p class="dlg-dim set-note" data-i18n>After this long without use, Topo saves, closes the open network and covers the screen until it is unlocked. For this PC only.</p>
+                            <div class="set-field">
+                                <label class="prop-lbl" for="setLockAfter" data-i18n>Lock after</label>
+                                <select id="setLockAfter" class="select">
+                                    <option value="0" data-i18n>Off</option>
+                                    <option value="5" data-i18n>5 min</option>
+                                    <option value="15" data-i18n>15 min</option>
+                                    <option value="30" data-i18n>30 min</option>
+                                    <option value="60" data-i18n>60 min</option>
+                                    <option value="custom" data-i18n>Custom</option>
+                                </select>
+                            </div>
+                            <div class="set-field" id="setLockCustomRow" hidden>
+                                <label class="prop-lbl" for="setLockCustom" data-i18n>Minutes (1 to 1440)</label>
+                                <input type="number" id="setLockCustom" data-keys="int" class="input" min="1" max="1440" step="1">
+                            </div>
+                            <p class="set-note" id="setLockPinState"></p>
+                            <div id="setLockPinForm" hidden>
+                                <div class="set-field">
+                                    <label class="prop-lbl" for="setLockPin1" data-i18n>New PIN (4 to 12 digits)</label>
+                                    <input type="password" id="setLockPin1" class="input" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="new-password">
+                                </div>
+                                <div class="set-field">
+                                    <label class="prop-lbl" for="setLockPin2" data-i18n>The same PIN again</label>
+                                    <input type="password" id="setLockPin2" class="input" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="new-password">
+                                </div>
+                                <p class="set-note lock-set-msg" id="setLockPinMsg" role="status" aria-live="polite"></p>
+                                <div class="set-acts">
+                                    <button type="button" id="setLockPinSave" class="btn btn-primary" data-i18n>Save the PIN</button>
+                                    <button type="button" id="setLockPinCancel" class="btn" data-i18n>Cancel</button>
+                                </div>
+                            </div>
+                            <div class="set-acts">
+                                <button type="button" id="setLockPinSet" class="btn">Set a PIN…</button>
+                                <button type="button" id="setLockPinRemove" class="btn" data-i18n hidden>Remove the PIN</button>
+                                <button type="button" id="setLockNow" class="btn" data-i18n>Lock now</button>
+                            </div>
+                            <div class="set-note lock-set-note" id="setLockNoteRow" hidden>
+                                <p id="setLockNote"></p>
+                                <button type="button" id="setLockNoteOk" class="btn" data-i18n>OK</button>
+                            </div>
+                            <p class="dlg-dim set-note" data-i18n>Unlock with the PIN, or by signing in to your Topo server again with a code sent to your email. Each wrong PIN says how many tries are left, and after 10 only the sign-in unlocks. With no server to sign in to, the PIN can be forgotten from the fifth wrong try, which Settings then says, and after 10 each further try waits longer.</p>
+                            <p class="dlg-dim set-note" data-i18n>The lock stops someone using a screen left unattended. It is not encryption: the networks stay in this browser as before, and anyone who can use this PC's account can read them with the browser's own tools. Without a PIN or a sign-in it only hides the screen.</p>
+                        </section>
                         <!-- A back-up folder (js/backupdir.js, D108): Chrome and
                              Edge only (the File System Access API); hidden
                              elsewhere, where Download a back-up stays a download. -->
@@ -1467,6 +1543,141 @@
                                 <span><span data-i18n>Also back up a network I change, once a day</span><br><span class="dlg-dim" data-i18n>A minute after your last edit, while the browser still lets Topo use the folder. Topo keeps the last day, then one a day for a week, one a week for a month and one a month for a year, and deletes only files it wrote.</span></span>
                             </label>
                         </section>
+                        <!-- This computer (js/thiscomputer.js, D166): the desktop
+                             app only. This PC's own interfaces, read by the app and
+                             added through the Import… review. -->
+                        <section class="set-sec" id="setTcSec" aria-labelledby="setTcHead" hidden>
+                            <h3 id="setTcHead" class="set-head" data-i18n>This computer</h3>
+                            <p class="dlg-dim set-note" data-i18n>Adds this PC to the open network: its name, its network cards with their addresses, and their subnets, read from this PC alone. Nothing is sent onto the network, the default gateway is only shown, and the review shows everything before it is kept.</p>
+                            <div class="set-acts">
+                                <button type="button" id="setTcAdd" class="btn btn-primary" data-i18n>Add this computer…</button>
+                            </div>
+                        </section>
+                        <!-- Monitor from this PC (js/checks.js, D131, step 7f): the
+                             desktop app only, off as shipped. The app asks each
+                             device and service with an answer check one question
+                             and keeps the statistics on this PC. Hidden on the
+                             website and the offline zip, which never probe. -->
+                        <section class="set-sec" id="setMonSec" aria-labelledby="setMonHead" hidden>
+                            <h3 id="setMonHead" class="set-head" data-i18n>Monitor from this PC</h3>
+                            <p class="dlg-dim set-note" data-i18n>Asks each device and service with an answer check one question, "are you answering?", from this PC, and keeps how long they take. It never scans or discovers anything, and never reads a device's settings.</p>
+                            <label class="set-row">
+                                <input type="checkbox" id="setMonOn">
+                                <span data-i18n>Monitor from this PC</span>
+                            </label>
+                            <div class="mon-offer" id="setMonOffer" hidden>
+                                <p class="set-note" id="setMonOfferText"></p>
+                                <label class="set-row">
+                                    <input type="checkbox" id="setMonOfferTray" checked>
+                                    <span data-i18n>Keep Topo in the system tray when the window is closed</span>
+                                </label>
+                                <label class="set-row">
+                                    <input type="checkbox" id="setMonOfferAuto" checked>
+                                    <span data-i18n>Open Topo at sign-in</span>
+                                </label>
+                                <div class="set-acts">
+                                    <button type="button" id="setMonOfferGo" class="btn btn-primary" data-i18n>Turn on</button>
+                                    <button type="button" id="setMonOfferCancel" class="btn" data-i18n>Cancel</button>
+                                </div>
+                            </div>
+                            <p class="set-note ds-status" id="setMonStatus" role="status" aria-live="polite"></p>
+                            <div id="setMonOnBox" class="mon-on" hidden>
+                                <button type="button" id="setMonOther" class="btn" data-i18n hidden>Monitor this network instead</button>
+                                <label class="set-row">
+                                    <input type="checkbox" id="setMonTray">
+                                    <span data-i18n>Keep Topo in the system tray when the window is closed</span>
+                                </label>
+                                <label class="set-row">
+                                    <input type="checkbox" id="setMonAuto">
+                                    <span data-i18n>Open Topo at sign-in</span>
+                                </label>
+                                <div class="set-field">
+                                    <label class="prop-lbl" for="setMonQuiet" data-i18n>Quiet the whole site (maintenance)</label>
+                                    <select id="setMonQuiet" class="select">
+                                        <option value="" data-i18n>Quiet for…</option>
+                                        <option value="1h" data-i18n>For 1 hour</option>
+                                        <option value="4h" data-i18n>For 4 hours</option>
+                                        <option value="morning" data-i18n>Until 08:00 tomorrow</option>
+                                        <option value="24h" data-i18n>For 24 hours</option>
+                                        <option value="end" data-i18n hidden>End the quiet</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="set-field">
+                                <label class="prop-lbl" for="setMonKeep" data-i18n>Keep statistics</label>
+                                <select id="setMonKeep" class="select">
+                                    <option value="0">Off</option>
+                                    <option value="30">30</option>
+                                    <option value="90">90</option>
+                                    <option value="180">180</option>
+                                    <option value="360">360</option>
+                                    <option value="720">720</option>
+                                    <option value="3650">3650</option>
+                                </select>
+                            </div>
+                            <p class="dlg-dim set-note" id="setMonKeepSite" hidden></p>
+                            <p class="dlg-dim set-note" data-i18n>Kept on this PC only: every check for 7 days, and hourly figures for as long as chosen here. Off keeps nothing; the states still show.</p>
+                            <p class="dlg-dim set-note" data-i18n>On some desktops (Wayland among them) the tray icon may not show. Then Topo keeps checking only while its window is open.</p>
+                            <!-- This PC as the site's monitor (js/monitors.js, step 7h):
+                                 the app, connected to a Topo server, on a network kept there. -->
+                            <div class="set-sub" id="setSiteMon" hidden>
+                                <h4 class="set-head" data-i18n>The site's monitor</h4>
+                                <p class="set-note ds-status" id="setSiteMonStatus" role="status" aria-live="polite"></p>
+                                <div id="setSiteMonGroups" class="site-mon-groups" hidden></div>
+                                <div class="set-acts">
+                                    <button type="button" id="setSiteMonOn" class="btn btn-primary" data-i18n hidden>Make this PC the site's monitor</button>
+                                    <button type="button" id="setSiteMonOff" class="btn" data-i18n hidden>Stop being the site's monitor</button>
+                                </div>
+                            </div>
+                            <!-- Show alarms on this PC (js/issues.js, desktop/alarm.html, step 7g) -->
+                            <div class="set-sub" id="setAlarmBox" hidden>
+                                <label class="set-row">
+                                    <input type="checkbox" id="setAlarmOn">
+                                    <span data-i18n>Show alarms on this PC</span>
+                                </label>
+                                <p class="dlg-dim set-note" data-i18n>When a device stops answering, a card covers every screen of this PC with its name, how long it has been down and what is behind it, with a short chime (the volume is left as it is), and a system notification goes out. It stays an open issue until someone acknowledges it, reports it or marks it expected. A device answering again is a small notification only.</p>
+                                <p class="dlg-dim set-note" data-i18n>On Wayland a window cannot always stay above the others, and with several screens the card may show on one of them only: there the system notification is the one to rely on.</p>
+                                <div class="set-acts">
+                                    <button type="button" id="setAlarmTest" class="btn" data-i18n>Test the alarm</button>
+                                </div>
+                            </div>
+                        </section>
+                        <!-- Connect to a Topo server (js/desktopclient.js, D144):
+                             the desktop app only. This window becomes a client
+                             of a Topo server; every request goes through the
+                             app (Rust), so the page's CSP is unchanged. Hidden
+                             on the website and the offline zip. -->
+                        <section class="set-sec" id="setDcSec" aria-labelledby="setDcHead" hidden>
+                            <h3 id="setDcHead" class="set-head" data-i18n>Connect to a Topo server</h3>
+                            <p class="dlg-dim set-note" data-i18n>This window keeps networks on a Topo server and syncs with the other PCs that use it. Sign in with your email, as in a browser.</p>
+                            <p class="set-note ds-status" id="setDcStatus" role="status" aria-live="polite"></p>
+                            <div id="setDcForm">
+                                <div class="set-field">
+                                    <label class="prop-lbl" for="setDcUrl" data-i18n>Server address</label>
+                                    <input type="text" id="setDcUrl" data-keys="code" class="input" maxlength="300" autocomplete="off" spellcheck="false" placeholder="https://192.168.1.20:7380">
+                                </div>
+                                <div class="set-acts">
+                                    <button type="button" id="setDcConnect" class="btn btn-primary" data-i18n>Connect</button>
+                                </div>
+                            </div>
+                            <div class="dc-compare" id="setDcCompare" hidden>
+                                <p class="set-note" data-i18n>This server signs its own certificate. Compare this fingerprint with the one the server shows (on the server PC: Settings, This PC as the server, or its log). Connect only if they are the same.</p>
+                                <p class="set-note"><span data-i18n>Certificate fingerprint (SHA-256):</span> <code id="setDcFp" class="ds-code"></code></p>
+                                <div class="set-acts">
+                                    <button type="button" id="setDcTrust" class="btn btn-primary" data-i18n>They are the same: connect</button>
+                                    <button type="button" id="setDcCancel" class="btn" data-i18n>Cancel</button>
+                                </div>
+                            </div>
+                            <div id="setDcOn" hidden>
+                                <p class="set-note"><span data-i18n>Server:</span> <code id="setDcAddr" class="ds-code"></code></p>
+                                <p class="set-note" id="setDcPinRow" hidden><span data-i18n>Certificate fingerprint (SHA-256):</span> <code id="setDcPin" class="ds-code"></code></p>
+                                <div class="set-acts">
+                                    <button type="button" id="setDcSignIn" class="btn btn-primary" data-i18n hidden>Sign in</button>
+                                    <button type="button" id="setDcAgain" class="btn" data-i18n hidden>Check the certificate again</button>
+                                    <button type="button" id="setDcDisconnect" class="btn" data-i18n>Disconnect</button>
+                                </div>
+                            </div>
+                        </section>
                         <!-- This PC as the server (js/desktopserver.js, D113, D125):
                              the desktop app only, where the bundled topo-server
                              answers; hidden on the website and the offline zip.
@@ -1480,6 +1691,7 @@
                             <p class="set-note ds-fp" id="setDsFpRow" hidden><span data-i18n>Certificate fingerprint (SHA-256):</span> <code id="setDsFp" class="ds-code"></code><br><span class="dlg-dim" data-i18n>Each other PC's browser warns about the certificate once. Check that it shows this fingerprint, then go on to the page.</span></p>
                             <div class="set-acts">
                                 <button type="button" id="setDsStart" class="btn btn-primary" data-i18n>Start</button>
+                                <button type="button" id="setDsHere" class="btn btn-primary" data-i18n hidden>Open it in this window</button>
                                 <button type="button" id="setDsStop" class="btn" data-i18n hidden>Stop</button>
                             </div>
                             <label class="set-row" id="setDsEnabledRow">
@@ -1573,9 +1785,127 @@
                                 <input type="email" id="setReporterEmail" data-keys="email" class="input" maxlength="200" autocomplete="email">
                             </div>
                         </section>
+                        <!-- The welcome (js/welcome.js, D141-D143, D170): its
+                             questions again, on the website and in the app. -->
+                        <section class="set-sec" id="setWelcomeSec" aria-labelledby="setWelcomeHead">
+                            <h3 id="setWelcomeHead" class="set-head" data-i18n>Welcome</h3>
+                            <p class="dlg-dim set-note" data-i18n>The questions Topo asks the first time: how it looks, the view, where networks are kept, the screen lock and how to start.</p>
+                            <div class="set-acts">
+                                <button type="button" id="setWelcomeAgain" class="btn" data-i18n>Run the welcome again</button>
+                            </div>
+                        </section>
                     </div>
                     <div class="modal-foot">
                         <button type="button" id="settingsDoneBtn" class="btn btn-primary" data-i18n>Done</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- The first-run welcome (js/welcome.js; docs/SCOPE.md D141-D143,
+                 D170, D326-D335). Once per PC or browser, on a plain start;
+                 never for a link, an intake or a mode entry. Every step can
+                 be skipped; each one hands over to the piece that already
+                 does it (the theme switch, the mode picker's profile, the
+                 desktop app's Connect to a Topo server and This PC as the
+                 server, the screen lock, This computer, Monitor from this
+                 PC, the landing's Open a file, Add devices and New network). -->
+            <div id="welcomeDialog" class="modal-scrim" hidden>
+                <div class="modal topo-welcome" role="dialog" aria-modal="true" aria-labelledby="wlTitle">
+                    <div class="modal-head">
+                        <h2 id="wlTitle" class="modal-title" data-i18n>Welcome to Topo</h2>
+                        <button type="button" class="modal-x" id="wlClose" data-close data-i18n-aria-label aria-label="Skip the welcome" data-i18n-title title="Skip the welcome">✕</button>
+                    </div>
+                    <div class="modal-body wl-body">
+                        <p class="wl-count" id="wlCount" aria-live="polite"></p>
+                        <section class="wl-step" data-step="theme" hidden>
+                            <h3 class="wl-head" data-i18n>How should Topo look?</h3>
+                            <div class="wl-choices" id="wlThemes">
+                                <button type="button" class="wl-choice" data-theme="gold" aria-pressed="false"><b data-i18n>Gold</b><span class="wl-blurb" data-i18n>Gold on black.</span></button>
+                                <button type="button" class="wl-choice" data-theme="color" aria-pressed="false"><b data-i18n>Colourful</b><span class="wl-blurb" data-i18n>Blue accents, light or dark as this PC is set.</span></button>
+                            </div>
+                            <p class="dlg-dim wl-note" data-i18n>Change it any time with the switch beside the Carino name at the top.</p>
+                        </section>
+                        <section class="wl-step" data-step="mode" hidden>
+                            <h3 class="wl-head" data-i18n>How will you use Topo?</h3>
+                            <div class="wl-choices" id="wlModes">
+                                <button type="button" class="wl-choice" data-mode="full" aria-pressed="false"><b data-i18n>Document the network</b><span class="wl-blurb" data-i18n>The full editor: every device and technical detail, with addresses, cables, racks and findings.</span></button>
+                                <button type="button" class="wl-choice" data-mode="simple" aria-pressed="false"><b data-i18n>Report problems</b><span class="wl-blurb" data-i18n>The simple view: the devices in plain words, for people who are not technical.</span></button>
+                            </div>
+                            <div class="wl-purpose" id="wlPurpose" hidden>
+                                <p class="wl-sub" data-i18n>What are you documenting?</p>
+                                <div class="wl-choices" id="wlProfiles"></div>
+                            </div>
+                            <p class="dlg-dim wl-note" data-i18n>Change it any time with Something missing? Try another mode.</p>
+                        </section>
+                        <section class="wl-step" data-step="where" hidden>
+                            <h3 class="wl-head" data-i18n>Where are your networks kept?</h3>
+                            <div class="wl-choices" id="wlWhereApp">
+                                <button type="button" class="wl-choice" data-where="here" aria-pressed="false"><b data-i18n>On this PC only</b><span class="wl-blurb" data-i18n>Networks stay in Topo on this PC. Back them up as files.</span></button>
+                                <button type="button" class="wl-choice" data-where="connect" aria-pressed="false"><b data-i18n>Connect to a Topo server</b><span class="wl-blurb" data-i18n>Your organisation already has one: its address, then sign in with your email.</span></button>
+                                <button type="button" class="wl-choice" data-where="server" aria-pressed="false" hidden><b data-i18n>Make this PC the server</b><span class="wl-blurb" data-i18n>Other PCs on site sign in to Topo and sync with this one. It runs in the background from startup, even when Topo is closed.</span></button>
+                            </div>
+                            <div id="wlWhereWeb" hidden>
+                                <div class="wl-choices">
+                                    <div class="wl-choice wl-fixed" aria-pressed="true"><b data-i18n>On this browser</b><span class="wl-blurb" data-i18n>Networks stay in this browser on this PC. Back them up as files.</span></div>
+                                </div>
+                                <p class="dlg-dim wl-note" data-i18n>A Topo server opens at its own address: if your organisation has one, open that address in the browser and sign in there.</p>
+                            </div>
+                        </section>
+                        <section class="wl-step" data-step="lock" hidden>
+                            <h3 class="wl-head" data-i18n>Lock the screen when nobody is using it?</h3>
+                            <p class="wl-text" data-i18n>After this long without use, Topo saves, closes the open network and covers the screen until it is unlocked. For this PC only.</p>
+                            <div class="wl-field">
+                                <label class="prop-lbl" for="wlLockAfter" data-i18n>Lock after</label>
+                                <select id="wlLockAfter" class="select">
+                                    <option value="0" data-i18n>Off</option>
+                                    <option value="5" data-i18n>5 min</option>
+                                    <option value="15" data-i18n>15 min</option>
+                                    <option value="30" data-i18n>30 min</option>
+                                    <option value="60" data-i18n>60 min</option>
+                                </select>
+                            </div>
+                            <div id="wlPinBox">
+                                <div class="wl-field">
+                                    <label class="prop-lbl" for="wlPin1" data-i18n>PIN to unlock (4 to 12 digits, optional)</label>
+                                    <input type="password" id="wlPin1" class="input" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="new-password">
+                                </div>
+                                <div class="wl-field">
+                                    <label class="prop-lbl" for="wlPin2" data-i18n>The same PIN again</label>
+                                    <input type="password" id="wlPin2" class="input" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="new-password">
+                                </div>
+                            </div>
+                            <p class="wl-msg" id="wlLockMsg" role="status" aria-live="polite"></p>
+                            <p class="dlg-dim wl-note" data-i18n>Without a PIN the lock only hides the screen. It is not encryption of what this PC keeps.</p>
+                        </section>
+                        <section class="wl-step" data-step="pc" hidden>
+                            <h3 class="wl-head" data-i18n>This PC</h3>
+                            <label class="wl-tick" id="wlAddPcRow">
+                                <input type="checkbox" id="wlAddPc">
+                                <span><b data-i18n>Add this computer to the map</b><span class="wl-blurb" data-i18n>Its name, its network cards with their addresses, and their subnets, read from this PC alone. The review shows everything before it is kept.</span></span>
+                            </label>
+                            <label class="wl-tick" id="wlMonitorRow">
+                                <input type="checkbox" id="wlMonitor">
+                                <span><b data-i18n>Monitor from this PC</b><span class="wl-blurb" data-i18n>Topo asks each device you mark one question, "are you answering?", and keeps how long it takes; it never scans or discovers anything, and never reads a device's settings.</span></span>
+                            </label>
+                            <p class="dlg-dim wl-note" data-i18n>Both happen once a network is open, through Settings and the review.</p>
+                        </section>
+                        <section class="wl-step" data-step="start" hidden>
+                            <h3 class="wl-head" id="wlStartHead" data-i18n>How do you want to start?</h3>
+                            <div class="wl-choices" id="wlStarts">
+                                <button type="button" class="wl-choice" id="wlOpenFile"><b data-i18n>Open a file</b><span class="wl-blurb" data-i18n>A network someone saved from Topo.</span></button>
+                                <button type="button" class="wl-choice" id="wlMapNow"><b data-i18n>Map the network now</b><span class="wl-blurb" data-i18n>Count what you have and the network draws itself.</span></button>
+                                <button type="button" class="wl-choice" id="wlEmpty"><b data-i18n>An empty network</b><span class="wl-blurb" data-i18n>Draw it yourself, device by device.</span></button>
+                            </div>
+                            <div id="wlHandoff" hidden>
+                                <p class="wl-text" id="wlHandoffText"></p>
+                                <button type="button" class="btn btn-primary" id="wlHandoffGo" data-i18n>Open Settings</button>
+                            </div>
+                        </section>
+                    </div>
+                    <div class="modal-foot wl-foot">
+                        <button type="button" id="wlBack" class="btn" data-i18n>Back</button>
+                        <button type="button" id="wlSkip" class="btn" data-i18n>Skip this step</button>
+                        <button type="button" id="wlNext" class="btn btn-primary" data-i18n>Next</button>
                     </div>
                 </div>
             </div>
@@ -1736,10 +2066,14 @@
                     <p id="sheetPreviewStatus" class="rpv-status" role="status" aria-live="polite"></p>
                     <div id="sheetPreviewOpts" class="rpv-opts" hidden>
                         <p id="sheetPreviewBlurb" class="dlg-blurb"></p>
+                        <!-- A sheet's own choices (the monitoring report,
+                             js/reports.js): filled by the sheet's cfg.controls. -->
+                        <div id="sheetPreviewControls" class="sheet-pv-controls" hidden></div>
                     </div>
                     <p id="sheetPreviewName" class="rpv-name"></p>
                     <div class="rpv-actions">
                         <button id="sheetPreviewPrint" type="button" class="btn" data-i18n>🖨 Print</button>
+                        <button id="sheetPreviewCsv" type="button" class="btn" hidden data-i18n>⬇ CSV</button>
                         <button id="sheetPreviewDownload" type="button" class="btn btn-primary">Download PDF</button>
                     </div>
                   </aside>
@@ -2046,6 +2380,11 @@
                                 <p id="visitChangesSummary" class="dlg-dim"></p>
                                 <ul id="visitChanges" class="vs-changes"></ul>
                             </section>
+                            <!-- Monitor during this visit (js/visitmonitor.js, step 7i) -->
+                            <section id="visitMonitoring" class="pb-sec" aria-labelledby="visitMonitoringHead" hidden>
+                                <h3 id="visitMonitoringHead" class="pb-head" data-i18n>Monitoring during the visit</h3>
+                                <p id="visitMonitoringText" class="dlg-dim"></p>
+                            </section>
                         </div>
                         <div id="visitReturn" hidden>
                             <p id="visitReturnHead" class="restore-name"></p>
@@ -2067,6 +2406,7 @@
                                 <button type="button" id="visitCopyMsgBtn" class="btn hidden"></button>
                                 <button type="button" id="visitCopyLinkBtn" class="btn hidden"></button>
                                 <button type="button" id="visitFileBtn" class="btn hidden"></button>
+                                <button type="button" id="visitReportBtn" class="btn hidden"></button>
                             </div>
                         </div>
                         <p id="visitError" class="dlg-error" role="alert"></p>
@@ -2152,6 +2492,30 @@
                         <p id="mergeDelta" class="paste-delta" role="status" aria-live="polite"></p>
                         <ul id="mergeNotes" class="merge-notes" hidden></ul>
                         <ul id="mergeList" class="merge-list"></ul>
+                        <!-- A provider's visit (js/visits.js, docs/SCOPE.md D153):
+                             the changes applied or rejected, the visit judged,
+                             a note for the provider (renderMergeVisit). -->
+                        <div id="mergeVisit" class="merge-visit" hidden>
+                            <p id="mergeVisitHead" class="merge-visit-head"></p>
+                            <div class="merge-visit-q">
+                                <span id="mergeVisitChangesLabel" class="merge-fname">The changes</span>
+                                <div class="merge-acts" role="group" aria-labelledby="mergeVisitChangesLabel">
+                                    <button type="button" class="btn merge-btn" data-visit-changes="apply" aria-pressed="true">Apply as reviewed</button>
+                                    <button type="button" class="btn merge-btn" data-visit-changes="reject" aria-pressed="false">Reject: apply nothing</button>
+                                </div>
+                            </div>
+                            <div class="merge-visit-q">
+                                <span id="mergeVisitOutcomeLabel" class="merge-fname">The visit</span>
+                                <div class="merge-acts" role="group" aria-labelledby="mergeVisitOutcomeLabel">
+                                    <button type="button" class="btn merge-btn" data-visit-outcome="successful" aria-pressed="false">Successful</button>
+                                    <button type="button" class="btn merge-btn" data-visit-outcome="not-successful" aria-pressed="false">Not successful</button>
+                                    <button type="button" class="btn merge-btn" data-visit-outcome="undecided" aria-pressed="true">Undecided</button>
+                                </div>
+                            </div>
+                            <label class="merge-visit-note"><span id="mergeVisitNoteLabel" class="merge-fname">A note for the provider (optional)</span>
+                                <textarea id="mergeVisitNote" class="textarea" rows="2" maxlength="2000" data-keys="prose"></textarea></label>
+                            <p id="mergeVisitSays" class="dlg-dim merge-visit-says" role="status" aria-live="polite"></p>
+                        </div>
                     </div>
                     <div class="modal-foot">
                         <button type="button" id="mergeCancelBtn" class="btn" data-close data-i18n>Cancel</button>
@@ -2396,6 +2760,57 @@
 
     </div>
 
+    <!-- The idle lock's cover (js/idlelock.js, D165, D169, D213-D222): over
+         everything, the only thing on screen while this browser is locked.
+         #lockAlarms sits above it, for the alarm card (7g). -->
+    <div id="lockCover" class="lock-cover" role="dialog" aria-modal="true" aria-labelledby="lockTitle" hidden>
+        <div class="lock-card">
+            <div class="lock-mark" aria-hidden="true">
+                <img class="mk-gold" src="logo.svg" alt="" width="58" height="58" decoding="async">
+                <img class="mk-color" src="logo-color.svg" alt="" width="58" height="58" decoding="async">
+            </div>
+            <h1 id="lockTitle" class="lock-title" data-i18n>Topo is locked</h1>
+            <p id="lockWhen" class="lock-when"></p>
+            <p id="lockInPlace" class="lock-line" hidden></p>
+            <p id="lockAsk" class="lock-ask" hidden></p>
+            <div id="lockPinRow" class="lock-row" hidden>
+                <label class="prop-lbl" for="lockPin" data-i18n>PIN</label>
+                <div class="lock-pin-line">
+                    <input type="password" id="lockPin" class="input lock-pin" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">
+                    <button type="button" id="lockPinBtn" class="btn btn-primary" data-i18n>Unlock</button>
+                </div>
+            </div>
+            <p id="lockState" class="lock-msg err" aria-live="polite" hidden></p>
+            <p id="lockMsg" class="lock-msg" role="status" aria-live="polite"></p>
+            <div id="lockPlain" class="lock-row" hidden>
+                <button type="button" id="lockPlainBtn" class="btn btn-primary lock-wide" data-i18n>Unlock</button>
+                <p id="lockPlainNote" class="lock-line dlg-dim"></p>
+            </div>
+            <div id="lockSignIn" class="lock-row" hidden>
+                <p id="lockSignInLead" class="lock-line"></p>
+                <button type="button" id="lockSendCode" class="btn lock-wide" data-i18n>Send a code</button>
+                <button type="button" id="lockRetry" class="btn lock-wide" data-i18n hidden>Try the server again</button>
+                <div id="lockCodeRow" hidden>
+                    <label class="prop-lbl" for="lockCode" data-i18n>Code from the email</label>
+                    <div class="lock-pin-line">
+                        <input type="text" id="lockCode" class="input lock-pin" data-keys="int" maxlength="6">
+                        <button type="button" id="lockVerify" class="btn btn-primary" data-i18n>Unlock</button>
+                    </div>
+                </div>
+            </div>
+            <div id="lockForget" class="lock-row" hidden>
+                <p id="lockForgetSure" class="lock-line" data-i18n hidden>Forgetting the PIN unlocks this screen and removes the PIN from this PC. Your networks stay in this browser: the lock never encrypted them. Settings will say when it was forgotten.</p>
+                <button type="button" id="lockForgetBtn" class="btn lock-wide" data-i18n>Forgot the PIN?</button>
+            </div>
+            <div id="lockForgetNet" class="lock-row" hidden>
+                <p id="lockForgetNetSure" class="lock-line" data-i18n hidden>This deletes from this PC the network that was open and every network from your Topo server kept here, and signs you out here. They stay on the server; changes not sent yet are lost.</p>
+                <button type="button" id="lockForgetNetBtn" class="btn lock-wide" data-i18n>Forget the network and unlock</button>
+            </div>
+            <button type="button" id="lockNotNow" class="btn lock-wide" data-i18n hidden>Not now</button>
+        </div>
+    </div>
+    <div id="lockAlarms" class="lock-alarms"></div>
+
     <script src="js/oui.js"></script>
     <script src="js/state.js"></script>
     <script src="js/i18n.js"></script>
@@ -2440,11 +2855,13 @@
     <script src="js/incidents.js"></script>
     <script src="js/providermode.js"></script>
     <script src="js/providerreport.js"></script>
+    <script src="js/visits.js"></script>
     <script src="js/servercrypto.js"></script>
     <script src="js/server.js"></script>
     <script src="js/serversync.js"></script>
     <script src="js/serverui.js"></script>
     <script src="js/backupfile.js"></script>
+    <script src="js/desktopclient.js"></script>
     <script src="js/importers/common.js"></script>
     <script src="js/importers/registry.js"></script>
     <script src="js/importers/netbox.js"></script>
@@ -2457,6 +2874,13 @@
     <script src="js/importers/phpipam.js"></script>
     <script src="js/netboxexport.js"></script>
     <script src="js/importui.js"></script>
+    <script src="js/thiscomputer.js"></script>
+    <script src="js/checks.js"></script>
+    <script src="js/issues.js"></script>
+    <script src="js/monitors.js"></script>
+    <script src="js/visitmonitor.js"></script>
+    <script src="js/reports.js"></script>
+    <script src="js/welcome.js"></script>
     <script src="js/app.js"></script>
     <script src="js/settings.js"></script>
 <script src="carino-navbar.js" data-app="Topo" data-repo="Topo" data-license="AGPL-3.0" defer></script>

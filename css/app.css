@@ -981,6 +981,32 @@ html, body { overscroll-behavior-y: none; }
     .topo-merge .btn, .topo-merge .toggle-btn, .topo-merge .select { min-height: 44px; }
     .topo-merge .modal-x { min-width: 44px; min-height: 44px; }
 }
+/* Provider visits through the owner (js/visits.js, docs/SCOPE.md D153):
+   the list waiting in the Problems tab and the Simple view, and the merge
+   review's foot for a visit. */
+.vw-box { margin: 0 0 12px; padding: 10px; border: 1px solid var(--warn, #b45309); border-radius: 8px; min-width: 0; }
+.vw-box.hidden { display: none; }
+.vw-sub { margin: 0 0 2px; font-weight: 600; }
+.vw-note { margin: 0 0 8px; font-size: var(--fs-sm); }
+.vw-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.vw-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head btn" "line btn"; gap: 2px 8px; align-items: center; min-width: 0; }
+.vw-head { grid-area: head; font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+.vw-line { grid-area: line; font-size: var(--fs-sm); overflow-wrap: anywhere; min-width: 0; }
+.vw-review { grid-area: btn; min-height: 44px; }
+@media (max-width: 640px) {
+    .vw-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "line" "btn"; }
+    .vw-review { width: 100%; }
+}
+.landing-card-visits { display: block; font-size: var(--fs-micro, 12px); color: var(--warn, #b45309); font-weight: 600; overflow-wrap: anywhere; }
+.pm-visit-decision { display: block; font-size: var(--fs-sm); color: var(--text-sec); font-style: italic; overflow-wrap: anywhere; }
+.merge-visit { margin-top: 12px; padding: 10px; border: 1px solid var(--accent); border-radius: 8px; display: grid; gap: 10px; min-width: 0; }
+.merge-visit[hidden] { display: none; }
+.merge-visit-head { margin: 0; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.merge-visit-q { display: grid; gap: 4px; min-width: 0; }
+.merge-visit-note { display: grid; gap: 4px; min-width: 0; }
+.merge-visit-note textarea { width: 100%; min-height: 44px; font-size: 16px; resize: vertical; box-sizing: border-box; }
+.merge-visit-says { margin: 0; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.merge-row.merge-out { border-style: dashed; }
 /* Expected life by type: one row per type, its count here, the years. */
 .life-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
 .life-row { display: grid; grid-template-columns: 1fr auto 5.5rem auto; align-items: center; gap: 8px; }
@@ -3507,6 +3533,29 @@ body.pm-bar .topo-table, body.pm-bar .topo-rack { padding-top: calc(max(16px, ca
 .pm-visit-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .pm-visit { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .pm-visit-notes { display: block; margin-top: 4px; color: var(--text-sec); white-space: pre-wrap; }
+/* The monitoring report's choices and CSV in the sheet preview (js/reports.js,
+   step 7j): the preview's own buttons hide with [hidden]; the choices are
+   the column's selects and ticks, 44px on a phone. */
+#sheetPreviewCsv[hidden], .sheet-pv-controls[hidden] { display: none !important; }
+.sheet-pv-controls { display: flex; flex-direction: column; gap: 6px; }
+.sheet-pv-controls fieldset { margin-top: 6px; }
+.sheet-pv-controls .select { width: 100%; }
+@media (max-width: 760px) {
+    .sheet-pv-controls .select { min-height: 44px; }
+    .sheet-pv-controls label:has(input) { min-height: 44px; align-items: center; }
+}
+.ck-report { margin-top: 8px; }
+.pv-tick { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+
+/* Monitor during this visit (js/visitmonitor.js, step 7i). */
+.vm-sec .vm-line { margin: 4px 0; }
+.vm-list, .vm-outages { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 4px; font-size: var(--fs-sm); }
+.vm-row { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.vm-row .vm-name { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.vm-row .vm-now { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
+.vm-out { overflow-wrap: anywhere; color: var(--text-sec); }
+.vm-out-on { color: var(--err, #dc2626); }
+.vm-report .vm-table { display: block; overflow-x: auto; max-width: 100%; }
 .vs-times { align-items: flex-end; }
 .vs-time, .vs-field { display: grid; gap: 2px; flex: 1 1 11rem; min-width: 0; }
 .vs-time .input, .vs-field .input { width: 100%; }
@@ -3542,6 +3591,15 @@ body:not(.simple-mode) .inc-simple { display: none; }
 #noSelectionPane.hidden ~ #problemsSimpleAll { display: none; }
 .pm-status.pm-closed { background: color-mix(in srgb, var(--ok, #16a34a) 15%, transparent); }
 .pm-status.pm-open, .pm-status.pm-sent { background: color-mix(in srgb, var(--warn, #d97706) 18%, transparent); }
+/* An outage (js/issues.js, step 7g): amber while it is not answering, a
+   softer look once it answers again (it still waits for someone to act). */
+.inc-row.inc-outage { border-left: 4px solid var(--warn, #d97706); }
+.inc-row.inc-outage.inc-recovered { border-left-color: color-mix(in srgb, var(--warn, #d97706) 40%, var(--border)); }
+.inc-row.inc-outage.inc-recovered .inc-when-line { color: var(--text-sec); }
+.inc-row.inc-outage.inc-closed { border-left-color: var(--border); }
+.pm-status.pm-down { background: color-mix(in srgb, var(--warn, #d97706) 28%, transparent); color: var(--text); }
+.pm-status.pm-recovered { background: color-mix(in srgb, var(--warn, #d97706) 10%, transparent); }
+.set-sub { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
 .landing-card-problems { display: block; font-size: var(--fs-micro, 12px); color: var(--warn, #b45309); font-weight: 600; overflow-wrap: anywhere; }
 @media (pointer: coarse) {
     .inc-acts .btn, .inc-where .link-btn { min-height: 44px; min-width: 44px; }
@@ -3622,6 +3680,13 @@ body:not(.simple-mode) .inc-simple { display: none; }
     .topo-settings .ds-logbox summary { min-height: 44px; display: flex; align-items: center; }
     #setDsSec .input, #setDsSec .select { font-size: 16px; min-height: 44px; }
 }
+/* Settings, Connect to a Topo server (js/desktopclient.js, D144): the same
+   status line and code blocks as This PC as the server. */
+.topo-settings #setDcOn[hidden], .topo-settings #setDcForm[hidden], .topo-settings .dc-compare[hidden] { display: none; }
+.topo-settings .dc-compare { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+@media (pointer: coarse), (max-width: 640px) {
+    #setDcSec .input { font-size: 16px; min-height: 44px; }
+}
 /* Settings, Back-ups (js/backupdir.js). */
 .set-acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
 .set-folder { overflow-wrap: anywhere; }
@@ -3692,3 +3757,169 @@ body:not(.simple-mode) .inc-simple { display: none; }
    default radio and checkbox margins put the box off centre (M60). */
 .imp-ask { display: grid; gap: 4px; margin: 8px 0; min-width: 0; }
 .imp-ask input { min-height: 44px; font-size: 16px; width: 100%; max-width: 24rem; box-sizing: border-box; }
+
+/* ============================================================
+   The idle lock's cover (js/idlelock.js, D165, D213-D222). Over
+   everything; while a tab is locked (html.topo-locked) the rest of the
+   page is not drawn at all, so nothing of the network shows through,
+   not even before the boot has finished. #lockAlarms is the one layer
+   above it: the alarm card (7g) shows there while locked.
+   ============================================================ */
+html.topo-locked body > :not(#lockCover):not(#lockAlarms) { visibility: hidden !important; }
+html.topo-locked body { overflow: hidden; }
+.lock-cover {
+    position: fixed; inset: 0; z-index: 2147483640; overflow-y: auto;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: max(48px, 12vh) 16px 32px; box-sizing: border-box;
+    background: radial-gradient(1100px 560px at 50% -8%, rgba(234, 179, 8, 0.08), transparent 70%), var(--bg);
+    color: var(--text); font-family: var(--sans);
+}
+.lock-cover[hidden] { display: none; }
+.lock-card {
+    width: 100%; max-width: 380px; min-width: 0; box-sizing: border-box;
+    display: flex; flex-direction: column; gap: 12px; text-align: center;
+}
+.lock-mark { display: flex; justify-content: center; }
+.lock-mark img { height: 58px; width: auto; display: block; }
+.lock-mark img.mk-color, :root[data-carino-theme="color"] .lock-mark img.mk-gold { display: none; }
+:root[data-carino-theme="color"] .lock-mark img.mk-color { display: block; }
+.lock-title { font-family: var(--display); font-size: var(--fs-h2); font-weight: 800; margin: 4px 0 0; }
+.lock-when { color: var(--text-sec); font-size: var(--fs-sec); margin: 0; }
+.lock-line { font-size: var(--fs-sec); margin: 0; overflow-wrap: anywhere; }
+.lock-ask { margin: 0; padding: 10px 12px; border: 1px solid var(--accent-dim); border-radius: var(--radius); background: var(--accent-faint); font-size: var(--fs-sec); }
+.lock-row { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.lock-row[hidden], .lock-cover [hidden] { display: none; }
+.lock-pin-line { display: flex; gap: 8px; min-width: 0; }
+.lock-pin { flex: 1 1 auto; min-width: 0; min-height: 44px; font-size: 16px; letter-spacing: 0.2em; }
+.lock-pin-line .btn { min-height: 44px; flex: none; }
+.lock-wide { width: 100%; min-height: 44px; }
+.lock-msg { min-height: 1.3em; margin: 0; font-size: var(--fs-sec); color: var(--text-sec); }
+.lock-msg.err { color: var(--err); }
+.lock-alarms { position: fixed; inset: 0; z-index: 2147483646; pointer-events: none; display: none; }
+.lock-alarms.on { display: block; }
+.lock-alarms > * { pointer-events: auto; }
+/* Settings, Screen lock. */
+.lock-set-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--warn); }
+.lock-set-note p { margin: 0; flex: 1 1 14rem; }
+.lock-set-msg:empty { display: none; }
+#setLockSec input[type=password] { min-height: 44px; font-size: 16px; }
+
+/* ---- Answer checks (js/checks.js, step 7f): the device panel's section,
+   the map's status dot and Settings' Monitor from this PC. The desktop app
+   only. Colours of states: --ok answering, --warn slow, --err not answering,
+   the muted text for quiet and unknown. ---- */
+.check-group[hidden] { display: none; }
+.ck-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding-top: 6px; }
+.ck-note { margin: 0; color: var(--text-sec); font-size: var(--fs-sm); }
+.ck-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); }
+.ck-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-sm); }
+.ck-head .ck-port { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-sec); font-size: var(--fs-micro); }
+.ck-head .ck-del { margin-left: auto; }
+.ck-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--text-muted); }
+.ck-dot.ck-up { background: var(--ok, #16a34a); }
+.ck-dot.ck-slow { background: var(--warn, #d97706); }
+.ck-dot.ck-down, .ck-dot.ck-flapping { background: var(--err, #dc2626); }
+.ck-dot.ck-cause { background: transparent; border: 2px solid var(--err, #dc2626); }
+.ck-dot.ck-quiet { background: var(--text-muted); }
+.ck-dot.ck-unknown { background: transparent; border: 2px solid var(--text-muted); }
+.ck-now { margin: 0; font-size: var(--fs-sm); line-height: 1.4; overflow-wrap: anywhere; color: var(--text-sec); }
+.ck-now-down, .ck-now-flapping { color: var(--err); }
+.ck-now.ck-warn { color: var(--warn); }
+.ck-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ck-grid .select, .ck-grid .input { width: 100%; min-width: 0; }
+.ck-tick { display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-sm); line-height: 1.4; cursor: pointer; }
+.ck-tick input { flex: none; margin-top: 2px; accent-color: var(--accent); }
+.ck-add { align-self: flex-start; }
+.ck-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ck-row .input, .ck-row .select { width: 100%; }
+.ck-target { max-width: 8rem; }
+.ck-day { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ck-day:empty { display: none; }
+.ck-day-head, .ck-day-axis { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-micro); color: var(--text-muted); }
+.ck-chart { display: block; width: 100%; height: 44px; }
+.ck-chart .ck-line { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.ck-chart .ck-axis { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ck-bar { display: block; width: 100%; height: 6px; border-radius: 2px; }
+.ck-bar .ck-bar-up { fill: var(--ok, #16a34a); }
+.ck-bar .ck-bar-slow { fill: var(--warn, #d97706); }
+.ck-bar .ck-bar-down { fill: var(--err, #dc2626); }
+.ck-bar .ck-bar-quiet { fill: var(--text-muted); }
+.ck-bar .ck-bar-unknown, .ck-bar .ck-bar-none { fill: var(--border); }
+.ck-day-sum { margin: 0; font-size: var(--fs-micro); color: var(--text-sec); line-height: 1.4; overflow-wrap: anywhere; }
+@media (pointer: coarse) {
+    .ck-body .select, .ck-body .input, .ck-body .btn { min-height: 44px; font-size: 16px; }
+    .ck-tick { min-height: 44px; align-items: center; }
+    .ck-tick input { width: 20px; height: 20px; margin-top: 0; }
+}
+@media (max-width: 380px) { .ck-grid { grid-template-columns: minmax(0, 1fr); } }
+.mon-offer { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--accent-dim); border-radius: var(--radius); background: var(--accent-faint); }
+.mon-offer[hidden], .mon-on[hidden] { display: none; }
+.mon-on { display: flex; flex-direction: column; gap: 10px; }
+.mon-on .btn { align-self: flex-start; }
+.mon-on .btn[hidden] { display: none; }
+
+/* ---- The site monitors' banner and states (step 7h, js/monitors.js) ----
+   A signed-in page's open issues and a monitor that stopped reporting, at
+   the top of the map; the card is the desktop app's. */
+.srv-issue-banner {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 22;
+    display: flex; flex-direction: column; gap: 4px; width: min(36rem, calc(100% - 32px));
+}
+.srv-issue-banner[hidden] { display: none; }
+.srv-ib-line {
+    min-height: 44px; padding: 8px 12px; text-align: left; cursor: pointer;
+    font: inherit; font-size: var(--fs-sm); font-weight: 700; line-height: 1.35; overflow-wrap: anywhere;
+    border-radius: 8px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text);
+    box-shadow: var(--topo-float-shadow);
+}
+.srv-ib-line.srv-ib-down { background: #b45309; border-color: #b45309; color: #ffffff; }
+.srv-ib-line.srv-ib-soft { border-left: 4px solid #b45309; font-weight: 600; }
+.srv-ib-line.srv-ib-stale { border-left: 4px solid var(--err); }
+.srv-ib-line.srv-ib-refused { border-left: 4px solid var(--warn); font-weight: 600; }
+.srv-ib-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ck-dot.ck-split { background: #9333ea; }
+.ck-now-split { color: #9333ea; }
+.ck-mons { margin: 8px 0 0; padding: 0; border: none; min-width: 0; }
+.ck-mons .ck-tick { min-height: 44px; display: flex; align-items: center; gap: 8px; }
+.site-mon-groups .set-row { min-height: 44px; }
+
+/* ---- The welcome (js/welcome.js, step 7l) ----
+   One question per step in a modal over the landing; big choices, 44px
+   targets on every screen (it is the first thing a phone sees). */
+.modal.topo-welcome { max-width: 32rem; width: 100%; }
+.topo-welcome .wl-body { display: flex; flex-direction: column; gap: 12px; max-height: min(68vh, 620px); overflow-y: auto; }
+.topo-welcome .wl-count { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-sec); }
+.topo-welcome .wl-step { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.topo-welcome .wl-step[hidden], .topo-welcome [hidden] { display: none; }
+.topo-welcome .wl-head { margin: 0; font-size: var(--fs-lg, 1.125rem); line-height: 1.3; color: var(--text); }
+.topo-welcome .wl-sub, .topo-welcome .wl-text, .topo-welcome .wl-note, .topo-welcome .wl-msg { margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.topo-welcome .wl-msg:empty { display: none; }
+.topo-welcome .wl-choices { display: flex; flex-direction: column; gap: 8px; }
+.topo-welcome .wl-choice {
+    display: flex; flex-direction: column; gap: 2px; min-height: 52px; width: 100%; padding: 10px 14px;
+    text-align: left; font: inherit; color: var(--text); background: transparent; cursor: pointer;
+    border: 1px solid var(--border); border-radius: var(--radius, 8px);
+}
+.topo-welcome .wl-choice b { font-size: 14px; overflow-wrap: anywhere; }
+.topo-welcome .wl-blurb { display: block; font-size: 12px; line-height: 1.4; color: var(--text-muted); overflow-wrap: anywhere; }
+.topo-welcome button.wl-choice:hover { border-color: var(--accent); background: var(--accent-faint); }
+.topo-welcome .wl-choice[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-faint); }
+.topo-welcome .wl-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.topo-welcome .wl-fixed { cursor: default; }
+.topo-welcome .wl-purpose { display: flex; flex-direction: column; gap: 8px; padding-left: 12px; border-left: 2px solid var(--accent-dim); }
+.topo-welcome .wl-field { display: flex; flex-direction: column; gap: 4px; }
+.topo-welcome .wl-field .select, .topo-welcome .wl-field .input { width: 100%; min-height: 44px; font-size: 16px; }
+.topo-welcome #wlPinBox { display: flex; flex-direction: column; gap: 10px; }
+.topo-welcome .wl-tick { display: flex; align-items: flex-start; gap: 12px; min-height: 52px; padding: 10px 12px; cursor: pointer; border: 1px solid var(--border); border-radius: var(--radius, 8px); }
+.topo-welcome .wl-tick input { flex: none; width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); }
+.topo-welcome .wl-tick b { display: block; font-size: 14px; }
+.topo-welcome #wlHandoff { display: flex; flex-direction: column; gap: 12px; }
+.topo-welcome #wlHandoff .btn { align-self: flex-start; }
+.topo-welcome .wl-foot { display: flex; flex-wrap: wrap; gap: 8px; }
+.topo-welcome .wl-foot #wlNext { margin-left: auto; }
+.topo-welcome .wl-foot .btn, .topo-welcome #wlHandoff .btn, .topo-welcome .modal-x { min-height: 44px; min-width: 44px; }
+.topo-welcome .wl-foot .btn[hidden] { display: none; }
+@media (max-width: 480px) {
+    .modal-scrim#welcomeDialog { padding: 8px; }
+    .topo-welcome .wl-body { max-height: calc(100dvh - 150px); }
+}

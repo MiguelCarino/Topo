@@ -15,7 +15,9 @@ func TestPushPullAnd409(t *testing.T) {
 	e := newAuthEnv(t, "TOPO_OWNER_EMAIL="+ownerEmail)
 	o := e.newPerson(ownerEmail, "")
 	site := o.createSite()
-	p := o.join(site, "prov@example.test", "provider")
+	// A second owner (only owners write revisions, D154).
+	p := o.join(site, "owner2@example.test", "owner")
+	prov := o.join(site, "prov@example.test", "provider")
 
 	// First push: base 0, prev = genesis.
 	r := o.push(site, `{"v":1}`)
@@ -23,11 +25,19 @@ func TestPushPullAnd409(t *testing.T) {
 		t.Fatalf("first push: %d %s", r.Code, r.Body.String())
 	}
 	h1 := r.json()["h"].(string)
-	// Both browsers had head 1; the provider wins the race, the owner gets
-	// 409 with the new head.
+	// A provider's push is refused whatever its base: only owners write
+	// versions of the site; an older app is told to update (D154).
 	n, h, epoch, rseq := o.head(site)
-	if r := p.pushAt(site, n, h, epoch, rseq, "provider edit"); r.Code != 201 {
+	if r := prov.pushAt(site, n, h, epoch, rseq, "provider edit"); r.Code != 403 || r.json()["error"] != ErrOwnersOnly || r.json()["update"] != true {
 		t.Fatalf("provider push: %d %s", r.Code, r.Body.String())
+	}
+	if e.count("SELECT count(*) FROM revisions WHERE site_id = ?", site) != 1 {
+		t.Fatal("a refused provider push was stored")
+	}
+	// Both owners' browsers had head 1; the second owner wins the race,
+	// the first gets 409 with the new head.
+	if r := p.pushAt(site, n, h, epoch, rseq, "owner 2 edit"); r.Code != 201 {
+		t.Fatalf("second owner push: %d %s", r.Code, r.Body.String())
 	}
 	r = o.pushAt(site, n, h, epoch, rseq, "owner edit")
 	if r.Code != 409 || r.json()["error"] != ErrStaleBase {
@@ -298,31 +308,33 @@ func TestNotificationsFromPushes(t *testing.T) {
 		t.Fatalf("incident body: %s", body)
 	}
 
-	// The provider records a visit: the owner (and the reporter id named)
-	// get visit-recorded; the owner gets no separate revision digest for
-	// that push.
+	// The provider records a visit: a visit copy (D154); the owner gets
+	// visit-recorded, nobody gets a revision digest (nothing was pushed).
 	before = len(e.mails())
-	if r := p.push(site, "visit", map[string]any{"kind": "visit-recorded", "to": []string{o.id}}); r.Code != 201 {
-		t.Fatal(r.Code)
+	if r := p.putVisit(site, "", "slot_report_1", "visit"); r.Code != 201 {
+		t.Fatal(r.Code, r.Body.String())
 	}
 	e.clk.Add(3 * time.Minute)
 	kinds = map[string]int{}
 	for _, m := range e.mails()[before:] {
 		kinds[m.To+" "+m.Kind]++
 	}
-	if kinds[ownerEmail+" visit-recorded"] != 1 || kinds[ownerEmail+" revision"] != 0 || kinds["prov2@example.test visit-recorded"] != 0 {
+	if kinds[ownerEmail+" visit-recorded"] != 1 || kinds[ownerEmail+" revision"] != 0 || kinds["prov2@example.test visit-recorded"] != 0 || kinds["prov@example.test visit-recorded"] != 0 {
 		t.Fatalf("visit recipients: %v", kinds)
 	}
 
-	// A plain push by the provider: the owner gets a revision digest; more
-	// pushes inside the window merge into one later email with a count.
+	// A plain push by a second owner: the owner gets a revision digest;
+	// more pushes inside the window merge into one later email with a count.
+	o2 := o.join(site, "owner2@example.test", "owner")
+	e.clk.Add(10 * time.Minute)
+	e.mails()
 	before = len(e.mails())
-	p.push(site, "r1")
+	o2.push(site, "r1")
 	if e.lastMail(ownerEmail, "revision") == nil {
 		t.Fatal("no first revision digest")
 	}
-	p.push(site, "r2")
-	p.push(site, "r3")
+	o2.push(site, "r2")
+	o2.push(site, "r3")
 	e.clk.Add(30 * time.Minute)
 	n := 0
 	for _, m := range e.mails()[before:] {
@@ -426,17 +438,18 @@ func TestRoutesMatrixSites(t *testing.T) {
 		want map[Class]int // status for the class; 0 = allowed (not 401/403/404)
 	}
 	whos := []who{
-		{"stranger", stranger.b, map[Class]int{Member: 404, Reader: 404, Writer: 404, Owner: 404}},
-		{"waiting", wait.b, map[Class]int{Reader: 403, Writer: 403, Owner: 403}},
-		{"viewer", view.b, map[Class]int{Writer: 403, Owner: 403}},
-		{"provider", prov.b, map[Class]int{Owner: 403}},
+		// Monitor routes take only a monitor's credential (step 7h).
+		{"stranger", stranger.b, map[Class]int{Member: 404, Reader: 404, Writer: 404, Owner: 404, Monitor: 403}},
+		{"waiting", wait.b, map[Class]int{Reader: 403, Writer: 403, Owner: 403, Monitor: 403}},
+		{"viewer", view.b, map[Class]int{Writer: 403, Owner: 403, Monitor: 403}},
+		{"provider", prov.b, map[Class]int{Owner: 403, Monitor: 403}},
 	}
 	for pattern, class := range e.srv.Routes() {
 		if !strings.Contains(pattern, "{site}") {
 			continue
 		}
 		method, path, _ := strings.Cut(pattern, " ")
-		path = strings.NewReplacer("{site}", site, "{uid}", o.id, "{iid}", "i_x", "{n}", "1").Replace(path)
+		path = strings.NewReplacer("{site}", site, "{uid}", o.id, "{iid}", "i_x", "{n}", "1", "{mid}", "m_00000000000000000000aa", "{day}", "0").Replace(path)
 		if (method == "DELETE" && strings.HasSuffix(path, site)) || strings.HasSuffix(path, "/leave") {
 			continue // checked last: they would delete the site or end the membership
 		}
@@ -446,6 +459,9 @@ func TestRoutesMatrixSites(t *testing.T) {
 		}
 		for _, w := range whos {
 			want := w.want[class]
+			if pattern == "POST /api/sites/{site}/records" && w.name == "viewer" {
+				want = 403 // a Reader route whose handler lets only owners, providers and monitors write
+			}
 			r := w.b.do(method, path, body)
 			if want != 0 && r.Code != want {
 				t.Errorf("%s as %s: %d, want %d", pattern, w.name, r.Code, want)

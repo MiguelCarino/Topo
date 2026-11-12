@@ -31,6 +31,11 @@
       "type": "array",
       "description": "For each owner at backup time: their wrap of the site key for the head's epoch and their locked recovery copy (escrow), or null.",
       "items": { "type": "object", "required": ["u"], "properties": { "u": { "type": "string" }, "wrap": {}, "escrow": {} } }
+    },
+    "records": {
+      "type": "array",
+      "description": "Records not yet folded into the document (step 7h, docs/SCOPE.md D159): a monitor's issues, people's acts on them and quiet windows, each sealed with the site key of its epoch and signed by its author. Absent when there are none.",
+      "items": { "type": "object", "required": ["v", "site", "kind", "id", "epoch", "author", "at", "ctHash", "sig", "iv", "ct"], "properties": { "kind": { "enum": ["issue", "act", "quiet"] } } }
     }
   },
   "additionalProperties": true

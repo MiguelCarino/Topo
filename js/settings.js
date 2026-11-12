@@ -20,8 +20,11 @@
 //            And whether the Simple views' device panel shows a short
 //            read-only history (off unless ticked). In every view (the
 //            owner, 2026-11-05).
+//   Screen lock  the idle lock (js/idlelock.js): the time, the PIN, Lock
+//            now. Kept in its own keys, not in state.settings.
 //   Problem reports  the name, phone and email Report a problem fills in
 //            (js/incidents.js): kept here only, carried by a report sent.
+//   Welcome  Run the welcome again (js/welcome.js wires the button).
 //   About    what Topo is, what it keeps and sends (the same words as the
 //            navbar's About), the document version, and the licence,
 //            contact and legal page behind the navbar's About.
@@ -59,10 +62,18 @@ function renderSettings() {
         if (f && document.activeElement !== f) f.value = rep[k] || '';
     });
     fillDocVersion();
+    // Screen lock: this PC's idle lock and PIN (js/idlelock.js).
+    if (typeof renderIdleLockSettings === 'function') renderIdleLockSettings();
     // Back-ups: the folder (js/backupdir.js).
     if (typeof renderBackupDirSettings === 'function') renderBackupDirSettings();
+    // Connect to a Topo server: the desktop app only (js/desktopclient.js).
+    if (typeof renderDesktopClientSettings === 'function') renderDesktopClientSettings();
     // This PC as the server: the desktop app only (js/desktopserver.js).
     if (typeof renderDesktopServerSettings === 'function') renderDesktopServerSettings();
+    // This computer: the desktop app only (js/thiscomputer.js).
+    if (typeof renderThisComputer === 'function') renderThisComputer();
+    // Monitor from this PC: the desktop app only (js/checks.js).
+    if (typeof renderMonitorSettings === 'function') renderMonitorSettings();
 }
 // The document format version, in the navbar's About window (index.html's
 // data-carino-about block): filled at start and again with each language.

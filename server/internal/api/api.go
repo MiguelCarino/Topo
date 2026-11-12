@@ -36,9 +36,10 @@ const (
 	Writer             // a granted owner or provider
 	Owner              // a granted site owner
 	Admin              // the server owner
+	Monitor            // a site monitor's credential, on its own site (step 7h)
 )
 
-var classNames = map[Class]string{Public: "public", User: "user", Keyed: "keyed", Member: "member", Reader: "reader", Writer: "writer", Owner: "owner", Admin: "admin"}
+var classNames = map[Class]string{Public: "public", User: "user", Keyed: "keyed", Member: "member", Reader: "reader", Writer: "writer", Owner: "owner", Admin: "admin", Monitor: "monitor"}
 
 func (c Class) String() string {
 	if n, ok := classNames[c]; ok {
@@ -56,7 +57,14 @@ type Session struct {
 	ServerRole string // owner | staff | member
 	HasKeys    bool
 	Email      string
-	hash       []byte // SHA-256 of the cookie (sign out)
+	// Monitor is the site of a site monitor's credential (step 7h), ""
+	// for a person. UserID is then the monitor's id (m_…).
+	Monitor string
+	hash    []byte // SHA-256 of the cookie (sign out)
+	// unavailable: a credential could not be looked up (the database
+	// failed). The request is answered 503, never 401, so a monitor does not
+	// take a passing fault for a revoke.
+	unavailable bool
 }
 
 type sessionKey struct{}
@@ -261,6 +269,26 @@ func (s *Server) routesV1() {
 	s.handle("GET /api/sites/{site}/revs/{n}", Reader, s.getRev)
 	s.handle("GET /api/events", User, s.events)
 
+	// Provider visits through the owner (docs/SCOPE.md D139, D153, D154).
+	s.handle("POST /api/sites/{site}/visits", Writer, s.putVisit)
+	s.handle("GET /api/sites/{site}/visits", Reader, s.listVisits)
+	s.handle("GET /api/sites/{site}/visits/{id}", Reader, s.getVisit)
+	s.handle("POST /api/sites/{site}/visits/{id}/decide", Owner, s.decideVisit)
+	s.handle("DELETE /api/sites/{site}/visits/{id}", Writer, s.deleteVisit)
+
+	// Monitors through the server (docs/SCOPE.md step 7h, D146-D162).
+	s.handle("POST /api/sites/{site}/monitors", Owner, s.addMonitor)
+	s.handle("GET /api/sites/{site}/monitors", Reader, s.listMonitors)
+	s.handle("POST /api/sites/{site}/monitors/{mid}/revoke", Owner, s.revokeMonitor)
+	s.handle("PATCH /api/sites/{site}/stats-days", Owner, s.patchStatsDays)
+	s.handle("PUT /api/sites/{site}/status", Monitor, s.putStatus)
+	s.handle("POST /api/sites/{site}/records", Reader, s.putRecord)
+	s.handle("GET /api/sites/{site}/records", Reader, s.listRecords)
+	s.handle("POST /api/sites/{site}/records/folded", Owner, s.foldRecords)
+	s.handle("PUT /api/sites/{site}/stats/{day}", Monitor, s.putStats)
+	s.handle("GET /api/sites/{site}/stats", Reader, s.listStats)
+	s.handle("GET /api/monitor", Monitor, s.monitorSelf)
+
 	// Backups (step 5b, D99-D105).
 	s.handle("GET /api/admin/backups", Admin, s.adminBackups)
 	s.handle("PUT /api/admin/backups", Admin, s.adminPutBackups)
@@ -306,7 +334,21 @@ func (s *Server) gate(pattern string, c Class, h http.HandlerFunc) http.Handler 
 			writeError(w, http.StatusUnauthorized, ErrUnauthorized, nil)
 			return
 		}
-		if c != User {
+		if sess.Monitor != "" {
+			// A monitor reads its site and writes its records, nothing else.
+			if st := monitorGate(r, c, sess); st != 0 {
+				code := ErrForbidden
+				if st == http.StatusNotFound {
+					code = ErrNotFound
+				}
+				writeError(w, st, code, nil)
+				return
+			}
+		} else if c == Monitor {
+			writeError(w, http.StatusForbidden, ErrForbidden, nil)
+			return
+		}
+		if c != User && c != Monitor {
 			status := s.d.Authorize(r, c, sess)
 			if status != 0 {
 				code := ErrForbidden

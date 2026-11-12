@@ -461,7 +461,9 @@ Tests: tests/README.md, The Topo server.
   seq) is signed by an owner and kept by the server as a blob it checks but
   is not trusted for; browsers walk it from seq 1 and accept each only when an
   owner of the previous one signed it. Revisions and wraps are accepted only
-  from an owner or provider in force. The server checks wrap and roster
+  from an owner or provider in force. *Replaced for providers by D154 (built in
+  step 7b, 2026-11-11): revisions only from an owner; a provider uploads a
+  visit copy.* The server checks wrap and roster
   signatures as well (cheap, so a bad one fails early), and `GET /rosters`
   also returns the members' current public keys, used only when they match a
   trusted roster line.
@@ -504,6 +506,8 @@ Tests: tests/README.md, The Topo server.
   "update needed" (C7). Rollback or a fork shows "The server sent an older or
   different history" and stops pushing; **Trust the server's history** merges
   this copy onto the server's head and pushes (A3: rseq and epoch only rise).
+  *Replaced for providers by D154 (built in step 7b, 2026-11-11): a
+  provider's browser no longer merges a 409 and pushes; it syncs read-only.*
 - **D65.** Live updates by Server-Sent Events (`/api/events`, 20 s ping), not
   long-polling; plus a check on coming online, on the tab showing, after a
   save. One sync per site at a time (navigator.locks); the server's 409 keeps
@@ -766,7 +770,7 @@ attachment: "Do as you suggested", "Do attach on servers".
   is gone stays a part (two-way). A part merged back is held as `part` (the
   base of their next return); a whole-network link never names a part as its
   base (`outgoingBase` skips them); the newest 8 parts survive the per-card
-  cap of 30. A part sent from a network not kept is held in the tab and
+  cap of 30 (since 7a, every part until it is answered: D152.1, D176). A part sent from a network not kept is held in the tab and
   adopted with it when it is kept. "Replace with this copy" is never offered
   for a part. What the owner should know: a provider who opens the part on a
   device holding their older full copy ends with the part: merged three-way
@@ -1099,7 +1103,8 @@ The browser side (stage 2 of 5b):
     read its log. The PC needs a fixed address, because sign-in links carry
     it.
   - The app's own window does not sync with that server; its address is
-    opened in a browser.
+    opened in a browser. *Replaced by D144 (step 7c, built 2026-11-11): the
+    window becomes a client of the server through Rust.*
   - Not tested: starting the server from the running app, and the Windows
     and macOS app builds. The Linux app builds and its settings section is
     tested against a stand-in.
@@ -1110,6 +1115,10 @@ The browser side (stage 2 of 5b):
   server (`topo-desktop-server`). When the PC becomes the server, the server
   runs as a service: always, from startup, even when Topo is closed or
   nobody is signed in.
+  *Changed by D170 (built in step 7l, D332): on Linux and macOS the
+  first-start question is the welcome's step 3 choice "Make this PC the
+  server"; the prompt described here is kept only for a start where the
+  welcome does not run.*
   - **Windows** (the main case): the installer is the NSIS `-setup.exe`
     only (the MSI is no longer built: it could not ask). It now installs
     for every user of the PC, in Program Files, so it asks for an
@@ -1351,6 +1360,2382 @@ systems; reading a MikroTik `.backup` or a running Cisco switch directly.
   read. Passwords, keys and community strings are never read from any file,
   and the count of what was left out is said once.
 
+## 7. Answer checks, monitors, statistics, the idle lock and This computer (step 7)
+
+Written 2026-11-11 from the owner's step 7 plan and their answers. Phase 7.0
+is this section and the wording in README.md, docs/FEATURES.md and
+docs/SERVER.md; no code. Each later phase adds its own decisions under
+"Decisions made building step 7" below, numbered on from the last one here.
+
+### What changes in Topo's promise
+
+README said: "Not a scanner or a monitor … it never probes the network." The
+new wording keeps the first half and narrows the second:
+
+- **Still not a scanner.** Topo never discovers anything: no sweeps, ARP,
+  SNMP, LLDP or port scans, and nothing that reads another device's
+  configuration.
+- **New: an answer check.** A Topo desktop app can ask the devices and
+  services already documented one question: "Are you answering?" (a ping, a
+  DICOM C-ECHO, an SMTP greeting and similar request-and-reply checks). It
+  runs only on a PC someone has turned into a monitor, and only for items
+  marked to be checked.
+- **New: statistics and reports.** Response times and availability, collected
+  automatically while checks run.
+- **New: This computer.** The desktop app can read the PC it runs on (its own
+  interfaces, addresses and default gateway) and offer to add it to the map.
+
+### How it fits together
+
+- **The page decides, Rust does the I/O.** The page (JS) knows the document,
+  so it decides what to check: each marked item, with its protocol, address,
+  port and options, and its upstream chain from the trace's reachability walk
+  (js/diagnostics.js). Rust runs the schedule on a background thread, does the
+  network I/O, keeps the samples, computes the hourly figures, and sends state
+  changes back to the page as Tauri events.
+- **It keeps running with the window closed.** Monitoring needs the tray icon
+  and "Open Topo at sign-in", both offered when the switch is turned on. Rust
+  keeps the monitor's own credential, so neither a signed-in person nor an
+  open window is needed.
+- **Three kinds of data, three paths.** Results never go through the merge or
+  the hash-chained log; if they did, every check would make a revision, a log
+  entry and a backup.
+
+| What | Where | Path |
+|---|---|---|
+| Check settings | the document (v19 `check` blocks) | the normal merge |
+| Live status (latest state per item) | an encrypted record per monitor; the server keeps only the latest | `/api/events` |
+| Statistics (hourly figures) | encrypted blobs per monitor and day on the server, kept out of the document | pushed by the monitor, pulled by any viewer |
+| Outages and who acted on them | encrypted issue records on the server, shown at once | `/api/events`; folded into the document's incidents by the next owner's browser that is open |
+| A provider's visit | an encrypted visit copy on the server | waits in the owner's "Visits waiting" list |
+
+- **Only owners write versions of the site.** Monitors (Rust) never build,
+  hash, sign or merge a document: that would mean a second copy of the
+  canonical serializer, the content hash, the log's hash chain and the merge,
+  which could drift apart. A monitor writes small encrypted records only
+  (status, statistics, issues). The server enforces this without reading
+  anything: a revision push from any role but owner is refused (403, "update
+  Topo" for an older app).
+- **Root cause.** When an item's upstream device is also down, it gets no
+  issue of its own. Router R1's issue says "R1 and 12 items behind it are not
+  answering", and the items behind it are listed on R1's issue. Optionally,
+  when two monitors check the same item, "down from A, up from B" points at
+  the path between them, not at the device.
+
+### Decisions for step 7 (owner, 2026-11-11)
+
+The owner's fixed decisions, not to be reopened:
+
+- **D126. Server and clients, no mesh.** topo-server is the hub: the desktop
+  app's built-in server (D113, D125) or a separate install. Every Topo install
+  is a client of it. Installs never talk to each other directly or look for
+  each other. Without a server, one desktop app still monitors on its own (the
+  same code, local only).
+- **D127. Only the desktop app checks.** The website and the offline zip never
+  probe, and their pages make no outside requests. They still see the status,
+  the issues and the reports through the server.
+- **D128. No network discovery, and no reading of other devices.** A check
+  sends one fixed request to an address and port already in the document, and
+  records only: answered or not, the time taken, and the reply's status code.
+  Excluded: SNMP, banners kept as data, configuration, and anything that
+  enumerates.
+- **D129. Any install can be a monitor**, turned on by someone signed in on
+  that PC. Two kinds:
+  - **Site monitor (owner):** permanent; it keeps monitoring after the person
+    who turned it on signs out, and stops only when turned off on that PC or
+    revoked by an owner.
+  - **Visit monitor (provider):** only the items the provider covers, for one
+    session; its statistics are kept only for that session and added to the
+    provider's visit report when the visit is recorded.
+- **D130. Alerts are on screen only.** No email, call, SMS or push service.
+  The alarm copies the layout of Atrium's card()
+  (~/Github/Atrium/home/.config/hypr/scripts/emergency-alerts.py), not its
+  hazard alerts: a full-screen card on every monitor, above other windows; a
+  big title, the headline, the details and a short note; one large OK button;
+  Escape closes it. *The plan's D160 gives the card three buttons instead;
+  see D172.*
+- **D131. Opt-in from Settings, off as shipped:** "Monitor from this PC"
+  (checks) and "Show alarms on this PC" (the card).
+- **D132. An outage becomes an issue**, which stays open until a person acts
+  on it.
+- **D133. Statistics are collected automatically** whenever checks run.
+  Reports cover response times and availability.
+- **D134. The interface locks after idle time:** 30 minutes by default; the
+  user changes the time, or turns the lock off, in Settings. While locked, the
+  alarm card still shows the item's name.
+- **D135. Statistics are kept 360 days by default.** The user changes this in
+  Settings, or turns it off.
+- **D136. The monitor's encryption is rewritten in Rust**, matching
+  js/servercrypto.js byte for byte, with shared test vectors.
+- **D137. Every listed check ships:** ping, TCP, HTTP(S), DNS, SMTP, DICOM
+  C-ECHO, NTP, RTSP, SIP, HL7 MLLP, IPP, IMAP and POP.
+- **D138. A first-run welcome**, shown the first time Topo starts.
+- **D139. Provider members propose; owners approve.** On a server, a
+  provider's edits never become a version of the site directly. A visit is
+  uploaded as a visit copy and waits for an owner, every time, even when
+  nothing needs deciding. The owner approves the changes and judges whether
+  the visit succeeded.
+- **D140. Merge fixes first.** The three weaknesses found in today's merge
+  (D152) are fixed in their own phase (7a), before anything else, because
+  v0.0.1 already ships them.
+
+Proposed in the plan and accepted by the owner (2026-11-11). The plan's two
+open questions were answered "1. Yes. 2. No, let user disable it from
+settings.": D144 and D145. Settled earlier the same day: This computer adds
+the PC only (D166), statistics Off saves nothing (D162), a visit monitor's
+outages stay on the provider's screen (D148), every visit waits for the owner
+(D139, D153), the merge fixes come first (D140).
+
+- **D141. The welcome: when it shows.** The desktop app: after the intro
+  animation (desktop/intro.html) on the first start, and from Settings, "Run
+  the welcome again". The website: a lighter version on the first visit,
+  without the server, monitoring and This computer steps. It is skipped for
+  share links, `#provider` links and intake links (`#setup`, `?profile=`),
+  which already know where to go.
+- **D142. The welcome's steps.** Every step can be skipped, and each choice
+  can be changed later in Settings:
+  1. Theme (Gold or Colourful). No language step: the language stays in the
+     About window.
+  2. How Topo is used: Simple (report problems) or Full (document the
+     network). This sets the profile exactly as the mode picker does.
+  3. Where networks live: on this PC only; connect to a Topo server (desktop
+     app: the address, then sign in, D144); or make this PC the server
+     (desktop app, "This PC as the server", D113, D125). On
+     topo.carino.systems the website cannot reach a client's server (D66):
+     this step offers "on this browser" and says that a Topo server is opened
+     at its own address. A page served by a Topo server skips this step.
+  4. The idle lock: the time (30 min by default) or Off, and the PIN.
+  5. Desktop app only: "Add this computer to the map?" (This computer, through
+     the Import… review), and "Monitor from this PC?", off by default, with
+     one sentence on what it does and what it never does.
+  6. Start: open an existing file; map the network now (hands over to the
+     `#setup` intake); or an empty network.
+- **D143. The welcome's rules.** It reuses the existing pieces (the intro, the
+  profile picker, the `#setup` intake, the server's sign-in in js/serverui.js,
+  "This PC as the server" in js/desktopserver.js) and adds no second way to do
+  any of them. It runs once per PC or browser, which keeps a "done" mark in
+  local storage. Translated, phone-first, 44 px targets. It is named "Welcome"
+  in code and text, so it does not collide with the `#setup` intake.
+- **D144. The desktop app becomes a server client (owner: yes).** Today it
+  cannot be one: the page talks only to the server that served it (D66: same
+  origin, `connect-src 'self'`), and D113 opens the built-in server's address
+  in a browser. Settings gets "Connect to a Topo server" (the address), in the
+  desktop app only:
+  - all server traffic goes through Rust: Tauri commands carry the requests
+    and the event stream, with the same client the monitor uses;
+  - the page's existing code is reused: js/server.js already takes
+    `_hooks.fetch`, `_hooks.EventSource` and `_hooks.origin`, so it runs
+    unchanged on a Tauri-backed fetch and event source;
+  - Rust holds the session cookie, so signing in from the app is the existing
+    email sign-in;
+  - a self-signed server (`TOPO_TLS_SELF`, D113) is pinned by fingerprint in
+    rustls: the person compares it once, as in a browser, and a changed
+    fingerprint is refused;
+  - no CORS and no CSP change: the webview never fetches the server;
+  - the app's own built-in server is reached the same way at 127.0.0.1,
+    replacing "open its address in a browser".
+
+  This supersedes D113's "the app's own window does not sync with that
+  server".
+- **D145. No status board (owner: no).** A PC used as a wall display of the
+  status is not given a separate view that never locks. Its user sets the idle
+  lock to Off in Settings (D134, D165).
+- **D146. Turning a PC into a site monitor.** A signed-in owner turns on
+  "Monitor from this PC" and picks the sites and the groups to watch. The app
+  then:
+  - makes a device key pair and keeps it in the OS keychain; on Linux without
+    a Secret Service (a bare Wayland session), a file readable only by the
+    user, and Settings says so;
+  - adds the monitor to the signed roster as an owner's act, so every browser
+    trusts its key;
+  - wraps the current site key for it from the owner's browser, as for a new
+    member (js/servercrypto.js);
+  - registers it with the server as a **monitor**: a credential that is not a
+    person. This adds `monitor` to the role CHECK, a server migration tested
+    from a v0.0.1 database.
+- **D147. What a monitor may do.** It may read the site and push status,
+  statistics and issue records; it never writes a revision. It is shown
+  everywhere as "Monitor: PC name (turned on by X on date)". Signing out does
+  not stop a site monitor (D129).
+- **D148. The visit monitor (provider).** In provider mode, on the desktop
+  app, "Monitor during this visit" starts checks of the items the provider
+  covers. It runs under the provider's own sign-in: no device key and no
+  `monitor` role. It collects samples and figures for this session only, on
+  the provider's PC. The provider sees status and outages on their screen; it
+  opens no issues for the client, because work in progress takes devices down
+  on purpose. Record visit adds a monitoring section to the report and to the
+  `visit` log entry: per item, availability, the median and 95th-percentile
+  response time and loss during the session; the outages seen; charts in the
+  report. If the site has a site monitor, the section compares the visit with
+  the 7 days before it ("R1's median went from 38 ms to 4 ms"). The session's
+  raw data is deleted when it ends: at Record visit, at Stop, or when the
+  provider signs out. *See D174: Stop deletes the samples but keeps the
+  session's figures until Record visit or sign-out.*
+- **D149. Turning off and revoking a monitor.** Owners see every monitor in
+  the site's members list, with when each last reported, and can revoke one.
+  Revoking deletes the server credential and rotates the site key epoch, as
+  removing a member does. A browser that rotates the key re-wraps the new key
+  for the remaining monitors.
+- **D150. Assignment.** Each monitor checks the items in the groups it was
+  given, so two PCs do not check the same item by accident. Checking one item
+  from two monitors is a deliberate choice, made per item.
+- **D151. Heartbeat.** The server sees, without decrypting, when each monitor
+  last reported. If a monitor misses 3 intervals, every install showing alarms
+  raises "Monitor at Building B stopped reporting", which covers a site gone
+  dark whose own monitor cannot say so.
+- **D152. The merge fixes (phase 7a), each with a failing test first.**
+  1. **Sent parts are kept until answered.** Today only the newest 8 parts
+     survive the per-card cap of 30, and a ninth outstanding copy merges
+     two-way (more questions, the provider's removals ignored). A part's
+     revision is kept until its copy is merged or its report is closed, with
+     no count limit. *See D175 for the card's 64-entry part list and the
+     40 MB budget.*
+  2. **Two providers' new records are never joined by name alone.**
+     mergePartPool (js/merge.js) excludes only the records known when the part
+     left, so a record another provider's merge added since can match a new
+     one by name or address, and two different "AP-9"s become one. Such
+     records match only by id, MAC or serial; anything else is a question in
+     the review, defaulting to Add as new.
+  3. **New ids get a random part.** nextId (js/model.js) is milliseconds plus
+     a counter from 0 per page load, so two PCs can make the same id. It adds
+     4 random base-36 characters. Ids are opaque strings, so the format does
+     not change; withFixedIds stays deterministic for the tests.
+- **D153. Visits waiting (link, file and server).** One list for the owner:
+  copies back by link or file, and visit copies on the server, oldest first,
+  with the provider, the report and a count of changes. Every visit opens the
+  review; nothing merges on its own (D139). The review's foot asks two things:
+  - **The changes:** apply as reviewed, or reject (nothing applied).
+  - **The visit:** Successful (the report goes to Fixed); Not successful (the
+    report stays open, a round up as Reopen does, D38, with a note to the
+    provider); or Undecided (the report stays Visited).
+
+  A rejected visit is kept in the log ("Visit by X rejected: note") and its
+  copy is kept as a file; the provider is told by the existing visit event
+  (D67, email if on), as for an approved one. Waiting copies queue up: with n
+  providers waiting, each merges in turn against the network as the earlier
+  approvals left it, and a field two of them changed is a question in the
+  second review, never an overwrite. One waiting copy per provider and report:
+  a second Record visit before the first is decided replaces the first copy
+  (it already holds the first visit's edits plus the new ones); the list says
+  "2 visits", and the review shows the visit entries of both. The owner never
+  reviews the same edits twice, or rejects one copy only to see its edits come
+  back inside the next.
+- **D154. Provider visits on a server.** A provider member's Record visit
+  uploads a **visit copy**: the encrypted document they edited, its base (the
+  server revision they started from), the visit entry and, when on, the
+  monitoring section. Any owner's browser reviews it three-way against that
+  base, which the server holds, so no browser-held part revision is needed.
+  Changes to items outside the provider's items are marked "outside what X
+  covers" in the review, defaulting to not applied. The server refuses a
+  revision push from a provider (and from viewers and monitors, as before); a
+  provider's browser no longer pushes, and syncs read-only. Once their copy is
+  approved or rejected, the provider's browser takes the server's version; a
+  rejected copy is offered as a file before it is replaced. A provider member
+  can still read the whole site, because the site key opens it all; limiting
+  reading needs per-provider keys, which is out of scope (docs/SERVER.md's
+  threat model says so). A server holding pushes from v0.0.1 providers keeps
+  them as valid history; only new pushes are refused. This supersedes D60's
+  "revisions from any owner or provider" and D64's provider-side merge of a
+  409.
+- **D155. The checks, first version.** Each check is one request and its
+  reply; nothing beyond the outcome is kept.
+  - **ICMP echo:** unprivileged datagram ICMP on Linux and macOS, IcmpSendEcho
+    on Windows. Where the system refuses ICMP, a TCP connect on a port the
+    item documents, labelled "TCP, not ping" wherever it shows, the reports
+    included.
+  - **TCP connect** to a documented port.
+  - **HTTP(S):** the status code, and the days until the TLS certificate
+    expires (a warning at 14 days).
+  - **DNS:** ask the item, as a resolver, for one name the owner gives, and
+    check that an answer comes back.
+  - **SMTP**, only when the item documents an SMTP service: connect, read the
+    220 greeting, EHLO, then QUIT; optionally STARTTLS to read the
+    certificate's expiry; never AUTH, never MAIL FROM, nothing is ever sent.
+  - **DICOM C-ECHO:** an A-ASSOCIATE-RQ with Verification (1.2.840.10008.1.1),
+    then C-ECHO-RQ and a release; calling and called AE titles per item,
+    default calling AE "TOPO".
+  - **NTP:** one client request; the reply, the stratum and the clock offset,
+    with a warning above 1 s.
+  - **RTSP:** OPTIONS (cameras, recorders), the status code only.
+  - **SIP:** OPTIONS over UDP or TCP (phone systems), the status code only.
+  - **HL7 MLLP:** a TCP connect to the listener only. No message is sent,
+    because a test message could reach a real RIS.
+  - **IPP:** Get-Printer-Attributes asking only for printer-state and
+    printer-state-reasons.
+  - **IMAP and POP:** read the greeting, optionally STARTTLS or TLS for the
+    certificate's expiry, then LOGOUT or QUIT. Never LOGIN, AUTH or USER.
+- **D156. Check settings: format v19**, with a migration in js/model.js and
+  schema/topo-v19.json. A `check` block per device, or per service on a
+  device: the protocol, port and options (AE titles, the DNS name, SMTP
+  STARTTLS); the interval (60 s by default, 30 s to 15 min); "slow above" in
+  ms (optional); which monitor or monitors check it. An availability target
+  per item and per provider (for example 99.5 %, optionally only during the
+  provider's service hours, which v18 already records); the reports compare
+  against it. No secrets: no check takes a password.
+- **D157. States.** **Down** after 3 failures in a row; **Up** after 2
+  successes. **Slow:** the median of the last 5 checks is above "slow above";
+  it shows on the map and in the reports but raises no alarm. **Flapping:** 4
+  changes in 30 min; it stays one issue, marked flapping. **Quiet until…:**
+  maintenance, per item, group or site; no issue is raised, and the time
+  counts as maintenance in the reports, not as down. **Unknown:** the monitor
+  itself was off, asleep or unable to reach the server; unknown time never
+  counts as down.
+- **D158. Issues.** A confirmed outage opens an issue record, encrypted,
+  pushed by the monitor and shown at once on every install. It records the
+  item (or the root cause and the items behind it), when it was first seen
+  down, and which monitor saw it. The next owner's browser that is open folds
+  open and closed issue records into the document's incidents (kind "outage")
+  with a log entry each and no review, since they only add incidents; until
+  then they live as records. Without a server, the app's own page does the
+  same (how those local records are trusted: D173). Owners act on issues,
+  and providers on the items they cover (their acts are records too, folded
+  the same way); viewers only see. An issue stays
+  open until a person does one of: **Acknowledge** (who and when, with an
+  optional note); **Report a problem** (opens the prefilled report; the step-4
+  routing names the provider; nothing is sent automatically); **Expected**
+  (maintenance or planned work, counted as maintenance). Recovery does not
+  close it: it is marked "answering again since 10:56 (down 14 min)", in a
+  softer colour, and still waits for someone to act. The same item going down
+  again while its issue is open adds the outage to that issue. It shows in the
+  Problems tab, the Simple view's list and the map marker, the landing line,
+  and on every install with "Show alarms on this PC" on. On the website (no
+  card) signed-in pages show it as a banner.
+- **D159. Issue records are signed.** Every record is signed by its author's
+  key: the monitor's device key or the person's user key. When folding, the
+  owner's browser checks the signature against the trusted roster and the
+  author's role and scope: only a monitor may open an issue, and a provider's
+  act on an item they do not cover is refused. A forged or out-of-scope record
+  is dropped and shown to the owner. This applies to records that come
+  through the server, from 7h; local records on a PC with no server are
+  D173. Records not yet folded go into the
+  server's backups (5b) beside the document, so a restore loses no open issue.
+- **D160. The alarm card.** Atrium's card design, in amber: "NOT ANSWERING",
+  the item and how long it has been down; for a root cause, its chain ("Router
+  R1 and 12 items behind it"); the note "Checked by monitor <PC name>"; the
+  buttons Acknowledge, Report a problem and Later (Later closes the card and
+  leaves the issue open; Escape works like Later). A short chime, with the
+  system volume untouched and nothing spoken. Recovery is a small
+  notification, not a card. The card is a separate Tauri window (alarm.html
+  beside intro.html, staged by desktop/stage.sh --desktop): always on top, on
+  every monitor, focused. On Wayland "always on top" is not guaranteed, so a
+  system notification is sent too, and the setting's help says so. "Test the
+  alarm" in Settings shows the card marked DRILL.
+- **D161. Statistics.** One sample per check (time, outcome, round-trip time,
+  the reply's status), kept on the monitor PC (Rust, a local SQLite) for 7
+  days. Hourly figures per item and per monitor: checks, successes and
+  failures (loss); minimum, median, 95th percentile and maximum round-trip
+  time; jitter (the mean difference between consecutive round-trip times);
+  seconds in each state (up, down, slow, maintenance, unknown). The hourly
+  figures are pushed to the server as one encrypted blob per monitor per day,
+  and also kept on the monitor PC, so it works without a server. Daily figures
+  are computed from the hourly ones. Downtime caused upstream is shown as
+  "down because R1", so a switch is not blamed for its router.
+- **D162. Retention.** "Keep statistics: 360 days", set per site by an owner
+  and applied by the server and by every monitor PC. Off saves no statistics
+  at all (no samples, no hourly or daily figures, on the monitor PC or the
+  server); live status and issues still work, and visit reports carry no
+  monitoring section. Otherwise samples stay 7 days on the monitor PC whatever
+  the setting, as the source of the hourly figures. Shortening the period
+  deletes the older figures after a confirmation that names how much will go.
+  Visit monitors ignore the setting: their figures live only in the visit
+  record.
+- **D163. Availability is measured, not assumed.** Availability = up ÷ (up +
+  down), leaving out maintenance and unknown time. The coverage (the share of
+  time actually measured) is printed next to every figure: 99.9 % with 40 %
+  coverage is not 99.9 %.
+- **D164. Reports**, through the .rpv report preview (Print, Download, and
+  CSV), charts following Branding's Data Viz section with the numbers always
+  available as a table:
+  - **Availability:** per item, group, site and provider; for a day, week,
+    month, quarter, or since the last visit; against the target, during
+    service hours or around the clock.
+  - **Response times:** the median and 95th percentile over time per item, as
+    a chart with a table beside it; loss and jitter; the "slow" hours.
+  - **Outages:** each issue with its start, duration, root cause and who
+    acted, with the time to acknowledge; the mean time to repair (MTTR) and
+    between failures (MTBF) per item.
+  - **Provider report:** that provider's items only, availability against the
+    target, and their outages with response times; it fits the step-4 provider
+    view and can be attached to a Report a problem.
+  - **On an item:** its Check section shows the last 24 h (a small
+    response-time chart and the state bar) and links to the full report.
+- **D165. The idle lock.** Settings: "Lock after: off / 5 / 15 / 30 / 60 min /
+  custom", per PC (browser or app storage, never the document), 30 min by
+  default, on the desktop app and the website alike. Locking saves first (the
+  open document, and any open dialog's draft such as Record visit or Report a
+  problem, as a server update already does, D64 C3), covers the interface, and
+  clears the open network from the screen and the page's memory. Monitoring
+  keeps running, because the Rust side and its own credential are separate.
+  Unlocking: a PIN set on this PC, stored as a slow hash, or the person's
+  server sign-in; after 5 wrong PINs, only the sign-in works (where there is
+  no PIN, or no sign-in to fall back on, see D169). It stops someone
+  walking up to an unattended screen; it is not encryption at rest of the
+  browser's library, and the help says so. While locked, the alarm card still
+  appears with the item's name and how long it has been down; Acknowledge and
+  Report a problem ask to unlock first, and Later works without unlocking.
+- **D166. This computer.** A Tauri command reads, from this PC only, its
+  interfaces (names, MACs, IPv4 and IPv6 addresses with prefixes, MTU), the
+  default gateway, and the DNS servers (/etc/resolv.conf on Linux,
+  GetAdaptersAddresses on Windows, scutil on macOS), with the netdev crate or
+  the standard library; nothing goes onto the network. One button, in the Add
+  menu and in Settings, goes through the Import… review: the PC as a device,
+  its interfaces, and its subnet worked out from address and prefix. Nothing
+  else: the default gateway is not added (the owner's decision), and the
+  review shows its address only as information. Nothing applies without the
+  review, and a second run merges instead of duplicating. A monitor PC that is
+  on the map is linked to its item, so its issues and statistics name where it
+  sits.
+- **D167. Dependencies are approved one by one.** Each Rust dependency is put
+  to the owner with its licence and size in the phase that needs it: netdev
+  (MIT); socket2 (MIT/Apache-2.0) and windows-sys (MIT/Apache-2.0) for ICMP;
+  ureq or hyper with rustls (MIT/Apache/ISC) for HTTP(S) checks and the
+  server; rusqlite with bundled SQLite (MIT); keyring (MIT/Apache-2.0); the
+  Tauri tray, notification and autostart plugins (MIT/Apache); aes-gcm, p256,
+  hkdf and sha2 from RustCrypto (MIT/Apache-2.0) for D136. DICOM PDUs and the
+  SMTP and DNS packets are hand-written, with no crate.
+
+### Decisions made building step 7, for the owner
+
+Phase 7.0 (2026-11-11), choices the plan left open:
+
+- **D168. The new promise is written now, marked as coming.** README's "What
+  it is not" and docs/FEATURES.md carry the new wording (still not a scanner;
+  answer checks from a desktop app turned into a monitor; statistics and
+  reports; This computer) under "Coming in step 7", and docs/SERVER.md's
+  threat model says now that a provider member can read the whole site and
+  that provider pushes go through the owner from 7b. Phase 7m replaces the
+  "coming" notes with the final wording once the pieces ship. Until then the
+  website, the zip and the app still never probe, and the old "Use Ping for
+  live checks" pointer stays. *Done in 7m: D337.*
+- **D169. The lock with no way to unlock yet.** The lock is on at 30 min as
+  shipped (D134), but a PC may have no PIN and no server sign-in. There it
+  still locks (it saves, covers the screen and clears the network from the
+  page) and unlocks with a plain **Unlock** that reopens the network, saying
+  "Set a PIN in Settings so only you can unlock". Said plainly: with no PIN,
+  the lock only hides the screen and protects nothing, and the help says so.
+  With a PIN but no server sign-in to fall back on (the website at
+  topo.carino.systems, D66, or an app that is not a server client), 5 wrong
+  PINs do not lock out: each further wrong PIN waits longer before the next
+  try (30 s, doubling, at most 15 min), and **Forget the PIN** stays offered.
+  It removes the PIN and keeps the library's networks, since the lock is not
+  encryption at rest; it is logged nowhere and says so. Where a sign-in
+  exists, D165's rule stands (only the sign-in after 5 wrong PINs). The lock
+  is never left with no way back. For the owner to confirm in 7e, together
+  with D165's note.
+- **D170. The D125 first-start question folds into the welcome.** On Linux and
+  macOS the desktop app's one-time "make this PC the server?" question (D125)
+  becomes the welcome's step 3 choice "make this PC the server", asked once;
+  the Windows installer's tick box stays, and an app whose PC already is the
+  server skips the choice. This keeps one way to do it (D143). Until 7l
+  ships, D125's own first-start prompt stays unchanged. Skipping step 3 (D142)
+  counts as the answer "not now": it is not asked again, and the choice stays
+  in Settings (This PC as the server). The 7l tests cover a skipped step 3
+  and an app updated from 0.0.1 that already answered D125's prompt (not
+  asked again).
+- **D171. Phase names.** The phases are 7.0 and 7a–7m as listed below; each
+  records its decisions here, numbered on from the last, and ticks its line in
+  the Status list.
+
+Phase 7.0 review (2026-11-11), conflicts in the plan made explicit:
+
+- **D172. The alarm card's buttons.** The owner's fixed D130 says "one large
+  OK button"; the plan's accepted D160 gives the card Acknowledge, Report a
+  problem and Later. Proposed: D160's three buttons replace the single OK,
+  since an issue stays open until a person acts (D132) and the card is where
+  they act; Later plays the OK's part, and Escape works like Later, as D130's
+  "Escape closes it". For the owner to confirm before 7g; if not, the card
+  has one OK (as Later) and acting happens in the Problems tab.
+- **D173. Local issue records (no server).** Issue records and folding come
+  in 7g, before the device key, the `monitor` role and the Rust signing
+  (7h). On a PC with no server, issue records come straight from the app's
+  own Rust side over Tauri events, inside one process, and are trusted as
+  local: they are not signed and skip D159's roster and role checks, as
+  there is no roster. A person's acts on them are the page's own edits. From
+  7h, every record that goes through the server is signed and checked as
+  D159 says; local records are never pushed to a server as they are (turning
+  the PC into a monitor starts signing new records, and records already
+  folded are already incidents in the document).
+- **D174. Stop keeps the visit's figures.** In the visit monitor (D148),
+  Stop ends the checks and deletes the samples, but keeps the session's
+  figures (availability, median, 95th percentile, loss, the outages seen)
+  on the provider's PC until Record visit adds them to the report, or the
+  provider signs out or starts a new session. So the usual order, Stop then
+  Record visit, still has a monitoring section.
+- **D175. Held parts and the revision limits (7a).** D152.1's "no count
+  limit" also covers today's two other limits in js/revisions.js:
+  `PART_REVS_MAX` (64 part tokens per card) goes with the held set, so a
+  card lists every outstanding part, however many; and when the 40 MB
+  budget (`REVISION_LIMITS.totalBytes`) is over with only held revisions
+  left, enforceRevisionCaps stops evicting (as now) and the library warns
+  "Old sent copies are taking up space: close or merge them" instead of
+  dropping a held part. Tests in 7a cover a ninth and a sixty-fifth
+  outstanding part, and an over-budget store of held parts only.
+
+Phase 7a (2026-11-11), choices the plan left open:
+
+- **D176. What "answered" and "closed" mean for a held part.** A part's
+  revision (js/revisions.js heldParts) now records the report it went out
+  for (`incidents`, the report being sent; none from the Share dialog) and
+  the providers it went to. A copy merged back on it is held as a part too
+  (as before) and records the part it answers (`answers`, `back`) and that
+  part's reports. A part, sent or merged back, is held until as many copies
+  have been merged on it as providers it went to (one at least), or until
+  every report it went out for is closed or gone; a part sent for no report
+  waits for its copy. A copy merged back is the base of that provider's next
+  return, so it is held the same way, by the same reports. The copies merged
+  back since the oldest part still out left are held with it (D177 needs
+  them). *Bounded by D179:* parts recorded before 0.0.2 and copies back for
+  no report are held as the newest 8 only, the copies held "since" are the
+  newest 16, and a part for several providers needs a copy from each.
+  card.partRevs names
+  every part still out, and of the others (answered, or gone from the store)
+  the newest 64. The tab's bucket for a network not kept
+  (`REVISION_LIMITS.session`, 30) counts only the copies opened, never a
+  part sent from it. The warning sits under "Your networks" on the landing,
+  beside the back-up line, translated.
+- **D177. Which records are "another provider's" (D152.2).** Computed at
+  the merge back (js/providerpart.js partMergeInfo, `others`): the devices,
+  cables and groups of every copy merged back as a part after the returning
+  part left, less what that copy's own part held when it left and less what
+  the returning part held. A two-way part merge (its revision gone) counts
+  every copy merged back. Strong keys: id, serial and MAC (the plan's
+  list); the asset tag, the address and the name of a device, a group's
+  place and a cable's ends only ask. The question reads "Another provider
+  added one with the same {how} since this part left: is it the same one?"
+  with the candidates, Add as new (the default) and Skip; Skip leaves it out
+  with the note "Skipped: it may be one another provider added since." A
+  record of yours added since (not from a provider's copy) still joins by
+  name, as before. Such a record that a later full revision also holds
+  (an export after the merge) is now matched by serial or MAC and asked by
+  name, where before it was never matched. A record whose id was reminted
+  when the other copy merged (an id clash) is not recognised and is matched
+  as before; with D178 such clashes are rare. *Since D179,* a weak hit on
+  another provider's record waits until every finder has run, so a serial or
+  MAC that also matches still pairs it with no question.
+- **D178. The random part of an id.** nextId appends 4 base-36 characters
+  from crypto.getRandomValues after the clock and the counter
+  (`n_<ms><seq><4>`); withFixedIds mints the form of before, with no random
+  part, so canonical comparisons and the suites stay deterministic. Two
+  suites that froze the clock to compare two runs (datacost, schema) also
+  freeze crypto.getRandomValues.
+- **D179. Bounds on what holds a part (7a review).** What nothing can
+  answer or close is no longer held without end:
+  - **Before 0.0.2.** A part recorded before 0.0.2 (no providers, no
+    report, sent or merged back) cannot say whether it was answered. Such
+    parts, and copies merged back for no report (from the Share dialog or a
+    two-way merge), are held as the old rule held parts: the newest 8
+    (`PART_LOOSE_HELD`), until a copy merged on one answers it.
+  - **Copies held "since".** Of the copies merged back since the oldest
+    unanswered part sent from 0.0.2 on left (D176, read by D177), only the
+    newest 16 (`PART_SINCE_HELD`) are held for it, so one Share-dialog part
+    that never comes back does not pin every later copy.
+  - **Whose copy.** A copy merged back records the provider it came from
+    (`by`): the part's one provider, or of several, the one whose visit
+    entries are new in it. A part for several providers is answered by a
+    copy from each; a copy that does not say whose counts as one more, as
+    in D176.
+  - **The budget.** Over the 40 MB budget with only held revisions left, a
+    part held with no open report (a Share-dialog part still out, a part
+    from before 0.0.2, a copy held "since") is let go, oldest first; a part
+    whose report is open never is, and D175's warning ("close or merge
+    them") is then about those, which can be closed or merged. A
+    Share-dialog part let go this way merges back two-way, as a part whose
+    revision is gone did before.
+  - **A card's part list from outside** (a binder, a back-up, a server
+    site) keeps at most the newest 1024 (`PART_REVS_HARD_MAX`); the card's
+    own sends still keep every outstanding part (trimPartRevs).
+  - **Strong keys first.** In the device match, a weak key (asset tag,
+    address, name) that hits another provider's new record is held back
+    until every finder has run: a serial or MAC that also matches pairs it,
+    and only otherwise is it asked, Add as new by default (D177).
+
+Phase 7b (2026-11-11), choices the plan left open:
+
+- **D180. The owner's answer is a log entry: format v19.** The plan asks
+  for the rejection to be "kept in the log" and for the visit's outcome to
+  be recorded; v18's log kinds (merge, incident, visit) have no place for
+  either, and an unknown kind in a v18 build is dropped (breaking the log's
+  chain). So 7b opens format v19 with one new log kind, `decision`:
+  `visits` (the ids of the visit entries it answers), `incidentId`,
+  `providerId`, `provider`, `visitBy` (the technician), `by` (who decided),
+  `result` (`approved` | `rejected`), `outcome` (`successful` |
+  `not-successful` | `undecided`), `note` (to the provider), `file` (the
+  file a rejected copy was kept as), `summary`. The v18 -> v19 migration
+  converts nothing; schema/topo-v19.json is v18's with the new kind
+  (schema/topo-v18.json stays); a v18 build opens a v19 document read-only.
+  v19 is not released yet: phase 7f adds its `check` blocks to the same v19
+  (D156) and its migration test then covers both.
+- **D181. What the judgement does (D153).** Successful: the report is
+  closed now, the owner's note its close note. Not successful: the report
+  is open again one round up (`reopened` + 1, the close cleared), as Reopen
+  does (D38); the note is in the decision entry, which the provider's copy
+  gets with the site's version (and the Problems tab shows under the
+  visit). Undecided: the report is left as the copy left it (Visited when
+  approved). The decision entry is the record: no separate `incident`
+  closed or reopened entry. A rejected copy's judgement applies to the
+  report as the owner's network has it. The merge, the report's state and
+  the decision entry are one undo step (commitMerge's `finish`).
+- **D182. Every visit opens the review, wherever it comes in.** A copy is a
+  visit when it brings a `visit` entry the network has not got and no
+  `decision` entry answers (js/visits.js visitReviewInfo); any copy but a
+  server's revision or a backup (the site's history) then opens the review
+  with the visit's foot. The banner's button reads **Review the visit** and
+  goes straight to the review (no Keep question first). A binder site with
+  such a visit is never merged on its own ("A visit to review"). The foot's
+  defaults are **Apply as reviewed** and **Undecided**, and Apply is enabled
+  even when nothing else is to merge ("Save the decision"): the visit is
+  still to be judged (D139). A note for the provider is always offered.
+- **D183. Visits waiting by link or file is per browser.** The copy is kept
+  in this browser's key store (IndexedDB, as the server's sync documents
+  are) when it arrives and when its review is cancelled, keyed by the
+  network, the provider (id, else name) and the report; a newer copy for the
+  same key replaces it. It goes when it is decided, or when it turns out to
+  be older than the network ("already has everything"). An undo of the
+  decision does not bring it back: the link or file can be opened again.
+  The list shows in the Problems tab (which shows while one waits, even on a
+  network with no report), the Simple view with nothing selected, and the
+  landing card ("Visits waiting: 2"); oldest first; the provider, the
+  problem, the count of visits and of changes, where it came from.
+- **D184. A rejected copy is downloaded at once** as
+  `<the network's file name>_rejected-visit.json` (the copy as it came, with
+  its identity), its name kept in the decision's `file`. Same on a server.
+- **D185. The server's side (migration 0004).** `visit_copies` holds each
+  copy sealed, with its header (id, author, device, slot, base revision,
+  epoch, roster, client time, ciphertext hash, signature), its state
+  (waiting, approved, rejected) and the decision (when, by whom, the
+  revision written). Routes: `POST /api/sites/{site}/visits` (providers
+  only; the same checks as a push: device, ciphertext hash, the author's
+  signature over `topo-visit-v1` (server/internal/tcrypto VisitHeader,
+  js/servercrypto.js sealVisit), a base that exists, epoch and roster in
+  force), `GET …/visits` (owners every copy, a provider their own, a viewer
+  an empty list), `GET …/visits/{id}` (the body), `POST
+  …/visits/{id}/decide` (owners; `{decision, n}`, n the revision written,
+  at least the copy's base), `DELETE …/visits/{id}` (the author or an
+  owner). The slot is a hash of the site, the report and the provider (the
+  server learns neither); one waiting copy per author and slot, a new one
+  replacing the waiting one (a decided one stays beside it, D191),
+  `replaced` counting how many it replaced; at most
+  64 waiting per site. A waiting copy's base revision is never pruned
+  (TOPO_REV_CAP). Decided copies are deleted by the provider's browser once
+  taken, or by housekeeping after 90 days. The owners get the
+  visit-recorded email when a copy arrives; the author gets it when it is
+  decided, with its own subject and sentence ("The owner approved your
+  visit", "… did not accept your visit", in the five languages, under their
+  "visit" switch). Both are told live by a `visits` event. Revision pushes:
+  owners only (403 `owners-only` with `update: true` and a message); a
+  v0.0.1 database's provider revisions are untouched and still verify.
+- **D186. The answer goes after what it wrote.** The owner's browser
+  writes the decision into the network, pushes it, and only then sends
+  `decide` with the revision pushed; until then the answer waits on the
+  card (offline included) and goes after the next push. A copy already
+  decided (409) or gone (404) drops the answer.
+- **D187. The provider's read-only sync.** A provider's card never pushes.
+  Each sync first reads the owner's answers on its copies (below); the
+  server's newer versions then merge in under its edits (three-way, quietly
+  when nothing conflicts, Needs merge otherwise), so its edits stay on the
+  newest revision; Record visit pulls first and uploads the card as it is,
+  on the revision it is built on. Its card says "Your changes go to the
+  owner when you record a visit" (chip **Proposed**) and, while a copy
+  waits, "Your visit is waiting for the owner's review" (**With the
+  owner**). When none of its copies is waiting any more and one was
+  answered, it takes the server's version (one undo step on screen) and
+  deletes its copies, without merging the head in first (a merge about to
+  be replaced could only stop it with a question). First
+  it offers its card as a file (`…_my-visit.json`) when a copy was
+  rejected, or when taking the server's version would lose something
+  (D192). While another copy of theirs still waits, the
+  card keeps its edits. A push refused as `owners-only` (a role changed
+  meanwhile) turns the card into a provider's.
+- **D188. Outside what they cover (server copies only).** The provider is
+  the copy's own (`providerId` in the sealed copy, else the newest visit's).
+  Inside: the devices, cables and groups they cover in the copy or its base
+  (providerPart, D91), anything new of those kinds and new reports, the
+  reports routed to them, their own provider record. Everything else that
+  changed is outside: an existing item they do not cover, another
+  provider, and every other kind (subnets, Wi-Fi, notes, columns, searches,
+  findings, the report header, the lives, the table view). A provider the
+  network does not list covers nothing. Each outside row asks **Leave it
+  out** (the default) or **Apply it**; the visit's own log entries always
+  come in. A copy by link or file keeps D91-D93's part rules instead.
+- **D189. Opening a server copy is checked.** The owner's browser opens a
+  copy only when its signature verifies with the key the trusted roster
+  names for its author, that roster lists the author as a provider, and
+  the newest trusted roster still does (D191; else `not-provider`); its
+  base revision only when its chain hash and signature check out, else the
+  review is two-way. A copy that fails is listed as "A visit copy that
+  could not be opened", with no Review.
+- **D190. Not in 7b.** A provider who sent a copy by link or file is not
+  told of the decision by Topo (there is no server to tell them; the owner
+  writes to them as before). Waiting server copies are not in the server's
+  backups (5b): they are proposals, and the site's history is whole without
+  them. Undoing a decision does not put the copy back in Visits waiting,
+  and an answer already sent to the server is not withdrawn. A waiting
+  copy never expires on its own (it holds its base from pruning until it
+  is answered or its provider leaves).
+- **D191. A rejected copy's edits do not come back unseen (review of 7b).**
+  A provider's card keeps every edit until the owner has answered all of
+  its copies, so a later copy (another report, or one uploaded before the
+  provider's browser took a rejection) carries a rejected copy's edits
+  too. The server therefore replaces only a *waiting* copy in the slot: a
+  decided one stays until its author's browser takes the answer and
+  deletes it (the unique slot index is on waiting copies only). When an
+  owner reviews a copy, their browser also opens the same author's
+  rejected copies still on the server (the newest 4) and marks each item
+  the copy still carries exactly as a rejected copy changed it: "This
+  change came in a visit you rejected before.", left out unless applied,
+  inside what the provider covers or not (js/visits.js visitRejectedKeys,
+  js/merge.js scope.rejected). A provider made a viewer or owner, removed,
+  or leaving takes their copies with them (store.SetMemberRole,
+  DeleteMember), and an owner's browser opens a copy only while the newest
+  trusted roster still lists its author as a provider. A link or file copy
+  that is reviewed after its visits were answered through a newer copy is
+  dropped from the list ("This visit was already answered."), and a
+  decision drops every local copy it answered. A rejected copy's file is
+  downloaded once the decision is written, so a review retried after a
+  stale result downloads it once.
+- **D192. What taking the server's version would lose.** Before a
+  provider's card becomes the server's version after an approval, it
+  counts the parts (docChangeParts: one per device, cable, group, report…)
+  it changed since the revision it is built on that the server's version
+  does not have as the card does, leaving out reports the owner judged in
+  those revisions, plus visit entries the server's version lacks. Edits
+  made after the upload with no new Record visit, and rows the owner left
+  out, are both caught; any count above zero offers the `…_my-visit.json`
+  file first. A rejected copy always offers it.
+
+Phase 7c (2026-11-11), choices the plan left open:
+
+- **D193. The client's crates (D167, for the owner to confirm).** ureq 2.12
+  (MIT/Apache-2.0) with its default features off but `tls`: rustls 0.23
+  (Apache-2.0/ISC/MIT) on ring 0.17 (Apache-2.0/ISC), webpki-roots 0.26
+  (the public authorities; the 1.0 data it carries is CDLA-Permissive-2.0)
+  and base64 (MIT/Apache-2.0); sha2 0.10 and url 2 were already in
+  Cargo.lock through tauri. No gzip, cookie, proxy or native-certs feature,
+  so nothing else comes in (the lock gains rustls, rustls-webpki,
+  rustls-pki-types, ring, untrusted, ureq, webpki-roots, getrandom, subtle,
+  zeroize, base64 and windows-sys/windows-targets for ring on Windows). The
+  same client serves the monitors' HTTP(S) checks in 7f, so 7f adds no
+  HTTP crate. Built offline from crates already on this PC; the release
+  size difference was not measured (no release build in 7c).
+- **D194. Which certificate is trusted.** One a public authority signed
+  (webpki-roots) connects with no question and is not pinned, so its
+  renewals keep working. Any other (a self-signed `TOPO_TLS_SELF`, a
+  company's own authority, a wrong name) is shown as its SHA-256
+  fingerprint, in the AB:CD:… form the server logs and the browsers show,
+  to compare once; "They are the same: connect" pins it. A pinned
+  certificate is the identity: its name and dates are not checked (the
+  self-signed one lists the PC's LAN addresses, not 127.0.0.1), and any
+  other certificate is refused, also when an authority signed it. The
+  refusal is said once as a toast, and Settings says why and offers
+  **Check the certificate again**, which compares the new fingerprint;
+  the same address keeps its session, another address starts signed out.
+  Plain http is accepted only to this PC (127.0.0.1, ::1, localhost), as
+  the server itself allows (D52); a bare address means https.
+- **D195. What the app sends, and to where.** Only the connected server's
+  `/api/` (a path, never a URL; no `..`, `//`, `#`, spaces), with GET,
+  POST, PUT, PATCH and DELETE, no redirects followed, answers up to
+  256 MB. Each request carries `X-Topo: 1` and `Sec-Fetch-Site:
+  same-origin` and no `Origin`: the server's CSRF check (D57) takes that,
+  as from its own page, and the app is not a page another site can drive,
+  so the check loses nothing. No server change was needed. Any HTTP status
+  is handed to the page as an answer; only no answer is an error
+  ("offline", "untrusted:<fp>", "pin-changed:<fp>"), which js/server.js
+  sees as its own "offline". Bodies that are not UTF-8 cross as base64.
+- **D196. The session.** The cookies are kept by the app per server in
+  `<app data>/client/session.json` (written readable by this user only),
+  the address and the pin in `<app config>/client.json`, so a restart of
+  the app stays signed in as a browser would. The page never sees the
+  cookie. The sign-in link in the email signs in a browser, not the app
+  (it is bound to the browser that asked, D54): in the app the person types
+  the code. Connecting backups to Google Drive or OneDrive (D110) finishes
+  in a browser on the server's address, where the provider sends it back.
+  **Disconnect** asks, signs out on the server, then forgets the address,
+  the pin and the session; the networks stay on the server and the ones in
+  the window stay on this PC.
+- **D197. The page side.** js/server.js, js/serversync.js and
+  js/serverui.js are unchanged; js/desktopclient.js sets
+  `TopoServer._hooks` (`force`, `origin`, `fetch`, `EventSource`). The
+  address is mirrored in the window's localStorage so the hooks are in
+  place before the boot opens the server client; the app's own answer
+  (`client_info`) wins, with one reload when they differ, never a loop.
+  Connecting and disconnecting reload the page, so it always boots as what
+  it is. The stream reconnects in Rust after the server's `retry:` time
+  (a browser's EventSource does the same) and is closed for good on any
+  status but 200; a reload or a page that leaves stops its streams
+  (`on_page_load`). A server that does not answer is tried again after 5 s,
+  then doubling to once a minute, and at once when the network comes back.
+  The section shows only in the app (a `__TAURI__` that answers
+  `client_info`), never on the website or in the zip, and the CSP is
+  unchanged.
+- **D198. This PC's own server in its window.** "Open in browser" is gone
+  from This PC as the server; **Open it in this window** connects the
+  window to the running server at 127.0.0.1 (https with the fingerprint
+  the server wrote, so there is nothing to compare, in "Other PCs on this
+  network"; http in "This PC only"), and once the window uses it the
+  section says so instead. The `server_open` command stays in the app for
+  an older page and is not offered. The welcome (7l) reaches "Connect to a
+  Topo server" through this Settings section.
+- **D199. How 7c is tested.** The Tauri window itself is not driven by a
+  test (no webview automation here). The Rust transport (src/client.rs)
+  has unit tests against loopback servers, with a test certificate pair in
+  src/testdata (a test-only key). The page side runs against a stub of the
+  commands whose requests are answered by the in-page fake server
+  (tests/suites/desktopclient.js). And the two meet in
+  tests/desktop-client-e2e.mjs: the page in Chromium, its commands sent to
+  examples/client-bridge.rs (the same src/client.rs over stdin and stdout;
+  an example is never bundled), against the real topo-server with
+  `TOPO_TLS_SELF`.
+
+Review of 7c (2026-11-11):
+
+- **D200. What only a browser can finish, from the app's window.** The
+  window is not a browser on the server's address, so js/serverui.js
+  (otherwise unchanged, D197) words two things for it when
+  js/desktopclient.js sets `TopoServer._hooks.desktop`: the sign-in sheet
+  asks only for the code (the email's link signs in a browser, D196); and
+  Backups to Google Drive or OneDrive offers no Connect, which could not
+  finish (the provider brings a browser back, and the server ties the
+  sign-in to the session that started it, so the app's session cannot
+  finish it in a browser). It says to finish in a browser signed in on the
+  server, with **Open the server in a browser** (the server's address,
+  opened outside the app). The redirect address shown is the server's
+  (from `_hooks.origin`, http(s)://localhost:<port> for this PC's own
+  server, as backups_oauth.go makes it), never the window's
+  tauri://localhost.
+- **D201. A certificate nobody vouches for any more.** A server connected
+  with no pin (its certificate from a public authority) whose certificate
+  then fails the check (expired, a proxy's own, someone in the way) is
+  treated as a refused certificate, not as a server that does not answer:
+  said once, not retried, and Settings says the certificate cannot be
+  checked and offers **Check the certificate again** (compare and pin it,
+  or disconnect). Its event stream closes for good too. A server that
+  answers again restarts the retry wait at 5 s (D197).
+- **D202. One keeper of the app's files.** The address, the pin and the
+  cookies are kept by src/client.rs `Store` (no Tauri), which the app's
+  commands and the tests' bridge both use, so the e2e restarts the bridge
+  on the same folder as the app restarting. Writes happen one at a time
+  under one lock and go to a temporary file renamed into place, so two
+  answers saving the cookies at once leave the newer jar, whole; only the
+  connected server's cookies are written (a late answer from a server just
+  left or disconnected writes nothing).
+- **D203. Each refusal reaches the thread that met it.** The certificate
+  check keeps its verdict per thread (ureq makes the handshake on the
+  calling thread), so a page request and the event stream refused at once
+  both say "pin-changed" (or "untrusted"), never "offline" for one of them.
+
+Phase 7d (2026-11-11), choices the plan left open:
+
+- **D204. No crate for This computer (D167).** netdev was not taken: the
+  standard library and libc (MIT/Apache-2.0, already in Cargo.lock through
+  tauri, now a direct dependency on Linux and macOS) read everything, so
+  nothing new comes in. Linux: getifaddrs for IPv4, /proc/net/if_inet6 for
+  IPv6 (its flags say which address is a temporary privacy one),
+  /sys/class/net for the MAC, the MTU, whether a card is physical (it has a
+  `device`) and Wi-Fi, /proc/net/route and /proc/net/ipv6_route for the
+  default gateways, /etc/resolv.conf for the DNS servers (and
+  systemd-resolved's own list when resolv.conf names only its 127.0.0.53
+  stub), /etc/os-release for the system's name. macOS: getifaddrs (the MAC
+  and MTU from the link entry; en* are the cards), `route -n get default`
+  and `scutil --dns`, `sw_vers`. Windows: GetAdaptersAddresses from
+  iphlpapi, declared in src/thiscomputer.rs (no windows-sys feature),
+  Ethernet and Wi-Fi adapters as cards except Hyper-V's vEthernet. The
+  macOS and Windows readers are written and not built or run here (no
+  such target on this PC); their text parsers are tested on every OS.
+- **D205. One address per interface.** Topo keeps one address on an
+  interface (amendment 29, as the importers do), so each card keeps the
+  first of: an IPv4 address that is not link-local, a stable IPv6 one (not
+  temporary, not fe80::), an IPv4 link-local one. Other stable addresses
+  are listed in the review as not added; temporary and link-local IPv6
+  addresses are not mentioned, since they change on their own and would
+  make every run differ. A subnet is added for the kept address only, and
+  never for a link-local one or a /32 or /128.
+- **D206. Which interfaces.** Loopback is never added, nor a card that is
+  not connected and has no address (said in the review). Virtual
+  interfaces (bridges, container links, VPN tunnels) are left out by
+  default and listed; the review's tick **Also add the virtual interfaces**
+  adds them and their subnets. On Windows the interface takes the name
+  people see ("Ethernet 2"), not the adapter's GUID.
+- **D207. What the device carries.** Type PC; its name is the host name
+  without its domain (the merge finds it again by MAC first, then name);
+  `os` is the system's name; `dns` holds the DNS servers (the PC's own
+  setting, in the field Topo already has). `gw` stays empty: the gateway is
+  not added (D166), so the review shows every default gateway, IPv4 first,
+  as information only, with the MTUs (Topo has no MTU field and 7d adds no
+  format change).
+- **D208. Where the button is.** The plan's "Add menu" is the Nodes panel,
+  where **＋ Add devices…** is: **＋ Add this computer…** sits under it in
+  the full editor (Import… is a full-editor tool), and Settings has a
+  **This computer** section with the same action, closing Settings first.
+  Both go to the Import… review through a new `openResult` that starts at
+  "What was understood" with no Back and the title **Add this computer**;
+  everything after it (the targets, the merge review, the restore point,
+  the log entry "This computer: <name>", one undo step) is the Import…
+  path unchanged. Hidden wherever there is no `window.__TAURI__`.
+
+Phase 7d review fixes (2026-11-11):
+
+- **D209. "Connected" means a link, not only switched on.** An interface's
+  `up` is true only when it is switched on and has a link: Linux and macOS
+  need IFF_UP and IFF_RUNNING (Linux sets IFF_RUNNING only when the card's
+  operational state is up, so NetworkManager's unplugged cards, which it
+  keeps IFF_UP, are not connected); macOS also reads `ifconfig -a`'s
+  `status: inactive` (unused Thunderbolt and Ethernet ports, Wi-Fi not
+  joined); Windows keeps OperStatus up. On the page a card that is not
+  connected is left out ("Not connected") unless it has an address that is
+  not loopback, link-local or temporary (a static address kept on an
+  unplugged card is documentation and stays). macOS reads its temporary
+  IPv6 addresses from `ifconfig -a` ("temporary") and which cards are
+  Wi-Fi from `networksetup -listallhardwareports`, both local commands
+  that read this PC's own tables; Windows' temporary addresses are the
+  ones whose suffix origin is NlsoRandom (5), never NlsoDhcp (3).
+- **D210. The DNS servers written are real ones.** systemd-resolved's stub
+  (127.0.0.53, 127.0.0.54) is replaced by resolved's own list and dropped
+  when that list cannot be read, so it is never the PC's DNS. Windows
+  leaves out the fec0:0:0:ffff::1/2/3 placeholders and takes the network
+  cards' servers (another adapter's, a VPN's say, only when no card has
+  any). The page also drops any loopback or placeholder server it is
+  given; with none left, the review says the PC lists no DNS servers.
+- **D211. A labelled address belongs to its card.** Linux lists an IPv4
+  address added with a label ("eth0:1") under that label; it is read as
+  an address of eth0 (and so listed as not added, D205), never as a
+  separate virtual interface.
+- **D212. The stored label stays English.** The log entry and the merge's
+  source say "This computer: <name>" in English whatever the editor's
+  language, as the importers' labels do; only the review's heading is
+  translated.
+
+Phase 7e (2026-11-11), the idle lock, choices the plan left open:
+
+- **D213. D169 confirmed, with no way to slip past it quietly.** The 7.0
+  review asked what happens after 5 wrong PINs where no sign-in exists.
+  Built: there, each further try waits (30 s after the fifth, doubling, at
+  most 15 min), and **Forget the PIN** appears only after the fifth wrong
+  PIN (not from the start). Its first tap says what it does; the second
+  removes the PIN and unlocks. The networks stay, since the lock never
+  encrypted them. "Logged nowhere" is narrowed: nothing goes into a
+  document or its log, but this browser notes it (D219), so the person
+  whose PIN it was learns that it happened. A server that does not answer
+  is still a sign-in (changed after review, D223). Where the server
+  answers, D165's rule stands: after 5 wrong PINs only the sign-in
+  unlocks. With no PIN but a sign-in,
+  the sign-in is asked for (a PIN gives a quicker unlock). Nobody is ever
+  left without a way back.
+- **D214. Locking clears the page by reloading it.** Clearing the network
+  from the page's memory piece by piece (the document, the undo history,
+  the library's cards, sync and history caches) would leave something
+  behind. So locking saves (the open document into its card and the tab's
+  history entry, the library's writes settled, a server card's pending push
+  sent, waiting at most 8 s), writes the lock, and reloads. The page that
+  comes back stops in the boot before it reads the library, the tab's
+  network or the server (js/app.js awaits `TopoLock.gate()`). The open
+  question from 7.0, where an unkept network goes while locked: in the
+  tab's history entry, where a reload already finds it, and it comes back
+  after the unlock as it was. The undo history does not survive a lock,
+  as it does not survive a reload. When the network could not be written
+  anywhere a reload finds it (the history entry refusing it, a draft too
+  big for the tab's storage), the cover goes up without the reload and
+  says "The open network could not be saved, so it stays open under the
+  lock."
+- **D215. One lock per browser.** The lock is kept in localStorage, so
+  every tab of Topo in that browser (or the desktop app's window) locks
+  with it: another tab locks (saving first) when one does, a tab opened
+  while locked boots locked, and unlocking in one unlocks them all.
+- **D216. Idle time is shared by the tabs.** A key press, a tap, a pointer
+  move, a scroll or a wheel in any tab counts; the last use is written for
+  the other tabs at most every 15 s. The time is looked at again each
+  minute and on coming back to the tab (a background tab's and a sleeping
+  PC's timers are late), so a PC woken after an hour locks at once.
+- **D217. The PIN.** 4 to 12 digits, kept as PBKDF2-SHA-256 with 600,000
+  rounds and a 16-byte random salt in this browser's storage, never the
+  PIN itself. Setting, changing or removing it in Settings asks for no old
+  PIN (whoever is in Settings has the screen unlocked already). A page
+  without Web Crypto (not a secure page) says it cannot keep a PIN, and
+  the lock then works as with no PIN.
+- **D218. The drafts.** What is typed in Report a problem and Record visit
+  (their form step) is kept in the tab's sessionStorage at the lock and the
+  dialog reopens with it after the unlock, when the same network comes
+  back; otherwise it is dropped. Their send steps are not kept: by then the
+  report or visit is already saved in the network.
+- **D219. Unlocked without the PIN or the sign-in: said afterwards.** A
+  forgotten PIN, or an Unlock because the server did not answer, is noted
+  in this browser with its time. Settings, Screen lock, shows it until OK
+  is pressed, and a notice says it once at that unlock.
+- **D220. Unlocking by sign-in.** The cover offers a code sent to the email
+  that was signed in when it locked, shown masked (o***r@example.com). It
+  checks only the code (`TopoServer.verifyCodeOnly`: `/api/auth/verify`
+  with this browser's device, as at sign-in), and reads no keys, sites or
+  networks until the boot carries on. A sign-in that is not the same person
+  is refused. The cover asks the server's health once to know whether the
+  sign-in can work ("Try the server again" after a failure). The code
+  makes a new session, as any sign-in does; the old one is then closed
+  (D226). A sign-in link from the email opens a
+  tab that boots locked like the others; its link is used after the
+  unlock, as before.
+- **D221. The setting.** "Lock after": Off, 5, 15, 30, 60 min or Custom
+  (1 to 1440 min), kept as its own key in this browser (absent is 30), not
+  in the settings carried with anything; plus **Lock now**. The same code on
+  the website, the offline zip, a server's page and the desktop app (the
+  window's own storage); no Rust or Go change in this phase, and the
+  monitor (from 7f) is not touched by a locked window.
+- **D222. The alarm card's hooks, for 7g.** `TopoLock.showOver(el)` puts an
+  element in a layer above the cover (the in-page card while locked);
+  `TopoLock.requestUnlock(text)` shows why on the cover with Not now and
+  answers true once unlocked, false for Not now (Acknowledge and Report a
+  problem); Later needs neither. `isLocked()` and `onChange(fn)` follow the
+  lock. The desktop app's card window (alarm.html, 7g) is a separate window
+  and is not covered by the page's lock.
+
+Phase 7e review fixes (2026-11-11):
+
+- **D223. A sign-in whose server does not answer is still a sign-in.**
+  D213 as first built let a server that did not answer count as no sign-in,
+  so anyone at the PC could cut the network (Wi-Fi off, cable out) and get
+  Forget the PIN after five wrong PINs, or a plain Unlock with no PIN, past
+  a lock that a sign-in protects. Now, when the lock names a person who was
+  signed in, a silent server offers neither: the PIN keeps working, with
+  D169's growing waits after the fifth wrong one, plus "Try the server
+  again". So that nobody is stuck for good (D169: the lock is never left
+  with no way back) when the server is gone for good, this browser keeps
+  when the server first stopped answering (`topo-lock-down`, cleared when
+  it answers and at the unlock); once it has not answered for 24 h, asked
+  again with Try the server again, Forget the PIN (after 5 wrong PINs) or
+  the plain Unlock (no PIN) appears, noted as D219 says. The cover says
+  when that will be. Cutting the network for a day at an unattended PC
+  remains a way past a lock without a PIN; with a PIN it still needs the
+  PIN or that day plus five wrong tries. For the owner to confirm with
+  D213.
+- **D224. Covered in place, held for real.** The cover also goes up
+  without the reload (D214's fallback) when this browser refuses to keep
+  the lock itself (site data blocked, storage full: a reload would boot
+  unlocked) and when edits wait for a history entry Back or Forward left
+  (a reload would forget them); the cover says which. Such a lock is held
+  in the page: another tab's storage news does not end it, and it ends at
+  the unlock or with the tab. While anything is locked, no key, Ctrl+Z/Y,
+  shortcut, copy, cut or paste reaches the page under the cover (a
+  capture guard registered in <head>, before any other script's, plus a
+  check at the top of the editor's own keyboard handler); the cover's and
+  the alarm card's own fields keep their keys.
+- **D225. A locked window does not open the server.** `openServerClient`
+  returns at once while the window is locked, being locked or about to
+  boot locked (`TopoLock.held()`), so the desktop app's client
+  (js/desktopclient.js, which may open it before the boot's gate) and its
+  retries read no keys, sites or sync state; the boot after the unlock
+  opens it.
+- **D226. Unlocking by sign-in closes the session from before the lock.**
+  `verifyCodeOnly` notes the current session (`GET /api/me/sessions`)
+  before verifying the code and, once the new session exists, ends the old
+  one (`DELETE /api/me/sessions/{id}`, which refuses another person's).
+  Each unlock by sign-in leaves one session, not one more.
+
+Phase 7f (2026-11-11), checks on one PC with no server, choices the plan
+left open:
+
+- **D227. Quiet windows are kept by the monitoring PC, not the document.**
+  "Quiet until…" on a device, on a group (from the device's Check section)
+  or on the whole site (Settings) is an operational act, like an issue's
+  Acknowledge: in the document it would make a revision, a log entry and a
+  merge question for every maintenance hour. So the app keeps them
+  (`monitor_quiet`, `<app config>/monitor.json`), they end on their own, and
+  an item in one is "quiet": no outage, its time counted as maintenance.
+  Offered: for 1 hour, 4 hours, 24 hours, until 08:00 tomorrow, or End the
+  quiet. From 7h a quiet window set on one install reaches the site's
+  monitors as a signed record, as the issue acts do.
+- **D228. The upstream chain and root cause.** The chain is the cable path
+  to the device (VPN tunnels and retired devices carry nothing), nearest to
+  this PC first. When this PC is on the map (found by one of its MACs, read
+  with `this_computer`, D166), the path runs from it; when not, from the
+  device's own router (the nearest routing device that is not the Internet
+  cloud), which is where any PC reaches it from. The page works the chains
+  out (js/checks.js monitorChains, under 200 ms on site300) and sends them
+  in the plan; the app decides the cause (src/monitor.rs root_causes): a
+  down item is down "because" the nearest device in its chain whose every
+  check is down. A router whose ping fails while its web page answers is
+  not down, so nothing behind it is blamed on it. The cause is kept with
+  every sample ("down because R1", D161).
+- **D229. The check blocks (D156).** `node.checks`, a list of at most 8 per
+  device (the device itself, or one service each), with the keys and order
+  of docs/FORMAT.md "Answer checks", absent keys left out, so a device with
+  none serializes as before; `node.target` the device's availability target.
+  Not in the spreadsheet: they are what the monitors ask, not facts of the
+  register, and the devices sheet's round trip is unchanged. The merge
+  compares a device's checks as one field (both sides changing them is a
+  question). Nothing to convert from v18; v19 was not released, so this
+  phase adds to the v19 that 7b opened (D180), and the provider's target
+  with its service hours waits for the reports (7j), which are what read
+  it, in the same v19. Which monitor checks a block (`monitors`) is in the
+  format now and read from 7h; a PC with no server checks every block.
+- **D230. One network monitored, chosen when it is turned on.** "Monitor
+  from this PC" needs a kept network (a card in My networks) and monitors
+  that one: the plan carries its id and name, the app keeps the plan
+  (`<app data>/monitor/plan.json`), so monitoring goes on with the window
+  closed or another network open. The dots and the Check section's states
+  show only while that network is open; Settings offers **Monitor this
+  network instead** for another. Ticking the switch opens the offer under
+  it: the network's name, **Keep Topo in the system tray when the window is
+  closed** and **Open Topo at sign-in**, both ticked (monitoring with the
+  window closed needs them), then **Turn on**. Turning it off also takes
+  Open Topo at sign-in away.
+- **D231. The crates (D167, for the owner to confirm).** rusqlite 0.40.2
+  (MIT) with SQLite bundled (public domain; compiled in, so no system
+  SQLite is needed); it brings libsqlite3-sys, hashlink, hashbrown,
+  fallible-iterator and fallible-streaming-iterator (MIT/Apache-2.0), and
+  vcpkg and sqlite-wasm-rs/rsqlite-vfs in the lock only (an MSVC build
+  helper and the wasm target, never built here). ring, already in the lock
+  through rustls, is now named for the checks' random ids. Tauri's
+  `tray-icon` feature (its crates were already in the lock). Not taken:
+  socket2 and windows-sys (the ICMP socket through libc, already a direct
+  dependency; IcmpCreateFile and IcmpSendEcho declared by hand, as
+  thiscomputer.rs declares GetAdaptersAddresses), the autostart plugin
+  (Open Topo at sign-in is a desktop entry in ~/.config/autostart on Linux,
+  a LaunchAgent on macOS and the HKCU Run value through reg.exe on Windows,
+  each starting the app with `--background`), and an HTTP crate for the
+  checks: HTTP(S) is one GET written by hand over rustls, reading the
+  status line only, so ureq's redirects and body handling are not in the
+  way (D193 named ureq for this; it stays the server client's). The release
+  size difference was not measured.
+- **D232. What answers, protocol by protocol (D155).** A TCP check refused
+  is not answering; a ping asked over TCP ("TCP, not ping") and refused is
+  answering, since the device itself said no. HTTP: 2xx, 3xx (never
+  followed) and 4xx answer, 5xx does not. DNS: NOERROR with an answer (or
+  truncated); NXDOMAIN and an empty answer are said and count as failures.
+  SMTP: the 220 greeting and a 250 to EHLO, which names this PC by its own
+  address literal and nothing else; STARTTLS asked for and not offered still
+  answers, and says so. DICOM: status 0000; a rejection is said as its
+  result/source/reason (1/1/7 is an AE title the SCP does not know). The
+  checks never judge a certificate (any is accepted, its end date read)
+  and never look a name up: addresses are the document's IP literals.
+  Timeouts: 5 s, 10 s for SMTP and DICOM. A check that cannot be asked from
+  this PC (no ICMP and no TCP port documented, no address, no DNS name, a
+  TCP check with no port) is unknown, never down. Windows asks IPv6 devices
+  over TCP (no Icmp6SendEcho2).
+- **D233. The states in detail (D157).** Up needs 2 answers in a row also
+  from unknown; slow needs at least 3 of the last 5 answers, their median
+  above "slow above"; flapping counts changes between up and down only
+  (not from unknown); more than 2.5 intervals with no result (the PC asleep
+  or off) is unknown, and counting starts again. The first round is spread
+  over at most 15 s; at most 8 checks run at once (8 worker threads); a
+  plan holds at most 4000 items. The map's dot is the worst of a device's
+  checks (down, down because of a device upstream, flapping, slow, unknown,
+  quiet, answering), top centre, a class of its own so no export carries
+  it. The Check section is the device panel's (Full editor) but translated,
+  as the plan's tests ask, unlike the Advanced editor's own vocabulary.
+- **D234. The statistics on the PC (D161, D162).** Each sample keeps the
+  state after it, whether it was down because of something upstream, the
+  check's interval and how it was asked. The time between two samples is
+  the first one's state, unless it is longer than 2.5 intervals: then one
+  interval is that state and the rest unknown. The hourly figures of ended
+  hours are worked out once a minute; an hour no sample reaches is not
+  written (a report counts it as unknown). Each figure carries the monitor
+  ("local" until 7h names it). The retention is this PC's setting in 7f
+  (Keep statistics: Off, 30, 90, 180, 360, 720 days or 10 years; 360 as
+  shipped); from 7h the site's owner sets it and every monitor follows.
+  Shortening asks first, counting the hourly figures and the items that
+  will go; Off counts the samples too and empties the file. The file is
+  `<app data>/monitor/stats.sqlite`, readable by this user only. The Check
+  section's last 24 h come from the samples: a response-time line over a
+  bar of 288 five-minute states, with the numbers in words beside it
+  (answered of asked, median, 95th percentile, availability and its
+  coverage).
+- **D235. One monitor per PC, and the tray.** The monitor runs in one Topo
+  at a time (a lock file, `<app data>/monitor/monitor.lock`); a second
+  window says it runs in the other. The tray has **Open Topo** and **Quit
+  Topo**, in the page's language, and its tooltip says how many items are
+  not answering. Closing the window keeps the app running while it
+  monitors with the tray icon; the tray's Open Topo opens the window again
+  on index.html. On Wayland and some desktops the tray may not show
+  (Settings says so): then monitoring lasts while the window is open.
+- **D236. The DICOM cross-check, by hand.** Carino DICOM's virtual
+  environment on this PC points at a Python 3.14 the system no longer has,
+  so the cross-check ran against pynetdicom 3.0.4 (the library Carino DICOM
+  is built on) as an SCP with the AE title TOPOTEST on 127.0.0.1:7397:
+  C-ECHO answered 0000 in 6.6 ms, and a wrong called AE was rejected 1/1/7.
+  It is the ignored test `dicom_cross_check` in src/checks.rs, to run again
+  against Carino DICOM's `./run.sh receive --port <port>`.
+
+From the review of 7f (2026-11-11):
+- **D237. Root cause never loops.** When this PC is not on the map, a
+  routing device that is checked has no upstream chain: the search from it
+  has no direction, so it would find a neighbouring router, maybe one
+  behind it, and two routers side by side would each be the other's cause.
+  Other devices keep the chain from their own router (D228). The app also
+  drops a cause whose own cause is this device, so a loop from any plan
+  leaves both as their own outage.
+- **D238. Retention holds while the monitor runs.** The scheduler deletes
+  samples past 7 days and figures past the retention once an hour, not
+  only at start and when the setting changes. The retention is read under
+  the statistics' lock both when a sample is written and when Off empties
+  the file, so no sample lands after Off. The monitor's folder is 0700 and
+  the file is made 0600 before SQLite opens it, so its -wal and -shm files
+  (which hold the latest samples) are private too.
+- **D239. A backlog is served oldest first.** When more checks are due
+  than 8 can run (an upstream outage with many timing out), the scheduler
+  hands out the ones due longest first, not the first in the plan, so the
+  last items of a long plan do not turn unknown.
+- **D240. Two Topos on one PC.** Open Topo at sign-in starts one Topo
+  with `--background`, and opening the app starts a second; only one runs
+  the monitor (D235). Each re-reads monitor.json and plan.json when they
+  change (every 2 s), so what the second window sets (the switch, Keep
+  statistics, a quiet window, the checks, the tray's words) reaches the
+  one that monitors, which applies it; the second shows no states or dots,
+  since the states go only to the window of the Topo that monitors, and no
+  tray icon (one icon, the monitoring Topo's). A Topo
+  whose monitor is on takes it over when the other quits. `--background`
+  opens no window only when the tray icon was really made; otherwise the
+  window opens. The tray's menu is made again when the page's language
+  changes.
+- **D241. SMTP only where the device documents it (D155).** An SMTP check
+  runs only when the device's Allowed ports hold the check's port (25
+  unless set) over TCP. The Asks list offers SMTP only on a device that
+  documents 25, 587 or 465, and picking it takes the documented port. A
+  block that does not match (from a file, or a port typed later) stays in
+  the document, the card says why, and the plan leaves it out.
+- **D242. Small fixes to the check fields.** The availability target is
+  rounded to 3 decimals before its range is checked, so 99.9999 is refused
+  instead of becoming 100. The Every list shows an interval it does not
+  hold (45 s from a file) as itself, not as its first choice.
+
+Phase 7g (2026-11-11), issues and the alarm, choices the plan left open.
+The owner's later answers (the app becomes a server client, D144; no status
+board, D145) change nothing here. D172 (three buttons on the card instead of
+D130's one OK) was not answered; 7g builds it as D172 proposes, and the
+fallback (one OK as Later, acting in the Problems tab) is a change to
+desktop/alarm.html alone.
+
+- **D243. One issue per device, opened by the app.** An issue belongs to a
+  device, not to one of its checks: it opens when a check of the device is
+  down and nothing upstream is down (the device is its own outage, D161,
+  D228), and lists as `behind` the devices down because of it. A device
+  that is then down because of one upstream keeps its own outage going (it
+  is not answering again). It answers again when none of its checks is down
+  and at least one answers: unknown (the PC asleep) and quiet are not
+  answering again. A device taken out of the checks while down ends its
+  outage unseen (`gone`), with no notification. Issues are worked out in
+  Rust from every status change (src/issues.rs), so they open with the
+  window closed, and kept in `<app data>/monitor/issues.json` (read again
+  when the other Topo on this PC changed it, D240); their id is
+  "in" and 10 base-36 characters, the incident's form, so the record and the
+  incident are the same id.
+- **D244. After an act, the outage stays on its issue.** Acting closes the
+  issue but the device may still be down: that outage stays on the closed
+  issue (no new issue, no second alarm) until the device answers; down again
+  after that is a new issue. A repeat while the issue is open raises the
+  card again, unless the issue is flapping (D157: one issue, marked).
+- **D245. Expected, in the statistics.** Expected relabels the device's own
+  down samples from the outage's start to the act as maintenance (quiet)
+  and works their hours out again (stats.rs `mark_maintenance`); hours
+  older than the samples (7 days) have their down seconds moved to
+  maintenance as they stand. Down because of a device upstream is left as
+  it is. Until the device answers again it shows and records as quiet
+  ("Expected (maintenance): quiet until it answers again"), so the rest of
+  that outage is maintenance too.
+- **D246. Folding.** Any editable, unlocked page with the record's network
+  open folds every record of it (js/issues.js): one undo step for what it
+  folds at once, an `incident` log entry `outage` for a new outage and one
+  per act (`acknowledged`, `reported`, `expected`); a recovery or a repeat
+  updates the outage with no entry. The outage is an incident with `kind:
+  "outage"` and its own fields (`outages`, `behind`, `monitor`, `flapping`,
+  `gone`, `acts`; docs/FORMAT.md section 6), added to the unreleased v19
+  as 7b and 7f did, with a symptom from the device's type so the lists,
+  the marker, the landing line and step-4 routing read it as any report. A
+  read-only network folds nothing. The app is told which records were
+  folded; a closed record whose outage has ended goes once folded, any
+  closed one after 30 days, at most 500 kept.
+- **D247. Acting.** An act goes into the document first (one undo step, its
+  entry), then to the app's record. Report a problem is the step-4 report,
+  prefilled with the device, its symptom and what the monitor saw; the act
+  is its save (with the report's id), so closing the report unsaved leaves
+  the issue open, and nothing is sent until the person sends it. "Who" is
+  Settings' reporter name, else nobody named. Acts the document holds that
+  the record lacks (made on the website, in a file, in another window) are
+  sent back to the app at the next fold, so its record closes too. Who may
+  act: an editable network's owner; in provider mode or as a provider
+  member, only on devices `providerCovers` gives the provider they act as;
+  a viewer (read-only) sees no buttons. Signatures and the server's role
+  checks are 7h (D159).
+- **D248. Two installs acting at once.** The merge takes an outage's acts
+  and times down as unions (an act is the same act by its kind, time and
+  author; a time down by its start, its end the later one known), `behind`
+  as a set, and two closes as the earlier one, never as a question.
+- **D249. The card window.** One card at a time; the next waits (the card
+  says how many). Each monitor gets a window placed on it and made full
+  screen, always on top, out of the taskbar, the primary's focused. On
+  Wayland a window cannot place itself on a monitor, so the windows may all
+  land on one; the notification covers that. The card is amber (#b45309,
+  white text) in both themes, Atrium's layout; its words live in
+  desktop/alarm.html in the five languages (it does not load js/i18n.js),
+  and its language is the page's (sent with the tray's words). Acknowledge
+  with the window unlocked opens a note on the card and writes the act on
+  the record (who: the name the page sent); while locked (the lock's key in
+  the shared storage) it is handed to Topo's window, which asks to unlock
+  first (D222's `requestUnlock`), as is Report a problem always, since the
+  report is a dialog of the main window: it opens the issue's network (asked
+  like any Open when another one has unsaved work) and the prefilled
+  report. Later and Escape need no unlock. The window is not under the
+  page's lock, so `TopoLock.showOver` is not used. Its capability grants
+  event listening only (capabilities/alarm.json).
+- **D250. The chime and the notifications, with no crate.** The chime is two
+  short tones from Web Audio in the first card window, once per card, at
+  the page's own level; the system volume is never touched and nothing is
+  spoken. A webview may hold back sound until a click; then the card shows
+  silently (not seen in a desktop session here). The system notification
+  goes through the desktop's own tools: `gdbus` to
+  org.freedesktop.Notifications on Linux (critical for an outage, so it
+  stays; normal for answering again), `osascript` on macOS and a PowerShell
+  balloon on Windows, fire and forget; the words are the page's, sent with
+  the tray's. Answering again is that small notification, plus a toast when
+  the network is open.
+- **D251. The setting.** Show alarms on this PC is this PC's (monitor.json
+  `alarms`, off as shipped), in Settings under Monitor from this PC, with
+  the Wayland caveat. Turning it off drops the waiting cards. Test the alarm
+  sends the page's words first, then shows the card marked DRILL (its
+  buttons only close it) and a notification. Until 7h the alarms come only
+  from this PC's own monitor; the website's banner for signed-in pages
+  (D158) needs the records through the server and comes with 7h.
+- **D252. "Checked by monitor".** Until 7h names monitors, the PC's host name
+  (`this_computer`) is the monitor's name on an issue.
+
+The 7g review (2026-11-11) settled these:
+
+- **D253. A record's end without a person.** When the monitor's plan moves
+  to another network (or to none), the outages of every other network
+  still going on end unseen, `gone`, as for a device taken out of the plan
+  (D243): none stays "not answering since" for ever, and a closed one can
+  go. Expected masks a device only on the network watched (a copy of a
+  network shares its node ids). The page tells the app which records have
+  a device that is no longer in the document (`monitor_issues_folded`
+  `dropped`); the app drops them once their outage is over (one still going
+  on ends as `gone` when the plan loses the device, then goes).
+- **D254. Undoing a fold.** A fold stays one undo step, and Undo may take it
+  back: the page then folds a record again only when its `rev` changes (or
+  the network is opened anew), not on every redraw, so the redo stack is
+  kept. The app forgets a closed, ended record only when a page finds it in
+  the document as the record says without having folded it there itself in
+  this undo history (D246's "goes once folded" now reads "goes once found
+  folded"); a record this page just folded waits for the next opening of
+  the network or start of the app. Nothing is lost by an Undo: the record
+  stays until then, and the next fold brings it back.
+- **D255. Expected covers the whole issue.** Expected relabels every outage
+  of the issue (repeats included) as maintenance, over every check of the
+  device in the plan and the checks down when the issue opened, each from
+  its start to its end (the act's time for one going on). Hourly figures
+  older than the samples are relabelled only within each span.
+- **D256. A report made from an outage is one step.** Saving it adds the
+  report, the outage's `report` act and both log entries (`opened`, then
+  `reported`) in one commit, so one Undo takes both back; the act goes to
+  the app after the commit. Its "by" is the report's reporter name (the one
+  Settings then keeps), else Settings'. An issue someone already acted on
+  is not acted on again: a late hand-over from the card, Acknowledge,
+  Expected or Report a problem on a closed outage says "Someone has already
+  acted on this issue." A hand-over heard live clears the app's copy
+  (`alarm_take`), and the same hand-over twice within 5 s is taken once.
+- **D257. Limits in characters, and the notifications' numbers.** The app
+  cuts "by" (120) and the note (2000) by characters, never inside one, and
+  before it compares an act with those it holds, so an act cut on one side
+  is still the same act (`act|at|by`) on the other. A notification for one
+  device behind the root cause has its own sentence ("{name} and 1 device
+  behind it are not answering"); Russian sentences with a count read right
+  after any numeral. Turning Show alarms on this PC off closes the card
+  windows (a drill shown stays). The Wayland caveat in Settings and
+  FEATURES also says the card may show on one screen only.
+
+Left for the phase that builds it (not decided here): how the welcome
+reaches "Connect to a Topo server" on an app that is not yet a client (7l,
+after 7c; decided in D330). The heartbeat's interval, left to 7h, is D264.
+
+Phase 7h (2026-11-11), monitors through the server, choices the plan left
+open. The owner's later answers (the app is a server client, D144; no status
+board, D145) are what this phase builds on: a site monitor is an app
+connected to its server.
+
+- **D258. The Rust encryption's crates (D136, D167, for the owner to
+  confirm).** p256 0.13 (MIT/Apache-2.0, RustCrypto) with `ecdh`, `ecdsa`,
+  `pkcs8` and `std`, for ECDH and ECDSA on P-256 (ring, already here, cannot
+  keep a static ECDH key, which a monitor needs to open the site key wrapped
+  to it). AES-256-GCM, HKDF-SHA-256 and the random bytes are ring's, so
+  aes-gcm is not added; hkdf, hmac, ecdsa, elliptic-curve, primeorder,
+  crypto-bigint, rfc6979, sec1, der, pkcs8, spki, ff, group, rand_core,
+  signature, base16ct, base64ct and const-oid come into the lock with p256
+  (all MIT/Apache-2.0). Fetched from crates.io; the release size difference
+  was not measured. src/servercrypto.rs reimplements the wraps, rosters,
+  signatures (P1363) and the new records. The vectors go both ways:
+  server/internal/tcrypto/testdata/record_vectors.json is made by
+  js/servercrypto.js (`node tests/crypto-cross.mjs --write`) and opened by
+  Rust and verified by Go; src/testdata/rust_vectors.json is made by Rust
+  (`TOPO_WRITE_VECTORS=1 cargo test rust_vectors`) and opened by
+  js/servercrypto.js (`node tests/crypto-cross.mjs`); the existing WebCrypto
+  vectors (rosters, a site wrap, a revision) open in Rust too.
+- **D259. Records.** One shape for everything a monitor or a person writes
+  beside the document: `{v, site, kind, id, epoch, author, at, ctHash, sig,
+  iv, ct}`, AES-GCM with the site key of `epoch`, its AAD
+  `topo-record-v1\nsite\nkind\nid\nepoch\nauthor\nat`, signed (P1363) over
+  the AAD and the ciphertext's hash by the author's key (a monitor's device
+  key, a person's U_sig). Kinds: `status` (one per monitor, kept alone),
+  `issue` (a monitor's; its plaintext is the app's issue record), `act`
+  (a person's Acknowledge, Report a problem or Expected: `{issue, act, at,
+  by, note, reportId, as}`), `quiet` (an owner's quiet window: `{scope, id,
+  until}`), `stats` (a monitor's day of hourly figures, kept apart). The
+  server checks the shape, that the author is the caller, the signature
+  under the key it registered and that the epoch is the site's (409
+  `stale-epoch` after a rotation); it never reads the plaintext. One record
+  per kind and id; a newer one from the same author replaces it with a new
+  number, which readers ask for (`?since=n`).
+- **D260. A monitor on the server (D146, migration 0005).** A users row with
+  the id `m_` and 22 lowercase hex digits, which is also its email (so its
+  roster line is `m_…|m_…|monitor|enc|sig`, lowercase and with no "@", and
+  it can never sign in), carrying the PC's keys; a member with the new role
+  `monitor` (the members table is made again with it in its CHECK, tested
+  from a v0.0.1 database); a `monitors` row with its name, who turned it on,
+  when, the token's SHA-256 and its heartbeat. It is given access through
+  the existing grant (the roster and the wrap), gets no email, is never in
+  the server's list of people, its role cannot be changed and no one can be
+  made a monitor; removing it from Members revokes it as Revoke does. Its
+  users row stays (disabled) after a revoke, so the records it signed can
+  still be checked. `sites.stats_days` (360) is the site's Keep statistics.
+- **D261. The monitor's credential.** A random token, answered once by
+  `POST /monitors` and kept on the PC; it is sent as `Authorization:
+  Topo-Monitor <token>` with no cookie (src/client.rs `set_monitor_token`),
+  so it does not depend on anyone's session (D129). A monitor session may
+  only read its own site (GET of the Member and Reader routes: the summary,
+  rosters, its wraps, revisions, records, monitors, statistics), write its
+  status and statistics (the new class Monitor) and post issue records.
+  Everything else (a revision, a visit copy, leaving, /api/me, the event
+  stream, another site) is 403 or 404.
+- **D262. The keychain with no crate.** The secret (the device keys and the
+  token, one JSON text) goes to the system's own keychain through its own
+  tool, as the notifications do (D250): `secret-tool` (Secret Service) on
+  Linux, read back to be sure; `security` on macOS; CredWriteW/CredReadW
+  declared by hand on Windows. Where none takes it, a file only this user
+  can read (`<app data>/monitor/monitor-key.json`, 0600 in a 0700 folder),
+  and Settings says so. `TOPO_KEYSTORE_DIR` makes the tests use the file
+  only, so no test touches the real keyring. The macOS and Windows code is
+  built only there and was not compiled here.
+- **D263. What the monitor trusts.** The roster the enrolling owner's page
+  trusts (after its own walk) is handed to the app with the token; from it
+  the link walks every newer roster as js/servercrypto.js acceptRoster does
+  (the signer an owner of the one before, with the key its line names) and
+  opens a site key only when an owner of the trusted roster signed its wrap.
+  A roster it cannot accept stops it ("roster N not trusted" in Settings);
+  it never trusts the server's word alone.
+- **D264. The heartbeat (D151).** A monitor sends its status at least once
+  a minute (sooner, at most every 5 s, when a state changes), whatever its
+  checks' intervals, and the server records 60 s as its interval; 3 missed
+  (3 minutes) is "stopped reporting". The server sweeps every 30 s and says
+  each change once (the event `monitor`, stale true or false). An issue
+  record counts as a report too.
+- **D265. What a monitor takes from people.** Owners' acts close its issues
+  and owners' quiet windows reach its checks (D227 now travels). It cannot
+  read the network, so it cannot check what a provider covers: a provider's
+  act reaches it once an owner's page, which checked it (D266), passes it on
+  as an act record of its own (its id and `|o`), which is what D247's "acts
+  the document holds that the record lacks are sent back" does through the
+  server. A forged record, or one from someone the trusted roster does not
+  name with that key, is ignored.
+- **D266. A provider's scope on a server.** A provider member's act counts
+  on the devices covered by the document's provider whose email is the
+  member's (case-insensitive, providerCovers); with no such provider, or on
+  another device, it is refused and shown to the owners.
+- **D267. Folding through the server (D158).** Only an owner's page with the
+  site's network open (and editable, unlocked) folds; the server is told
+  which records are in the document (`records/folded`): they leave the
+  backups and go after 30 days. Records waiting are kept with no time limit,
+  at most 5000 per site. Refused records (forged, a role not allowed to
+  write them, a provider out of scope) are never folded; the owners see "N
+  records were refused" in the banner.
+- **D268. Status on any signed-in page.** The map's dots and the device's
+  Answer checks (read only, by monitor) show the monitors' latest status on
+  every page signed in to the site that is not itself monitoring that
+  network, the website included (D127: it still asks nothing). Per check, a
+  monitor that stopped reporting is left out; one saying down and another up
+  is "split" (purple): "Not answering from A, answering from B: look at the
+  path between them, not the device" (D150).
+- **D269. Assignment (D150).** The groups a monitor checks are chosen when it
+  is turned on (none: the whole site) and kept on that PC
+  (`monitor-link.json`), not in the document; a check's `monitors` list
+  (Checked by, in the app's card, on a site with monitors) overrides them,
+  and two make the deliberate two-monitor item. docs/FORMAT.md and the
+  schema now say that an absent list means the monitors whose groups hold
+  the device.
+- **D270. The plan is still the page's (D230).** A site monitor reports with
+  its window closed and no one signed in, but the checks it runs are the
+  plan its own window last sent: a check changed on another PC reaches it
+  the next time the network is open in that PC's window. Building the plan
+  in Rust would mean reading the document there, a second copy of the
+  page's logic ("Only owners write versions of the site" above).
+- **D271. Keep statistics through the server (D162, D234).** The site's
+  value, set by an owner in Members (Settings): shortening it when days would
+  go answers 409 `confirm` with how many, and the page asks before sending it
+  again with confirm; Off deletes every blob at once. The server also
+  applies it every 10 minutes, refuses a day while Off or past it, and every
+  monitor sets its own Keep statistics from it (`/api/monitor`).
+- **D272. "Monitor at X stopped reporting" (D151).** A banner line on every
+  page signed in to the site, the members list's row in red, and a system
+  notification (not the card, which stays for a device's issue, D160) on
+  every app with Show alarms on: from its page while open (`alarm_notify`),
+  and from a monitor PC's own link with the window closed. Said once per
+  episode.
+- **D273. The monitor's name** is the PC's host name (D252), registered with
+  the server when it is turned on and shown everywhere as "Monitor: PC name
+  (turned on by X on date)". It is not editable in 7h.
+- **D274. The backups' records (D159).** The backup file carries the
+  unfolded records as stored (`records`, schema/topo-backup-v1.json,
+  docs/FORMAT.md); opening one checks each issue (its author a monitor on
+  the file's rosters, with the key that signed it) and folds it into the
+  network before the usual review.
+- **D275. Not done in 7h.** The Rust link (src/monitorlink.rs) is
+  unit-tested against a fake server; since the review it also runs against
+  the real binary (tests/server-e2e.mjs step 15k, through
+  desktop/src-tauri/examples/monitor-link.rs: the app's link, crypto and
+  transport with a stand-in for the checks), and a record the Rust seals
+  verifies in Go (tcrypto TestVectorRustRecord). The app was not started in
+  a desktop session (the real keychain, the thread with the window closed,
+  the notification from Rust), and the macOS and Windows keychain code was
+  not compiled here. The website does not yet draw the pulled hourly
+  figures (TopoMonitors.stats reads them, for 7j's reports).
+
+Decided in the 7h review (2026-11-11):
+
+- **D276. One site per monitor PC (D146).** A PC is the monitor of one site
+  in 7h: one link (`monitor-link.json`), enrolled from the network open in
+  the window. D146 says the owner picks the sites; several links would need
+  a plan per site from the page, and the app runs one monitor (D235), which
+  checks one network. Another site needs another PC, or this one turned off
+  and on again there.
+- **D277. Records stay bounded.** Folding an issue folds the acts on it too:
+  the server does it by id (an act's id is `<issue>|<act>|<at>[|o]`, which
+  it can read), and the owner's page also reports the acts it folded after
+  their issue. An owner's page passes a provider's act on (`|o`, D265) once
+  per page, with the act's own time, so a repeat is an older record the
+  server refuses with no new event; not when an owner's own record of that
+  act is there, nor while the issue's monitor is revoked or stopped
+  reporting. At the 5000-record cap the server first deletes the oldest
+  folded records; a monitor's issue is never refused for the cap (acts and
+  quiet windows are). The link runs each step whatever another one met, so
+  a refused issue does not stop it taking acts or sending statistics.
+- **D278. A monitor reports only the site's network.** The link keeps the
+  site's network (its library card id) from the enrolment; turning on is
+  refused while this PC's monitor watches another network, and while it
+  does later (Settings, the other network), the heartbeat still goes with no
+  items and no issue or statistics goes.
+- **D279. A revoke is taken only from the server.** A failed credential
+  lookup (the database) is 503, never 401. The app takes a revoke (and
+  forgets its keys) only on the server's own `{"error":"unauthorized"}`
+  seen on two turns in a row; any other 401 (a proxy's page) is an error
+  that passes.
+- **D280. Records after a rotation are not passed over.** A record whose
+  author the trusted roster does not name yet, or whose epoch has no key
+  here, makes the link read the site again at once (once per pull) and try
+  it again before moving past it.
+- **D281. Quiet windows through the server (D227, D265).** An owner's quiet
+  window (a device, its group, the whole site) is a signed `quiet` record,
+  one per scope and id, from the app and from the website alike: owners get
+  the Quiet control in the device's read-only section on any signed-in
+  page. The page shows this PC's and the site's windows (the later of
+  each). A provider's quiet record is refused (only owners). A window that
+  ended is folded.
+- **D282. Keep statistics on a monitor PC is the site's (D271).** While the
+  PC is the site's monitor, Settings shows the value as set by the site's
+  owners and does not change it; the link applies the site's value on its
+  first read (the link starts at -1) and whenever this PC's differs.
+- **D283. Turning on and off cleanly.** A turn-on that fails after the
+  server made the monitor takes it away again. The server's sweep counts
+  only granted monitors as stopped reporting. Off while not signed in as an
+  owner of the site says plainly that the server cannot be told: only this
+  PC forgets, and the site lists the monitor until an owner revokes it.
+- **D284. Status of revoked monitors; split in words.** An open page drops
+  a revoked monitor's last status at the next read. A device that reads
+  "split" now says so in the banner and on its Problems row ("not answering
+  from A, answering from B"); the issue stays the monitor's own (per
+  monitor, D150).
+- **D285. TOPO_MONITOR_SWEEP** (default 30s, 100ms to 10m) is the sweep's
+  period, a configuration key like the others (the end-to-end test sets
+  200ms). The environment name of the first build was refused by the
+  configuration check as unknown, so it never worked.
+
+Phase 7i (2026-11-11), the visit monitor, choices the plan left open:
+
+- **D286. Where it runs and what it asks (D148).** "Monitor during this
+  visit" is a section of the report's tab in provider mode, in the desktop
+  app only (the website and the zip show nothing, D127), once the provider
+  has chosen which provider they are. It asks the v19 check blocks of the
+  devices `providerCovers` gives that provider, with the site monitor's
+  upstream chains (js/checks.js monitorPlan): a covered device with no
+  check block is not asked (the tab says to add one in its Answer checks,
+  which becomes part of the visit's proposed changes; D128 "only items
+  marked to be checked" holds). It runs in the app's process beside any
+  site monitor (src/visitmon.rs `Session`, its own schedule and states,
+  src/visitcmd.rs the commands `visit_monitor_start`, `_plan`, `_info`,
+  `_figures`, `_stop`, `_end`); D235's one-monitor lock is the site
+  monitor's and does not apply, so both may ask the same device. At most
+  400 checks per visit. A check added while it runs joins it.
+- **D287. Where its data lives (D148, D174).** The samples are kept in an
+  in-memory SQLite only, never on disk, never pushed: a Topo that quits
+  while it runs keeps nothing. Stop ends the checks and drops the samples;
+  the figures it made stay in memory and in `<app data>/monitor/visit.json`
+  (0600), so a Topo closed between Stop and Record visit still has them.
+  Everything goes at Record visit (once the visit is saved), at Discard,
+  when a new session starts (Start again asks first) and at the person's
+  own sign-out from the server (js/server.js now says `signed-out`; an
+  expired session, a lock or a reload is not a sign-out). Leaving provider
+  mode is a Stop. Its figures belong to the network it was started on
+  (the page's docId); another network's Record visit does not take them.
+- **D288. Statistics Off (D162).** Off is the site's Keep statistics on a
+  server card and this PC's own otherwise; a link or file copy cannot know
+  the client's, so the provider's PC's setting stands. Off: no sample and no
+  figures (the session starts with nothing kept), the states and outages
+  still show, the dialog says so and the visit gets no section. The number
+  of days is ignored (D162: a visit's figures live only in the visit).
+- **D289. The section in the document.** The visit entry's `monitoring`
+  (format v19, which is still unreleased, so no migration; js/model.js
+  visitMonitoring, schema/topo-v19.json, docs/FORMAT.md): the span, per
+  check answered of asked, loss, availability with its coverage (D163),
+  median and 95th percentile, a chart of at most 48 points (the median
+  answer and the worst state of each), and the outages, at most 60 checks
+  (the rest counted) and 100 outages. Being in the log entry it is in the
+  hash chain, saved in the same undo step as the visit, and travels with no
+  change in the link or file back and in the server's visit copy (7b),
+  where the owner reviews it with the visit. The entry's English summary
+  adds "monitored N checks, M outages".
+- **D290. Before and after (D148).** When the site has a monitor whose
+  figures this page can read, each check is compared with that monitor's
+  hourly figures of the 7 days before the visit's start: on a server card,
+  every site monitor's blobs (TopoMonitors.stats) pooled; else this PC's own
+  when it monitors the same kept network (the new `monitor_figures`). The
+  medians and 95th percentiles are the hours' weighted by their answers
+  (as stats.rs daily), availability up / (up + down), coverage of the 7
+  days. A link or file copy has none: the section says "No site monitor:
+  nothing to compare with", and the owner's review does not add it later.
+  Building it found that js/monitors.js availability counted time down
+  because of a device upstream twice (`sDown` already holds `sUpstream`);
+  fixed.
+- **D291. Outages on the provider's screen only.** A device is down while
+  any of its checks is down; the outage names the device upstream when
+  every check of it that is down names that one. A new outage is a toast
+  and a line in the tab; the map's dots follow the visit monitor while it
+  runs on the open network (over the site's states for those checks). No
+  issue record, card, notification, incident or log entry, and nothing is
+  folded.
+- **D292. Its report.** The visit's own **Visit report**, a sheet in the
+  report preview (.rpv) offered once the visit is saved: the visit (who,
+  when, how it went, notes, sign-off, changes) and the monitoring section
+  with a chart per check (response time over a state bar, its scale and
+  colours said under it) and the numbers as tables. The network report's
+  Problems and visits shows the section's tables (no charts) under the
+  visit; the message back to the client and the provider panel's past
+  visits get one line.
+- **D293. Not done in 7i.** The app was not started in a desktop session:
+  the checks' network I/O is 7f's (its loopback tests), and visitmon.rs is
+  tested with a stand-in for the checks; the page's side against a stub of
+  the commands and in Playwright.
+
+7i review fixes (2026-11-11):
+
+- **D294. Stop is final; the 7 days before are whole hours.** A check
+  still running at Stop (a timeout takes seconds) changes nothing when it
+  finishes: src/monitor.rs drops a result that comes after `stop()` (no
+  state, no sample, no change sent, for the site monitor too), and the
+  visit session ignores any change once stopped or dropped, so no outage
+  opens after Stop, no sample outlives it and no toast says it. Each event
+  carries its session's start, and the page drops a late event of an
+  earlier session. Stopped, the tab shows the outages Stop kept. A check
+  that leaves the plan while down (its device deleted or replaced, the
+  check removed, no longer covered) ends its device's outage at that moment
+  instead of at Stop. The comparison's "7 days before" (D290) takes only
+  hours that ended by the visit's start: the hour it starts in holds
+  minutes of the visit and is left out, on a server card and in this PC's
+  own `monitor_figures` alike. Its coverage is printed under the before
+  figures ("{pct} measured"), as D163 asks of every availability.
+- **D295. Statistics Off fails closed.** On a server card the site's Keep
+  statistics is read before anything is kept: Start reads it when this
+  page has not yet (`statsAt`, set by TopoMonitors.load and loadMonitors),
+  and a setting that cannot be read (offline, an error) counts as Off. Save
+  in Record visit checks again, so an owner turning statistics Off during
+  the visit leaves the visit with no section. When the site's monitors
+  cannot be read for the comparison, the section says "The site monitor's
+  figures could not be read: no comparison" (format v19 `unread`), never
+  "No site monitor".
+- **D296. Whose the session is; leaving provider mode ends it.** Leaving
+  provider mode ends the session (it was a Stop, D287): the provider
+  session goes with it, so the visit can no longer be recorded and nothing
+  is kept for it. It asks first when the session runs or holds figures. A
+  session started under a server sign-in belongs to that person: another
+  person signed in on this PC neither sees it nor records it, and it is
+  dropped when they sign in (the earlier sign-out was missed, for example
+  with the app closed). With statistics Off, Stop writes no visit.json and
+  removes an earlier one: D288's Off keeps nothing, not even who and what.
+- **D297. A new start names the session it drops.** Any session on this
+  PC goes at a new start (D287). Start now asks first whenever one runs or
+  holds figures, for any network, and names the other network when it is
+  not the open one.
+
+Phase 7j (2026-11-11), the reports, choices the plan left open:
+
+- **D298. Where a report's figures come from.** A network that is a Topo
+  server's site reads its monitors' daily blobs (TopoMonitors.stats) on any
+  signed-in page, the website included, which still asks nothing of any
+  device (D127); otherwise the desktop app reads this PC's own hourly
+  figures (`monitor_figures`, every check's key) when it monitors the open
+  network (a copy of a network shares its node ids, D253, so another
+  network's figures are never taken). The server's come first: a monitor PC
+  pushes its own there, so reading both would count it twice. With neither
+  (the website with no server, the offline zip, an app that does not
+  monitor this network) the report says why and still lists the outages,
+  which the document holds. The server answers 400 blobs at once; a long
+  period is read on from the last day it answered (js/monitors.js stats).
+- **D299. A provider's target (format v19, no migration: v19 is still
+  unreleased).** A provider record gains `target` (a percent as a device's,
+  D229) and `targetHours` (true: judged only during their support hours).
+  Unlike a device's checks they are a contract's facts, so providers.csv
+  carries them (`availability_target`, `target_support_hours`) and reads
+  them back; the provider card edits them, one undo step each. "During
+  their support hours" uses the hours text Topo already reads for routing
+  (js/routing.js parseHours): an hour counts when its middle is inside them,
+  in this browser's time (the document has no time zone); hours that do not
+  read, or read as 24/7, count around the clock, and the report says so.
+  Only a provider's own report is cut to their hours, with a choice in the
+  left column (their own setting first); the whole network's per-provider
+  rows stay around the clock and say where to look.
+- **D300. Two availabilities, one judged.** Each figure is printed as seen
+  (every second down counts) and "not counting upstream" (the time down
+  only because a device upstream was, `sUpstream`, left out); a target is
+  met or missed on the second, so a switch is not blamed for its router
+  (D161). That upstream time is named per check: the outage whose devices
+  behind it (`behind`) hold the device during that hour gives "down because
+  R1: 30 min"; with no such outage folded yet it is "down because of a
+  device upstream". A device's target comes first, else that of the
+  report's provider, else of any provider covering it that has one.
+- **D301. The periods.** The last 24 hours, 7 days, 30 days and 91 days (a
+  quarter), rolling, ending at the last whole hour (an hour's figures are
+  made once it has ended), and since the last visit (the newest `visit`
+  entry's `left`, else its time; in a provider's report their own visit),
+  from the first whole hour after it. Calendar months were not taken: a
+  rolling period reads the same whichever day it is printed. The coverage
+  of each figure is the hours measured over the period's hours (or their
+  support hours).
+- **D302. Pooling.** Several monitors on one check (D150), the checks of a
+  device, a group (every group a device is in, at any depth, up to 50), a
+  provider and the whole report are pooled: their seconds and checks are
+  added and the coverage is over every stream's span. A device's figure is
+  therefore the time-weighted mean of its checks, not "down while any check
+  is down": the hourly figures cannot say whether two checks were down at
+  the same moment. The medians and 95th percentiles are the hours' weighted
+  by their answers, as stats.rs daily does.
+- **D303. Outages, MTTR and MTBF.** An outage is listed when its device or
+  a device behind it is in the report and one of its times down overlaps
+  the period: its first start in the period, its time down cut to the
+  period, its root cause (its own, with the devices behind it; or "down
+  because R1" in a report of a device behind it), every act with who and
+  when, and the time to acknowledge (the first act less the first time
+  down). Per device, from its own outages that started in the period:
+  MTTR is the mean length of the ones that ended, MTBF the period's time
+  less the time down, divided by the failures. An issue whose first act is
+  Expected is maintenance (D158, D245), not a failure, and is left out of
+  both (and of the Outages tile, which counts it apart). (D313: any act
+  Expected, not only the first.)
+- **D304. The provider's section.** Their report (js/providerreport.js),
+  and so the file a Report a problem attaches (D97), carries a Monitoring
+  section after their devices when one of their devices has a check: their
+  devices only, availability against their target (in their hours when
+  they ask for it), response times as a table and their outages; since
+  their last visit when it ended within 91 days, else the last 30 days. No
+  charts there: their report stays phone-first with no wide figure. A
+  section that cannot be made is left out, never a reason for the report to
+  fail. The full report with charts is their card's **Monitoring report**.
+- **D305. One CSV.** The preview's CSV button saves one file
+  (`topo_<org>_<site>_<date>_monitoring.csv`) whose `section` column says
+  what each row is: `availability` per check, `availability-device`,
+  `-group`, `-provider`, `-total`, `response` per check per step of the
+  chart, and `outage`. English column names, numbers with a dot, times in
+  ISO 8601 (UTC), only the parts ticked. It is an export: nothing reads it
+  back. An outage row carries every act in order, joined with "; " in
+  `acted`, `acted_by` and `acted_at` alike (D314).
+- **D306. An outage in the network report.** The site report's Problems and
+  visits prints an outage (step 7g) as one: its device, the devices behind
+  it, each time down with its length, the time down in all, the monitor,
+  who acted and how long it took to acknowledge; never the empty reporter
+  and Sent to rows a problem report has. This was the outage section 7g
+  left for the reports.
+- **D307. The charts.** One per check with figures, its table of the same
+  steps beside it (under it on a phone): the median solid and the 95th
+  percentile dashed in one blue, over a bar of each step's worst state
+  (green, amber, red, grey), as the visit report and the Check section draw
+  them (Branding Data Viz: inline SVG, no library). A step is the shortest
+  of an hour, 6 hours, a day and a week that gives at most 31 points. The
+  slow hours are the slow time of every check by the hour of the day it
+  fell in, in this browser's time. The tiles at the top follow Branding's
+  .stat-tile: availability with its coverage, the target, the outages, the
+  median.
+- **D308. "TCP, not ping" in the figures.** The hourly figures did not say
+  how a ping was asked, so a report could not label it (D155). stats.rs
+  adds `tcp` (how many of the hour's checks were asked over TCP), carried
+  in `monitor_figures` and the server's blobs when not 0; the statistics
+  file goes to version 2 (an existing file gains the column, its hours read
+  0, tested from a version 1 file).
+- **D309. The preview's choices and CSV.** The sheet preview
+  (js/sheetpreview.js) takes `controls(box)`, which fills the left column
+  under the note, and `csv()`, which shows a CSV button between Print and
+  Download; the labels and Locate sheets show neither, as before. The
+  choices: on what (the whole network, a group, a device, a provider), the
+  period, the hours (a provider with hours) and what goes in (availability,
+  response times, outages; at least one). The report opens from the file
+  menu's **📈 Monitoring report** (under Site report), a device's Answer
+  checks (**📈 Full report…**, the app's section and the website's read-only
+  one) and a provider card's **Monitoring report**.
+- **D310. Retention in the reports.** Keep statistics was built in 7f (this
+  PC, D234) and 7h (the site's, D271, D282): 7j adds no setting. A period
+  longer than the figures are kept says so ("Statistics are kept 30 days,
+  so the start of this period has no figures"), and statistics Off says
+  that no figures are kept; the coverage shows the rest.
+- **D311. Not done in 7j.** The app was not started in a desktop session:
+  the report's local path is tested against a stub of `monitor_figures`
+  (tests/suites/reports.js, tests/reports-e2e.mjs), and the column `tcp`
+  in cargo tests. No Go change: the server stores blobs it cannot read.
+  (After the review: the server path is now tested against the real binary,
+  tests/server-e2e.mjs 15f2.)
+- **D312. Whose target, on several providers.** A report on several
+  providers (Report a problem sent to more than one, whose attachment is
+  built for all of them) judges each device on its own target, else the
+  target of the first of those providers that covers it and has one, else
+  of any provider covering it: never a provider that does not cover it. It
+  has no pooled target and no support hours (around the clock, said), and
+  shows a Per provider table as the whole network's report does. In that
+  table a provider judged only in their support hours (`targetHours` with
+  hours that read) gets no met or missed on the around-the-clock figures:
+  their own report gives it. The Per device rows carry their verdict.
+  Support hours that read as around the clock ("24/7") are said as such,
+  never as unreadable.
+- **D313. Expected in the server's blobs.** The monitor PC rewrites its own
+  hours as maintenance when Expected is chosen (stats.rs
+  mark_maintenance), but re-pushes only today's blob (and yesterday's in
+  the first two hours), so a blob of an earlier day keeps that time as
+  down. The report therefore moves a device's own time down inside an
+  Expected outage's spans (to its end, or the Expected act while it was
+  still down) to maintenance, per hour and per check of the root device,
+  never the upstream time, as mark_maintenance does. An hour already
+  rewritten has no own time down left, so nothing moves twice. An issue is
+  Expected when any of its acts is (the monitor marks the time whenever
+  Expected is chosen), for the figures, MTTR, MTBF and the Outages tile
+  alike. Re-pushing the changed days from monitorlink.rs was not taken: it
+  would fix only the monitors updated, and the report must read old blobs
+  anyway.
+- **D314. Outage list and period edges.** The outages run on to now, not
+  to the last whole hour, so an outage going on in this hour is listed;
+  the period line says so ("The outages are listed up to ..."). A period
+  that has no hours (no visit recorded, or less than an hour since it)
+  lists no outage, in the list, the tile and the CSV. A group's report
+  lists, under Per group, only the groups inside it, never itself or the
+  groups it is in. providers.csv: a target out of range is a conflict on
+  its row (never dropped unsaid), a "no" under `target_support_hours`
+  clears the tick, and a blank cell leaves either as it is, as everywhere.
+
+Phase 7k (2026-11-11), the remaining checks, choices the plan left open:
+
+- **D315. Their names, ports and keys (D156, D229).** The protocols are
+  `ntp` (UDP 123), `rtsp` (554), `sip` (5060), `mllp` (HL7 MLLP, 2575),
+  `ipp` (631), `imap` (143, or 993 with TLS from the start) and `pop` (110,
+  or 995). Two keys join the check block, in this order after `starttls`:
+  `tls` (imap and pop: `starttls`, which is STLS for POP, or `implicit`)
+  and `transport` (sip: `tcp`; absent, UDP). `path` serves RTSP (the
+  stream, / as shipped) and IPP (the printer, /ipp/print as shipped). A
+  value that is not one is dropped, as every option is. SMTP keeps its
+  boolean `starttls` (7f). v19 was not released, so this phase adds to it
+  with nothing to convert, as D229 did; schema/topo-v19.json and
+  docs/FORMAT.md say so. The Rust checks are a child module of checks.rs
+  (src/checks_more.rs), sharing its connect, line reader and the TLS
+  handshake that reads a certificate's end date without judging it (D232).
+- **D316. NTP.** One 48-byte client request (version 4, mode 3), every
+  field zero but the transmit time, which is random (RFC 9109: it only
+  matches the reply and says nothing of this PC's clock); a reply is ours
+  when it is mode 4 with our time as its origin, anything else is ignored
+  until the timeout. The offset is ((T2 - T1) + (T3 - T4)) / 2 with T1 and
+  T4 from one reading of this PC's clock and the monotonic time between
+  them, so a clock step during the check does not count, and the
+  differences signed so it holds past 2036. A kiss-o'-death (stratum 0,
+  said as "KoD RATE") or an unsynchronised server (leap 3 or stratum 16)
+  is not answering: it serves no time. The status is "stratum N"; the
+  offset (`offsetMs`, the server ahead positive) goes with the outcome and
+  the page's status, and the card warns above 1 s either way ("This PC's
+  clock is 3.2 s behind this server"): a warning, never a state or an
+  alarm. It is not kept in the samples or the hourly figures.
+- **D317. RTSP.** `OPTIONS rtsp://<address>[:port]<path> RTSP/1.0` with
+  CSeq 1 and nothing else; the status line only. 2xx to 4xx answer (a
+  camera asking for a login is there), 5xx does not, as HTTP (D232).
+- **D318. SIP.** One OPTIONS with this PC's own address in Via, From and
+  Call-ID (where the reply comes back), random branch, tag and Call-ID,
+  Max-Forwards 70, no body. Over UDP it is one datagram and never sent
+  again (RFC 3261's retransmissions are not used: the next check is the
+  retry, and down needs 3 failures); the reply is matched by its Call-ID.
+  Provisional replies (1xx) are passed. 2xx to 4xx and 6xx answer (a 404
+  or 401 is the phone system saying so), 5xx does not. TCP when the block
+  says so; TLS (5061) is not asked in 7k.
+- **D319. HL7 MLLP.** A TCP connect closed at once: no byte written, none
+  read (D155). Refused is not answering, as a TCP check. Unlike SMTP
+  (D241) it is not tied to the device's Allowed ports, since it sends
+  nothing; nor are IMAP, POP, NTP, RTSP, SIP or IPP, which send no message
+  and no login.
+- **D320. IPP.** Get-Printer-Attributes in IPP/1.1 over plain HTTP
+  (`ipp://`, POST to the path), with attributes-charset,
+  attributes-natural-language, printer-uri and requested-attributes
+  printer-state and printer-state-reasons, and nothing that names a person
+  (no requesting-user-name) or a job. A reply by length, chunked or to the
+  end, at most 64 KiB. HTTP other than 200 is judged as HTTP and said as
+  "http 401"; inside a 200, an IPP status below 0x0500 answers (a client
+  error is the IPP service speaking) and a server error does not. The
+  status is the IPP status, the state and up to 4 reasons as the printer's
+  own keywords ("0000 stopped media-empty-error"); the card says "Printer
+  stopped (media-empty-error)" in the page's language with the keywords as
+  they are, as a warning. A stopped printer still answers: the check asks
+  whether it answers, not whether it prints. ipps (IPP over TLS) is not
+  asked in 7k.
+- **D321. IMAP and POP.** The greeting is the answer: IMAP's `* OK` or
+  `* PREAUTH` answer, `* BYE` does not; POP's `+OK` answers, `-ERR` does
+  not; anything else is "bad-reply". With `starttls` the check sends
+  `a1 STARTTLS` or `STLS`; refused, it answers and says so ("OK no
+  STARTTLS"); agreed, the handshake on the same socket (lines are read a
+  byte at a time, so nothing past the yes is lost) and the certificate's
+  end date. With `implicit`, TLS first, then the greeting. Then `a2 LOGOUT`
+  or `QUIT`, inside TLS when it was started. Nothing else: no CAPABILITY,
+  and never LOGIN, AUTHENTICATE, USER, PASS, APOP or AUTH (the fakes fail
+  the test on any). Timeouts of 10 s, as SMTP's.
+- **D322. The check section.** Asks offers every protocol (SMTP still only
+  where documented, D241), named NTP, RTSP, SIP, HL7 MLLP, IPP, IMAP and
+  POP. Each new one shows its own fields (Stream path, Printer path, Over
+  UDP or TCP, Encryption None / STARTTLS or STLS / TLS from the start) and
+  one sentence of what it asks and never does, translated. The port shown
+  follows the encryption (993, 995). Its line adds the NTP offset and the
+  printer's state; the NTP offset above 1 s and a stopped printer colour
+  the line as a certificate near its end does (D155), nothing more.
+- **D323. The first check of a device.** Add a check asks what the device
+  is for: a printer documenting 631 is asked IPP, a camera documenting 554
+  RTSP, a phone system documenting 5060 SIP (UDP when it documents
+  udp/5060 or 5060 with no protocol, TCP when only tcp/5060), as a DICOM
+  node is asked C-ECHO (7f); anything else a ping.
+- **D324. Not tested against real devices.** As the plan's Tests ask, every
+  new check runs only against loopback fakes in `cargo test`; none was run
+  against a real time server, camera, phone system, RIS, printer or mail
+  server here. The website and the zip still never probe (D127): the new
+  checks are Rust, reached only through the app's monitor.
+- **D325. 7k review fixes.** Every TCP check that reads lines (RTSP, SIP
+  over TCP, IPP, IMAP, POP, and SMTP from 7f) has one deadline for the
+  whole check, its timeout from the start: before each read or write the
+  socket's timeout is set to the time left, and then it is "timeout". A
+  device that drips a byte at a time can no longer hold one of the
+  monitor's workers for hours. IPP passes interim HTTP answers (1xx, such
+  as "100 Continue"), up to 4, and reads the answer after them. NTP: a
+  reply whose receive or transmit time is zero (RFC 5905's sanity check)
+  is "bad-reply", not answering, so no era-long offset is shown. SIP over
+  UDP leaves its socket unconnected and takes the answer from any address
+  or port, matched by the random Call-ID alone, so a multi-homed phone
+  system that answers from elsewhere is not marked down; this PC's
+  address for Via comes from a second socket's connect, which sends
+  nothing. The tests now count the datagrams a silent NTP or SIP server
+  received over 1.2 s (past SIP's T1), so a resend would fail them.
+
+Phase 7l (2026-11-11), the welcome, choices the plan left open. The owner's
+later answers stand: the app is a server client (D144), and there is no
+status board, so a wall display turns the screen lock Off (D145); the
+welcome's lock step offers Off for that.
+
+- **D326. When the welcome shows.** On a plain start only: the page
+  arrived with no fragment at all (no share, binder, sealed or asset link,
+  no `#setup`, `#provider`, `#simple`, `#imagenology` or `#advanced`, no
+  server sign-in or invitation link) and no `?profile=` or `?simple`, and
+  boot ended on the landing (so a reload of an open network, whose
+  document is in the tab's history entry, does not show it either). The
+  way in is read as the page arrived, before load() takes an entry off the
+  URL (js/welcome.js ARRIVAL). Test runs (`?lang=en#advanced`) never see
+  it, and the plain-URL rule is untouched when it is skipped. It shows over
+  the landing, which stays behind it; boot does not wait for it. The e2e
+  scripts that drive a plain start (tests/server-e2e.mjs,
+  tests/desktop-client-e2e.mjs) mark it done in their browsers, since
+  tests/suites/welcome.js is where it is tested.
+- **D327. An install already in use is not welcomed.** A browser or app
+  whose library holds a network (not a template) at its first plain start
+  after this phase counts as done: the mark is written ("existing") and
+  nothing shows, so a person updating from 0.0.1 is not walked through
+  questions they answered by using it. Run the welcome again shows it to
+  them. The mark is localStorage `topo-welcome` ({ v, at, how }), this
+  PC's or browser's, never the document's.
+- **D328. Next, Skip and closing.** Next applies what the step shows;
+  Skip this step applies nothing (a theme only looked at goes back); ✕,
+  Esc or a click beside it end the welcome, keeping what earlier Nexts
+  applied and nothing more. The mark is written when it ends, however it
+  ends, and not before: a page closed half way asks again next time. The
+  last step's Skip reads Not now and leaves the landing as it is.
+- **D329. The mode, and the plain URL (for the owner).** Report problems
+  then General or Imagenology, or Document the network, set
+  `state.settings` exactly as the mode picker does (D142). The rule that a
+  plain URL opens the full editor is unchanged, so the next plain start
+  (every start of the desktop app) opens the full editor even after Report
+  problems was chosen; the welcome's note points at the mode button. Open
+  for the owner: whether Report problems chosen in the welcome should make
+  that PC's plain start open the simple view. Not built, since it changes
+  the plain-URL rule.
+- **D330. A server chosen in step 3 ends in Settings.** Connect to a Topo
+  server and Make this PC the server do not ask for an address or the
+  owner's email in the welcome: its last step becomes "One more thing" with
+  Open Settings, which opens Settings at that section (the address field
+  focused; or, for this PC, the section filled from the app and the owner's
+  email focused, the same as D125's Yes, now `dsOpenSetUp` in
+  js/desktopserver.js). The address, the certificate compare, the sign-in
+  and the service set-up stay where they are (D143: no second way), and the
+  start page that follows is the server's. Step 3 is not asked on a page a
+  Topo server served, nor in an app window already connected to one. On
+  the website it shows On this browser as the only choice, and the note,
+  and applies nothing.
+- **D331. This PC's two ticks wait for an open network.** Add this
+  computer adds to the open network and Monitor from this PC checks a kept
+  one, while the welcome runs over the landing with none. Ticked, they are
+  queued for the tab (sessionStorage `topo-welcome-next`, so the reload
+  that Connect makes keeps them) and run in that order once a network is
+  open and nothing else is on screen (no landing, no dialog, not locked):
+  Add this computer opens its review; Monitor from this PC opens Settings
+  and ticks its switch, which opens the offer under it (or says the
+  network must be kept first). Turning the monitor on stays the person's
+  click, with its tray and sign-in ticks (D131). Given up after 30 minutes.
+- **D332. D125's question, once on every path (D170).** The welcome asks
+  the app (`server_question`) whether to offer Make this PC the server: a
+  PC that can run the service and does not, whose Windows installer did
+  not ask, and that has not answered before (an app updated from 0.0.1
+  that answered is not asked). The answer is sent when the welcome ends,
+  so Back can change it: "yes" only when chosen, "no" when skipped or
+  closed; nothing when it was not offered. The old prompt (`dsFirstRun`)
+  stays only for a start where the welcome does not run (an install in
+  use, a start by a link): the welcome calls it then, instead of it
+  running on its own timer, so no start asks twice. *Changed by D336:*
+  the choice is offered wherever the service can run and is not set up,
+  and "yes" is sent only through Open Settings.
+- **D333. The lock step.** Off, 5, 15, 30 (as shipped) or 60 minutes; a
+  custom time already set shows as it is, and a new custom time stays in
+  Settings. The PIN (4 to 12 digits, twice, optional) is asked only when
+  none is set; changing one stays in Settings. The step says that without
+  a PIN the lock only hides the screen and is not encryption (D169).
+- **D334. Theme through the navbar's switch.** Choosing a look shows it
+  at once; Next keeps it by the navbar's own switch (carino-theme.js: this
+  origin's storage and the fleet cookie), so it is the same choice as a
+  click there. Without the switch (no navbar), it is written to this
+  origin's storage and applied.
+- **D335. How 7l is tested.** tests/suites/welcome.js (real clock, the
+  app's commands stubbed as in desktopserver.js and thiscomputer.js), and
+  a Playwright pass of a real plain start at 360, 390 and 1280 in Gold and
+  Colourful (every step: no sideways scroll, 44 px targets on a phone, the
+  mark written, not shown after a reload, no console error). The Tauri
+  window and its intro are not driven (D199); the welcome runs on the
+  page the intro hands over to, which is a plain start. The Playwright
+  pass is kept as `node tests/welcome-e2e.mjs` (D336).
+- **D336. The 7l review's fixes.**
+  - *The theme step measures against the kept theme.* The welcome keeps
+    the theme it opened with, then the one each Next kept; Next on a
+    second visit (Back) keeps a new choice through the navbar's switch,
+    and a Skip, ✕ or Esc puts the kept theme back on screen, not the one
+    the welcome opened with.
+  - *D125's "yes" only through Open Settings.* Make this PC the server
+    chosen in step 3 sends "yes" only when the hand-over's Open Settings
+    is pressed (Settings then opens at This PC as the server). Not now, ✕,
+    Esc or a click beside the card send "no" (not now), as D170 reads: the
+    PC is never recorded as having said yes with nothing set up.
+  - *Make this PC the server is offered wherever it can be done.* D142
+    lists it among step 3's three app choices, and D170 limits only the
+    question to once. So the app's welcome offers it whenever the app's
+    `server_info` says the service can run on this PC and is not set up,
+    also on Windows (where the installer asked), after the question was
+    answered, and on Run the welcome again. Only when `server_question`
+    said to ask is an answer sent (D332); otherwise choosing it just
+    opens Settings at that section.
+  - *Next waits.* While a Next is applied (the PIN's hash), Next, Skip,
+    Back and Enter do nothing, and the step moves on only if the welcome
+    is still open at that step, so one Next never moves two steps or
+    ends the welcome early.
+  - *The 30 minutes of D331 run from the queueing.* The waiting tasks are
+    stored with the time the welcome queued them (`{ at, tasks }`), so a
+    tab that reloads (Connect does) gives them up 30 minutes after the
+    welcome ended, not 30 minutes after its latest load.
+  - *Tests.* The welcome suite also checks: the fleet cookie and the
+    switch's state after Next; Back then a new theme kept, and a preview
+    skipped there undone; Skip, Back and Enter waiting while the PIN is
+    kept; server chosen then Not now or ✕ answering "no" with Settings
+    not opened; the choice offered after an answer (no second answer) and
+    not on a PC already running the service; a queue older than 30
+    minutes given up. `node tests/welcome-e2e.mjs` loads real `#setup`,
+    `#provider`, `#simple`, `#imagenology`, `?profile=`, `?simple`, a share
+    link the page made and `#advanced` with no mark, and the plain start
+    at 360, 390 and 1280 in Gold and Colourful.
+
+Phase 7m (2026-11-11), the docs, the i18n review, the release note and the
+audit of this section, choices the plan left open:
+
+- **D337. The final wording (D168 done).** The "coming in step 7" notes
+  are gone. README: what step 7 built is now in "Features at a glance"
+  (problems, providers and a server; answer checks and alarms; statistics
+  and reports; This computer, the screen lock and the welcome), "What it
+  is not" keeps **Not a scanner** with the answer check as the one way
+  Topo touches the network, and gains **Not a paging service** (alarms on
+  screen only, D130); the file-format paragraph names v19 and
+  docs/FORMAT.md; "Private by design" says the website and the zip have
+  no server and a Topo server you host gets only ciphertext; the desktop
+  section says what only the app does and points at the open items below.
+  docs/FEATURES.md: "Step 7: built and still coming" becomes "Answer
+  checks, monitors and statistics (step 7)", the promise as built with
+  links to the sections below it; the file format names topo-v19.json
+  and what v19 adds. docs/SERVER.md: the intro names steps 5 and 7, says
+  only owners save versions and what a site monitor sends; the threat
+  model adds what the host sees of monitors (the PC's name, who turned it
+  on, the interval, the heartbeat, each record's kind, author, time and
+  size, a statistics blob per monitor and day, and a quiet window's
+  record id, which names the scope and the Topo id of what it quiets, never
+  a name or address), that a stolen monitor PC reads the site until it is
+  revoked, and that a visit monitor sends nothing while it runs; the
+  provider read limit (D154) was already there. docs/FORMAT.md: "step 7h"
+  dropped, the v19 migration row lists every v19 addition (the provider's
+  `target` and `targetHours`, outages and their events were missing), and
+  the next format's address is topo-v20.json (it said v19). js/model.js's
+  v19 migration note lists the same.
+- **D338. The release note.** desktop/release-notes.md is the body every
+  release reuses, so the entry is a "New in 0.0.2" section at its top, in
+  the client's words, saying that providers on 0.0.1 must update to work
+  with a 0.0.2 server (D154) and that the new desktop pieces were not run
+  on Windows or macOS. 0.0.2 is the next version (desktop/tauri.conf.json
+  is set by the workflow from the tag). If the owner ships 7a alone as
+  0.0.2 with the macOS icon (the plan's note), the heading of everything
+  but the first item moves to 0.0.3. .github/workflows/builds.yml was not
+  touched.
+- **D339. The i18n review.** Every key added to js/i18n.js since 0.0.1
+  (583, in both dictionaries) was read out of the file in Node and checked
+  in es, pt-BR, ru and ja: present in all four, the same placeholders, no
+  コンピュータ in Japanese and "PC" wherever the English says PC; the
+  1397 keys the changed files use (t(), tn(), data-i18n) all have the four
+  translations, and desktop/alarm.html's own dictionary covers its 22
+  keys in all four. Values equal to the English ("5 min", "{pct} %",
+  "⬇ CSV", "Jitter (ms)" in es and pt-BR) are deliberate. Fixed: Russian
+  said "компьютер" for "PC" in five lock strings while every other new
+  string says "ПК" (now ПК; "This computer" stays "Этот компьютер", as
+  the English says computer there); Japanese called Expected 予定済み once
+  in the report's availability note (now 予定どおり, as everywhere else);
+  Spanish "Time to acknowledge" now matches Acknowledge's "Enterado"
+  ("Tiempo hasta marcarlo como enterado"). Left as it is: Japanese spaces
+  around "PC" both ways (この PC, このPC), as the strings before step 7
+  mostly did not.
+- **D340. tests/README.md complete.** Every suite in tests/suites has its
+  row: the eight from before step 7 that had none (`rackports`,
+  `rackpatch`, `rackschedule`, `rack5exit`, `groupfixes`, `simple`,
+  `offline`, `mac`) got one, and `tests/gen-vectors.mjs` is described
+  beside crypto-cross.mjs.
+- **D341. The audit of this section.** Every decision from D126 and every
+  phase item was walked against the code. Checked in the code: the
+  numbers (down after 3, up after 2, slow over the median of 5, flapping
+  at 4 changes in 30 min, samples 7 days, statistics 360 days, the
+  certificate warned at 14 days, the heartbeat's 3 missed intervals, the
+  lock's 30 minutes and 5 PINs, at most 8 checks of 30 s to 15 min),
+  both settings off as shipped (monitor.json's defaults), no status board
+  (D145), the page's CSP still `connect-src 'self'` (D127, D144), the
+  card's Escape as Later and its own four-language dictionary, nextId's
+  random part and withFixedIds (D178), the v19 schema's outage, target,
+  targetHours and monitoring. Fixed directly: the docs above, and two
+  tests that the final run showed flaky: TestMonitorLookupFaultIs503
+  made its "unknown" token by putting an x first, which was the same
+  token when the random one began with x (now y then); and
+  tests/desktop-client-e2e.mjs wrote to the bridge it was restarting
+  (a page's call during the app's restart is now answered offline, as
+  the app's would be). Larger gaps are the open items below. Its review
+  found two narrowings of accepted decisions the audit had not flagged,
+  D179 (of D152.1) and D276 (of D146); both are now in "Waiting for the
+  owner to confirm".
+- **D342. One English key, one meaning (7m review).** Step 7 reused "The
+  whole network" (the share dialog's "What the link carries", accusative in
+  Russian: "Всю сеть") as the report's scope (nominative: "Вся сеть"). A
+  key written twice in one locale keeps only its later value, so the share
+  dialog read "Вся сеть". The report's scope is now its own key, "Whole
+  network", in all four languages, and the second copy of "The whole
+  network" is gone from each. tests/suites/i18n.js reads js/i18n.js as text
+  and fails on any key written twice in one locale with two different
+  translations. The 13 such keys from before step 7 (Change, Past the
+  {total}-port faceplate, Back up now, Status, Where, Type, in some
+  locales) are listed in the test as known and left as they were: each is
+  a place where one screen shows the other's wording (for example
+  Japanese "Where" as 保存先 everywhere), an open item below.
+
+Owner's answers to the open list (2026-11-12):
+
+- **D343. Ten PINs, Forget from the fifth (changes D169, D213).** Each
+  wrong PIN says how many of its 10 tries are left ("Wrong PIN. 9 tries
+  left.", down to "1 try left"). Forget the PIN appears from the fifth
+  wrong PIN, where no sign-in can unlock (D223 unchanged: a sign-in whose
+  server is silent is still a sign-in for 24 h). After the tenth: with a
+  sign-in, only the sign-in unlocks ("10 wrong PINs: only signing in
+  unlocks now."); with none, each further try waits 30 s, doubling, at most
+  15 min, and Forget stays offered. From five to nine wrong there is no
+  wait. js/idlelock.js `PIN_TRIES = 10`, `FORGET_AT = 5`;
+  tests/suites/idlelock.js covers each step.
+- **D344. The crates are accepted (D193, D231, D258).** ureq, rustls, ring,
+  webpki-roots, base64, rusqlite with bundled SQLite, Tauri's tray-icon
+  feature and p256 stay. The built app now carries their notices:
+  desktop/THIRD-PARTY.txt, made by `node desktop/third-party.mjs` from
+  Cargo.lock (the six build targets, no dev-dependencies) and server/go.mod
+  (the modules topo-server's packages come from), lists every crate and
+  module with its licence and each distinct licence text once; a crate that
+  ships no licence file gets the standard text of the licence it names,
+  with its authors as the copyright line. desktop/stage.sh --desktop copies
+  it into the app (never the zip, which has no Rust or Go in it), and
+  tests/stage-check.mjs checks that. The README's Licensing section says
+  so. ring's clang need on Windows Arm (D193) still waits for a
+  builds.yml change, which belongs to 0.0.2's release work.
+- **D345. The alarm card's three buttons (D172 confirmed).** Before (D130):
+  one large OK that closed the card, Escape the same, and acting on the
+  issue happened in the Problems tab. Now: Acknowledge, Report a problem
+  and Later, as built in 7g; Later plays the old OK's part and Escape works
+  like Later.
+- **D346. A silent server never lets the PIN go; after 72 h the network
+  goes instead (changes D223).** When the lock names a person who was
+  signed in to a Topo server, a server that does not answer changes
+  nothing: the PIN keeps working with its waits, and Forget the PIN and the
+  plain Unlock never appear, however long the silence. Losing the network
+  on this PC is better than showing it, so once the server has not
+  answered for 72 h (`downGraceMs`), asked again with Try the server again,
+  the one way past the sign-in is **Forget the network and unlock**: the
+  library card open when it locked (the lock record now keeps its id,
+  `doc`), every card of that server kept in this browser, their sync
+  copies, this person's keys in this browser and the tab's network not
+  kept are deleted, the page is signed out (`TopoServer.forgetHere`) and
+  the desktop app forgets its server connection (`dcForget`). Nothing on
+  the cover, the confirmation or Settings' note names the network, so the
+  person at the PC does not learn which one was open. The networks stay on
+  the server; only changes not yet sent are lost. Other tabs locked with
+  it drop their own unkept network too. Without a sign-in (the website, the
+  zip, an app that is not a client) D343 stands.
+- **D347. D179's limits confirmed** as they are.
+- **D348. 0.0.3.** There is no 0.0.2: the release after 0.0.1 is 0.0.3,
+  built as a draft (the Builds workflow from the tag v0.0.3) and
+  published only by the owner. "0.0.2" in this section and in
+  js/revisions.js means that release. desktop/release-notes.md says "New
+  in 0.0.3"; the macOS Dock icon (desktop/icon-macos.svg, builds.yml) goes
+  in it, and builds.yml puts the runner's clang on the PATH for ring on
+  Windows Arm (D193).
+- **D349. Several sites per monitor PC is a later update (D276 stands).**
+  One link per PC for now; D146's several sites are not in step 7.
+
+### Step 7: open items, for the owner
+
+**Open items (larger gaps found by the 7m audit, not built):**
+
+1. **D166's last sentence.** "A monitor PC that is on the map is linked to
+   its item, so its issues and statistics name where it sits": the PC on
+   the map is found (by its MACs) and used as the start of the upstream
+   chains (D228), but an outage and the statistics carry only the
+   monitor's name (`incident.monitor`, a text), never the map item, so
+   neither names where the PC sits. Doing it needs a v19 field on the
+   outage (the item's id), the site monitor sending it through its
+   records, and the rows and reports showing it.
+2. **The app was never started in a desktop session here.** Everything
+   the app does was tested through cargo tests, loopback fakes, stubs of
+   the commands in the browser and examples/*.rs against the real server,
+   but not as the running app (see the list below).
+3. **No check was run against a real device** (D324), except the DICOM
+   C-ECHO cross-check by hand against pynetdicom (D236); the plan's
+   cross-check against Carino DICOM itself was not run.
+4. **Release size.** The new crates' effect on the installers' size was
+   never measured (D193, D231, D258).
+5. **Keys translated twice, from before step 7** (D342). In js/i18n.js,
+   13 keys are written twice in one locale with two translations, so one
+   of their two places shows the other's wording: "Change" (es, pt-BR,
+   ru), "Past the {total}-port faceplate" (all four), "Back up now" (es),
+   "Status" and "Where" (ru, ja), "Type" (ja). Each needs its own key per
+   meaning, as "Whole network" got; the i18n suite keeps them as known
+   until then.
+6. **Several sites per monitor PC** (D146): a later update (D349).
+
+**Waiting for the owner to confirm:**
+
+- D169 (and D165's note, D213): answered by D343 (10 tries, the count
+  shown, Forget from the fifth). Still to confirm: the lock with no PIN
+  and no sign-in gives a plain Unlock.
+- D170 and D332: answered; the welcome becomes Setup and sets up the
+  server itself, step by step (being built after D349).
+- D329: whether Report problems chosen in the welcome should make that
+  PC's plain start open the simple view (not built: it changes the
+  plain-URL rule).
+
+**Not verified on a real desktop session, or on Windows or macOS:**
+
+- The desktop app was built (Linux, debug) but never started in a GUI
+  session for step 7: the tray and Open Topo at sign-in, `--background`
+  and monitoring with the window closed (7f); two Topos on one PC
+  watching each other's files (D240, no automated test either); the alarm
+  card windows on real monitors, always on top, the chime under the
+  webview's autoplay policy, and the gdbus notification (7g, D250); the
+  real keychain through secret-tool, the monitor's thread with the window
+  closed and its notifications (7h, D275); the visit monitor and the
+  local monitoring report from the running app (D293, D311); the welcome
+  after the intro animation in the app (7l's tests use the page with
+  stubs); Connect to a Topo server from the running window (7c's tests
+  drive the page through examples/client-bridge.rs).
+- Built only on their own systems and never compiled here: Windows'
+  IcmpSendEcho and autostart (HKCU Run), the PowerShell notification,
+  CredWriteW/CredReadW and This computer's GetAdaptersAddresses reader;
+  macOS's LaunchAgent, osascript notification, `security` keychain and
+  This computer's reader (type-checked in a scratch crate only, the 7d
+  review).
+- Datagram ICMP was answered on 127.0.0.1 here (Linux); macOS's datagram
+  ICMP was not run.
+- Wayland: whether the card stays above other windows varies by
+  compositor (the notification always goes too, D160); not seen.
+- From earlier steps, still standing: "This PC as the server" started
+  from the running app and the installers' bundled layout (D113, D125),
+  and the Windows and macOS server installers (build-tested only).
+
+### Phases
+
+Stop after each phase and report the counts and failures as they are.
+
+- **7.0** Scope only, no code: this section, and the README, FEATURES and
+  SERVER wording (D168).
+- **7a. Merge fixes** (D140, D152, D175): sent parts kept until answered; no
+  name-only joins across providers; random id suffix. Each with a failing test
+  first. This phase can ship as 0.0.2 with the macOS icon.
+- **7b. Provider visits through the owner** (D139, D153, D154): Visits waiting
+  with its two questions; visit copies on the server; the server refusing
+  non-owner revision pushes; the provider's read-only sync; one waiting copy
+  per provider and report; the outside-their-items marking.
+- **7c. The desktop app as a server client** (D144): the Rust transport, the
+  hooks, the certificate pin, the built-in server reached from the window.
+- **7d. This computer** (D166): the Tauri command, the importer and its
+  review, and tests.
+- **7e. The idle lock** (D134, D165, D169): settings, saving first, the cover,
+  the PIN, unlocking by sign-in, on the website and in the app.
+- **7f. Checks on one PC, no server:** ping, TCP, HTTP(S), DNS, SMTP and DICOM
+  C-ECHO; the scheduler, the states and root cause; format v19; the local
+  samples and hourly figures; the item's Check section; tray and autostart.
+- **7g. Issues and the alarm** (D172, D173): issue records, folding,
+  Acknowledge, Report a problem and Expected, repeats, the card window, the
+  chime, the drill and recovery notifications.
+- **7h. Monitors through the server:** the Rust encryption and its shared test
+  vectors first (D136); the `monitor` role and its migration; signed records
+  and the fold's checks; turning a PC on as a monitor, and revoking it; the
+  device key in the keychain; the status channel over `/api/events`;
+  heartbeats and "monitor stopped reporting"; statistics pushed and pulled;
+  two monitors on one item.
+- **7i. The visit monitor** (D148, D174): "Monitor during this visit" in
+  provider mode, and the monitoring section in the visit copy, its report
+  and the log entry, with the before-and-after comparison.
+- **7j. Reports** (D163, D164): availability, response times, outages, the
+  provider report, CSV, and the retention setting (D162).
+- **7k. The remaining checks:** NTP, RTSP, SIP, HL7 MLLP, IPP, IMAP and POP,
+  each with its loopback fake.
+- **7l. The welcome** (D141–D143, D170): the desktop app and website versions,
+  and "Run the welcome again". It comes last, so it links to pieces that
+  already exist.
+- **7m** (D337-D342). The i18n review; docs (README, FEATURES, SERVER with
+  the provider read limit, FORMAT.md for v19); a release note; the audit of
+  this section and its open items ("Step 7: open items, for the owner").
+
+Tests, per phase, are the plan's list: Rust unit tests against loopback fakes
+only (no real devices, internet or email), ICMP on 127.0.0.1 where the system
+allows it, one DICOM cross-check against Carino DICOM by hand, the states and
+statistics on tests/fixtures/site300.js, the server's Go tests and
+tests/server-e2e.mjs, the merge fixes, provider visits, the app as a client
+against the e2e server, issue records, the encryption vectors, the visit
+monitor, retention, the welcome, the v18 → v19 migration with the suite count
+before and after, the idle lock, and the alarm card, the Check section and the
+reports in the browser at 360, 390 and 1280 in both themes and every language.
+
 ## Order
 
 1. Fix A and B, add restore points (no format change).
@@ -1359,6 +3744,8 @@ systems; reading a MikroTik `.backup` or a running Cisco switch directly.
 4. The client-provider loop without a server.
 5. The portable server.
 6. Importers and the published format spec.
+7. Answer checks, monitors, statistics, the idle lock and This computer
+   (section 7: merge fixes first, the welcome last).
 
 ## Status
 
@@ -1439,3 +3826,416 @@ systems; reading a MikroTik `.backup` or a running Cisco switch directly.
   and the field-level schema/topo-v18.json with schema/topo-backup-v1.json.
   D114–D124. Not checked against live NetBox, UniFi, Omada, Lansweeper or
   phpIPAM systems (D117, D123).
+- [x] 7. Answer checks, monitors, statistics, the idle lock and This computer
+  (section 7; its open items are listed there, "Step 7: open items, for the
+  owner"). 7.0 done 2026-11-11 (not yet committed): section 7 with
+  D126–D175 (D172–D175 from its review), the phase list, and the new
+  promise in README.md, docs/FEATURES.md and docs/SERVER.md marked "Coming
+  in step 7" (D168); no code. D169, D170 and D172 wait for the owner.
+  7a done 2026-11-11 (not yet committed): sent parts held until answered
+  or their report is closed, with no count limit, and the library's space
+  warning (js/revisions.js heldParts, D175, D176); another provider's new
+  records matched only by id, serial or MAC, otherwise a question that
+  defaults to Add as new (js/merge.js, js/providerpart.js partMergeInfo,
+  D177); four random base-36 characters in nextId (D178). Each fix had its
+  failing test first (tests/suites/mergefixes.js, 42 checks). Full run
+  before: 235 suites, 12950 checks, 4 failing (touchfields, font layout,
+  already failing); after: 236 suites, 12992 checks, the same 4 failing.
+  Its review (D179): strong keys pair before a weak hit on another
+  provider's record is asked; parts from before 0.0.2 and copies back for no
+  report held as the newest 8, the copies held "since" as the newest 16, a
+  part for several providers answered by a copy from each, parts with no
+  open report let go over the budget, a card's part list from outside
+  bounded; mergefixes now 60 checks: before the fix 12 failed (11 of the 18
+  new checks and the extended 1.8; the other 7 guard wiring that already
+  worked). Full run after the review: 236 suites, 13010 checks, the same 4
+  touchfields failures.
+  7b done 2026-11-11 (not yet committed): provider visits through the
+  owner (D180-D190). Format v19 (the log's `decision` kind,
+  schema/topo-v19.json); Visits waiting (js/visits.js) for copies by link,
+  file and binder and for server visit copies, the review's foot (the
+  changes, the visit, the note; js/mergeui.js), the judgement and the
+  decision in one undo step, a rejected copy kept as a file; on the server
+  (migration 0004, server/internal/api/visits.go) visit copies stored,
+  listed, answered and deleted, revision pushes from owners only (403
+  `owners-only`), the decision emails; the provider's read-only sync and
+  upload (js/serversync.js), the outside-their-items marking (js/merge.js
+  scope). Tests: `go test ./...` all packages ok (new TestVisitCopies,
+  TestVisitBaseHeldFromPruning, TestV001ProviderRevisionsStillVerify,
+  TestVisitCopiesMigrationOnAV001Database, TestVisitDecisionMail);
+  tests/suites/visitswaiting.js (46 checks) and visitsserver.js (31);
+  tests/server-e2e.mjs steps 7, 8 and 10 rewritten for a provider that
+  never pushes (171 checks, 0 failing, run on port 7397: 7381 was taken).
+  Full run: 238 suites, 13087 checks, 18 failing: 14 in keyboards (the
+  new note field had no data-keys; fixed, keyboards then 103/103) and the
+  same 4 touchfields failures as before.
+  Review of 7b (2026-11-11): D191 and D192. A decided copy stays beside
+  a new one until taken; rejected edits carried by a later copy are marked
+  and left out by default; a provider's sync reads the answers before it
+  pulls and takes the server's version without merging it first; a provider removed or made a viewer takes
+  their copies; the landing counts server copies of cards not open; a link
+  copy answered through a newer one leaves the list; the rejected file is
+  downloaded once. New Go tests TestVisitDecidedCopyKeptBesideNewOne,
+  TestVisitCopiesGoWithTheProvider, TestVisitsFull (go test: every
+  package ok, 238 PASS, 0 FAIL); visitswaiting 49 and visitsserver 43
+  checks; server-e2e 172 checks, 0 failing (B answers the D192 file
+  offer); full web run 238 suites, 13102 checks, the same 4 touchfields
+  failures.
+  7c built 2026-11-11 (D193-D199): Settings, Connect to a Topo server, in
+  the desktop app only (js/desktopclient.js); every request and the event
+  stream through Rust (desktop/src-tauri/src/client.rs on ureq and rustls,
+  src/clientcmd.rs the commands) with the session cookie kept by the app;
+  js/server.js unchanged on the app's fetch, EventSource and origin; a
+  self-signed server pinned by its fingerprint and a changed one refused;
+  This PC as the server's "Open it in this window" at 127.0.0.1 replacing
+  Open in browser; no CSP or server change. Tests: `cargo test` 19 passed,
+  0 failed (13 new for the client); tests/suites/desktopclient.js (65
+  checks) and desktopserver.js (55); tests/desktop-client-e2e.mjs, the
+  page through examples/client-bridge.rs against the real topo-server
+  with TOPO_TLS_SELF (31 checks, 0 failing, port 7397); server-e2e 172
+  checks, 0 failing (port 7397: 7381 was taken); no Go change, Go tests
+  not rerun. Full web run: 239 suites, 13170 checks, the same 4
+  touchfields failures as before.
+  Review of 7c (2026-11-11): D200-D203. The app window words the sign-in
+  and Google Drive / OneDrive backups for what it can do and shows the
+  server's redirect address; a certificate that stops being trusted is
+  refused, said and not retried; the retry wait starts again at 5 s; the
+  app's files are kept by one `Store` (atomic, ordered writes) shared with
+  the bridge; refusals are per thread. Tests: `cargo test` 23 passed, 0
+  failed (an authority-signed certificate with and without a pin, a
+  redirect not followed, concurrent refusals, the session across a
+  restart and the concurrent writes); desktopclient 88 checks, 0 failing; backupsettings 112 and desktopserver 55, 0 failing;
+  desktop-client-e2e 38 checks, 0 failing (adds the app
+  restarted from its files and this PC's server on plain http);
+  full web run (port 7397, 7398 was taken) 239 suites, 13193 checks, the same 4 touchfields failures.
+  7d built 2026-11-11 (D204-D208): This computer. The `this_computer`
+  command (desktop/src-tauri/src/thiscomputer.rs; libc only, no new
+  crate) reads this PC's interfaces, default gateways and DNS servers and
+  nothing on the network; js/thiscomputer.js turns them into the PC, its
+  cards with one address each and their subnets, the gateway shown only,
+  through the Import… review (js/importui.js openResult), from the Nodes
+  panel and Settings, in the desktop app only. Tests: `cargo test` 32
+  passed, 0 failed (9 new: the system's texts parsed, and this PC read for
+  real on Linux); tests/suites/thiscomputer.js 56 checks, 0 failing;
+  importframework 60, i18n 114, 0 failing; the review and Settings in
+  Playwright at 360, 390 and 1280 in Gold and Colourful, no sideways
+  scroll and no console error. The macOS and Windows readers are not built
+  or run here (D204). Full web run (port 7397): 240 suites, 13249
+  checks, the same 4 touchfields failures as before.
+  7d review fixes 2026-11-11 (D209-D212): connected means a link (IFF_RUNNING,
+  macOS media status), Windows' temporary suffix is NlsoRandom (5), the
+  DNS stub and Windows' placeholders never written, labelled addresses
+  belong to their card, the log label stays English; macOS temporary
+  addresses and Wi-Fi read. The suite now drives window.__TAURI__.core.invoke
+  and checks one undo step per run. The Windows and macOS readers were
+  type-checked on Linux in a scratch crate (cfg forced; the macOS link
+  entry, which needs macOS's own libc, excluded) but never built for
+  or run on those systems.
+  7e built 2026-11-11 (D213-D222): the idle lock (js/idlelock.js, loaded
+  in <head>). Settings, Screen lock: Lock after Off / 5 / 15 / 30 / 60 min /
+  custom (1-1440), 30 as shipped, per browser or app window; Lock now; a
+  PIN of 4-12 digits kept as PBKDF2-SHA-256 (600,000 rounds). Locking
+  saves (the card, the tab's entry, the library's writes, a server card's
+  push, the Report a problem and Record visit drafts) and reloads; the
+  boot waits in TopoLock.gate() before it reads anything; every tab of the
+  browser locks and unlocks together. Unlock by the PIN, or by a code sent
+  to the email signed in when it locked (TopoServer.verifyCodeOnly);
+  after 5 wrong PINs only the sign-in, or, with no sign-in or no answer
+  from the server, the waits and Forget the PIN, said in Settings after.
+  The alarm card's hooks (showOver, requestUnlock) wait for 7g. No format,
+  Rust or Go change. Review fixes (D223-D226): a silent server no longer
+  counts as no sign-in (24 h of silence before the PIN-less ways); the
+  lock held in place when the browser will not keep it or edits are
+  parked for another entry; no key or paste reaches the page while
+  locked; a locked window does not open the server client; the session
+  from before the lock is closed at a sign-in unlock. After the fixes:
+  tests/suites/idlelock.js 153 checks, 0 failing; tests/idlelock-e2e.mjs
+  42, 0 failing; full web run (port 7398) 241 suites, 13409 checks, the
+  same 4 touchfields failures. Tests: tests/suites/idlelock.js 140 checks, 0
+  failing; tests/idlelock-e2e.mjs (real reloads, Playwright's clock; the
+  cover and Settings at 360, 390 and 1280 in Gold and Colourful, no
+  sideways scroll, no console error) 42 checks, 0 failing; stage-check
+  23, 0 failing. Full web run (port 7397): 241 suites, 13396 checks, the
+  same 4 touchfields failures as before.
+  7f built 2026-11-11 (D227-D236): checks on one PC, no server. The
+  checks ping (datagram ICMP on Linux and macOS, IcmpSendEcho on Windows,
+  "TCP, not ping" where ICMP is refused), TCP, HTTP(S) with the
+  certificate's end date, DNS, SMTP (greeting, EHLO, optional STARTTLS,
+  QUIT) and DICOM C-ECHO (desktop/src-tauri/src/checks.rs); the schedule
+  on a background thread with at most 8 at once, the states and root
+  cause (src/monitor.rs); the samples and hourly figures in a local SQLite,
+  Keep statistics 360 days as shipped, Off keeps nothing (src/stats.rs);
+  the app's commands, the tray icon and Open Topo at sign-in, one monitor
+  per PC (src/monitorcmd.rs); format v19's check blocks and availability
+  target (js/model.js, schema/topo-v19.json, docs/FORMAT.md); the page's
+  side (js/checks.js): the plan with the upstream chains, Settings'
+  Monitor from this PC (off as shipped), the device panel's Answer checks
+  with its last 24 h, the map's dots. Tests: `cargo test` 71 passed, 0
+  failed, 1 ignored (39 new: every check against a loopback fake, ICMP on
+  127.0.0.1 answered here, the states, root cause, the scheduler, the
+  hourly figures, retention, the sign-in files; the ignored one is the
+  DICOM cross-check, run by hand against pynetdicom: 1 passed, D236);
+  `cargo build` with no warning; tests/suites/checks.js 86 checks, 0
+  failing; the Check section and Settings in Playwright at 360, 390 and
+  1280 in Gold and Colourful (30 checks, 0 failing: no sideways scroll, no
+  console error). Full web run (port 7397) before: 241 suites, 13409
+  checks, 5 failing (the 4 touchfields and 1 desktopserver, which passes
+  alone); after: 242 suites, 13495 checks, 5 failing (the same 4
+  touchfields and 1 in selbar, which passes alone twice). No Go change;
+  the Go tests and tests/server-e2e.mjs were not rerun. The app was built
+  but not started in a desktop session here (the tray, sign-in and
+  --background were not seen running); the Windows ICMP and autostart code
+  is built only on Windows and was not compiled here.
+  7f reviewed 2026-11-11 (D237-D242): root cause with no loop between
+  routers; pruning while the monitor runs, Off ordered under the
+  statistics' lock, the -wal and -shm files private; a backlog served
+  oldest first; two Topos on one PC (the files read again, the second shows
+  no states and no tray, --background opens the window when no tray was
+  made, the tray's words follow the language); SMTP only where documented;
+  the target rounded first; an unlisted interval shown as itself; the
+  ping's TCP fallback tested through ping()'s own code; HTTPS and SMTP
+  STARTTLS against a certificate that has ended; README and FEATURES say
+  what 7f built. Tests: `cargo test` 75 passed, 0 failed, 1 ignored;
+  `cargo build` with no warning; tests/suites/checks.js 97 checks, 0
+  failing; i18n, formatschema, schema, thiscomputer, desktopserver,
+  desktopclient and idlelock all passing; the Check section (with an
+  SMTP note) and Settings in Playwright at 360, 390 and 1280 in Gold and
+  Colourful, 30 checks, 0 failing. Full web run (port 7398): 242 suites,
+  13506 checks, 6 failing (the same 4 touchfields, and 1 desktopserver and
+  1 selbar, both passing alone on a rerun). The two-Topo file watching
+  (D240) has no automated test and was not seen running in a desktop
+  session.
+  7g built 2026-11-11 (D243-D252): issues and the alarm on one PC with no
+  server. Issue records worked out in Rust from every status change, one
+  per root-cause outage with the devices behind it, repeats joined to an
+  open issue, recovery leaving it open, kept in issues.json
+  (src/issues.rs); Expected relabelling the outage's time as maintenance
+  and showing the device quiet until it answers (src/stats.rs,
+  src/monitor.rs); the card windows, their queue, the chime, the
+  notifications and the commands (src/alarm.rs, src/monitorcmd.rs,
+  capabilities/alarm.json); desktop/alarm.html, staged by stage.sh
+  --desktop and checked by it; the page's side (js/issues.js): folding into
+  outages (v19 incident fields, js/model.js, schema/topo-v19.json,
+  docs/FORMAT.md), Acknowledge, Report a problem and Expected, who may act,
+  the outage rows, the card's hand-over with the unlock first, Settings'
+  Show alarms on this PC and Test the alarm; the merge of acts (js/merge.js);
+  translated (es, pt-BR, ja, ru). Tests: `cargo test` 86 passed, 0 failed,
+  1 ignored (11 new); `cargo build` with no warning;
+  tests/suites/issues.js 66 checks, 0 failing; `node tests/alarm-e2e.mjs`
+  105 checks, 0 failing (the card at 360, 390 and 1280, Gold and Colourful,
+  five languages; the app's Problems row and Settings at the same sizes
+  and themes; no console error); `node tests/stage-check.mjs` 26, 0
+  failing; checks, incident, i18n, formatschema, schema, merge, mergefixes,
+  mergelog, mergeui, idlelock, providermode, providersmulti, visitswaiting,
+  visitsserver, library, desktopserver, desktopclient, thiscomputer, loop
+  and revisions all passing (1614 checks). Full web run (port 7398): 243
+  suites, 13572 checks, 4 failing (the same 4 touchfields as before 7g);
+  issues, checks, idlelock and incident rerun after the last edit (430,
+  0 failing). No Go change; the
+  Go tests and tests/server-e2e.mjs were not rerun. The app was built but
+  not started in a desktop session: the card windows on real monitors,
+  always on top, the chime under the webview's autoplay policy and the
+  gdbus notification were not seen; the macOS and Windows notification
+  code is built only there and was not compiled here.
+  7g review fixes 2026-11-11 (D253-D257): the act's "by" and note cut by
+  characters (a non-ASCII name or note panicked with the issues' lock held,
+  and a byte cut made the page and the app disagree on an act, a fold
+  loop); Undo of a fold kept (no refold on redraw, the app keeps the record
+  until it is found folded in a later undo history); a report from an
+  outage one undo step; a hand-over cleared once heard, taken once, and
+  never acting on a closed outage; another network watched ends the old
+  outages, Expected masking only the network watched, records of devices
+  gone from the document dropped; Expected over every outage of the issue;
+  Show alarms off closes the cards; the raise decision a pure, tested
+  function; the notification for one device behind; Russian counts; the
+  Wayland caveat. D172 (three buttons on the card) still waits for the
+  owner; declining it changes desktop/alarm.html only.
+  Tests after the fixes: `cargo test` 91 passed, 0 failed, 1 ignored (5
+  new); `cargo build` with no warning; issues 79 checks, 0 failing;
+  `node tests/alarm-e2e.mjs` 106, 0 failing; `node tests/stage-check.mjs`
+  26, 0 failing; issues, checks, incident, i18n, idlelock, merge,
+  mergefixes, mergelog, mergeui, providermode, providersmulti,
+  formatschema and schema 1127 checks, 0 failing. Full web run (port
+  7398): 243 suites, 13585 checks, 4 failing (the same 4 touchfields). No
+  Go change; Go tests and server-e2e not rerun. Still not seen in a desktop
+  session.
+  7h built 2026-11-11 (D258-D275): monitors through the server. The Rust
+  encryption (src/servercrypto.rs, p256 and ring) with the vectors both
+  ways; the server's `monitor` role (migration 0005 from a v0.0.1
+  database), the monitor's credential and gate, its status (the heartbeat
+  and the 30 s sweep), records, statistics with the site's Keep statistics,
+  revoke with the key rotation, the unfolded records in the backups
+  (server/internal/api/monitors.go, store/monitors.go, tcrypto/record.go);
+  the app's side: the device key in the keychain or a private file
+  (src/keystore.rs), the link that walks the rosters, opens the key, pushes
+  status, issues and statistics and takes owners' acts and quiet windows
+  (src/monitorlink.rs, monitorcmd.rs `monitor_device_key`,
+  `monitor_enroll`, `monitor_link_info`, `monitor_unenroll`,
+  `alarm_notify`); the page's side (js/monitors.js): turning a PC on and off
+  in Settings, the records checked and folded, acts pushed and passed on,
+  the status on the map and in the device section of any signed-in page,
+  "split" for two monitors, the banner, the members list's monitors with
+  Revoke and the site's Keep statistics, the plan by groups and Checked
+  by, a backup's records folded on open; translated (es, pt-BR, ru, ja).
+  Tests: `cargo test` 105 passed, 0 failed, 1 ignored (14 new);
+  `cargo build` with no warning; `go test ./...` all packages ok (new:
+  TestSiteMonitor, TestRevokeMonitorRotates, TestMonitorRoleMigrationOnAV001Database,
+  TestVectorRecords; TestRoutesMatrixSites updated for the Monitor class);
+  `node tests/crypto-cross.mjs` 12, 0 failing; `node tests/server-e2e.mjs
+  --port 7397` 180 checks, 0 failing (step 15 new); tests/suites/monitors.js
+  42 checks, 0 failing; the related suites (issues, checks, i18n, idlelock,
+  incident, backuprestore, backupsettings, desktopclient, desktop,
+  desktopserver, formatschema, schema, servercrypto, server, serverkeys,
+  serversync, serverui, visit, visitsserver, visitswaiting, library, loop,
+  providermode) 1710 checks, 0 failing; `node tests/alarm-e2e.mjs` 106, 0
+  failing; `node tests/stage-check.mjs` 26, 0 failing; the banner, the
+  read-only device section, the members list's monitors and Keep statistics
+  in Playwright at 360, 390 and 1280 in Gold and Colourful, 48 checks, 0
+  failing, no console error, no sideways scroll. Full web run (port
+  7398): 244 suites, 13627 checks, 4 failing (the same 4 touchfields as
+  before 7h). The Rust link was not run against the real server, and the
+  app was not started in a desktop session (D275).
+  7h review fixes 2026-11-11 (D276-D285): the relay loop, quiet windows
+  through the server (website owners too), acts folded with their issue and
+  the cap, the link's last record after a rotation, 503 not 401 on a lookup
+  fault and a revoke only on two server 401s, Keep statistics applied on the
+  first read and locked on a monitor PC, a half-made monitor taken away, Off
+  while signed out said plainly, a revoked monitor's status dropped, the
+  network a monitor reports, split in the banner and Problems, a backup's
+  acts restored through unlockBackup, the sweep as a configuration key with
+  an end-to-end check, a Go check of a Rust-sealed record, README and
+  FEATURES reworded. Counts are in the review report.
+  7i built 2026-11-11 (D286-D293): Monitor during this visit. The
+  session in Rust (src/visitmon.rs: the schedule and states of the site
+  monitor, samples in memory only, the outages per device with root cause,
+  the figures and their chart; src/visitcmd.rs: the commands, the
+  "topo-visit-monitor" event, Stop's figures kept in visit.json;
+  monitorcmd.rs `monitor_figures`), the page's side (js/visitmonitor.js:
+  the plan of the provider's devices, the tab, the map's dots, the
+  section of the visit entry with the before-and-after, the Visit report),
+  format v19's `monitoring` (js/model.js, schema/topo-v19.json,
+  docs/FORMAT.md), Record visit and the copy back (js/providermode.js), the
+  network report (js/incidents.js), sign-out said (js/server.js),
+  translated (es, pt-BR, ru, ja). Counts are in the phase report.
+  7i reviewed 2026-11-11 (D294-D297): Stop is final (monitor.rs drops a
+  late result; the session ignores changes once stopped), a check leaving
+  the plan ends its outage, the 7 days before are whole hours with their
+  coverage printed, statistics Off fails closed on a server card and is
+  checked again at Save, leaving provider mode ends the session (asked
+  first), a session belongs to whoever started it, a new start names the
+  session it drops, Off writes no visit.json; cargo tests for the file, the
+  late finish and monitor_figures, the schema checked with a full section.
+  7j built 2026-11-11 (D298-D311): the monitoring report (js/reports.js):
+  availability per check, device, group, provider and the whole network
+  with the coverage beside every figure, "not counting upstream" and "down
+  because R1", against the device's or the provider's target (v19 provider
+  `target` and `targetHours`, in their support hours when asked); response
+  times as charts with their tables, loss, jitter and the slow hours;
+  outages with who acted and the time to acknowledge, MTTR and MTBF; one
+  CSV; through the sheet preview with its choices (js/sheetpreview.js);
+  from the server's blobs (read past 400) or this PC's monitor; the
+  provider's section in their report and its attachment; the outage block
+  of the network report; the Check section's and provider card's links;
+  stats.rs `tcp` (file version 2); translated (es, pt-BR, ru, ja). Counts
+  are in the phase report. Reviewed 2026-11-11 (D312-D314): whose target
+  on several providers, nested groups, no period lists no outage, the
+  outages run on to now, Expected in older server blobs counted as
+  maintenance, every act in the CSV, providers.csv's target conflicts and
+  "no", 24/7 hours; the server path tested against the real binary.
+  7k built 2026-11-11 (D315-D324): the remaining checks. NTP (one
+  request, the stratum and the clock offset, warned above 1 s), RTSP
+  OPTIONS, SIP OPTIONS over UDP or TCP, HL7 MLLP (a connect, nothing sent),
+  IPP (printer-state and printer-state-reasons only), IMAP and POP (the
+  greeting, optional STARTTLS/STLS or TLS from the start, LOGOUT or QUIT,
+  never a login) in desktop/src-tauri/src/checks_more.rs, the offset
+  through monitor.rs's status; format v19's `tls` and `transport` and the
+  new protocols (js/model.js, schema/topo-v19.json, docs/FORMAT.md); the
+  check section's fields, sentences, lines and first checks (js/checks.js);
+  translated (es, pt-BR, ru, ja). Tests: `cargo test` 138 passed, 0
+  failed, 1 ignored (10 new: a loopback fake for each check, the MLLP
+  listener failing on any byte, the IMAP and POP fakes on any login);
+  `cargo build` with no warning; tests/suites/checksmore.js 56 checks, 0
+  failing; checks 97, 0 failing; the Check section in Playwright at 360,
+  390 and 1280 in Gold and Colourful, in English, Japanese and Russian
+  (42 checks each, 0 failing: no sideways scroll, 44 px targets on a
+  phone, no console error). Full web run (port 7398): 247 suites, 13839
+  checks, 4 failing (the same 4 touchfields). No Go change; the Go tests
+  and server-e2e were not rerun. No new check was run against a real
+  device (D324). Reviewed 2026-11-11 (D325): one deadline per check for
+  the line-reading TCP checks (SMTP too), IPP past "100 Continue", NTP's
+  zero times as bad-reply, SIP over UDP answered from any address, the
+  resend tests that could not fail now count datagrams; FEATURES and
+  README list 7j as built. `cargo test` 139 passed, 0 failed, 1 ignored;
+  `cargo build` with no warning; checksmore 56 and checks 97, 0 failing;
+  full web run 247 suites, 13839 checks, 5 failing (the same 4
+  touchfields, and visitmonitor 6.4 once, which passed 67/67 alone).
+  7l built 2026-11-11 (D326-D335): the welcome (js/welcome.js, its
+  markup and Settings' Run the welcome again in index.html, css/app.css,
+  translated in es, pt-BR, ru and ja): theme, mode, where networks are
+  kept, the screen lock, This PC's two ticks in the app, and the start;
+  once per PC or browser on a plain start only; D125's question folded in
+  (D170, D332). Tests: tests/suites/welcome.js 97 checks, 0 failing; a
+  Playwright pass of a real plain start at 360, 390 and 1280 in Gold and
+  Colourful, 74 checks, 0 failing; i18n, desktopserver, desktopclient,
+  library, idlelock, thiscomputer, checks, monitors, smoke, privacy,
+  touchsizes 1-3, a11ynames and navload (the plain URL) all passing;
+  server-e2e 183 checks and desktop-client-e2e 38 checks, 0 failing (port
+  7397; server-e2e with --no-rust, no Rust changed). Full web run (port
+  7397): 248 suites, 13936 checks, 4 failing (the same 4 touchfields). No
+  Rust or Go change, so cargo and the Go tests were not rerun.
+  Reviewed 2026-11-11 (D336): a theme chosen after Back kept, D125's
+  "yes" only through Open Settings (Not now, ✕ and Esc are "no"), Make
+  this PC the server offered wherever the service can run and is not set
+  up, Next waiting while the PIN is kept, the 30 minutes of D331 timed
+  from the queueing; the Playwright pass kept as tests/welcome-e2e.mjs
+  with real link and entry loads. Tests: welcome 109 checks, 0 failing;
+  welcome-e2e 84 checks, 0 failing; desktopserver, desktopclient,
+  thiscomputer, idlelock, i18n, navload, smoke, checks and monitors all
+  passing (954 with welcome); full web run (port 7397, 7398 was taken):
+  248 suites, 13948 checks, 4 failing (the same 4 touchfields). server-e2e
+  and desktop-client-e2e not rerun (they mark the welcome done; nothing on
+  that path changed).
+  7m done 2026-11-11 (D337-D341): the final wording in README.md,
+  docs/FEATURES.md, docs/SERVER.md (the monitors' metadata and a stolen
+  monitor PC in the threat model) and docs/FORMAT.md (v19's row, topo-v20
+  as the next address); tests/README.md rows for every suite; the "New in
+  0.0.2" entry in desktop/release-notes.md; the i18n review (583 new
+  keys, all four languages, three fixes); the audit of D126-D336 with
+  "Step 7: open items, for the owner" (one open gap, D166's last
+  sentence; the decisions waiting for the owner; what was never seen on a
+  real desktop, Windows or macOS). Final run: web suites (port 7397)
+  248 suites, 13948 checks, 5 failing (the same 4 touchfields, and 1
+  selbar, which passed alone: 69/69); `go test ./...` every package ok,
+  245 top-level tests passing (one flaky, fixed, D341);
+  `node tests/server-e2e.mjs --port 7397` 187 checks, 0 failing;
+  `cargo test` 139 passed, 0 failed, 1 ignored (the DICOM cross-check);
+  `cargo build` with no warning; desktop-client-e2e 38, 0 failing (after
+  the harness fix; the first run crashed at step 6); stage-check 26,
+  crypto-cross 12, alarm-e2e 106, idlelock-e2e 42, welcome-e2e 84,
+  reports-e2e 41, visitmonitor-e2e 31, all passing.
+  Reviewed 2026-11-12 (D342, and D341's note): the report's scope got its
+  own key "Whole network" (step 7 had written "The whole network" twice in
+  Russian, changing the share dialog's text), with a duplicate-key check in
+  the i18n suite; D179 and D276 added to "Waiting for the owner to
+  confirm", and open items 5 (13 keys translated twice from before step 7)
+  and 6 (several sites per monitor PC, if D276 is declined). Tests: i18n
+  116, reports 66, providerpart 47, all passing; reports-e2e 41, 0
+  failing; `go test -count=1 ./...` every package ok; full web run (port
+  7397, 7398 was held by another process): 248 suites, 13950 checks, 6
+  failing: the same 4 touchfields, and desktopserver 1 and revisions 1,
+  which both passed when rerun alone (55/55, 71/71). server-e2e,
+  desktop-client-e2e and cargo were not rerun (no server or Rust change).
+  - [x] 7.0 Scope.
+  - [x] 7a. Merge fixes.
+  - [x] 7b. Provider visits through the owner.
+  - [x] 7c. The desktop app as a server client.
+  - [x] 7d. This computer.
+  - [x] 7e. The idle lock.
+  - [x] 7f. Checks on one PC, no server.
+  - [x] 7g. Issues and the alarm.
+  - [x] 7h. Monitors through the server.
+  - [x] 7i. The visit monitor.
+  - [x] 7j. Reports.
+  - [x] 7k. The remaining checks.
+  - [x] 7l. The welcome.
+  - [x] 7m. i18n review, docs and the release note.

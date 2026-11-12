@@ -2,7 +2,7 @@
 // Chromium (docs/SCOPE.md step 5a, design §11.3). Not a run.sh suite: run.sh
 // serves the repository with a static server, this starts the binary.
 //
-//   node tests/server-e2e.mjs [--port 7381] [--keep] [--no-build]
+//   node tests/server-e2e.mjs [--port 7381] [--keep] [--no-build] [--no-rust]
 //
 //   --port      the loopback port for the server (default 7381, or
 //               $TOPO_E2E_PORT). A busy port is an error: nothing is killed.
@@ -10,6 +10,7 @@
 //   --no-build  use server/dist/topo-server as it is (otherwise
 //               `make -C server build` stages the app and builds it first).
 //   $TOPO_E2E_BIN  a binary to use instead (implies --no-build).
+//   --no-rust      skip step 15k (the app's Rust link, built with cargo).
 //
 // The server runs with TOPO_MAIL=file in a temporary data folder, so every
 // email lands in <data>/mail/outbox.jsonl (one JSON line each) and as an .eml;
@@ -74,7 +75,8 @@ const child = spawn(BIN, ['serve'], {
     env: {
         PATH: process.env.PATH, HOME: process.env.HOME, TOPO_DATA: data, TOPO_LISTEN: `127.0.0.1:${PORT}`, TOPO_PUBLIC_URL: ORIGIN,
         TOPO_MAIL: 'file', TOPO_OWNER_EMAIL: OWNER, TOPO_NOTIFY_REVISION_MINUTES: '0', TOPO_NOTIFY_EVENT_SECONDS: '0', TOPO_LOG_LEVEL: 'warn',
-        TOPO_MAIL_PER_MINUTE: '1000', TOPO_BACKUP_FOLDERS: bkRoot, TOPO_BACKUP_DEBOUNCE: '0s', TOPO_BACKUP_TICK: '1s'
+        TOPO_MAIL_PER_MINUTE: '1000', TOPO_BACKUP_FOLDERS: bkRoot, TOPO_BACKUP_DEBOUNCE: '0s', TOPO_BACKUP_TICK: '1s',
+        TOPO_MONITOR_SWEEP: '200ms'
     },
     stdio: ['ignore', 'inherit', 'inherit'], detached: true
 });
@@ -147,6 +149,9 @@ const errors = { A: [], B: [] };
 async function ctx(name, opts) {
     const c = await browser.newContext(opts);
     await c.addInitScript(() => {
+        // The first-run welcome (js/welcome.js) is tests/suites/welcome.js's;
+        // these browsers have seen it.
+        try { localStorage.setItem('topo-welcome', JSON.stringify({ v: 1, at: 1, how: 'done' })); } catch (e) { /* none */ }
         window.__cspViolations = [];
         document.addEventListener('securitypolicyviolation', (e) => window.__cspViolations.push(e.violatedDirective + ' ' + e.blockedURI));
     });
@@ -288,67 +293,55 @@ try {
     ok('6. B decrypted the same network', same[0] === same[1], same);
     ok('6. B\'s "who am I" is Acme IT', await B.p.evaluate(() => { const id = providerSelfOf(state.docId); return !!id && (state.providers.find((p) => p.id === id) || {}).name === 'Acme IT'; }));
 
-    // 7. Concurrent offline edits: B's push meets a 409, B pulls, merges
-    //    cleanly and pushes; both converge. The order is fixed (C9): B reads
-    //    the head before A pushes, so B's push is on a stale base.
+    // 7. B is a provider: it never pushes (docs/SCOPE.md D154). Offline
+    //    edits on both; A pushes; B pulls and keeps its own edit on top (a
+    //    quiet merge here); B's edit waits for a visit; a push B's app tries
+    //    anyway (as a v0.0.1 app would) is refused: 403 owners-only.
     for (const p of [A.p, B.p]) await p.evaluate(() => { TopoServerSync._hooks.quietMs = 200; TopoServerSync._hooks.maxMs = 1000; });
-    let b409 = 0;
-    B.p.on('response', (r) => { if (r.request().method() === 'POST' && /\/revs$/.test(new URL(r.url()).pathname) && r.status() === 409) b409++; });
+    let bPosts = 0;
+    B.p.on('request', (r) => { if (r.method() === 'POST' && /\/revs$/.test(new URL(r.url()).pathname)) bPosts++; });
     await A.c.setOffline(true);
     await B.c.setOffline(true);
     await A.p.evaluate((id) => { const lib = loadLibrary(); lib[id].doc.nodes[0].name = 'Renamed by A'; lib[id].updated = Date.now(); persistLibrary(lib); serverAfterSave(id); }, cardId);
     await B.p.evaluate(() => { batch(() => { state.nodes[1].notes = 'Note by B'; save(); }); flushAutosave(); });
-    ok('7. B offline: the card keeps the local change', await until(B.p, (id) => TopoServerSync.dirty(id) && ['offline', 'error'].includes(TopoServerSync.cardSync(id).state), cardId),
-        await B.p.evaluate((id) => TopoServerSync.cardSync(id), cardId));
-    let releaseB, bRead;
-    const aPushed = new Promise((r) => { releaseB = r; });
-    const bHasStale = new Promise((r) => { bRead = r; });
-    let held = false;
-    await B.p.route((u) => /\/api\/sites\/[^/]+\/revs$/.test(u.pathname) && u.searchParams.has('since'), async (route) => {
-        if (held || route.request().method() !== 'GET') return route.continue();
-        held = true;
-        const stale = await route.fetch();
-        bRead();
-        await aPushed;
-        await route.fulfill({ response: stale });
-    });
+    ok('7. B offline: the card keeps the local change', await until(B.p, (id) => TopoServerSync.dirty(id), cardId), await B.p.evaluate((id) => TopoServerSync.cardSync(id), cardId));
     await B.c.setOffline(false);
-    const bSync = B.p.evaluate((id) => TopoServerSync.syncNow(id), cardId);
-    await Promise.race([bHasStale, sleep(15000)]);
-    ok('7. B read head 1 before A pushed', held);
     await A.c.setOffline(false);
     await A.p.evaluate((id) => TopoServerSync.syncNow(id), cardId);
     ok('7. A pushed head 2', await until(A.p, (id) => TopoServerSync.rec(id).baseN >= 2, cardId), await A.p.evaluate((id) => TopoServerSync.rec(id), cardId));
-    releaseB();
-    await bSync.catch(() => {});
-    await B.p.unroute('**');
-    ok('7. B\'s push met a 409', b409 >= 1, b409);
-    ok('7. B merged and pushed head 3', await until(B.p, (id) => TopoServerSync.rec(id).baseN === 3 && TopoServerSync.cardSync(id).state === 'synced', cardId),
-        await B.p.evaluate((id) => [TopoServerSync.rec(id), TopoServerSync.cardSync(id)], cardId));
+    await B.p.evaluate((id) => TopoServerSync.syncNow(id), cardId);
+    ok('7. B pulled head 2 and kept its own edit on top', await until(B.p, (id) => TopoServerSync.rec(id).baseN === 2 && libraryEntry(id).doc.nodes[0].name === 'Renamed by A'
+        && libraryEntry(id).doc.nodes[1].notes === 'Note by B', cardId), await B.p.evaluate((id) => [TopoServerSync.rec(id), TopoServerSync.cardSync(id)], cardId));
+    ok('7. B\'s card says its changes go to the owner', await until(B.p, (id) => TopoServerSync.cardSync(id).state === 'proposed', cardId), await B.p.evaluate((id) => TopoServerSync.cardSync(id), cardId));
     ok('7. the quiet merge is one log entry from "the server"', await B.p.evaluate(() => (state.log || []).filter((e) => e.kind === 'merge' && e.source === 'server').length === 1));
-    ok('7. A pulled head 3', await until(A.p, (id) => TopoServerSync.rec(id).baseN === 3, cardId));
-    const docs = await Promise.all([A.p, B.p].map((p) => p.evaluate((id) => { const d = libraryEntry(id).doc; return [d.nodes[0].name, d.nodes[1].notes, revHashOf(d)]; }, cardId)));
-    ok('7. both have both edits and converge', docs[0][0] === 'Renamed by A' && docs[0][1] === 'Note by B' && docs[0][2] === docs[1][2], docs);
-    ok('7. B\'s screen shows A\'s rename', await B.p.evaluate(() => state.nodes[0].name === 'Renamed by A'));
-    ok('7. the server head is 3', (await head(siteId)) === '3 1', await head(siteId));
+    ok('7. B never pushed', bPosts === 0, bPosts);
+    ok('7. A has not got B\'s note: it waits for a visit', await A.p.evaluate((id) => libraryEntry(id).doc.nodes[1].notes !== 'Note by B', cardId));
+    const bRefused = await B.p.evaluate(async (id) => {
+        const r = TopoServerSync.rec(id);
+        r.role = 'owner';
+        try { await TopoServerSync.pushCard(r); return ['pushed']; } catch (e) { return [e.status, e.code, !!(e.data && e.data.update)]; } finally { r.role = 'provider'; TopoServerSync.putRec(r); }
+    }, cardId);
+    bPosts = 0;
+    ok('7. a provider\'s push is refused: 403 owners-only, update Topo', bRefused[0] === 403 && bRefused[1] === 'owners-only' && bRefused[2] === true, bRefused);
+    ok('7. the server head is 2', (await head(siteId)) === '2 1', await head(siteId));
 
     // 8. A conflict: both rename the same device offline; A syncs first; B
-    //    shows Needs merge, the review opens only on the tap, then converges.
+    //    shows Needs merge, the review opens only on the tap; B still pushes
+    //    nothing.
     await B.c.setOffline(true);
     await A.p.evaluate((id) => { const lib = loadLibrary(); lib[id].doc.nodes[2].name = 'A says'; lib[id].updated = Date.now(); persistLibrary(lib); serverAfterSave(id); }, cardId);
     await B.p.evaluate(() => { batch(() => { state.nodes[2].name = 'B says'; save(); }); flushAutosave(); });
-    ok('8. A pushed head 4', await until(A.p, (id) => TopoServerSync.rec(id).baseN === 4, cardId));
+    ok('8. A pushed head 3', await until(A.p, (id) => TopoServerSync.rec(id).baseN === 3, cardId));
     await B.c.setOffline(false);
     await B.p.evaluate((id) => TopoServerSync.syncNow(id), cardId);
     ok('8. B needs a merge', await until(B.p, (id) => TopoServerSync.cardSync(id).state === 'needs-merge', cardId), await B.p.evaluate((id) => TopoServerSync.cardSync(id), cardId));
     ok('8. no merge dialog popped up by itself', !(await B.p.evaluate(() => TopoMergeUI.mergeDialogOpen())));
     ok('8. the doc bar says Merge', await B.p.evaluate(() => /Merge/.test((document.getElementById('docBar') || document.body).textContent)));
-    await B.p.evaluate(async (id) => { TopoMergeUI.setMergeResponder(() => ({})); await TopoServerSync.reviewMerge(id); }, cardId);
-    ok('8. B pushed after the review (head 5)', await until(B.p, (id) => TopoServerSync.rec(id).baseN === 5 && TopoServerSync.cardSync(id).state === 'synced', cardId),
-        await B.p.evaluate((id) => [TopoServerSync.rec(id), TopoServerSync.cardSync(id)], cardId));
-    ok('8. A converged at head 5', await until(A.p, (id) => TopoServerSync.rec(id).baseN === 5, cardId));
-    const d2 = await Promise.all([A.p, B.p].map((p) => p.evaluate((id) => revHashOf(libraryEntry(id).doc), cardId)));
-    ok('8. the two copies are the same', d2[0] === d2[1], d2);
+    await B.p.evaluate(async (id) => { TopoMergeUI.setMergeResponder(() => ({})); await TopoServerSync.reviewMerge(id); TopoMergeUI.setMergeResponder(null); }, cardId);
+    ok('8. B reviewed it: on head 3, its own name kept, nothing pushed', await until(B.p, (id) => TopoServerSync.rec(id).baseN === 3 && TopoServerSync.cardSync(id).state === 'proposed'
+        && libraryEntry(id).doc.nodes[2].name === 'B says', cardId), await B.p.evaluate((id) => [TopoServerSync.rec(id), TopoServerSync.cardSync(id)], cardId));
+    ok('8. B never pushed', bPosts === 0, bPosts);
+    ok('8. the server head is 3', (await head(siteId)) === '3 1', await head(siteId));
 
     // 9. A reports a problem routed to Acme IT and sends it through the server.
     await A.p.evaluate(async (id) => { setDialogResponder(() => true); await openFromLibrary(id); }, cardId);
@@ -380,8 +373,12 @@ try {
     ok('9. the provider\'s incident-sent email is in the sink', !!im, mails().map((m) => m.kind + ' ' + m.to));
     ok('9. it carries no network content', !!im && !/Secret note|Renamed by A|Office|A says|B says|house/i.test(emlOf(im)), im && emlOf(im).slice(0, 400));
 
-    // 10. B gets it live, records a visit; the owner gets the email.
+    // 10. B gets it live and records a visit: a visit copy goes to the owner
+    //     (D154), who gets the email, reviews it in Visits waiting, approves
+    //     it as Successful; it is pushed and answered; B is told, and takes
+    //     the server's version.
     ok('10. B has the report', await until(B.p, (iid) => (state.incidents || []).some((x) => x.id === iid && x.status === 'sent'), sent.id));
+    const head10 = (await head(siteId)).split(' ')[0];
     // Through the Record visit dialog, as the provider would.
     await B.p.evaluate((iid) => { enterProviderMode(iid); TopoProviderMode.openVisitDialog(iid); }, sent.id);
     ok('10. the visit dialog opens, ready to save', await until(B.p, () => !document.getElementById('visitDialog').hidden && !document.getElementById('visitSaveBtn').disabled));
@@ -391,16 +388,50 @@ try {
         const by = document.getElementById('visitBy'); by.value = 'Tech'; by.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await B.p.click('#visitSaveBtn');
-    ok('10. the return step says "Saved to the server"', await until(B.p, () => document.getElementById('visitReturnStatus').textContent === 'Saved to the server. The client will get an email.'),
+    ok('10. the return step says it went to the owner for review', await until(B.p, () => /^Sent to the owner for review\./.test(document.getElementById('visitReturnStatus').textContent)),
         await B.p.evaluate(() => [document.getElementById('visitReturnStatus').textContent, document.getElementById('visitError').textContent]));
     ok('10. no link, passphrase, email, share or file to send back', await B.p.evaluate(() => ['visitEmailBtn', 'visitCallBtn', 'visitShareBtn', 'visitCopyMsgBtn', 'visitCopyLinkBtn', 'visitFileBtn', 'visitPassRow', 'visitMakeBtn', 'visitLink']
         .every((id) => document.getElementById(id).classList.contains('hidden'))));
     ok('10. B recorded a visit', await B.p.evaluate(() => (state.log || []).some((e) => e.kind === 'visit' && e.by === 'Tech')));
     await B.p.click('#visitDoneBtn');
+    // What B is asked before its card takes the server's version (D192):
+    // answered here, the question recorded.
+    await B.p.evaluate(() => { window.__offered = ''; TopoServerSync._hooks.ask = async (m, o) => { window.__offered = o.why; return 'no'; }; });
+    ok('10. B\'s card says the visit waits for the owner', await until(B.p, (id) => TopoServerSync.cardSync(id).state === 'visit-waiting', cardId), await B.p.evaluate((id) => TopoServerSync.cardSync(id), cardId));
+    ok('10. nothing was pushed: the head is the same', (await head(siteId)).split(' ')[0] === head10 && bPosts === 0, [await head(siteId), bPosts]);
+    const db10 = spawnSync('sqlite3', ['-readonly', join(data, 'topo.db'), `SELECT state || ' ' || base_n || ' ' || length(ct) FROM visit_copies WHERE site_id = '${siteId.replace(/[^\w-]/g, '')}'`], { encoding: 'utf8' });
+    ok('10. the server holds one visit copy, waiting, on head ' + head10, db10.status === 0 && db10.stdout.trim().startsWith('waiting ' + head10 + ' '), db10.stdout || db10.stderr);
     const vm = await readMail(OWNER, 'visit-recorded');
     ok('10. the owner\'s visit-recorded email is in the sink', !!vm, mails().map((m) => m.kind + ' ' + m.to));
     ok('10. it carries no network content', !!vm && !/Secret note|Renamed by A|Office|Tech|house/i.test(emlOf(vm)));
-    ok('10. A has the visit', await until(A.p, () => (state.log || []).some((e) => e.kind === 'visit')));
+    // A: Visits waiting, in the Problems tab; the review in the browser.
+    await A.p.evaluate(async (id) => { await openFromLibrary(id); await TopoVisits.refreshServerVisits(id, true); openIncidentsView(); TopoVisits.renderVisitsWaiting(); }, cardId);
+    ok('10. A\'s Problems tab lists the visit waiting', await until(A.p, () => /A visit waits for your review/.test(document.getElementById('visitsWaiting').textContent)
+        && !!document.querySelector('#visitsWaiting button.vw-review')), await A.p.evaluate(() => document.getElementById('visitsWaiting').textContent));
+    await A.p.click('#visitsWaiting button.vw-review');
+    ok('10. the review opens with the visit\'s two questions', await until(A.p, () => TopoMergeUI.mergeDialogOpen() && !document.getElementById('mergeVisit').hidden));
+    await audit(A.p, '10. the visit review');
+    await A.p.click('#mergeVisit [data-visit-outcome="successful"]');
+    await A.p.click('#mergeApplyBtn');
+    ok('10. A has the visit, the report fixed, the decision logged', await until(A.p, (iid) => (state.log || []).some((e) => e.kind === 'visit' && e.by === 'Tech')
+        && (state.log || []).some((e) => e.kind === 'decision' && e.result === 'approved' && e.outcome === 'successful')
+        && (state.incidents.find((x) => x.id === iid) || {}).status === 'closed', sent.id), await A.p.evaluate(() => (state.log || []).map((e) => e.kind)));
+    // Acme IT is named on no device: B's note and B's name are outside what
+    // it covers (D154, D188), so they are left out by default.
+    ok('10. B\'s edits outside what Acme IT covers left out, A\'s name kept', await A.p.evaluate((id) => { const d = libraryEntry(id).doc; return d.nodes[1].notes !== 'Note by B' && d.nodes[2].name === 'A says'; }, cardId));
+    ok('10. pushed and answered on the server', await until(A.p, (a) => TopoServerSync.rec(a.id).baseN > a.n && !(TopoServerSync.rec(a.id).decisions || []).length, { id: cardId, n: Number(head10) }));
+    const db10b = spawnSync('sqlite3', ['-readonly', join(data, 'topo.db'), `SELECT state || ' ' || decided_n FROM visit_copies WHERE site_id = '${siteId.replace(/[^\w-]/g, '')}'`], { encoding: 'utf8' });
+    ok('10. the copy is approved at the new head', db10b.stdout.trim() === 'approved ' + (await head(siteId)).split(' ')[0] || db10b.stdout.trim() === '', [db10b.stdout, await head(siteId)]);
+    const pm = await readMail(PROV, 'visit-recorded');
+    ok('10. B is told by email that the owner approved it', !!pm && /approved your visit/.test(pm.subject || emlOf(pm)), pm && pm.subject);
+    ok('10. B takes the server\'s version and deletes its copy', await until(B.p, (id) => TopoServerSync.cardSync(id).state === 'synced' && !TopoServerSync.dirty(id)
+        && revHashOf(libraryEntry(id).doc) !== '' , cardId), await B.p.evaluate((id) => TopoServerSync.cardSync(id), cardId));
+    ok('10. B is offered its copy as a file first: the owner left its outside edits out (D192)', (await B.p.evaluate(() => window.__offered)) === 'unsent', await B.p.evaluate(() => window.__offered));
+    await B.p.evaluate(() => { delete TopoServerSync._hooks.ask; });
+    const conv = await Promise.all([A.p, B.p].map((p) => p.evaluate((id) => revHashOf(libraryEntry(id).doc), cardId)));
+    ok('10. the two copies are the same', conv[0] === conv[1], conv);
+    const db10c = spawnSync('sqlite3', ['-readonly', join(data, 'topo.db'), `SELECT count(*) FROM visit_copies WHERE site_id = '${siteId.replace(/[^\w-]/g, '')}'`], { encoding: 'utf8' });
+    ok('10. the decided copy is gone from the server', await (async () => { for (let i = 0; i < 100; i++) { const r = spawnSync('sqlite3', ['-readonly', join(data, 'topo.db'), `SELECT count(*) FROM visit_copies WHERE site_id = '${siteId.replace(/[^\w-]/g, '')}'`], { encoding: 'utf8' }); if (r.stdout.trim() === '0') return true; await sleep(100); } return false; })(), db10c.stdout);
     ok('10. A\'s log verifies', (await A.p.evaluate(async () => verifyLog(normalizeLog(state.log)))) === -1);
 
     // 10b. A reports a problem to a provider who is not a member: the
@@ -699,11 +730,207 @@ try {
         await s3.close();
     }
 
+    // 15. Site monitors through the real server (docs/SCOPE.md step 7h).
+    // The PC's side (desktop/src-tauri/src/monitorlink.rs) is played in A's
+    // page with WebCrypto: its keys, its token on every request, its records
+    // sealed with the site key and signed with its own key.
+    const mon = await A.p.evaluate(async (s) => {
+        const C = TopoServerCrypto, M = TopoMonitors;
+        const pcs = [];
+        for (const name of ['FRONT-DESK', 'WARD-2']) {
+            const e = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+            const g = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
+            const pc = { name, enc: e.privateKey, sig: g.privateKey, encPub: C.b64u(new Uint8Array(await crypto.subtle.exportKey('raw', e.publicKey))), sigPub: C.b64u(new Uint8Array(await crypto.subtle.exportKey('raw', g.publicKey))) };
+            M.state.invoke = async (cmd, a) => {
+                if (cmd === 'monitor_device_key') return { encPub: pc.encPub, sigPub: pc.sigPub, keyKind: 'file', name };
+                if (cmd === 'monitor_enroll') { pc.args = a.args; return { enrolled: true }; }
+                return null;
+            };
+            await M.turnOn(s, []);
+            pcs.push(pc);
+        }
+        M.state.invoke = null; M.state.link = null;
+        window.__pcs = pcs;
+        // As the monitor: its own token, no cookie of a person counted.
+        const call = async (pc, method, path, body) => {
+            const r = await fetch(path, { method, credentials: 'omit', headers: Object.assign({ 'X-Topo': '1', Authorization: 'Topo-Monitor ' + pc.args.token }, body ? { 'Content-Type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined });
+            let j = null; try { j = await r.json(); } catch (x) { /* none */ }
+            return { status: r.status, json: j };
+        };
+        window.__monCall = call;
+        const pc = pcs[0];
+        const self = await call(pc, 'GET', '/api/monitor');
+        const keys = await call(pc, 'GET', `/api/sites/${s}/keys`);
+        const tr = await TopoServerSync.walkRosters(s);
+        const owners = [];
+        for (const m of tr.rosters[tr.rosters.length - 1].members) if (m.role === 'owner') owners.push(tr.pubs[m.u].sigPub);
+        const w = keys.json.wraps.find((x) => x.epoch === self.json.epoch);
+        const raw = await C.unwrap(w.wrap, { priv: pc.enc, pub: pc.encPub, ctx: C.siteCtx(s, w.epoch, pc.args.monitor), signers: owners });
+        const key = await C.importSiteKey(raw);
+        pc.key = key; pc.epoch = w.epoch;
+        let at = Date.now();
+        const seal = (kind, id, payload) => C.sealRecord({ site: s, kind, id, epoch: pc.epoch, author: pc.args.monitor, at: at++ }, key, pc.sig, C.utf8(JSON.stringify(payload)));
+        const firstNode = state.nodes[0];
+        const status = await call(pc, 'PUT', `/api/sites/${s}/status?interval=60000`, await seal('status', pc.args.monitor, { v: 1, monitor: pc.name, items: [{ key: firstNode.id + '/ck', nodeId: firstNode.id, state: 'down', since: Date.now() - 60000, status: 'e2e-plaintext-marker' }] }));
+        const issue = await call(pc, 'POST', `/api/sites/${s}/records`, await seal('issue', 'in00000e2e01', { id: 'in00000e2e01', nodeId: firstNode.id, name: firstNode.name, outages: [{ from: Date.now() - 60000 }], behind: [], acts: [], monitor: pc.name }));
+        const head = await (await fetch(`/api/sites/${s}/revs?since=0&limit=1`)).json();
+        const rev = await call(pc, 'POST', `/api/sites/${s}/revs`, { rev: { n: head.head.n + 1 } });
+        const me = await call(pc, 'GET', '/api/me');
+        const day = Math.floor(Date.now() / 864e5) * 864e5;
+        const stats = await call(pc, 'PUT', `/api/sites/${s}/stats/${day}`, await seal('stats', pc.args.monitor + '|' + day, { v: 1, day, monitor: pc.name, checks: {} }));
+        // The owner's page reads it all.
+        await M.load(s);
+        const st = M.siteState(s);
+        const pulled = await M.stats(s, day, day);
+        return { self: self.status, selfSite: self.json && self.json.site, unwrapped: raw.length === 32, status: status.status, issue: issue.status, rev: rev.status, me: me.status, stats: stats.status,
+            statusRead: [...st.status.values()].some((o) => o.author === pc.args.monitor && o.payload.items[0].state === 'down'), issueRead: st.issues.has('in00000e2e01'),
+            listed: st.monitors.map((m) => ({ name: m.name, last: m.lastReport > 0 })), pulled: pulled.length, ids: pcs.map((x) => x.args.monitor), tokens: pcs.map((x) => x.args.token), refused: st.refused.size };
+    }, siteId);
+    ok('15a. an owner turns two PCs into monitors; each opens the site key wrapped to it', mon.self === 200 && mon.selfSite === siteId && mon.unwrapped && mon.ids.length === 2, mon);
+    ok('15b. a monitor pushes its signed status (the heartbeat), an issue and a day of statistics', mon.status === 200 && mon.issue === 200 && mon.stats === 204, mon);
+    ok('15c. it cannot push a revision or act as a person', mon.rev === 403 && mon.me === 403, mon);
+    ok('15d. the owner\'s page reads them, checked, and lists the monitors with their last report', mon.statusRead && mon.issueRead && mon.pulled === 1 && mon.refused === 0 && mon.listed.length === 2 && mon.listed[0].last, mon);
+    const recText = spawnSync('sqlite3', ['-readonly', join(data, 'topo.db'), 'SELECT record FROM site_records'], { encoding: 'utf8' }).stdout;
+    ok('15e. the server holds the records as ciphertext only', recText.includes('"ctHash"') && !recText.includes('e2e-plaintext-marker'), recText.slice(0, 200));
+    const folded = await waitFor(async () => (await A.p.evaluate(() => (state.incidents || []).some((i) => i.id === 'in00000e2e01'))) && spawnSync('sqlite3', ['-readonly', join(data, 'topo.db'), "SELECT folded FROM site_records WHERE id = 'in00000e2e01'"], { encoding: 'utf8' }).stdout.trim() === '1');
+    ok('15f. the owner\'s open page folds the issue into the network, and the server marks it folded', !!folded);
+    // The monitoring report on the real server's blobs (step 7j, D298): a
+    // day of hourly figures the monitor sealed is pulled, opened and counted
+    // by the owner's page, its monitor named.
+    const rpt = await A.p.evaluate(async (s) => {
+        const C = TopoServerCrypto, R = TopoReports;
+        const pc = window.__pcs[0];
+        const HOUR = 36e5, DAY = 864e5;
+        const n0 = state.nodes[0];
+        const key = n0.id + '/ck';
+        const hour = Math.floor(Date.now() / HOUR) * HOUR - 2 * HOUR;
+        const hday = Math.floor(hour / DAY) * DAY;
+        const fig = { hour, checks: 60, ok: 57, fail: 3, rttMin: 1, rttMed: 4, rttP95: 9, rttMax: 20, jitter: 0.5, sUp: 3000, sSlow: 0, sDown: 600, sUpstream: 0, sMaint: 0, sUnknown: 0 };
+        const checks = {};
+        checks[key] = { node: n0.id, hours: [fig] };
+        const body = await C.sealRecord({ site: s, kind: 'stats', id: pc.args.monitor + '|' + hday, epoch: pc.epoch, author: pc.args.monitor, at: Date.now() }, pc.key, pc.sig,
+            C.utf8(JSON.stringify({ v: 1, day: hday, monitor: pc.name, checks })));
+        const put = await window.__monCall(pc, 'PUT', '/api/sites/' + s + '/stats/' + hday, body);
+        const range = R.periodRange('day');
+        const doc = serializeDoc();
+        const data = await R.gather(range, doc);
+        doc.nodes.find((n) => n.id === n0.id).checks = [{ id: 'ck', proto: 'ping' }];
+        const m = R.buildModel(doc, data, { scope: 'site', range, parts: R.PARTS });
+        const row = m.rows.find((r) => r.key === key);
+        return { put: put.status, source: data.source, streams: data.streams.length, row: row && { down: row.down, up: row.up, avail: row.avail, coverage: row.coverage, monitors: row.monitors, med: row.med },
+            html: /FRONT-DESK/.test(R.reportHtml(m)) };
+    }, siteId);
+    ok('15f2. the monitoring report reads the real server\'s blobs: the hour pulled, opened and counted, its monitor named', rpt.put === 204 && rpt.source === 'server' && rpt.row
+        && rpt.row.down === 600 && Math.abs(rpt.row.avail - 3000 / 3600) < 1e-9 && Math.abs(rpt.row.coverage - 1 / 24) < 1e-9 && rpt.row.med === 4 && rpt.html, rpt);
+    // Revoking the second: the key rotates, the first is wrapped the new key.
+    const rv = await A.p.evaluate(async (s) => {
+        const pcs = window.__pcs;
+        const before = (await TopoServerSync.siteDetail(s, true)).site.epoch;
+        await TopoServerSync.removeMember(s, pcs[1].args.monitor);
+        const after = (await TopoServerSync.siteDetail(s, true)).site.epoch;
+        const gone = await window.__monCall(pcs[1], 'GET', '/api/monitor');
+        const keys = await window.__monCall(pcs[0], 'GET', `/api/sites/${s}/keys`);
+        return { before, after, gone: gone.status, firstHasNew: keys.json.wraps.some((w) => w.epoch === after) };
+    }, siteId);
+    ok('15g. revoking a monitor: its credential is refused, the key rotates, the other monitor gets the new key', rv.gone === 401 && rv.after === rv.before + 1 && rv.firstHasNew, rv);
+
+    // 15i. The heartbeat through the server's own sweep (TOPO_MONITOR_SWEEP
+    //      above): the first monitor's last report moved 4 minutes back in
+    //      the database, the sweep marks it stale and the owner's open page
+    //      hears it and says "Monitor at FRONT-DESK stopped reporting".
+    const monId = mon.ids[0].replace(/[^\w]/g, '');
+    const aged = spawnSync('sqlite3', ['-cmd', '.timeout 5000', join(data, 'topo.db'), `UPDATE monitors SET last_report = last_report - 240000 WHERE id = '${monId}'`], { encoding: 'utf8' });
+    const staleSaid = await waitFor(async () => {
+        const db = spawnSync('sqlite3', ['-readonly', join(data, 'topo.db'), `SELECT stale FROM monitors WHERE id = '${monId}'`], { encoding: 'utf8' }).stdout.trim();
+        const banner = await A.p.evaluate(() => { const b = document.getElementById('srvIssueBanner'); return b && !b.hidden ? b.textContent : ''; });
+        return db === '1' && banner.includes('Monitor at FRONT-DESK stopped reporting') && banner;
+    });
+    ok('15i. a monitor that missed 3 intervals is marked by the server\'s sweep and shown as stopped reporting', aged.status === 0 && !!staleSaid, [aged.stderr, staleSaid]);
+
+    // 15j. An owner's quiet window goes to the site's monitors as a signed
+    //      record (D227, D265): the monitor finds it, opens it with the
+    //      key wrapped to it, and its signer is the owner.
+    const qt = await A.p.evaluate(async (s) => {
+        const C = TopoServerCrypto, pc = window.__pcs[0];
+        const node = state.nodes[0];
+        const until = Date.now() + 3600000;
+        const pushed = await TopoMonitors.pushQuiet(s, 'node', node.id, until);
+        const self = await window.__monCall(pc, 'GET', '/api/monitor');
+        const keys = await window.__monCall(pc, 'GET', `/api/sites/${s}/keys`);
+        const tr = await TopoServerSync.walkRosters(s);
+        const owners = tr.rosters[tr.rosters.length - 1].members.filter((m) => m.role === 'owner').map((m) => tr.pubs[m.u].sigPub);
+        const w = keys.json.wraps.find((x) => x.epoch === self.json.epoch);
+        const key = await C.importSiteKey(await C.unwrap(w.wrap, { priv: pc.enc, pub: pc.encPub, ctx: C.siteCtx(s, w.epoch, pc.args.monitor), signers: owners }));
+        const recs = await window.__monCall(pc, 'GET', `/api/sites/${s}/records?since=0`);
+        const q = recs.json.records.map((x) => x.record).find((r) => r.kind === 'quiet');
+        const me = TopoServer.me();
+        let p = null;
+        try { p = JSON.parse(C.fromUtf8(await C.openRecord(q, key, tr.pubs[me.id].sigPub))); } catch (e) { p = { err: String(e) }; }
+        return { pushed, author: q && q.author === me.id, p, node: node.id, until };
+    }, siteId);
+    ok('15j. an owner\'s quiet window reaches the site\'s monitor as a signed record', qt.pushed && qt.author && qt.p && qt.p.scope === 'node' && qt.p.id === qt.node && qt.p.until === qt.until, qt);
+
+    // 15k. The app's own Rust link against this server (D275): the device
+    //      keys made in Rust, the PC turned on from A's page, then
+    //      src/monitorlink.rs (desktop/src-tauri/examples/monitor-link.rs,
+    //      the app's link, crypto and transport with a stand-in for the
+    //      checks) walks the rosters, opens its key, pushes its status, an
+    //      issue and a day of statistics, and takes the owner's quiet
+    //      window; A's page reads and opens what Rust sealed and signed.
+    //      Skipped with --no-rust (no cargo here).
+    if (!args.includes('--no-rust')) {
+        const TAURI = join(ROOT, 'desktop/src-tauri');
+        const exe = join(TAURI, 'target/debug/examples/monitor-link');
+        const built = spawnSync('cargo', ['build', '--offline', '-j', '4', '--example', 'monitor-link'], { cwd: TAURI, stdio: ['ignore', 'ignore', 'inherit'] });
+        ok('15k. the Rust link builds (cargo build --example monitor-link)', built.status === 0 && existsSync(exe));
+        const keys = JSON.parse(spawnSync(exe, ['keys'], { encoding: 'utf8' }).stdout || '{}');
+        const en = await A.p.evaluate(async ([s, k]) => {
+            const M = TopoMonitors;
+            let args = null;
+            M.state.invoke = async (cmd, a) => {
+                if (cmd === 'monitor_device_key') return { encPub: k.encPub, sigPub: k.sigPub, keyKind: 'file', name: 'RUST-PC' };
+                if (cmd === 'monitor_enroll') { args = a.args; return { enrolled: true }; }
+                return null;
+            };
+            try { await M.turnOn(s, []); } catch (e) { return { err: String(e && e.message || e) }; }
+            M.state.invoke = null; M.state.link = null;
+            return { args, node: state.nodes[0].id, name: state.nodes[0].name };
+        }, [siteId, keys]);
+        const cfgPath = join(data, 'monitor-link.json');
+        const day = Math.floor(Date.now() / 864e5) * 864e5;
+        writeFileSync(cfgPath, JSON.stringify({
+            origin: ORIGIN, pin: '', token: en.args && en.args.token, secret: keys.secret, site: siteId, monitor: en.args && en.args.monitor, name: 'RUST-PC',
+            network: en.args && en.args.network, watched: en.args && en.args.network, roster: en.args && en.args.roster,
+            statuses: [{ key: en.node + '/rk', nodeId: en.node, state: 'down' }], issues: [{ id: 'in0000rust01', nodeId: en.node, name: en.name }], ticks: 2
+        }));
+        const runOut = spawnSync(exe, ['tick', cfgPath], { encoding: 'utf8' });
+        let run = {};
+        try { run = JSON.parse(runOut.stdout); } catch (e) { run = { stdout: runOut.stdout, stderr: runOut.stderr }; }
+        const sent = (m, p) => (run.calls || []).find((c) => c[0] === m && c[1].endsWith(p));
+        ok('15k. the Rust link pushes status, an issue and statistics, all taken by the server', !!en.args && (run.errors || []).length === 0 && !run.revoked
+            && sent('PUT', '/status')[2] === 200 && sent('POST', '/records')[2] === 200 && sent('PUT', '/stats/' + day)[2] === 204, { en: en.err, run });
+        ok('15k. it takes the owner\'s quiet window (sealed and signed by the page) and the site\'s Keep statistics', (run.quiets || []).some((q) => q.scope === 'node' && q.id === en.node) && (run.retention || [])[0] === 360, run);
+        const rd = await A.p.evaluate(async ([s, mid, day]) => {
+            const M = TopoMonitors;
+            await M.load(s);
+            const st = M.siteState(s);
+            const status = st.status.get(mid);
+            const stats = await M.stats(s, day, day);
+            return { status: !!status && status.payload.items[0].state === 'down' && status.payload.monitor === 'RUST-PC', issue: !!st.issues.get('in0000rust01') && st.issues.get('in0000rust01').author === mid,
+                stats: stats.some((x) => x.monitor === mid && x.name === 'RUST-PC'), refused: [...st.refused.entries()].filter(([, v]) => v.author === mid) };
+        }, [siteId, en.args && en.args.monitor, day]);
+        ok('15k. the owner\'s page opens what Rust sealed and signed: status, issue and statistics, none refused', rd.status && rd.issue && rd.stats && rd.refused.length === 0, rd);
+    }
+
     // 12. Sign out on both.
     for (const [n, p] of [['A', A.p], ['B', B.p]]) {
         await p.evaluate(() => TopoServer.signOut());
         ok(`12. ${n} signed out (/api/me is 401)`, (await p.evaluate(async () => (await fetch('/api/me')).status)) === 401);
     }
+
+    // 15h. The monitor keeps reporting after the people signed out (D129).
+    const after = await fetch(ORIGIN + '/api/monitor', { headers: { Authorization: 'Topo-Monitor ' + mon.tokens[0] } });
+    ok('15h. a site monitor keeps working after its owner signed out', after.status === 200);
 
     // The whole run: no console errors (an HTTP status line is the
     // browser reporting a 401/404/409, not a script error), no CSP violation.

@@ -12,6 +12,30 @@
 // default; as a service that starts with the computer, or only while the
 // app is open.
 mod server;
+// "Connect to a Topo server" (D144): the window as a client of a server,
+// with every request and the event stream going through Rust.
+mod client;
+mod clientcmd;
+// "Add this computer" (D166, step 7d): this PC's own interfaces, gateways
+// and DNS servers, read and never sent anywhere.
+mod thiscomputer;
+// "Monitor from this PC" (D131, step 7f): the answer checks, their schedule
+// and states, and the statistics, on this PC with no server.
+mod checks;
+mod monitor;
+mod monitorcmd;
+mod visitcmd;
+mod visitmon;
+mod stats;
+// Issues and the alarm (step 7g): outages become issue records, a person
+// acts on them, and the alarm card opens on every monitor.
+mod alarm;
+mod issues;
+// Monitors through the server (step 7h): the device key in the keychain,
+// js/servercrypto.js in Rust, and the monitor's link to the site.
+mod keystore;
+mod monitorlink;
+mod servercrypto;
 
 // The download handler (and its helpers) is not built on Windows; see main.
 #[cfg(not(target_os = "windows"))]
@@ -20,10 +44,11 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_os = "windows"))]
 use tauri::webview::DownloadEvent;
 use tauri::webview::NewWindowResponse;
-#[cfg(not(target_os = "windows"))]
 use tauri::Manager;
 use tauri::window::Color;
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
+
 use tauri_plugin_opener::OpenerExt;
 
 /// The page's own addresses: the bundled files (tauri:// on macOS and Linux,
@@ -136,6 +161,87 @@ fn host_prints() -> bool {
     cfg!(target_os = "macos")
 }
 
+/// The app's one window, on `page` (intro.html at the start, index.html
+/// when the tray's Open Topo brings it back).
+fn main_window(app: &AppHandle, page: &str) -> tauri::Result<()> {
+    let nav_handle = app.clone();
+    let win_handle = app.clone();
+    let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(page.into()))
+        .title("Topo")
+        // The intro's own near-black, so the window never flashes
+        // white before the first paint.
+        .background_color(Color(5, 5, 5, 255))
+        .inner_size(1280.0, 800.0)
+        .min_inner_size(360.0, 560.0)
+        .center()
+        // The page takes its own drops (the palette, files dropped on
+        // the landing page); the native handler would swallow them.
+        .disable_drag_drop_handler()
+        // The same window: the app's own pages stay, a link to the
+        // web (the brand, Legal) opens in the default browser.
+        .on_navigation(move |url| {
+            if stays_in_app(url) {
+                return true;
+            }
+            if opens_outside(url) {
+                open_outside(&nav_handle, url);
+            }
+            false
+        })
+        // target="_blank" (GitHub, Issues, the licence, Netplan) opens
+        // in the default browser; window.open(blob:) of Print labels
+        // gets null back and the page saves the labels as a file.
+        .on_new_window(move |url, _features| {
+            if matches!(url.scheme(), "http" | "https" | "mailto") {
+                open_outside(&win_handle, &url);
+            }
+            NewWindowResponse::Deny
+        });
+    // macOS and Linux: a bare webview has no download list, so a file
+    // the page saves goes to Downloads under its own name (name (1)
+    // when taken), as a browser would. Windows gets no handler at
+    // all: WebView2 then saves to Downloads itself and shows its own
+    // downloads flyout, which a handler would hide (wry marks the
+    // download handled).
+    #[cfg(not(target_os = "windows"))]
+    let builder = builder.on_download(|webview, event| match event {
+        DownloadEvent::Requested { destination, .. } => {
+            let asked = destination
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let name = clean_file_name(&asked);
+            if let Ok(dir) = webview.path().download_dir() {
+                *destination = unique_path(&dir, &name);
+            }
+            true
+        }
+        DownloadEvent::Finished { success, url, .. } => {
+            if !success {
+                eprintln!("topo: a download did not finish: {url}");
+            }
+            true
+        }
+        _ => true,
+    });
+    builder.build()?;
+    Ok(())
+}
+
+/// The tray's Open Topo: the window shown and focused, made again when it
+/// was closed.
+pub fn show_main_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    if let Err(e) = main_window(app, "index.html") {
+        eprintln!("topo: could not open the window: {e}");
+    }
+}
+
 fn main() {
     // WebKitGTK's DMA-BUF renderer draws a blank window on NVIDIA's driver
     // and inside many AppImage setups. Only when nobody chose otherwise.
@@ -158,6 +264,17 @@ fn main() {
                 .build(),
         )
         .manage(server::ServerState::default())
+        .manage(clientcmd::ClientState::default())
+        .manage(monitorcmd::MonitorState::default())
+        .manage(visitcmd::VisitState::default())
+        // A page that reloads or leaves drops its event streams with it.
+        .on_page_load(|webview, payload| {
+            if payload.event() == PageLoadEvent::Started {
+                if let Some(st) = webview.try_state::<clientcmd::ClientState>() {
+                    st.close_all();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             host_prints,
             host_print,
@@ -169,81 +286,62 @@ fn main() {
             server::server_service_install,
             server::server_service_remove,
             server::server_question,
-            server::server_question_done
+            server::server_question_done,
+            clientcmd::client_info,
+            clientcmd::client_probe,
+            clientcmd::client_connect,
+            clientcmd::client_disconnect,
+            clientcmd::client_request,
+            clientcmd::client_events,
+            clientcmd::client_events_close,
+            thiscomputer::this_computer,
+            monitorcmd::monitor_info,
+            monitorcmd::monitor_set,
+            monitorcmd::monitor_plan,
+            monitorcmd::monitor_status,
+            monitorcmd::monitor_history,
+            monitorcmd::monitor_quiet,
+            monitorcmd::monitor_older,
+            monitorcmd::monitor_issues,
+            monitorcmd::monitor_issue_act,
+            monitorcmd::monitor_issues_folded,
+            monitorcmd::alarm_current,
+            monitorcmd::alarm_answer,
+            monitorcmd::alarm_hand,
+            monitorcmd::alarm_take,
+            monitorcmd::alarm_test,
+            monitorcmd::monitor_device_key,
+            monitorcmd::monitor_enroll,
+            monitorcmd::monitor_link_info,
+            monitorcmd::monitor_unenroll,
+            monitorcmd::alarm_notify,
+            monitorcmd::monitor_figures,
+            visitcmd::visit_monitor_start,
+            visitcmd::visit_monitor_plan,
+            visitcmd::visit_monitor_info,
+            visitcmd::visit_monitor_figures,
+            visitcmd::visit_monitor_stop,
+            visitcmd::visit_monitor_end
         ])
         .setup(|app| {
             // Off the main thread: starting waits a moment for a refusal.
             let server_handle = app.handle().clone();
             std::thread::spawn(move || server::autostart(&server_handle));
-            let nav_handle = app.handle().clone();
-            let win_handle = app.handle().clone();
-            let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("intro.html".into()))
-                .title("Topo")
-                // The intro's own near-black, so the window never flashes
-                // white before the first paint.
-                .background_color(Color(5, 5, 5, 255))
-                .inner_size(1280.0, 800.0)
-                .min_inner_size(360.0, 560.0)
-                .center()
-                // The page takes its own drops (the palette, files dropped on
-                // the landing page); the native handler would swallow them.
-                .disable_drag_drop_handler()
-                // The same window: the app's own pages stay, a link to the
-                // web (the brand, Legal) opens in the default browser.
-                .on_navigation(move |url| {
-                    if stays_in_app(url) {
-                        return true;
-                    }
-                    if opens_outside(url) {
-                        open_outside(&nav_handle, url);
-                    }
-                    false
-                })
-                // target="_blank" (GitHub, Issues, the licence, Netplan) opens
-                // in the default browser; window.open(blob:) of Print labels
-                // gets null back and the page saves the labels as a file.
-                .on_new_window(move |url, _features| {
-                    if matches!(url.scheme(), "http" | "https" | "mailto") {
-                        open_outside(&win_handle, &url);
-                    }
-                    NewWindowResponse::Deny
-                });
-            // macOS and Linux: a bare webview has no download list, so a file
-            // the page saves goes to Downloads under its own name (name (1)
-            // when taken), as a browser would. Windows gets no handler at
-            // all: WebView2 then saves to Downloads itself and shows its own
-            // downloads flyout, which a handler would hide (wry marks the
-            // download handled).
-            #[cfg(not(target_os = "windows"))]
-            let builder = builder.on_download(|webview, event| match event {
-                DownloadEvent::Requested { destination, .. } => {
-                    let asked = destination
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    let name = clean_file_name(&asked);
-                    if let Ok(dir) = webview.path().download_dir() {
-                        *destination = unique_path(&dir, &name);
-                    }
-                    true
-                }
-                DownloadEvent::Finished { success, url, .. } => {
-                    if !success {
-                        eprintln!("topo: a download did not finish: {url}");
-                    }
-                    true
-                }
-                _ => true,
-            });
-            builder.build()?;
+            // Open Topo at sign-in starts it with --background: the monitor
+            // and the tray, no window until the tray's Open Topo.
+            if !monitorcmd::on_start(app.handle()) {
+                main_window(app.handle(), "intro.html")?;
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building Topo")
         // A server the app started itself stops with it (a service does not).
-        .run(|handle, event| {
-            if let RunEvent::Exit = event {
-                server::on_exit(handle);
-            }
+        .run(|handle, event| match event {
+            // The window closed while this PC monitors with its tray icon:
+            // the app stays (the tray's Quit Topo ends it).
+            RunEvent::ExitRequested { code: None, api, .. } if monitorcmd::keeps_running(handle) => api.prevent_exit(),
+            RunEvent::Exit => server::on_exit(handle),
+            _ => {}
         });
 }

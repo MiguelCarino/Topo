@@ -55,3 +55,33 @@ func CTHash(iv, ct []byte) string {
 }
 
 func i64(n int64) string { return strconv.FormatInt(n, 10) }
+
+// VisitHeader is the signed part of a provider's visit copy (docs/SCOPE.md
+// D154): the network they edited, sealed with the site key of epoch, on top
+// of server revision BaseN, for the report the browser names Slot.
+type VisitHeader struct {
+	Site   string
+	ID     string
+	Slot   string
+	BaseN  int64
+	Epoch  int64
+	RSeq   int64
+	Author string
+	Dev    string
+	At     int64
+	CTHash string
+}
+
+// SignedString is ["topo-visit-v1", site, id, slot, baseN, epoch, rseq,
+// author, dev, at, ctHash] joined by "\n"; the AAD is it without its last
+// line, as for a revision.
+func (h *VisitHeader) SignedString() string {
+	return strings.Join([]string{"topo-visit-v1", h.Site, h.ID, h.Slot, i64(h.BaseN), i64(h.Epoch), i64(h.RSeq),
+		h.Author, h.Dev, i64(h.At), h.CTHash}, "\n")
+}
+
+// AAD is the additional data the copy's ciphertext is bound to.
+func (h *VisitHeader) AAD() string {
+	s := h.SignedString()
+	return s[:strings.LastIndexByte(s, '\n')]
+}

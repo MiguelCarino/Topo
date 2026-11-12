@@ -2871,6 +2871,10 @@ function stopNativeUndo(event) {
 }
 
 window.addEventListener('keydown', (event) => {
+    // The screen lock (js/idlelock.js, D224): no key acts on the network
+    // under the cover. Its own capture guard stops these first; this is the
+    // second line, for a key that comes from the cover itself.
+    if (window.TopoLock && TopoLock.isLocked()) { stopNativeUndo(event); return; }
     // A question on screen (js/dialog.js) owns the keyboard: Delete must not
     // delete the selection behind it, nor F refit the map. CarinoUI.modal
     // handles Esc and Tab itself.
@@ -3762,7 +3766,7 @@ function canvasSvgMarkup(scale = 1) {
     // A group's ▾ and a collapsed rack's Open rack (js/groupmap.js) are
     // controls too; its frame and tab are drawing. So is a host badge's
     // chevron and tap target; its count of guests is drawing.
-    svg.querySelectorAll('.node-delete, .grp-toggle, .grp-rack-open, .host-fold-chev, .host-badge > .grp-toggle-hit, .pv-tip, .node-problem').forEach((el) => el.remove());
+    svg.querySelectorAll('.node-delete, .grp-toggle, .grp-rack-open, .host-fold-chev, .host-badge > .grp-toggle-hit, .pv-tip, .node-problem, .node-status').forEach((el) => el.remove());
     // Provider mode's ring round the report's devices is the view's, not the drawing's.
     svg.querySelectorAll('.inc-hit').forEach((el) => el.classList.remove('inc-hit'));
     svg.querySelectorAll('.node-sel').forEach((el) => el.classList.remove('node-sel'));
@@ -4000,6 +4004,10 @@ showLibraryTab(state.settings.libraryTab || 'nodes');
 // Boot may need to decompress a shared "~" link, so await it before drawing.
 (async () => {
     try {
+        // A locked browser (js/idlelock.js, D214, D215): nothing is read, not
+        // the library, not the tab's network, not the server, until someone
+        // unlocks. Not locked: it starts watching for idle time and goes on.
+        if (window.TopoLock) await TopoLock.gate();
         // Before anything reads the library: the landing's cards, a reload's
         // card (load()), the saved templates. IndexedDB opens asynchronously,
         // and the old store's cards are merged into it on the way (js/library.js).
@@ -4028,6 +4036,10 @@ showLibraryTab(state.settings.libraryTab || 'nodes');
         applyArrivalFocus(); // '#asset/<tag>': the device it found, centred once the map is fitted
         initHistory(); // the loaded document is the floor of the undo timeline, not a step
         syncTraceControls();
+        // The first-run welcome (js/welcome.js, D141): on a plain first
+        // start only; it decides for itself. Not awaited: it may ask the
+        // desktop app a question first.
+        if (window.TopoWelcome) TopoWelcome.atBoot().catch((e) => console.warn('welcome', e));
     } finally {
         // Boot has decided: either the landing is up and keeps the chrome hidden
         // on its own, or this is the editor and its controls belong on screen.

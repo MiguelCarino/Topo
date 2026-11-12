@@ -209,7 +209,10 @@ async function commitIncidentChange(mutate) {
         // A visit brings its own entry (js/providermode.js); the rest are
         // the report's events.
         const entry = res.entry !== undefined ? res.entry : incidentLogEntry({ id: 'lg_' + randomToken(), at: _incHooks.now(), incident: res.incident, event: res.event, routedTo: res.routedTo });
-        const next = entry ? await appendLogEntry(doc, entry) : doc;
+        let next = entry ? await appendLogEntry(doc, entry) : doc;
+        // More entries of the same step (a report made from an outage: the
+        // outage's 'reported' after the report's 'opened').
+        for (const e of (res.more || [])) next = await appendLogEntry(next, e);
         if (JSON.stringify(serializeDoc()) !== beforeJson || state.readOnly) continue;
         state.linkSourceId = null;
         batch(() => {
@@ -269,11 +272,16 @@ async function createIncident(d) {
         visits: []
     };
     if (d.groupId && groupById(d.groupId)) inc.groupId = d.groupId;
+    // Made from an outage: saving it is that outage's Report a problem, in
+    // the same commit (one undo step: the report, the act, both entries).
+    let outageAct = null;
     const res = await commitIncidentChange((doc) => {
         doc.incidents.push(inc);
-        return { incident: inc, event: 'opened', routedTo: inc.routedTo };
+        outageAct = d.fromIssue && window.TopoIssues ? TopoIssues.reportAct(doc, d.fromIssue, inc.id, reporter.name) : null;
+        return { incident: inc, event: 'opened', routedTo: inc.routedTo, more: outageAct ? [outageAct.entry] : [] };
     });
     if (!res) return null;
+    if (outageAct) await TopoIssues.reported(d.fromIssue, outageAct.act);
     if (d.remember !== false) {
         const rep = normalizeReporterSetting(reporter);
         if (rep) state.settings.reporter = rep;
@@ -375,14 +383,15 @@ async function incidentLinkFor(id, opts = {}) {
 const _pb = {
     open: false, stage: 'form', gen: 0, busy: false, picking: false,
     symptom: '', nodeIds: [], groupId: '', text: '', name: '', phone: '', email: '', remember: true,
-    sendTo: [], ticksTouched: false, incidentId: null, send: null
+    sendTo: [], ticksTouched: false, incidentId: null, send: null,
+    fromIssue: null     // the outage this report is made from (js/issues.js, step 7g)
 };
 const problemDialogOpen = () => _pb.open;
 
 function resetProblemDraft() {
     const rep = state.settings.reporter || {};
     Object.assign(_pb, { stage: 'form', busy: false, picking: false, symptom: '', nodeIds: [], groupId: '', text: '',
-        name: rep.name || '', phone: rep.phone || '', email: rep.email || '', remember: true, sendTo: [], ticksTouched: false, incidentId: null, send: null });
+        name: rep.name || '', phone: rep.phone || '', email: rep.email || '', remember: true, sendTo: [], ticksTouched: false, incidentId: null, send: null, fromIssue: null });
     // The device selected now is the likely one.
     if (state.selectedType === 'node' && state.selectedId && getNode(state.selectedId)) _pb.nodeIds = [state.selectedId];
 }
@@ -415,6 +424,35 @@ function closeProblemDialog() {
     if (window.CarinoUI && CarinoUI.modal.isOpen(scrim)) CarinoUI.modal.close(scrim, 'answered');
     else scrim.hidden = true;
     if (!_pb.picking) { _pb.open = false; _pb.gen++; }
+}
+
+// The idle lock (js/idlelock.js, D218): the open form's draft, plain, so
+// the lock can keep it in the tab while the page is cleared, and reopen it
+// after the unlock. Only the form: the send step's report is already saved.
+const PROBLEM_DRAFT_FIELDS = ['symptom', 'nodeIds', 'groupId', 'text', 'name', 'phone', 'email', 'remember', 'sendTo', 'ticksTouched', 'incidentId', 'fromIssue'];
+function problemDraftForLock() {
+    if (!_pb.open || _pb.stage !== 'form') return null;
+    if (!_pb.picking) readProblemForm();
+    const d = {};
+    PROBLEM_DRAFT_FIELDS.forEach((k) => { d[k] = Array.isArray(_pb[k]) ? _pb[k].slice() : _pb[k]; });
+    return d;
+}
+function reopenProblemDraft(d) {
+    if (!d || typeof d !== 'object' || state.readOnly) return false;
+    if (_pb.picking) { _pb.picking = false; const b = incEl('problemPickBanner'); if (b) b.hidden = true; }
+    resetProblemDraft();
+    const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+    _pb.symptom = INCIDENT_SYMPTOMS.includes(d.symptom) ? d.symptom : '';
+    _pb.nodeIds = Array.isArray(d.nodeIds) ? d.nodeIds.filter((id) => typeof id === 'string' && getNode(id)) : [];
+    _pb.groupId = typeof d.groupId === 'string' && (state.groups || []).some((g) => g.id === d.groupId) ? d.groupId : '';
+    _pb.text = str(d.text, 2000); _pb.name = str(d.name, 120); _pb.phone = str(d.phone, 200); _pb.email = str(d.email, 200);
+    _pb.remember = d.remember !== false;
+    _pb.sendTo = Array.isArray(d.sendTo) ? d.sendTo.filter((id) => typeof id === 'string') : [];
+    _pb.ticksTouched = !!d.ticksTouched;
+    _pb.incidentId = typeof d.incidentId === 'string' && incidentById(d.incidentId) ? d.incidentId : null;
+    _pb.fromIssue = typeof d.fromIssue === 'string' && incidentById(d.fromIssue) ? d.fromIssue : null;
+    showProblemSheet();
+    return true;
 }
 
 // The form's fields into the draft (before a redraw or a pick).
@@ -1195,6 +1233,8 @@ async function askReopen(id) {
 
 // A log entry of a report, in words (the network log, the report).
 function incidentLogText(e) {
+    const outage = typeof outageLogText === 'function' ? outageLogText(e) : null;
+    if (outage) return outage;
     const symptom = symptomLabel(e.symptom);
     const n = Array.isArray(e.routedTo) ? e.routedTo.length : 0;
     if (e.event === 'sent') return n === 1 ? t('Problem sent to 1 provider: {symptom}.', { symptom }) : t('Problem sent to {n} providers: {symptom}.', { n, symptom });
@@ -1216,6 +1256,8 @@ const incVisitEntry = (id) => (state.log || []).find((e) => e && e.id === id && 
 // opts.compact: the Simple view's (the words cut, the last visit only, no
 // list of changes).
 function incidentRowEl(inc, opts = {}) {
+    // An outage (step 7g) has a row of its own (js/issues.js).
+    if (isOutage(inc) && typeof outageRowEl === 'function') return outageRowEl(inc, opts);
     const li = incNode('li', `inc-row inc-${inc.status}`);
     li.dataset.inc = inc.id;
     const head = incNode('div', 'inc-head');
@@ -1259,6 +1301,8 @@ function incidentRowEl(inc, opts = {}) {
         shown.forEach((e) => {
             const v = incNode('li', 'pm-visit', typeof visitLineText === 'function' ? visitLineText(e) : e.summary || '');
             if (e.notes && !opts.compact) v.appendChild(incNode('span', 'pm-visit-notes', e.notes));
+            // The owner's answer on it (v19, js/visits.js).
+            if (typeof visitDecisionsOf === 'function') visitDecisionsOf(e.id).forEach((d) => v.appendChild(incNode('span', 'pm-visit-decision', visitDecisionText(d))));
             const items = (e.changes && e.changes.items) || [];
             if (items.length && !opts.compact && typeof visitChangeText === 'function') {
                 const det = incNode('details', 'inc-changes');
@@ -1297,7 +1341,9 @@ function renderIncidentsPanel() {
     const all = state.incidents || [];
     const live = liveIncidents(all);
     const btn = incEl('incTabBtn');
-    if (btn) btn.classList.toggle('hidden', isReduced() || !all.length);
+    // Shown too when a provider's visit waits for a network with no report.
+    const waiting = typeof visitsWaitingCount === 'function' && isKept() ? visitsWaitingCount(state.libraryId) : 0;
+    if (btn) btn.classList.toggle('hidden', isReduced() || (!all.length && !waiting));
     const count = incEl('incTabCount');
     if (count) { count.textContent = live.length ? String(live.length) : ''; count.classList.toggle('hidden', !live.length); }
     const panel = incEl('cfgPanel-incidents');
@@ -1307,10 +1353,11 @@ function renderIncidentsPanel() {
         const list = incEl('incidentList');
         list.textContent = '';
         incidentsNewestFirst(all).forEach((inc) => list.appendChild(incidentRowEl(inc)));
-        incEl('incidentsEmpty').classList.toggle('hidden', !!all.length);
+        incEl('incidentsEmpty').classList.toggle('hidden', !!all.length || !!waiting);
         incEl('incidentsSummary').textContent = all.length ? t('{open} open of {n}.', { open: live.length, n: all.length }) : '';
     }
     renderProblemsSimpleAll();
+    if (typeof renderVisitsWaiting === 'function') renderVisitsWaiting();
 }
 // The Simple views, nothing selected: every report not closed.
 function renderProblemsSimpleAll() {
@@ -1398,7 +1445,8 @@ function landingProblemsText(doc) {
     const live = liveIncidents(doc && Array.isArray(doc.incidents) ? doc.incidents : []);
     if (!live.length) return '';
     const newest = incidentsNewestFirst(live)[0];
-    return t('Open problems: {n} · newest {symptom}, {date}', { n: live.length, symptom: symptomLabel(newest.symptom), date: incidentWhen(newest.at) });
+    const what = isOutage(newest) && typeof outageLandingText === 'function' ? outageLandingText(newest, doc) : symptomLabel(newest.symptom);
+    return t('Open problems: {n} · newest {symptom}, {date}', { n: live.length, symptom: what, date: incidentWhen(newest.at) });
 }
 // One handler for every list's buttons (the tab, both Simple lists).
 async function incidentActClick(e) {
@@ -1411,6 +1459,7 @@ async function incidentActClick(e) {
         return;
     }
     const id = b.dataset.inc;
+    if (typeof outageActClick === 'function' && outageActClick(act, id)) return;
     if (act === 'send') openIncidentSend(id);
     else if (act === 'fix') await askMarkFixed(id);
     else if (act === 'reopen') await askReopen(id);
@@ -1429,11 +1478,13 @@ function incidentsReportSection(incidents, log) {
     const esc = escapeHtml;
     const lead = `<p class="muted">${esc(t('The problems reported on this network and the visits recorded for them, newest first. They travel with the network.'))}</p>`;
     const blocks = list.map((inc) => {
+        // An outage has a block of its own (js/reports.js, step 7j).
+        if (inc.kind === 'outage' && window.TopoReports) return TopoReports.outageReportBlock(inc);
         const visits = (inc.visits || []).map((id) => {
             const e = entries.get(id);
             if (!e) return `<li class="muted">${esc(t('A visit recorded elsewhere.'))}</li>`;
             const line = typeof visitLineText === 'function' ? visitLineText(e) : e.summary || '';
-            return `<li>${esc(line)}${e.notes ? `<br><span class="muted">${esc(e.notes)}</span>` : ''}${e.signoff ? `<br><span class="muted">${esc(t('Signed off by: {name}', { name: e.signoff }))}</span>` : ''}</li>`;
+            return `<li>${esc(line)}${e.notes ? `<br><span class="muted">${esc(e.notes)}</span>` : ''}${e.signoff ? `<br><span class="muted">${esc(t('Signed off by: {name}', { name: e.signoff }))}</span>` : ''}${e.monitoring && window.TopoVisitMonitor ? TopoVisitMonitor.sectionHtml(e.monitoring) : ''}</li>`;
         }).join('');
         const to = (inc.routedTo || []).map((id) => providerById(id)).filter(Boolean).map((p) => p.name || p.id).join(', ');
         const rows = [
@@ -1455,7 +1506,7 @@ function incidentsReportSection(incidents, log) {
 window.TopoIncidents = {
     hooks: _incHooks, draft: _pb, INCIDENT_MAILTO_MAX, infraLinkHtml, incidentCopyRich, linesToHtml, tHtml,
     commitIncidentChange, createIncident, sendIncident, incidentLinkFor, setProblemScope, setProblemAttach, buildProblemAttachment, serverMailReady, mailThroughServer, problemEmail, PROBLEM_ATTACH_SERVER_MAX, problemPartOf, composeIncidentMessage, incidentDraftProblems, keepForIncident,
-    incidentWhereText, incidentSiteName, downloadIncidentFile, openProblemDialog, openIncidentSend, closeProblemDialog,
+    incidentWhereText, incidentSiteName, downloadIncidentFile, openProblemDialog, openIncidentSend, closeProblemDialog, problemDraftForLock, reopenProblemDraft,
     startProblemPick, endProblemPick, defaultSendTo, telHref,
     markIncidentFixed, reopenIncident, askMarkFixed, askReopen, openIncidentNodeIds, liveIncidents, incidentLogText, renderIncidentsPanel,
     renderIncidentsUi, renderProblemsSimple, openIncidentsView, landingProblemsText, incidentsReportSection, incidentStatusText, incidentById

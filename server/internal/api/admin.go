@@ -39,7 +39,7 @@ func (s *Server) adminUser(r *http.Request, q store.Q, id string) (*adminUser, e
 // adminUsers: GET /api/admin/users.
 func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.d.Store.R.QueryContext(r.Context(), `SELECT u.id, u.email, u.server_role, u.lang, u.created, u.disabled, u.enc_pub IS NOT NULL,
-		(SELECT count(*) FROM members m WHERE m.user_id = u.id) FROM users u ORDER BY u.created, u.email`)
+		(SELECT count(*) FROM members m WHERE m.user_id = u.id) FROM users u WHERE u.id NOT LIKE 'm\_%' ESCAPE '\' ORDER BY u.created, u.email`)
 	if err != nil {
 		s.internal(w, "admin users", err)
 		return

@@ -15,6 +15,8 @@
 //                                          return is merged against
 //   partMergeInfo(cardId, rev)             what the merge back needs to know
 //                                          of a part (js/mergedoors.js)
+//   partCopyFrom(part, theirs, mine)       whose copy a merge back is
+//                                          (js/mergeapply.js)
 //
 // The rule (D91, D92). For each chosen provider p:
 //   items     every device, cable and group p answers for: named on it,
@@ -341,7 +343,10 @@ async function partCopy(providerIds, opts = {}) {
     const ident = { rev, base, prior: [...new Set(prior)].slice(0, PRIOR_MAX) };
     const all = [];
     ['nodes', 'links', 'groups'].forEach((k) => partRecs(raw[k]).forEach((r) => { if (typeof r.id === 'string') all.push(r.id); }));
-    const context = { nodes: [...part.context.keys()], groups: [...part.contextGroups], from: [base, ...ident.prior].filter((r) => validRev(r)), all };
+    // incidents and providers: what holds the part until it is answered
+    // (heldParts, js/revisions.js, D176).
+    const context = { nodes: [...part.context.keys()], groups: [...part.contextGroups], from: [base, ...ident.prior].filter((r) => validRev(r)), all,
+        incidents: opts.incidentId ? [opts.incidentId] : [], providers: partArr(providerIds) };
     recordPartRevision(kept ? state.libraryId : null, rev, canon, hash, context);
     const { v, ...rest } = canon;
     const doc = Object.assign({ v, id: head.id, updated: head.updated }, revisionFields(ident), rest);
@@ -355,7 +360,13 @@ async function partCopy(providerIds, opts = {}) {
 // held (a record the provider still has from an older full copy, that the
 // client has deleted since, is not brought back). baseRev: the 'part'
 // revision the merge is three-way against, or null (two-way).
-// -> { nodes: Set, groups: Set, known: Set }.
+// rev and incidents: the part it answers and the reports that part went out
+// for, kept with the copy once merged (heldParts, D176). others: the
+// devices, cables and groups another provider's copy, merged back after this
+// part left, added: matched with a new record of this copy only by id, MAC or
+// serial (mergePartPool, js/merge.js, D152.2, D177).
+// providers: whom the part went to (whose copy this is: partCopyFrom).
+// -> { nodes: Set, groups: Set, known: Set, rev, incidents: [], providers: [], others: Set }.
 async function partMergeInfo(cardId, baseRev) {
     const meta = baseRev && typeof revisionPartMeta === 'function' ? revisionPartMeta(cardId, baseRev) : null;
     // The network as the part left (its ids), then every full revision's.
@@ -366,8 +377,46 @@ async function partMergeInfo(cardId, baseRev) {
         if (!d) continue;
         ['nodes', 'links', 'groups'].forEach((k) => partRecs(d[k]).forEach((r) => { if (typeof r.id === 'string') known.add(r.id); }));
     }
-    return { nodes: new Set(meta ? meta.nodes : []), groups: new Set(meta ? meta.groups : []), known };
+    const others = await partOthers(cardId, baseRev, meta);
+    return { nodes: new Set(meta ? meta.nodes : []), groups: new Set(meta ? meta.groups : []), known,
+        rev: baseRev || null, incidents: meta && Array.isArray(meta.incidents) ? meta.incidents.slice() : [],
+        providers: meta && Array.isArray(meta.providers) ? meta.providers.slice() : [], others };
+}
+// Whose copy `theirs` is, merged back on a part (partMergeInfo's): the one
+// provider the part went to; of several, the one whose visit entries are new
+// in it (not in `mine`'s log), when only one's are. Else null (D179).
+function partCopyFrom(part, theirs, mine) {
+    const providers = part && Array.isArray(part.providers) ? part.providers.filter((x) => typeof x === 'string' && x) : [];
+    if (providers.length === 1) return providers[0];
+    if (!providers.length || !theirs || !Array.isArray(theirs.log)) return null;
+    const had = new Set((mine && Array.isArray(mine.log) ? mine.log : []).map((e) => e && e.id).filter(Boolean));
+    const who = new Set(theirs.log.filter((e) => e && e.kind === 'visit' && !had.has(e.id) && providers.includes(e.providerId)).map((e) => e.providerId));
+    return who.size === 1 ? [...who][0] : null;
+}
+// What other providers' copies merged back since part `baseRev` left added:
+// each copy's records less what its own part held when it left (its all) and
+// less what this part held. Two-way (no base): every copy merged back.
+async function partOthers(cardId, baseRev, meta) {
+    const others = new Set();
+    if (typeof revisionsOf !== 'function') return others;
+    const recs = revisionsOf(cardId);
+    const base = baseRev ? recs.find((m) => m.rev === baseRev) : null;
+    const since = base ? base.at : 0;
+    const card = typeof libraryEntry === 'function' ? libraryEntry(cardId) : null;
+    const sent = new Set(card && Array.isArray(card.partRevs) ? card.partRevs : []);
+    const ours = new Set(meta && Array.isArray(meta.all) ? meta.all : []);
+    for (const m of recs) {
+        if (m.why !== 'part' || m.rev === baseRev || !(m.at > since)) continue;
+        if (!partIsBack(m, sent)) continue;
+        const d = await revisionDoc(cardId, m.rev);
+        if (!d) continue;
+        const theirsHad = new Set(m.part && Array.isArray(m.part.all) ? m.part.all : []);
+        ['nodes', 'links', 'groups'].forEach((k) => partRecs(d[k]).forEach((r) => {
+            if (typeof r.id === 'string' && !ours.has(r.id) && !theirsHad.has(r.id)) others.add(r.id);
+        }));
+    }
+    return others;
 }
 
 // Published for the suites (tests/suites/providerpart.js).
-window.TopoPart = { PART_HOPS, PART_CONTEXT_KEYS, PART_CONTEXT_LINK_KEYS, providerPart, partOfSelf, partProviderNames, partCopy, partMergeInfo };
+window.TopoPart = { PART_HOPS, PART_CONTEXT_KEYS, PART_CONTEXT_LINK_KEYS, providerPart, partOfSelf, partProviderNames, partCopy, partMergeInfo, partCopyFrom };

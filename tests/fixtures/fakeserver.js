@@ -27,6 +27,11 @@
 //   fake.oauthBack(url) is the provider's answer (the fragment the app
 //   gets back); finish checks the state once and connects as
 //   fake.oauthAccount.
+//   Monitors (step 7h): /monitors, /records, /stats, /stats-days as
+//   server/internal/api/monitors.go answers them (the signature checks are
+//   the Go tests'); fake.remoteMonitor(siteId, name) is a PC turned into a
+//   monitor (src-tauri/src/monitorlink.rs in WebCrypto): its keys, its
+//   token, and the records it seals, signs and pushes.
 (function () {
 'use strict';
 const C = () => window.TopoServerCrypto;
@@ -109,6 +114,13 @@ window.FakeTopoServer = function (opts = {}) {
         if (method === 'POST' && p === '/api/auth/signout') { S.sessions.delete(S.session); S.session = null; return { status: 204 }; }
         if (p === '/api/me' && method === 'GET') return ok(meOf(me));
         if (p === '/api/me' && method === 'PATCH') { if (body.lang) me.lang = body.lang; if (body.notify) Object.assign(me.notify, body.notify); return ok(meOf(me)); }
+        if (method === 'DELETE' && (m = p.match(/^\/api\/me\/sessions\/([^/]+)$/))) {
+            const x = S.sessions.get(decodeURIComponent(m[1]));
+            if (!x || x.user !== me.id) return err(404, 'not-found');
+            S.sessions.delete(decodeURIComponent(m[1]));
+            if (decodeURIComponent(m[1]) === S.session) S.session = null;
+            return { status: 204 };
+        }
         if (p === '/api/me/sessions') return ok({ sessions: [{ id: S.session, current: true, created: 1, lastSeen: 1, ip: '', ua: '' }] });
         if (method === 'POST' && p === '/api/devices') {
             const d = { id: id('d_'), user: me.id, devPub: body.devPub, label: body.label || '', wrap: null };
@@ -287,6 +299,7 @@ window.FakeTopoServer = function (opts = {}) {
             if (!x) return err(404, 'not-found');
             if (x.status === 'granted') { const bad = nextRoster(body.roster, s.epoch); if (bad) return bad; s.rosters.push(body.roster); }
             x.role = body.role;
+            if (body.role !== 'provider') s.visits = (s.visits || []).filter((v) => v.author !== m[1]);   // D191
             return ok({ site: siteJSON(s, me) });
         }
         if (rest === '/remove' || rest === '/rotate') {
@@ -301,10 +314,62 @@ window.FakeTopoServer = function (opts = {}) {
                 s.epoch++; s.rosters.push(body.roster); s.nameCt = body.nameCt || s.nameCt;
                 body.wraps.forEach((w) => { s.wraps[w.epoch + '|' + w.user] = w.wrap; });
             }
-            if (x) { s.members.delete(body.user); Object.keys(s.wraps).forEach((k) => { if (k.endsWith('|' + body.user)) delete s.wraps[k]; }); }
+            if (x && s.monitors) s.monitors = s.monitors.filter((mm) => mm.id !== body.user);   // a monitor removed is revoked (D149)
+            if (x) { s.visits = (s.visits || []).filter((v) => v.author !== body.user); s.members.delete(body.user); Object.keys(s.wraps).forEach((k) => { if (k.endsWith('|' + body.user)) delete s.wraps[k]; }); }
             return ok({ site: siteJSON(s, me) });
         }
-        if (rest === '/leave') { s.members.delete(me.id); return { status: 204 }; }
+        // ---- Monitors (server/internal/api/monitors.go, step 7h) ----
+        s.monitors = s.monitors || [];
+        s.records = s.records || [];
+        s.stats = s.stats || [];
+        if (s.statsDays === undefined) s.statsDays = 360;
+        if (rest === '/monitors' && method === 'POST') {
+            if (!owner) return err(403, 'forbidden');
+            const mid = 'm_' + [...C().random(11)].map((b) => b.toString(16).padStart(2, '0')).join('');
+            const u = { id: mid, email: mid, lang: 'en', serverRole: 'member', encPub: body.encPub, sigPub: body.sigPub, keysAt: now(), escrow: null, notify: {} };
+            S.users.set(mid, u);
+            s.members.set(mid, { user: mid, role: 'monitor', status: 'waiting', added: now() });
+            const token = id('t_');
+            const mon = { id: mid, name: body.name, by: me.id, byEmail: me.email, created: now(), intervalMs: 60000, lastReport: 0, stale: false, encPub: body.encPub, sigPub: body.sigPub, token };
+            s.monitors.push(mon);
+            return ok({ monitor: Object.assign({}, mon, { token: undefined }), token }, 201);
+        }
+        if (rest === '/monitors' && method === 'GET') return ok({ monitors: s.monitors.map((x) => Object.assign({}, x, { token: undefined })), now: now(), statsDays: s.statsDays, missed: 3 });
+        if (rest === '/stats-days' && method === 'PATCH') {
+            if (!owner) return err(403, 'forbidden');
+            const today = Math.floor(now() / 864e5) * 864e5;
+            const cut = body.days === 0 ? Infinity : today - body.days * 864e5;
+            const n = s.stats.filter((x) => x.day < cut).length;
+            if (n && !body.confirm) return err(409, 'confirm', { deletes: n });
+            s.statsDays = body.days;
+            s.stats = s.stats.filter((x) => x.day >= cut);
+            return ok({ statsDays: s.statsDays, deleted: n });
+        }
+        if (rest === '/records' && method === 'POST') {
+            if (mem.role !== 'owner' && mem.role !== 'provider') return err(403, 'forbidden');
+            if (!['act', 'quiet'].includes(body.kind) || body.author !== me.id) return err(403, 'forbidden');
+            fake.recordPosts = (fake.recordPosts || 0) + 1;
+            return fake.putRecord(s, body);
+        }
+        if (rest === '/records' && method === 'GET') {
+            const since = Number(q.get('since') || 0);
+            return ok({ records: s.records.filter((x) => x.n > since).map((x) => ({ n: x.n, folded: !!x.folded, received: x.received, record: x.record })), last: s.records.length ? s.records[s.records.length - 1].n : since, more: false, now: now() });
+        }
+        if (rest === '/records/folded' && method === 'POST') {
+            if (!owner) return err(403, 'forbidden');
+            let n = 0;
+            // An issue folded takes the acts on it along (ids "<issue>|…"), as the Go server does.
+            const issues = [];
+            s.records.forEach((x) => { if ((body.ns || []).includes(x.n) && !x.folded && x.record.kind !== 'status') { x.folded = true; n++; if (x.record.kind === 'issue') issues.push(x.record.id); } });
+            s.records.forEach((x) => { if (x.record.kind === 'act' && issues.some((id) => x.record.id.startsWith(id + '|'))) x.folded = true; });
+            fake.foldedNs = (fake.foldedNs || []).concat(body.ns || []);
+            return ok({ folded: n });
+        }
+        if (rest === '/stats' && method === 'GET') {
+            const from = Number(q.get('from')), to = Number(q.get('to'));
+            return ok({ stats: s.stats.filter((x) => x.day >= from && x.day <= to).map((x) => ({ monitor: x.monitor, day: x.day, record: x.record })) });
+        }
+        if (rest === '/leave') { s.visits = (s.visits || []).filter((v) => v.author !== me.id); s.members.delete(me.id); return { status: 204 }; }
         // ---- Backups: a network's owners (step 5b) ----
         if (rest.startsWith('/backups')) {
             if (!owner) return err(403, 'forbidden');
@@ -336,6 +401,13 @@ window.FakeTopoServer = function (opts = {}) {
         }
         if (rest === '/revs' && method === 'POST') {
             if (mem.role === 'viewer') return err(403, 'forbidden');
+            // Only owners write revisions (docs/SCOPE.md D154; the Go server's
+            // pushRev): after the base, epoch and roster checks there.
+            const r0 = body.rev;
+            if (mem.role !== 'owner' && r0.base === s.revs.length && r0.epoch === s.epoch && r0.rseq === s.rosters.length) {
+                fake.refusedPushes = (fake.refusedPushes || 0) + 1;
+                return err(403, 'owners-only', { update: true, message: 'Only owners save versions of this site. Update Topo: your visit then goes to the owner for review.' });
+            }
             const r = body.rev;
             if (r.base !== s.revs.length) return err(409, 'stale-base', { head: { n: s.revs.length, h: s.headH } });
             if (r.epoch !== s.epoch) return err(409, 'stale-epoch', { epoch: s.epoch });
@@ -355,6 +427,45 @@ window.FakeTopoServer = function (opts = {}) {
             const head = s.revs[s.revs.length - 1];
             return ok({ head: { n: s.revs.length, h: s.headH, epoch: s.epoch, rosterSeq: s.rosters.length }, revs, more: false,
                 body: head && s.revs.length > since ? { n: head.hdr.n, iv: head.body.iv, ct: head.body.ct } : null });
+        }
+        // ---- Visit copies (server/internal/api/visits.go, D154) ----
+        s.visits = s.visits || [];
+        const visitOut = (v) => ({ id: v.id, author: v.author, email: (S.users.get(v.author) || {}).email || '', dev: v.dev, slot: v.slot, baseN: v.baseN, epoch: v.epoch, rseq: v.rseq,
+            at: v.at, received: v.received, replaced: v.replaced, size: v.size, ctHash: v.ctHash, sig: v.sig, state: v.state, decidedAt: v.decidedAt || 0, decidedBy: v.decidedBy || '', decidedN: v.decidedN || 0 });
+        if (rest === '/visits' && method === 'POST') {
+            if (mem.role !== 'provider') return err(403, 'forbidden');
+            const c = body.copy || {};
+            if (c.author !== me.id || !/^v_[A-Za-z0-9_-]{16,40}$/.test(c.id || '') || !/^[A-Za-z0-9_-]{8,64}$/.test(c.slot || '')) return err(400, 'bad-request', { field: 'copy' });
+            const h = { site: s.id, id: c.id, slot: c.slot, baseN: c.baseN, epoch: c.epoch, rseq: c.rseq, author: c.author, dev: c.dev, at: c.at, ctHash: c.ctHash };
+            if (!(await C().verify(me.sigPub, C().visitSigned(h), c.sig))) return err(422, 'bad-signature');
+            if (c.baseN < 1 || c.baseN > s.revs.length) return err(409, 'stale-base', { head: { n: s.revs.length, h: s.headH } });
+            if (c.epoch !== s.epoch) return err(409, 'stale-epoch', { epoch: s.epoch });
+            if (c.rseq !== s.rosters.length) return err(409, 'stale-roster', { rosterSeq: s.rosters.length });
+            const old = s.visits.find((v) => v.author === me.id && v.slot === c.slot && v.state === 'waiting');   // a decided one stays (D191)
+            s.visits = s.visits.filter((v) => v !== old);
+            const v = Object.assign({}, h, { body: { iv: c.iv, ct: c.ct }, sig: c.sig, received: now() + (fake.visitSeq = (fake.visitSeq || 0) + 1), replaced: old ? (old.replaced || 0) + 1 : 0,
+                size: C().unb64u(c.ct).length, state: 'waiting' });
+            s.visits.push(v);
+            fake.mails.push({ kind: 'visit-recorded', to: 'owners', site: s.id });
+            return ok(Object.assign({ visit: visitOut(v) }, old ? { replacedId: old.id } : {}), 201);
+        }
+        if (rest === '/visits' && method === 'GET') {
+            if (mem.role === 'viewer') return ok({ visits: [] });
+            return ok({ visits: s.visits.filter((v) => owner || v.author === me.id).slice().sort((a, b) => a.received - b.received).map(visitOut) });
+        }
+        if ((m = /^\/visits\/([^/]+)(\/decide)?$/.exec(rest))) {
+            const v = s.visits.find((x) => x.id === m[1]);
+            if (!v || (!owner && v.author !== me.id)) return err(404, 'not-found');
+            if (m[2] && method === 'POST') {
+                if (!owner) return err(403, 'forbidden');
+                if (v.state !== 'waiting') return err(409, 'conflict', { state: v.state });
+                if (!['approved', 'rejected'].includes(body.decision) || !(body.n >= v.baseN && body.n <= s.revs.length)) return err(422, 'bad-chain');
+                Object.assign(v, { state: body.decision, decidedAt: now(), decidedBy: me.id, decidedN: body.n });
+                fake.mails.push({ kind: 'visit-recorded', to: (S.users.get(v.author) || {}).email, reason: body.decision });
+                return ok({ id: v.id, state: v.state, n: v.decidedN });
+            }
+            if (method === 'DELETE') { s.visits = s.visits.filter((x) => x !== v); return { status: 204 }; }
+            return ok({ visit: visitOut(v), body: v.body });
         }
         if ((m = /^\/revs\/(\d+)$/.exec(rest))) {
             const r = s.revs[Number(m[1]) - 1];
@@ -406,6 +517,29 @@ window.FakeTopoServer = function (opts = {}) {
             const key = R.keys.get(siteId + '|' + r.hdr.epoch);
             return C().unpackDoc(await C().openRevision(Object.assign({ site: siteId }, r.hdr), r.body, key));
         };
+        // Uploads a visit copy as a provider's browser does (js/serversync.js
+        // uploadVisit): mutate(doc) changes the head's copy (or o.from, a
+        // document of its own). o: { slot, baseN, incidentId, providerId, from }.
+        R.uploadVisit = async (siteId, mutate, o = {}) => {
+            const s = S.sites.get(siteId);
+            const baseN = o.baseN || s.revs.length;
+            const r0 = s.revs[baseN - 1];
+            const env0 = o.from ? { v: 1, id: o.id || 'x', name: 'X', doc: o.from } : await C().unpackDoc(await C().openRevision(Object.assign({ site: siteId }, r0.hdr), r0.body, R.keys.get(siteId + '|' + r0.hdr.epoch)));
+            const doc = JSON.parse(JSON.stringify(env0.doc));
+            const next = mutate ? mutate(doc) || doc : doc;
+            const plain = await C().packDoc({ v: 1, kind: 'visit', id: env0.id, name: env0.name, rev: 'r' + C().b64u(C().random(9)), base: env0.rev || null, prior: [], doc: next,
+                baseN, incidentId: o.incidentId || null, providerId: o.providerId || null });
+            const slot = o.slot || await TopoServerSync.visitSlot(siteId, o.incidentId, o.providerId);
+            const id = 'v_' + C().b64u(C().random(16));
+            const h = { site: siteId, id, slot, baseN, epoch: s.epoch, rseq: s.rosters.length, author: u.id, dev: 'd_remote', at: now() };
+            const env = await C().sealVisit(h, R.keys.get(siteId + '|' + s.epoch), R.sig, plain);
+            const old = (s.visits = s.visits || []).find((v) => v.author === u.id && v.slot === slot && v.state === 'waiting');
+            s.visits = s.visits.filter((v) => v !== old);
+            const v = Object.assign({}, h, { ctHash: env.ctHash, sig: env.sig, body: { iv: env.iv, ct: env.ct }, received: now() + (fake.visitSeq = (fake.visitSeq || 0) + 1),
+                replaced: old ? (old.replaced || 0) + 1 : 0, size: C().unb64u(env.ct).length, state: 'waiting' });
+            s.visits.push(v);
+            return v;
+        };
         // Pushes a new revision: mutate(doc) changes the head's copy. opts: { epoch, rseq, events }
         R.push = async (siteId, mutate, o = {}) => {
             const s = S.sites.get(siteId);
@@ -423,6 +557,64 @@ window.FakeTopoServer = function (opts = {}) {
             return sealed.h;
         };
         return R;
+    };
+    // A record kept as the Go server keeps it: one per (kind, id), a newer
+    // one from the same author replacing it with a new n.
+    fake.recordSeq = 0;
+    fake.putRecord = (s, rec) => {
+        s.records = s.records || [];
+        if (rec.epoch !== s.epoch) return err(409, 'stale-epoch', { epoch: s.epoch });
+        const old = s.records.find((x) => x.record.kind === rec.kind && x.record.id === rec.id);
+        if (old && old.record.author !== rec.author) return err(403, 'not-author');
+        if (old && rec.at <= old.record.at) return err(409, 'older-record');
+        s.records = s.records.filter((x) => x !== old);
+        const n = ++fake.recordSeq;
+        s.records.push({ n, record: rec, received: now(), folded: false });
+        return ok({ n });
+    };
+    // A PC turned into a site monitor, as src-tauri/src/monitorlink.rs does
+    // it: device keys (enc ECDH, sig ECDSA), then, once granted, the site
+    // key unwrapped and records sealed and signed by it.
+    fake.remoteMonitor = async () => {
+        const M = { keys: new Map() };
+        const e = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+        const g = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
+        M.enc = e.privateKey; M.sig = g.privateKey;
+        M.encPub = C().b64u(new Uint8Array(await crypto.subtle.exportKey('raw', e.publicKey)));
+        M.sigPub = C().b64u(new Uint8Array(await crypto.subtle.exportKey('raw', g.publicKey)));
+        // After the owner's page registered and granted it.
+        M.adopt = (siteId, monitorId) => { M.site = siteId; M.id = monitorId; };
+        M.unwrapKeys = async () => {
+            const s = S.sites.get(M.site);
+            for (const [kk, w] of Object.entries(s.wraps)) {
+                if (!kk.endsWith('|' + M.id)) continue;
+                const epoch = Number(kk.split('|')[0]);
+                const raw = await C().unwrap(w, { priv: M.enc, pub: M.encPub, ctx: C().siteCtx(M.site, epoch, M.id), signers: [S.users.get(w.by).sigPub] });
+                M.keys.set(epoch, await C().importSiteKey(raw));
+            }
+        };
+        M.at = 0;
+        M.seal = async (kind, rid, payload, o = {}) => {
+            const s = S.sites.get(M.site);
+            const epoch = o.epoch || s.epoch;
+            M.at = Math.max(now(), M.at + 1);
+            return C().sealRecord({ site: M.site, kind, id: rid, epoch, author: o.author || M.id, at: M.at }, o.key || M.keys.get(epoch), o.sigPriv || M.sig, C().utf8(JSON.stringify(payload)));
+        };
+        M.status = async (name, items) => {
+            const s = S.sites.get(M.site);
+            const r = fake.putRecord(s, await M.seal('status', M.id, { v: 1, monitor: name, at: now(), intervalMs: 60000, items }));
+            const mon = s.monitors.find((x) => x.id === M.id);
+            if (mon) { mon.lastReport = now(); mon.stale = false; }
+            return r;
+        };
+        M.issue = async (payload) => fake.putRecord(S.sites.get(M.site), await M.seal('issue', payload.id, payload));
+        M.stats = async (day, checks, name) => {
+            const s = S.sites.get(M.site);
+            const rec = await M.seal('stats', M.id + '|' + day, { v: 1, day, monitor: name || '', checks });
+            s.stats = (s.stats || []).filter((x) => !(x.monitor === M.id && x.day === day));
+            s.stats.push({ monitor: M.id, day, record: rec });
+        };
+        return M;
     };
     // ---- A backup file of a site's head (server/internal/backup/snapshot.go) ----
     // o: { originHash, name (shown in clear), dropPubs: [user ids] (keys reset
@@ -451,7 +643,9 @@ window.FakeTopoServer = function (opts = {}) {
             $schema: 'https://topo.carino.systems/schema/topo-backup-v1.json', kind: 'topo-backup', v: 1, site: siteId, made: new Date(o.at || now()).toISOString(),
             originHash: o.originHash || C().b64u(await C().sha256(C().utf8(location.origin))), name: o.name || null, nameCt: s.nameCt || null,
             rev: { n: hd.n, base: hd.base, prev: hd.prev, epoch: hd.epoch, rseq: hd.rseq, author: hd.author, dev: hd.dev, at: hd.at, ctHash: hd.ctHash, sig: hd.sig, h: hd.h, iv: r.body.iv, ct: r.body.ct },
-            rosters, pubs, owners
+            rosters, pubs, owners,
+            // The records not folded yet (D159), as snapshot.go adds them.
+            records: o.records !== undefined ? o.records : (s.records || []).filter((x) => !x.folded && x.record.kind !== 'status').map((x) => x.record)
         };
     };
     // Lists a backup of the head (as the engine would after a push).

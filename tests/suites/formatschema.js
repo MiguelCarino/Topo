@@ -135,6 +135,33 @@ window.addEventListener('load', () => { setTimeout(async () => {
       const badInc2 = clone(c2); badInc2.incidents[0].status = 'lost';
       const badInc3 = clone(c2); badInc3.incidents[0].reporter.fax = '1';
       ok('it refuses an unknown key on a report, a status that is not one, an unknown reporter field', docOk(badInc).length > 0 && docOk(badInc2).length > 0 && docOk(badInc3).length > 0);
+
+      // A visit with its monitoring section (v19, step 7i) as the app writes
+      // it: every check field, the chart, the 7 days before, the outages
+      // with their cause, checks past 60 counted.
+      const n1 = withProv.nodes[1] || n0;
+      const mon = { from: at - 3600000, to: at, compared: true,
+        items: Array.from({ length: 62 }, (_, i) => ({ node: i % 2 ? n1.id : n0.id, check: 'c' + i, name: 'R' + i, proto: i % 3 ? 'ping' : 'http', via: i % 3 ? 'tcp' : undefined,
+          asked: 60, answered: 54, loss: 0.1, avail: 0.9, coverage: 0.98, med: 4.2, p95: 9.5, step: 75000,
+          rtt: Array.from({ length: 48 }, (_, k) => (k % 5 ? 3 + k / 10 : null)), states: 'u'.repeat(40) + 'd'.repeat(6) + 'q-',
+          before: { med: 38, p95: 50, avail: 1, coverage: 0.0179 } })),
+        outages: [{ node: n0.id, name: 'R1', from: at - 600000, to: at - 300000 }, { node: n1.id, name: 'SW', from: at - 590000, cause: n0.id, causeName: 'R1' }] };
+      const d3 = await appendLogEntry(clone(d2), visitLogEntry({ id: 'lg_visit02', at: at + 4, incidentId: full.id, providerId: prov.id, provider: prov.name, by: 'Luis', arrived: at + 4, left: at + 4,
+        outcome: 'fixed', monitoring: mon }));
+      const c3 = canonicalDoc(d3);
+      const v3 = (c3.log || []).find((x) => x.id === 'lg_visit02');
+      const e3 = fileOk(c3);
+      ok('a visit with a full monitoring section satisfies it', !e3.length && !!v3 && !!v3.monitoring && v3.monitoring.items.length === 60 && v3.monitoring.more === 2
+        && v3.monitoring.items[1].via === 'tcp' && !!v3.monitoring.items[0].before && v3.monitoring.items[0].states.length === 48 && v3.monitoring.outages[1].cause === n0.id,
+        e3.slice(0, 3).join('; '));
+      const unread = await appendLogEntry(clone(d2), visitLogEntry({ id: 'lg_visit03', at: at + 4, incidentId: full.id, providerId: prov.id, provider: prov.name, by: 'Luis', arrived: at + 4, left: at + 4,
+        outcome: 'fixed', monitoring: Object.assign({}, mon, { compared: undefined, unread: true, items: mon.items.slice(0, 2).map((x) => Object.assign({}, x, { before: undefined })) }) }));
+      const e4 = fileOk(canonicalDoc(unread));
+      ok('a monitoring section whose site monitor could not be read satisfies it', !e4.length && canonicalDoc(unread).log.find((x) => x.id === 'lg_visit03').monitoring.unread === true, e4.slice(0, 3).join('; '));
+      const badMon = clone(c3); badMon.log.find((x) => x.id === 'lg_visit02').monitoring.items[0].colour = 'red';
+      const badMon2 = clone(c3); badMon2.log.find((x) => x.id === 'lg_visit02').monitoring.items[0].states = 'uxz';
+      const badMon3 = clone(c3); delete badMon3.log.find((x) => x.id === 'lg_visit02').monitoring.items[0].coverage;
+      ok('it refuses an unknown key on a monitored check, a state that is not one, a check without its coverage', docOk(badMon).length > 0 && docOk(badMon2).length > 0 && docOk(badMon3).length > 0);
     }
 
     // ---- Imported documents ----

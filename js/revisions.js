@@ -47,11 +47,22 @@ const REVISION_LIMITS = { perCard: 30, totalBytes: 40 * 1024 * 1024, writeMs: 40
 // provider's part of the network that left as a link or a file, or such a
 // part merged back (part; js/providerpart.js, docs/SCOPE.md D93).
 const REVISION_WHY = ['export', 'backup', 'binder', 'link', 'opened', 'merge-theirs', 'server', 'part'];
-// A part in flight survives the per-card cap: the newest few are held.
-const PART_REVISIONS_HELD = 8;
-// The parts a card ever sent (card.partRevs, ids only): a copy naming one
-// is a part, whose base can only be a part (mergeContext, js/mergedoors.js).
+// A part in flight survives every cap until it is answered (heldParts,
+// D152.1, D175, D176): no count limit.
+// The parts a card sent (card.partRevs, ids only): a copy naming one is a
+// part, whose base can only be a part (mergeContext, js/mergedoors.js).
+// Every outstanding part is named, however many; of the answered ones, the
+// newest PART_REVS_MAX are remembered.
 const PART_REVS_MAX = 64;
+// A card's part list from outside (a binder, a back-up, a server site): a
+// generous bound, the newest kept (D179).
+const PART_REVS_HARD_MAX = 16 * PART_REVS_MAX;
+// Parts nothing can answer or close (D179): those recorded before 0.0.2 (no
+// providers, no report) and copies merged back for no report are held as
+// before, the newest few only; and of the copies merged back since the
+// oldest unanswered part left (D177 reads them), the newest few.
+const PART_LOOSE_HELD = 8;
+const PART_SINCE_HELD = 16;
 const PART_CONTEXT_MAX = 20000;
 // A card on a Topo server makes a 'server' revision at every push and pull:
 // the newest few are enough (the sync keeps its own base), and they go first,
@@ -102,7 +113,20 @@ function validPartMeta(v) {
     // left, so a record the provider adds is never matched with one of yours
     // it never saw (mergePartPool, js/merge.js).
     const all = Array.isArray(v.all) ? [...new Set(v.all.filter((x) => typeof x === 'string' && x.length > 0 && x.length <= 200))].slice(0, 3 * PART_CONTEXT_MAX) : [];
-    return { nodes: ids(v.nodes), groups: ids(v.groups), from, all };
+    const out = { nodes: ids(v.nodes), groups: ids(v.groups), from, all };
+    // What holds it (heldParts, D176): incidents, the reports it went out
+    // for (closed or gone, it is let go); providers, whom it went to (that
+    // many copies merged back answer it); back, a copy merged back rather
+    // than a part sent; answers, the part a copy merged back was merged on.
+    const incidents = ids(v.incidents).slice(0, 500), providers = ids(v.providers).slice(0, 500);
+    if (incidents.length) out.incidents = incidents;
+    if (providers.length) out.providers = providers;
+    if (v.back === true) out.back = true;
+    // by: the provider a copy merged back came from, when known (D179).
+    if (typeof v.by === 'string' && v.by.length > 0 && v.by.length <= 200) out.by = v.by;
+    const answers = Array.isArray(v.answers) ? [...new Set(v.answers.filter((x) => validRev(x)))].slice(0, PRIOR_MAX + 1) : [];
+    if (answers.length) out.answers = answers;
+    return out;
 }
 
 // ---- The content's hash ----
@@ -117,7 +141,7 @@ function revHashOf(doc, canonical = false) {
 
 // ---- Card meta ----
 const CARD_REV_KEYS = ['rev', 'revHash', 'revAt', 'base', 'prior', 'partRevs'];
-const validPartRevs = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => validRev(x)))].slice(-PART_REVS_MAX) : []);
+const validPartRevs = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => validRev(x)))].slice(-PART_REVS_HARD_MAX) : []);
 // A card's revision fields from `src` (a card, a site, a patch), validated;
 // null, an empty list or an invalid value removes the key.
 function applyCardRevision(card, src) {
@@ -193,9 +217,74 @@ function recordPartRevision(cardId, rev, doc, hash, context) {
     if (!card) return false;
     const held = recordRevision(cardId, rev, doc, 'part', hash, part);
     const list = validPartRevs(card.partRevs);
-    if (!list.includes(rev)) setCardMeta(cardId, { partRevs: list.concat([rev]) });
+    if (!list.includes(rev)) setCardMeta(cardId, { partRevs: trimPartRevs(cardId, list.concat([rev])) });
     return !!held;
 }
+// A card's partRevs: every part still out, and of the others (answered, or
+// dropped from the store) the newest PART_REVS_MAX.
+function trimPartRevs(cardId, list) {
+    const out = heldParts(cardId);
+    const others = list.filter((r) => !out.has(r) || !hasRevision(cardId, r));
+    const cut = new Set(others.slice(0, Math.max(0, others.length - PART_REVS_MAX)));
+    return list.filter((r) => !cut.has(r));
+}
+// The parts of card `cardId` still out (D152.1, D175, D176, D179), as revs:
+// a revision held as 'part' (a part sent, or a copy of one merged back,
+// which is the base of that provider's next return) until it is answered
+// (a copy merged back on it from each provider it went to, one at least; a
+// copy that does not say whose counts as one more) or every report it went
+// out for is closed or gone. A part sent for no report waits for its copy:
+// no count limit. Parts nothing can answer or close (sent before 0.0.2, or
+// a copy back for no report) are held the newest PART_LOOSE_HELD only. With
+// them, the newest PART_SINCE_HELD copies merged back since the oldest
+// unanswered part sent left: what another provider added meanwhile is told
+// apart by them when it comes back (partMergeInfo's others, D177).
+// -> a Set of revs; its .weak: those held with no open report, which the
+// 40 MB budget lets go, oldest first, before it gives up (D179).
+function heldParts(cardId, card) {
+    if (card === undefined) card = typeof libraryEntry === 'function' ? libraryEntry(cardId) : null;
+    const list = (_revs.get(cardId) || []).filter((m) => m.why === 'part');
+    const out = new Set();
+    out.weak = new Set();
+    if (!list.length) return out;
+    const sent = new Set(card ? validPartRevs(card.partRevs) : []);
+    const answers = new Map();
+    list.forEach((m) => {
+        const p = m.part || {};
+        (p.answers || []).forEach((r) => {
+            const a = answers.get(r) || { by: new Set(), anon: 0 };
+            if (p.by) a.by.add(p.by); else a.anon++;
+            answers.set(r, a);
+        });
+    });
+    const answeredBy = (rev) => { const a = answers.get(rev); return a ? a.by.size + a.anon : 0; };
+    const incs = new Map((card && card.doc && Array.isArray(card.doc.incidents) ? card.doc.incidents : [])
+        .filter((x) => x && typeof x.id === 'string').map((x) => [x.id, x]));
+    const reports = (ids) => (!ids.length ? 'none'
+        : ids.some((id) => { const x = incs.get(id); return !!x && x.status !== 'closed'; }) ? 'open' : 'closed');
+    const loose = [], anchors = [];
+    list.forEach((m) => {
+        const p = m.part || {};
+        const back = partIsBack(m, sent);
+        const fromNow = !back && Array.isArray(p.providers) && p.providers.length > 0;
+        if (answeredBy(m.rev) >= (fromNow ? p.providers.length : 1)) return;
+        const st = reports(p.incidents || []);
+        if (st === 'closed') return;
+        if (st === 'open') { out.add(m.rev); if (fromNow) anchors.push(m); return; }
+        if (fromNow) { out.add(m.rev); out.weak.add(m.rev); anchors.push(m); } else loose.push(m);
+    });
+    loose.slice(-PART_LOOSE_HELD).forEach((m) => { out.add(m.rev); out.weak.add(m.rev); });
+    if (anchors.length) {
+        const since = Math.min(...anchors.map((m) => m.at));
+        list.filter((m) => m.at > since && !out.has(m.rev) && partIsBack(m, sent)).slice(-PART_SINCE_HELD)
+            .forEach((m) => { out.add(m.rev); out.weak.add(m.rev); });
+    }
+    return out;
+}
+// A 'part' revision (meta m) that is a copy merged back, not a part sent:
+// marked so since D176 (a part sent names its providers); an older one is a
+// copy merged back when the card never named it as sent (sent: card.partRevs).
+const partIsBack = (m, sent) => !!(m.part && m.part.back === true) || (!(m.part && m.part.providers) && !sent.has(m.rev));
 // The open document's identity from its card (after a card is made of it).
 function syncDocRevision(card) {
     state.docRev = (card && validRev(card.rev)) || null;
@@ -369,19 +458,23 @@ function recordSessionRevision(rev, doc, why, hash) {
     let copy;
     try { copy = stripIdentity(cloneData(doc)); } catch (e) { return false; }
     _revSession.set(rev, { rev, doc: copy, hash: typeof hash === 'string' ? hash : revHashOf(copy), at: Date.now(), why: REVISION_WHY.includes(why) ? why : 'export' });
-    while (_revSession.size > REVISION_LIMITS.session) _revSession.delete(_revSession.keys().next().value);
+    // The tab's count is for the copies only opened: a part sent from a
+    // network not kept yet is still out (D152.1, D176), and stays.
+    const others = [..._revSession.values()].filter((r) => r.why !== 'part');
+    for (let i = 0; i < others.length - REVISION_LIMITS.session; i++) _revSession.delete(others[i].rev);
     return true;
 }
 // The tab's revisions `revs` (all when omitted) become card `cardId`'s, and
 // go to disk: the copy was kept.
 // why: what to record them as instead of what they were held as (a copy
-// visited and then merged in is 'merge-theirs').
-function adoptSessionRevisions(cardId, revs, why) {
+// visited and then merged in is 'merge-theirs'); part: the part's context to
+// keep with them instead of their own (a copy merged back as a part).
+function adoptSessionRevisions(cardId, revs, why, part) {
     const want = Array.isArray(revs) ? new Set(revs.filter(validRev)) : null;
     let n = 0;
     [..._revSession.values()].forEach((r) => {
         if (want && !want.has(r.rev)) return;
-        if (recordRevision(cardId, r.rev, r.doc, why || r.why, r.hash, r.part)) n++;
+        if (recordRevision(cardId, r.rev, r.doc, why || r.why, r.hash, part || r.part)) n++;
         _revSession.delete(r.rev);
     });
     return n;
@@ -397,8 +490,12 @@ function revisionHeld(cardId) {
     if (validRev(card.base)) held.add(card.base);
     const b = card.doc ? outgoingBaseRaw(cardId, card.doc) : null;
     if (b) held.add(b);
-    // The newest parts: a provider may still be working on one (D93).
-    (_revs.get(cardId) || []).filter((m) => m.why === 'part').slice(-PART_REVISIONS_HELD).forEach((m) => held.add(m.rev));
+    // The parts still out: a provider may still be working on one (D93, D176).
+    // weak: those of them the budget may let go (no open report, D179), never
+    // the card's own rev or base.
+    const parts = heldParts(cardId, card);
+    held.weak = new Set([...parts.weak].filter((r) => !held.has(r)));
+    parts.forEach((r) => held.add(r));
     return held;
 }
 // outgoingBase's log half, without the card.
@@ -450,6 +547,16 @@ function enforceRevisionCaps(cardId) {
             _revs.forEach((list) => list.forEach((m, i) => {
                 if (!heldOf(m.cardId).has(m.rev) && (!oldest || rank(m) < rank(oldest.m) || (rank(m) === rank(oldest.m) && m.at < oldest.m.at))) oldest = { m, list, i };
             }));
+            // Only held ones left: a part with no open report goes, the
+            // oldest first (nothing could ever close it, D179); one with an
+            // open report never does, and the library warns (D175).
+            if (!oldest) {
+                _revs.forEach((list) => list.forEach((m, i) => {
+                    const h = heldOf(m.cardId);
+                    if (h.weak && h.weak.has(m.rev) && (!oldest || m.at < oldest.m.at)) oldest = { m, list, i };
+                }));
+                if (oldest) held.delete(oldest.m.cardId);
+            }
             if (!oldest) break;
             total -= oldest.m.bytes;
             drop(oldest.list, oldest.i);
@@ -457,6 +564,15 @@ function enforceRevisionCaps(cardId) {
         }
     }
     return dropped;
+}
+
+// Over the budget (REVISION_LIMITS.totalBytes) with nothing left to drop:
+// only held revisions, mostly parts still out (D175). The library says so
+// (renderLanding, js/library.js) instead of dropping one.
+function revisionsOverBudget() {
+    let total = 0;
+    _revs.forEach((list) => list.forEach((m) => { total += m.bytes; }));
+    return total > REVISION_LIMITS.totalBytes;
 }
 
 function revisionMetaById(id) {
@@ -646,5 +762,5 @@ function dropRevisions(cardId) {
 window.CarinoRevisions = { REVISION_DB, REVISION_LIMITS, REVISION_WHY, PRIOR_MAX, openRevisionStore, releaseRevisionStore, idbRevisionAdapter,
     recordRevision, recordSessionRevision, adoptSessionRevisions, hasRevision, hasSessionRevision, revisionsOf, revisionDoc, findBase,
     revisionsReady, revisionsFlushed, dropRevisions, stampCard, stampOpenDoc, stampCardDoc, stampSites, outgoingBase, revHashOf,
-    PART_REVISIONS_HELD, PART_REVS_MAX, revisionWhy, revisionPartMeta, cardPartRevs, recordPartRevision, sessionRevsWhy,
+    PART_REVS_MAX, PART_LOOSE_HELD, PART_SINCE_HELD, revisionWhy, revisionPartMeta, cardPartRevs, recordPartRevision, sessionRevsWhy, heldParts, revisionsOverBudget,
     _reset() { _revs.clear(); _revDocs.clear(); _revSession.clear(); } };

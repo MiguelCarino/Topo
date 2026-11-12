@@ -24,6 +24,10 @@ const (
 	ErrNoKeys       = "no-keys"
 	ErrNoDevice     = "no-device"
 	ErrMember       = "already-member"
+	// A revision pushed by anyone but an owner (D154); "update": true.
+	ErrOwnersOnly = "owners-only"
+	// A visit copy for a site with too many waiting already.
+	ErrVisitsFull = "visits-full"
 )
 
 // apiErr is a refusal decided inside a handler or a transaction; answer()

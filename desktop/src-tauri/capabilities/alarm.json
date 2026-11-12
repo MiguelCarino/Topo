@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "alarm",
+  "description": "The alarm card windows (alarm.html, step 7g): the app's own commands and its refresh event only.",
+  "windows": ["alarm-*"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

@@ -7,7 +7,9 @@
 //
 //   1. a web stage and a --desktop stage of this repo both pass the script's
 //      own checks; the web copy is the website's files byte for byte, the
-//      desktop copy differs only in index.html, by the CSP's IPC origins;
+//      desktop copy differs only in index.html, by the CSP's IPC origins,
+//      and adds intro.html and alarm.html (the alarm card, step 7g), which
+//      loads only staged files and talks only to the app;
 //   2. nothing that is not the app is staged (tests/, docs/, desktop/,
 //      CLAUDE.md, CNAME, AUDIT.md, README.md, 404.html, robots.txt,
 //      sitemap.xml, og.jpg, carino-diag.js, dotfiles);
@@ -36,11 +38,18 @@ try {
   const r2 = run(STAGE, [desk, '--desktop']);
   ok('a desktop stage passes its own checks', r2.status === 0, (r2.stderr || '').trim().slice(0, 300));
   const wf = files(web), df = files(desk);
-  ok('both stage the same files, and the desktop one its intro', df.filter((f) => f !== 'intro.html').join() === wf.join() && df.includes('intro.html') && !wf.includes('intro.html'), `${wf.length} vs ${df.length}`);
+  const deskOnly = ['THIRD-PARTY.txt', 'alarm.html', 'intro.html'];
+  ok('both stage the same files, and the desktop one its intro, alarm card and third-party licences', df.filter((f) => !deskOnly.includes(f)).join() === wf.join() && deskOnly.every((f) => df.includes(f) && !wf.includes(f)), `${wf.length} vs ${df.length}`);
   ok('the intro is desktop/intro.html as it is', readFileSync(join(desk, 'intro.html')).equals(readFileSync(join(ROOT, 'desktop', 'intro.html'))));
+  ok('the alarm card is desktop/alarm.html as it is (step 7g)', readFileSync(join(desk, 'alarm.html')).equals(readFileSync(join(ROOT, 'desktop', 'alarm.html'))));
+  ok('the third-party licences are desktop/THIRD-PARTY.txt as it is', readFileSync(join(desk, 'THIRD-PARTY.txt')).equals(readFileSync(join(ROOT, 'desktop', 'THIRD-PARTY.txt'))));
+  ok('the alarm card loads nothing from another site and talks only to the app', (() => {
+    const a = readFileSync(join(ROOT, 'desktop', 'alarm.html'), 'utf8');
+    return !/(src|href)="(https?:)?\/\//.test(a) && /connect-src ipc: http:\/\/ipc\.localhost;/.test(a) && /default-src 'none'/.test(a);
+  })());
   const differs = wf.filter((f) => !readFileSync(join(web, f)).equals(readFileSync(join(ROOT, f))));
   ok('the web copy is the website, byte for byte', differs.length === 0, differs.join(', '));
-  const ddiff = df.filter((f) => f !== 'intro.html' && !readFileSync(join(desk, f)).equals(readFileSync(join(ROOT, f))));
+  const ddiff = df.filter((f) => !deskOnly.includes(f) && !readFileSync(join(desk, f)).equals(readFileSync(join(ROOT, f))));
   ok('the desktop copy differs only in index.html', ddiff.join() === 'index.html', ddiff.join(', '));
   const src = readFileSync(join(ROOT, 'index.html'), 'utf8'), dsk = readFileSync(join(desk, 'index.html'), 'utf8');
   ok('by the IPC origins in connect-src', dsk === src.replace("connect-src 'self';", "connect-src 'self' ipc: http://ipc.localhost;") && dsk !== src);
@@ -59,11 +68,13 @@ try {
   ok('about 4 MB', kb > 2500 && kb < 8000, `${Math.round(kb)} KB`);
 
   // ---- 3: a made-up source tree ----
-  const fake = (name, html, drop = []) => {
+  const fake = (name, html, drop = [], opts = {}) => {
     const dir = join(tmp, name);
     mkdirSync(join(dir, 'desktop'), { recursive: true });
     cpSync(STAGE, join(dir, 'desktop', 'stage.sh'));
     writeFileSync(join(dir, 'desktop', 'intro.html'), 'intro');
+    writeFileSync(join(dir, 'desktop', 'THIRD-PARTY.txt'), 'licences');
+    writeFileSync(join(dir, 'desktop', 'alarm.html'), opts.alarm || '<link rel="stylesheet" href="fonts/x.txt">');
     for (const d of ['css', 'js', 'fonts', 'vendor']) { mkdirSync(join(dir, d)); writeFileSync(join(dir, d, 'x.txt'), d); }
     for (const f of ['carino-clock.js', 'carino-lang.js', 'carino-navbar.js', 'carino-theme.css', 'carino-theme.js', 'carino-ui.css', 'carino-ui.js', 'carino-pdf.js', 'carino-html2canvas.js', 'logo.svg', 'logo-color.svg', 'logo.webp', 'LICENSE']) writeFileSync(join(dir, f), f);
     writeFileSync(join(dir, 'index.html'), html);
@@ -88,6 +99,9 @@ try {
   const twice = fake('twice', `${head}${head}`);
   const twiceDesk = run(join(tmp, 'twice', 'desktop', 'stage.sh'), [join(tmp, 'twice', 'out2'), '--desktop']);
   ok('a --desktop CSP patch that does not match exactly once fails it', twice.status === 0 && twiceDesk.status !== 0 && /not once/.test(twiceDesk.stderr), twiceDesk.stderr.trim());
+  fake('alarmref', `${head}`, [], { alarm: '<script src="js/missing.js"></script>' });
+  const alarmRef = run(join(tmp, 'alarmref', 'desktop', 'stage.sh'), [join(tmp, 'alarmref', 'out2'), '--desktop']);
+  ok('a desktop stage fails when the alarm card needs a file that is not staged', alarmRef.status !== 0 && /alarm\.html needs js\/missing\.js/.test(alarmRef.stderr), alarmRef.stderr.trim());
   const nowhere = run(STAGE, ['/']);
   ok('it refuses to stage into /', nowhere.status !== 0 && existsSync('/usr'));
   const usage = run(STAGE, []);

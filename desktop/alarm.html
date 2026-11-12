@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Nothing leaves this page: it talks only to the app (Tauri's IPC
+       origins), as index.html's desktop copy does. Tauri sends no CSP
+       header (csp: null), so this is the only policy. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'unsafe-inline'; connect-src ipc: http://ipc.localhost; base-uri 'none'; form-action 'none'" />
+  <title>Topo</title>
+  <link rel="stylesheet" href="fonts/carino-fonts.css" />
+  <!-- The alarm card (docs/SCOPE.md D130, D160, D172, step 7g): the desktop
+       app opens it in a window of its own on every monitor, full screen and
+       above other windows, when a device stops answering (or for the drill,
+       Settings' Test the alarm). Atrium's card() layout
+       (emergency-alerts.py: a big title, the headline, the details, a short
+       note, large buttons; Escape closes it), in amber, with Topo's buttons:
+       Acknowledge (a note if you like), Report a problem (handed to Topo's
+       window) and Later (Escape too), which leaves the issue open. While
+       Topo's window is locked (js/idlelock.js keeps the lock in this
+       origin's storage) the card still shows the device, and Acknowledge
+       and Report a problem go to Topo's window, which asks to unlock first.
+       A short chime in the first window only; the system volume is never
+       touched and nothing is spoken. desktop/stage.sh --desktop stages it
+       beside intro.html; it is never part of the website or the zip. -->
+  <style>
+    :root { --bg: rgba(180, 83, 9, .96); --text: #ffffff; --muted: rgba(255,255,255,.82); --drill: #fde68a;
+      --btn: #ffffff; --btn-ink: #78350f; --line: rgba(255,255,255,.55); color-scheme: dark; }
+    /* The same amber in Colourful: an alarm looks one way on every theme. */
+    html, body { min-height: 100%; margin: 0; }
+    body { background: var(--bg); color: var(--text); font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+      display: flex; align-items: center; justify-content: center; min-height: 100vh; box-sizing: border-box; padding: 24px 16px;
+      overflow-x: hidden; }
+    main { width: 100%; max-width: 860px; display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; }
+    .drill { color: var(--drill); font-size: clamp(16px, 3.2vw, 26px); font-weight: 700; letter-spacing: .04em; margin: 0; }
+    h1 { font-family: "Red Hat Display", "IBM Plex Sans", system-ui, sans-serif; font-size: clamp(34px, 8vw, 64px); font-weight: 800;
+      margin: 0; letter-spacing: .02em; line-height: 1.05; overflow-wrap: anywhere; }
+    .head { font-size: clamp(22px, 4.4vw, 40px); font-weight: 700; margin: 0; overflow-wrap: anywhere; }
+    .text { font-size: clamp(17px, 2.8vw, 24px); margin: 0; overflow-wrap: anywhere; }
+    .text.soft { color: var(--muted); }
+    .note { color: var(--muted); font-size: clamp(14px, 2vw, 16px); margin: 0; overflow-wrap: anywhere; }
+    .acts { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; width: 100%; margin-top: 6px; }
+    button { font: inherit; font-size: clamp(17px, 2.6vw, 22px); font-weight: 600; min-height: 52px; padding: 10px 32px; border-radius: 6px;
+      border: 2px solid var(--btn); background: transparent; color: var(--text); cursor: pointer; max-width: 100%; }
+    button.ok { background: var(--btn); color: var(--btn-ink); }
+    button:focus-visible { outline: 3px solid var(--drill); outline-offset: 3px; }
+    .noterow { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; width: 100%; }
+    .noterow[hidden] { display: none; }
+    input { font: inherit; font-size: 18px; min-height: 52px; box-sizing: border-box; padding: 8px 14px; border-radius: 6px;
+      border: 2px solid var(--line); background: rgba(0,0,0,.18); color: var(--text); width: min(520px, 100%); }
+    input::placeholder { color: var(--muted); }
+    @media (max-width: 480px) {
+      .acts button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main id="card" role="alertdialog" aria-labelledby="title" aria-describedby="head">
+    <p class="drill" id="drill" hidden></p>
+    <h1 id="title"></h1>
+    <p class="head" id="head"></p>
+    <p class="text" id="time"></p>
+    <p class="text soft" id="chain" hidden></p>
+    <p class="text soft" id="extra" hidden></p>
+    <p class="note" id="by"></p>
+    <div class="acts">
+      <button type="button" class="ok" id="ack"></button>
+      <button type="button" id="report"></button>
+      <button type="button" id="later"></button>
+    </div>
+    <div class="noterow" id="noterow" hidden>
+      <input type="text" id="note" maxlength="2000" autocomplete="off" />
+      <button type="button" class="ok" id="send"></button>
+    </div>
+    <p class="note" id="lockline" hidden></p>
+    <p class="note" id="laterline"></p>
+  </main>
+  <script>
+  (function () {
+    'use strict';
+    // The card's own words, by the English (the app's catalogue lives in
+    // js/i18n.js, which this window does not load). Japanese says PC.
+    var T = {
+      es: {
+        'NOT ANSWERING': 'NO RESPONDE', 'DRILL · THIS IS A TEST': 'SIMULACRO · ESTO ES UNA PRUEBA', 'Test of the alarm': 'Prueba de la alarma',
+        'Nothing is down. This is how an alarm looks and sounds on this PC.': 'Nada está caído. Así se ve y suena una alarma en este PC.',
+        'Not answering for {time}': 'No responde desde hace {time}', '{n} min': '{n} min', '{h} h {m} min': '{h} h {m} min', 'less than a minute': 'menos de un minuto',
+        '{name} and {n} devices behind it': '{name} y {n} dispositivos detrás', '{name} and 1 device behind it': '{name} y 1 dispositivo detrás',
+        'Behind it: {names}': 'Detrás: {names}', 'Checked by monitor {pc}': 'Comprobado por el monitor {pc}',
+        'Answering again since {time}': 'Responde de nuevo desde las {time}', 'It keeps going down and coming back (flapping).': 'Se cae y vuelve una y otra vez (intermitente).',
+        'Acknowledge': 'Enterado', 'Report a problem': 'Reportar un problema', 'Later': 'Más tarde', 'A note, if you like': 'Una nota, si quieres',
+        'Topo is locked: you will be asked to unlock it first.': 'Topo está bloqueado: primero se pedirá desbloquearlo.',
+        'Later closes this and leaves the issue open.': 'Más tarde cierra esto y deja el problema abierto.', '{n} more not answering': '{n} más sin responder'
+      },
+      'pt-BR': {
+        'NOT ANSWERING': 'SEM RESPOSTA', 'DRILL · THIS IS A TEST': 'SIMULADO · ISTO É UM TESTE', 'Test of the alarm': 'Teste do alarme',
+        'Nothing is down. This is how an alarm looks and sounds on this PC.': 'Nada caiu. É assim que um alarme aparece e soa neste PC.',
+        'Not answering for {time}': 'Sem resposta há {time}', '{n} min': '{n} min', '{h} h {m} min': '{h} h {m} min', 'less than a minute': 'menos de um minuto',
+        '{name} and {n} devices behind it': '{name} e {n} dispositivos atrás dele', '{name} and 1 device behind it': '{name} e 1 dispositivo atrás dele',
+        'Behind it: {names}': 'Atrás dele: {names}', 'Checked by monitor {pc}': 'Verificado pelo monitor {pc}',
+        'Answering again since {time}': 'Respondendo de novo desde {time}', 'It keeps going down and coming back (flapping).': 'Cai e volta repetidamente (instável).',
+        'Acknowledge': 'Ciente', 'Report a problem': 'Relatar um problema', 'Later': 'Mais tarde', 'A note, if you like': 'Uma nota, se quiser',
+        'Topo is locked: you will be asked to unlock it first.': 'O Topo está bloqueado: será preciso desbloqueá-lo primeiro.',
+        'Later closes this and leaves the issue open.': 'Mais tarde fecha isto e deixa o problema aberto.', '{n} more not answering': 'mais {n} sem resposta'
+      },
+      ru: {
+        'NOT ANSWERING': 'НЕ ОТВЕЧАЕТ', 'DRILL · THIS IS A TEST': 'УЧЕНИЯ · ЭТО ПРОВЕРКА', 'Test of the alarm': 'Проверка тревоги',
+        'Nothing is down. This is how an alarm looks and sounds on this PC.': 'Ничего не упало. Так тревога выглядит и звучит на этом ПК.',
+        'Not answering for {time}': 'Не отвечает уже {time}', '{n} min': '{n} мин', '{h} h {m} min': '{h} ч {m} мин', 'less than a minute': 'меньше минуты',
+        '{name} and {n} devices behind it': '{name} и ещё устройств за ним: {n}', '{name} and 1 device behind it': '{name} и ещё 1 устройство за ним',
+        'Behind it: {names}': 'За ним: {names}', 'Checked by monitor {pc}': 'Проверено монитором {pc}',
+        'Answering again since {time}': 'Снова отвечает с {time}', 'It keeps going down and coming back (flapping).': 'Постоянно пропадает и возвращается (нестабильно).',
+        'Acknowledge': 'Принято', 'Report a problem': 'Сообщить о проблеме', 'Later': 'Позже', 'A note, if you like': 'Заметка, если нужно',
+        'Topo is locked: you will be asked to unlock it first.': 'Topo заблокирован: сначала его нужно будет разблокировать.',
+        'Later closes this and leaves the issue open.': '«Позже» закрывает это окно, проблема остаётся открытой.', '{n} more not answering': 'ещё {n} не отвечают'
+      },
+      ja: {
+        'NOT ANSWERING': '応答なし', 'DRILL · THIS IS A TEST': '訓練 · これはテストです', 'Test of the alarm': 'アラームのテスト',
+        'Nothing is down. This is how an alarm looks and sounds on this PC.': '停止しているものはありません。この PC でのアラームの表示と音の確認です。',
+        'Not answering for {time}': '{time}前から応答なし', '{n} min': '{n} 分', '{h} h {m} min': '{h} 時間 {m} 分', 'less than a minute': '1 分未満',
+        '{name} and {n} devices behind it': '{name} とその先の {n} 台の機器', '{name} and 1 device behind it': '{name} とその先の 1 台の機器',
+        'Behind it: {names}': 'その先: {names}', 'Checked by monitor {pc}': '監視 PC {pc} が確認',
+        'Answering again since {time}': '{time} から再び応答あり', 'It keeps going down and coming back (flapping).': '停止と復旧を繰り返しています（不安定）。',
+        'Acknowledge': '確認しました', 'Report a problem': '問題を報告', 'Later': '後で', 'A note, if you like': 'メモ（任意）',
+        'Topo is locked: you will be asked to unlock it first.': 'Topo はロックされています。先にロック解除を求められます。',
+        'Later closes this and leaves the issue open.': '「後で」はこれを閉じ、問題は未対応のまま残ります。', '{n} more not answering': 'ほかに {n} 件が応答なし'
+      }
+    };
+    var LANGS = { es: 'es', pt: 'pt-BR', 'pt-br': 'pt-BR', ru: 'ru', ja: 'ja', en: 'en' };
+    var lang = 'en';
+    function pickLang(v) {
+      v = String(v || '').toLowerCase();
+      return LANGS[v] || LANGS[v.split('-')[0]] || null;
+    }
+    function t(key, p) {
+      var s = (T[lang] && T[lang][key]) || key;
+      Object.keys(p || {}).forEach(function (k) { s = s.split('{' + k + '}').join(String(p[k])); });
+      return s;
+    }
+    var $ = function (id) { return document.getElementById(id); };
+    var core = function () { return window.__TAURI__ && window.__TAURI__.core; };
+    function invoke(cmd, args) {
+      var c = core();
+      if (!c || typeof c.invoke !== 'function') return Promise.reject(new Error('no-host'));
+      return c.invoke(cmd, args || {});
+    }
+    // The main window's lock (js/idlelock.js), in this origin's storage.
+    function locked() {
+      try { var m = JSON.parse(localStorage.getItem('topo-lock') || 'null'); return !!(m && typeof m.at === 'number'); } catch (e) { return false; }
+    }
+    try { if (localStorage.getItem('carino-theme') === 'color') document.documentElement.setAttribute('data-carino-theme', 'color'); } catch (e) { /* no storage */ }
+
+    var view = null, skew = 0, busy = false;
+    function duration(ms) {
+      var min = Math.floor(Math.max(0, ms) / 60000);
+      if (min < 1) return t('less than a minute');
+      if (min < 60) return t('{n} min', { n: min });
+      return t('{h} h {m} min', { h: Math.floor(min / 60), m: min % 60 });
+    }
+    function clock(ms) {
+      try { return new Date(ms).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' }); } catch (e) { return new Date(ms).toTimeString().slice(0, 5); }
+    }
+    function tick() {
+      if (!view) return;
+      var now = Date.now() - skew;
+      $('time').textContent = view.recovered ? t('Answering again since {time}', { time: clock(view.recovered) }) : t('Not answering for {time}', { time: duration(now - view.since) });
+    }
+    function render() {
+      var v = view;
+      if (!v) return;
+      lang = pickLang(v.lang) || lang;
+      document.documentElement.lang = lang;
+      $('drill').hidden = !v.drill;
+      $('drill').textContent = t('DRILL · THIS IS A TEST');
+      $('title').textContent = t('NOT ANSWERING');
+      $('head').textContent = v.drill ? t('Test of the alarm') : v.behind > 1 ? t('{name} and {n} devices behind it', { name: v.name, n: v.behind })
+        : v.behind === 1 ? t('{name} and 1 device behind it', { name: v.name }) : v.name;
+      var chain = !v.drill && v.behindNames && v.behindNames.length ? t('Behind it: {names}', { names: v.behindNames.join(', ') + (v.behind > v.behindNames.length ? ', …' : '') }) : '';
+      $('chain').hidden = !chain;
+      $('chain').textContent = chain;
+      var extra = [];
+      if (v.drill) extra.push(t('Nothing is down. This is how an alarm looks and sounds on this PC.'));
+      if (v.flapping) extra.push(t('It keeps going down and coming back (flapping).'));
+      if (v.more > 0) extra.push(t('{n} more not answering', { n: v.more }));
+      $('extra').hidden = !extra.length;
+      $('extra').textContent = extra.join(' ');
+      $('by').textContent = t('Checked by monitor {pc}', { pc: v.monitor || '—' });
+      $('ack').textContent = t('Acknowledge');
+      $('send').textContent = t('Acknowledge');
+      $('report').textContent = t('Report a problem');
+      $('later').textContent = t('Later');
+      $('note').placeholder = t('A note, if you like');
+      $('note').setAttribute('aria-label', t('A note, if you like'));
+      var lk = locked();
+      $('lockline').hidden = !lk;
+      $('lockline').textContent = t('Topo is locked: you will be asked to unlock it first.');
+      $('laterline').textContent = t('Later closes this and leaves the issue open.');
+      if (lk) $('noterow').hidden = true;
+      tick();
+    }
+    // A short chime: two soft tones, Web Audio, at the page's own level.
+    // The system volume is never touched; nothing is spoken.
+    function chime() {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        var ctx = new AC();
+        var play = function () {
+          [[880, 0], [660, 0.28]].forEach(function (n) {
+            var o = ctx.createOscillator(), g = ctx.createGain();
+            o.type = 'sine'; o.frequency.value = n[0];
+            var at = ctx.currentTime + n[1];
+            g.gain.setValueAtTime(0.0001, at);
+            g.gain.exponentialRampToValueAtTime(0.18, at + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001, at + 0.42);
+            o.connect(g); g.connect(ctx.destination);
+            o.start(at); o.stop(at + 0.45);
+          });
+          setTimeout(function () { try { ctx.close(); } catch (e) { /* done */ } }, 1200);
+        };
+        if (ctx.state === 'suspended' && ctx.resume) ctx.resume().then(play, play); else play();
+      } catch (e) { /* no sound here: the card still shows */ }
+    }
+    function load() {
+      return invoke('alarm_current').then(function (v) {
+        if (!v) return;
+        var first = !view || view.id !== v.id;
+        view = v;
+        skew = Date.now() - (v.now || Date.now());
+        if (first) { $('noterow').hidden = true; $('note').value = ''; }
+        render();
+        if (v.chime) chime();
+        if (first) $('ack').focus();
+      }).catch(function () { /* the window closes with the app */ });
+    }
+    function answer(kind, note) {
+      if (!view || busy) return;
+      busy = true;
+      var id = view.id;
+      var done = function () { busy = false; };
+      var args = { id: id, answer: kind };
+      if (note) args.note = note;
+      invoke('alarm_answer', args).then(done, done);
+    }
+    function hand(act) {
+      if (!view || busy) return;
+      busy = true;
+      var done = function () { busy = false; };
+      invoke('alarm_hand', { id: view.id, act: act, locked: locked() }).then(done, done);
+    }
+    $('later').addEventListener('click', function () { answer('later'); });
+    $('report').addEventListener('click', function () { if (view && view.drill) answer('later'); else hand('report'); });
+    $('ack').addEventListener('click', function () {
+      if (!view) return;
+      if (view.drill) { answer('ack'); return; }
+      if (locked()) { hand('ack'); return; }
+      if ($('noterow').hidden) { $('noterow').hidden = false; $('note').focus(); return; }
+      answer('ack', $('note').value.trim());
+    });
+    $('send').addEventListener('click', function () { if (view) answer('ack', $('note').value.trim()); });
+    $('note').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); $('send').click(); } });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.preventDefault(); answer('later'); } });
+    window.addEventListener('storage', function (e) { if (e.key === 'topo-lock' || e.key === null) render(); });
+    var ev = window.__TAURI__ && window.__TAURI__.event;
+    if (ev && typeof ev.listen === 'function') ev.listen('topo-alarm', function () { load(); });
+    try { lang = pickLang(localStorage.getItem('carino_lang')) || pickLang(navigator.language) || 'en'; } catch (e) { lang = pickLang(navigator.language) || 'en'; }
+    setInterval(tick, 15000);
+    load();
+    window.TopoAlarmCard = { state: function () { return { view: view, lang: lang, locked: locked() }; }, reload: load };
+  })();
+  </script>
+</body>
+</html>

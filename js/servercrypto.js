@@ -283,6 +283,58 @@ async function openRevision(h, body, key) {
     return new Uint8Array(await subtle().decrypt({ name: 'AES-GCM', iv, additionalData: utf8(revAad(h)) }, key, ct));
 }
 
+// ---- Visit copies (docs/SCOPE.md D154) ----
+// A provider's Record visit on a site: the network they edited, sealed with
+// the site key as a revision is, signed by them, on top of server revision
+// baseN, for the report the browser names slot (a hash). The server checks
+// the signature against the author's key (server/internal/tcrypto
+// VisitHeader) and an owner's browser against the trusted roster.
+const visitSigned = (h) => ['topo-visit-v1', h.site, h.id, h.slot, h.baseN, h.epoch, h.rseq, h.author, h.dev, h.at, h.ctHash].map(String).join('\n');
+const visitAad = (h) => ['topo-visit-v1', h.site, h.id, h.slot, h.baseN, h.epoch, h.rseq, h.author, h.dev, h.at].map(String).join('\n');
+// h: { site, id, slot, baseN, epoch, rseq, author, dev, at }.
+async function sealVisit(h, key, sigPriv, plain) {
+    const iv = random(12);
+    const ct = new Uint8Array(await subtle().encrypt({ name: 'AES-GCM', iv, additionalData: utf8(visitAad(h)) }, key, plain));
+    const head = Object.assign({}, h, { ctHash: await ctHashOf(iv, ct) });
+    const sig = await sign(sigPriv, visitSigned(head));
+    return Object.assign(head, { sig, iv: b64u(iv), ct: b64u(ct) });
+}
+async function openVisit(h, body, key) {
+    const iv = unb64u(body.iv), ct = unb64u(body.ct);
+    if (await ctHashOf(iv, ct) !== h.ctHash) throw new Error('bad-chain');
+    return new Uint8Array(await subtle().decrypt({ name: 'AES-GCM', iv, additionalData: utf8(visitAad(h)) }, key, ct));
+}
+
+// ---- Records (docs/SCOPE.md D158, D159, step 7h) ----
+// What a monitor and the people write beside the document: a monitor's
+// status and its statistics of a day, issues, people's acts on them and
+// quiet windows. Sealed with the site key of an epoch and signed by the
+// author (a monitor's device key, src-tauri/src/servercrypto.rs, or a
+// person's user key). The server checks the signature against the author's
+// registered key (server/internal/tcrypto record.go); an owner's browser
+// checks it against the trusted roster before folding (js/monitors.js).
+const recordAad = (h) => ['topo-record-v1', h.site, h.kind, h.id, h.epoch, h.author, h.at].map(String).join('\n');
+const recordSigned = (h) => recordAad(h) + '\n' + h.ctHash;
+// h: { site, kind, id, epoch, author, at }; plain: bytes.
+async function sealRecord(h, key, sigPriv, plain) {
+    const iv = random(12);
+    const ct = new Uint8Array(await subtle().encrypt({ name: 'AES-GCM', iv, additionalData: utf8(recordAad(h)) }, key, plain));
+    const r = { v: 1, site: h.site, kind: h.kind, id: h.id, epoch: h.epoch, author: h.author, at: h.at, ctHash: await ctHashOf(iv, ct), sig: '', iv: b64u(iv), ct: b64u(ct) };
+    r.sig = await sign(sigPriv, recordSigned(r));
+    return r;
+}
+// -> the plaintext bytes; throws 'bad-record' (shape or hash),
+// 'bad-signature' (not the author's key) or 'decrypt'.
+async function openRecord(r, key, authorSigPub) {
+    if (!r || r.v !== 1 || typeof r.iv !== 'string' || typeof r.ct !== 'string') throw new Error('bad-record');
+    const iv = unb64u(r.iv), ct = unb64u(r.ct);
+    if (await ctHashOf(iv, ct) !== r.ctHash) throw new Error('bad-record');
+    if (!await verify(authorSigPub, recordSigned(r), r.sig)) throw new Error('bad-signature');
+    try {
+        return new Uint8Array(await subtle().decrypt({ name: 'AES-GCM', iv, additionalData: utf8(recordAad(r)) }, key, ct));
+    } catch (e) { throw new Error('decrypt'); }
+}
+
 // ---- Recovery code and escrow (design §5.4) ----
 // 26 symbols (128.8 bits) and two check symbols, shown in 7 groups of 4.
 async function checkSymbols(s26) {
@@ -394,6 +446,8 @@ window.TopoServerCrypto = {
     wrap, unwrap, deviceCtx, siteCtx, newSiteKeyRaw, importSiteKey, sealName, openName,
     rosterCanonical, signRoster, rosterMember, acceptRoster,
     revSigned, revAad, chainHash, genesis, ctHashOf, packDoc, unpackDoc, sealRevision, openRevision,
+    visitSigned, visitAad, sealVisit, openVisit,
+    recordAad, recordSigned, sealRecord, openRecord,
     newRecoveryCode, parseRecoveryCode, sealEscrow, openEscrow,
     openKeyStore, ksGet, ksPut, ksDel, ksAll, ksReset, ephemeral: () => _ephemeral
 };

@@ -200,7 +200,7 @@ window.addEventListener('load', async () => {
        && saved.length === 1 && saved[0].name === r3.file, `${r3.why} ${r3.file}`);
     const fileDoc = JSON.parse(await saved[0].blob.text());
     ok('the file is a Topo network file with the report and its whole log', fileDoc.kind === 'nettopology' && fileDoc.doc.incidents[0].id === id && fileDoc.doc.log.length === 4
-       && String(fileDoc.$schema || '').includes('topo-v18'), String(fileDoc.$schema));
+       && String(fileDoc.$schema || '').includes('topo-v' + DOC_VERSION), String(fileDoc.$schema));
     ok('its message says to attach it', r3.message.body.includes(r3.file) && !r3.message.body.includes('Infrastructure link'));
     H.urlMax = held.urlMax;
     // A visit-heavy network goes as a file: sent for real, with the real cap

@@ -1,0 +1,45 @@
+{
+  "monitor": {
+    "encPub": "BD3AEFCD332tVTPDX996iba1e0SkFOPVWAyAOlKXXqHvmZVFC5wz6rwigMZUXSevdENb6x2hFK8cPgQs3HlAP6g",
+    "id": "m_0123456789abcdef012345",
+    "secret": "{\"v\":1,\"enc\":\"D2CgUxIoYCufkf6H8I38tDMPoQhuNPLZnJX15r4RNK4\",\"sig\":\"XbwTY9YLWweiFDFIPrqguO7Dy_44do3Leejtw8AtWb4\"}",
+    "sigPub": "BLnBEe8cp5pg1RLONtxG71bt3vUTvUVD-5tu_xnnSqcLBHczC2AKWSQNXBABInYSUpUqSbv7GOomG2HXMCaiGog"
+  },
+  "note": "Written by src/servercrypto.rs (TOPO_WRITE_VECTORS=1 cargo test rust_vectors). Test data only: these keys protect nothing.",
+  "owner": {
+    "id": "u_RustOwnerRustOwner0001",
+    "sigPub": "BGFCPo5gsRLR2DzmOyXUqFMGSdwQC5W5CRboj75439TFedD33lN6cDcO6MB2_CNaoKEmjNrU4m8w-g8Xun17sMc"
+  },
+  "plaintext": "{\"v\":1,\"items\":{\"n1\":{\"state\":\"down\"}}}",
+  "record": {
+    "at": 1762900000000,
+    "author": "m_0123456789abcdef012345",
+    "ct": "xfu-P0jMM6R9h0q4VSTTN1qkkNrnmDrG1XCWMQeB7-g1S1ACQqPpMr4-wexOgv8F17OCb-KqPQ",
+    "ctHash": "LryZK6ALFIViaMvxmCt8hsSyPK5mlsWy8Mu-OsTVSp0",
+    "epoch": 1,
+    "id": "m_0123456789abcdef012345",
+    "iv": "Swz6lfobkINW0fEN",
+    "kind": "status",
+    "sig": "bKQ4x_Ljkfo7RNPNIARk44VJkongPZVIU9A99pbSdoGVmhoA2oSy2oAZHvC3tiducGenHC_YiytDHRJJyk73_w",
+    "site": "s_RustRustRustRustRust01",
+    "v": 1
+  },
+  "signed": {
+    "sig": "jkXzBVkm9aJip0mTcTXxHqr6P8lYnFUOBFTEMfPV16QyxIQnRMPS2CEZA4ifPgtfFAPvFItAniXcrJgqkbiBVw",
+    "text": "topo-test-v1\nhello"
+  },
+  "site": "s_RustRustRustRustRust01",
+  "siteKey": "g3GVXOmQUVI0XHtcXFYQUPj9J9Kx6S5_Ioqp1dxeUNI",
+  "wrap": {
+    "alg": "P256-HKDF256-A256GCM",
+    "by": "u_RustOwnerRustOwner0001",
+    "ct": "wY9ZicnU9vZrXVJVDX8oX9-cu22UoYCRjPkuO4k5_ATxbz4RKttjy5mIXmV629vd",
+    "ctx": "site:s_RustRustRustRustRust01|epoch:1|user:m_0123456789abcdef012345",
+    "epk": "BLH_GMUrm_Mu-DYhILEEP4RvYxKQVZrhCG3-Rp8SkUNuEQYXzpNN8D0AvobqNfTRRsRYi9HE7DeirYuD4uHLinc",
+    "iv": "rGyqF9DLdYDGV39L",
+    "salt": "DxWBJBvvzFeZLFW8oiAJow",
+    "sig": "zNccvVqAVloMDVMmmTfqmrtxMvTi-rhERRSpddnIGVZG9rXg7f42SeVQOVOKaLd6mCOUsFPmp6wMMltNd21FOw",
+    "to": "oW7H5dZ-xT9yOKNtkHGwzG",
+    "v": 1
+  }
+}

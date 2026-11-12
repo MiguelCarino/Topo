@@ -58,20 +58,20 @@ window.addEventListener('load', () => { setTimeout(async () => {
     state.settings.advanced = true; applyProfile();
 
     // ---- 1. The format ----
-    ok('the document version is 18', DOC_VERSION === 18);
+    ok('the document version is 19 (v19: the log\'s decision kind)', DOC_VERSION === 19);
     const v17 = { v: 17, providers: [{ id: 'p1', name: 'ISP' }, { id: 'p2', name: 'IT' }],
       nodes: [N('a', 'router', { provider: 'p2' }), N('b', 'pc')], links: [{ id: 'l', source: 'a', target: 'b', provider: 'p1' }],
       groups: [{ id: 'g', name: 'G', kind: 'room', provider: 'p1' }] };
     const frozen = JSON.stringify(v17);
     const m = migrateDoc(v17);
-    ok('v17 -> v18 lifts provider into a list of one, everywhere, input untouched', m.doc.v === 18 && m.from === 17 && JSON.stringify(v17) === frozen
+    ok('v17 -> v18 lifts provider into a list of one, everywhere, input untouched (then v19)', m.doc.v === 19 && m.from === 17 && JSON.stringify(v17) === frozen
        && show(m.doc.nodes[0].providers) === '["p2"]' && !('provider' in m.doc.nodes[0]) && !('providers' in m.doc.nodes[1])
        && show(m.doc.links[0].providers) === '["p1"]' && show(m.doc.groups[0].providers) === '["p1"]', show(m.doc));
     ok('migrating twice gives the same document', show(migrateDoc(JSON.parse(frozen)).doc) === show(m.doc));
     open(v17);
     const s1 = JSON.parse(JSON.stringify(serializeDoc()));
     ok('saved: providers lists, no provider key, none where none', show(s1.nodes[0].providers) === '["p2"]' && !('providers' in s1.nodes[1])
-       && !/"provider"/.test(show(s1)) && s1.v === 18, show(s1.nodes));
+       && !/"provider"/.test(show(s1)) && s1.v === 19, show(s1.nodes));
     open({ v: DOC_VERSION, providers: PV.map((p) => Object.assign({}, p)), nodes: [N('a', 'router', { provider: 'pT' }), N('b', 'router', { providers: ['pX', 'pI', 'ghost', 'pI'] })], links: [] });
     ok('a leftover provider at v18 is still read, as a list of one', show(getNode('a').providers) === '["pT"]' && !('provider' in getNode('a')));
     ok('a list is kept in doc.providers\' order, repeats and unknown ids dropped', show(getNode('b').providers) === '["pI","pX"]', show(getNode('b').providers));

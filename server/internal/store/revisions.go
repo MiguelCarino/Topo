@@ -99,6 +99,21 @@ func Prune(ctx context.Context, tx *sql.Tx, b Blobs, site string, head int64, ke
 	if err := rows.Err(); err != nil {
 		return false, err
 	}
+	// The base of a visit copy still waiting stays: an owner reviews the
+	// copy three-way against it (D154).
+	held, err := visitBasesHeld(ctx, tx, site)
+	if err != nil {
+		return false, err
+	}
+	if len(held) > 0 {
+		kept := cands[:0]
+		for _, c := range cands {
+			if !held[c.n] {
+				kept = append(kept, c)
+			}
+		}
+		cands = kept
+	}
 	var drop []int64
 	var freed int64
 	for _, c := range cands {

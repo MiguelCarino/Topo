@@ -15,7 +15,10 @@
 # connect-src gains Tauri's IPC origins (ipc: on macOS and Linux,
 # http://ipc.localhost on Windows). The zip never gets them, because
 # *.localhost is loopback in a browser. It also adds intro.html (from
-# desktop/), the app's intro animation, which the window opens first.
+# desktop/), the app's intro animation, which the window opens first, and
+# alarm.html (from desktop/), the alarm card's window (step 7g), and
+# THIRD-PARTY.txt (from desktop/, made by desktop/third-party.mjs): the
+# licences of the Rust crates and Go modules the app is built from.
 #
 # Portable to macOS bash 3.2 and Git Bash: no arrays past the basics, no
 # sed -i, no GNU-only flags.
@@ -61,6 +64,8 @@ if [ "$DESKTOP" = 1 ]; then
     sed "s|$CSP_FROM|$CSP_TO|" "$OUT/index.html" > "$OUT/index.html.tmp"
     mv "$OUT/index.html.tmp" "$OUT/index.html"
     cp "$SRC/desktop/intro.html" "$OUT/intro.html"
+    cp "$SRC/desktop/alarm.html" "$OUT/alarm.html"
+    cp "$SRC/desktop/THIRD-PARTY.txt" "$OUT/THIRD-PARTY.txt"
 fi
 
 fail=0
@@ -92,6 +97,14 @@ while IFS= read -r f; do
         cmp -s "$f" "$SRC/desktop/intro.html" || bad "intro.html differs from desktop/intro.html"
         continue
     fi
+    if [ "$DESKTOP" = 1 ] && [ "$rel" = alarm.html ]; then
+        cmp -s "$f" "$SRC/desktop/alarm.html" || bad "alarm.html differs from desktop/alarm.html"
+        continue
+    fi
+    if [ "$DESKTOP" = 1 ] && [ "$rel" = THIRD-PARTY.txt ]; then
+        cmp -s "$f" "$SRC/desktop/THIRD-PARTY.txt" || bad "THIRD-PARTY.txt differs from desktop/THIRD-PARTY.txt"
+        continue
+    fi
     cmp -s "$f" "$SRC/$rel" || bad "$rel differs from the source"
 done <<EOF_FILES
 $(find "$OUT" -type f)
@@ -104,9 +117,19 @@ if [ "$DESKTOP" = 1 ]; then
     m="$(grep -o "$CSP_FROM" "$SRC/index.html" | wc -l | tr -d ' ' || true)"
     [ "$m" = 1 ] || bad "the source CSP has connect-src 'self'; $m times, not once"
     [ -e "$OUT/intro.html" ] || bad "the desktop intro was not staged"
+    [ -e "$OUT/alarm.html" ] || bad "the alarm card was not staged"
+    [ -s "$OUT/THIRD-PARTY.txt" ] || bad "the third-party licences were not staged"
+    # The card's own loads are staged too (its fonts).
+    for ref in $(grep -oE '(src|href)="[^"]*"' "$OUT/alarm.html" | sed -E 's/^(src|href)="//; s/"$//' | sort -u); do
+        case "$ref" in ''|\#*|*:*|//*) continue ;; esac
+        path="${ref%%\?*}"
+        [ -e "$OUT/$path" ] || bad "alarm.html needs $ref, which is not staged"
+    done
 else
     cmp -s "$OUT/index.html" "$SRC/index.html" || bad "index.html is not the website's"
     [ ! -e "$OUT/intro.html" ] || bad "the zip got the desktop intro"
+    [ ! -e "$OUT/alarm.html" ] || bad "the zip got the alarm card"
+    [ ! -e "$OUT/THIRD-PARTY.txt" ] || bad "the zip got the app's third-party list"
 fi
 
 # 5. No script or stylesheet (or icon, preload, manifest) from another site.

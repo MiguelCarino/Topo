@@ -261,14 +261,20 @@ func Render(kind, lang string, d Data) (*Message, error) {
 		return t(base)
 	}
 
-	subject := pick(kind + ".subject")
+	subjectKey := kind + ".subject"
 	bodyKey := kind + ".body"
 	switch {
+	case kind == "visit-recorded" && (v["reason"] == "approved" || v["reason"] == "rejected"):
+		// The provider is told what the owner decided on their visit
+		// (docs/SCOPE.md D153, D154).
+		subjectKey = "visit-recorded." + v["reason"] + ".subject"
+		bodyKey = "visit-recorded." + v["reason"] + ".body"
 	case kind == "member-joined" && v["reason"] == "keys":
 		bodyKey = "member-joined.keys.body"
 	case kind == "visit-recorded" && v["n"] != "" && v["n"] != "1":
 		bodyKey = "visit-recorded.many"
 	}
+	subject := pick(subjectKey)
 	body := pick(bodyKey)
 	action, button := t("action.open"), t("button.open")
 	if buttonKinds[kind] {

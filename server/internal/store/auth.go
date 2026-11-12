@@ -421,6 +421,8 @@ func (s *Store) Housekeep(ctx context.Context, now int64, l HousekeepLimits) ([]
 			{"DELETE FROM invite_sends WHERE at < ?", []any{now - day}},
 			{"DELETE FROM outbox WHERE sent = -2 AND created < ?", []any{now - 3600*1000}},
 			{"DELETE FROM oauth_states WHERE created < ?", []any{now - 10*60*1000}},
+			// A decided visit copy its provider never came back for (D154).
+			{"DELETE FROM visit_copies WHERE state <> 'waiting' AND decided_at < ?", []any{now - 90*day}},
 			{"DELETE FROM outbox WHERE sent IS NOT NULL AND sent <> -2 AND created < ?", []any{now - 7*day}},
 			// A file no waiting row names any more (its rows were deleted
 			// with an invite or a site, or the worker stopped between the
@@ -431,6 +433,11 @@ func (s *Store) Housekeep(ctx context.Context, now int64, l HousekeepLimits) ([]
 			if _, err := tx.ExecContext(ctx, st.q, st.args...); err != nil {
 				return err
 			}
+		}
+		// Folded records after 30 days, statistics past their site's
+		// retention (step 7h, D159, D162).
+		if err := HousekeepRecords(ctx, tx, now); err != nil {
+			return err
 		}
 		rows, err := tx.QueryContext(ctx, "DELETE FROM sessions WHERE expires <= ? OR last_seen + ? <= ? RETURNING id", now, l.SessionIdleMs, now)
 		if err != nil {
