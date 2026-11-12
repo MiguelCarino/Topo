@@ -1,5 +1,25 @@
 Topo for working offline: the same editor as https://topo.carino.systems/, as a desktop app or as a folder to open in a browser.
 
+## New in 0.0.3
+
+There was no 0.0.2: this release follows 0.0.1.
+
+
+- **Safer merges.** A part sent to a provider is kept until its copy comes back or its report is closed, however many are out, so every copy back merges against what was sent. Two providers' new devices are never joined by name alone: the review asks, with Add as new as the answer if you do nothing. New records get ids that two PCs cannot both make.
+- **Every visit waits for the owner.** A provider's copy back (by link, file, or on a Topo server) waits in **Visits waiting** until an owner reviews it: apply or reject the changes, and say whether the visit succeeded. On a Topo server a provider no longer saves versions of the site; their visit is uploaded as a copy for the owners. Providers on Topo 0.0.1 must update to keep working with a 0.0.3 server.
+- **Connect to a Topo server** (Settings): the app's own window keeps networks on a Topo server, this PC's or another's, with the email sign-in. A server that signs its own certificate is checked once by its fingerprint and pinned.
+- **Add this computer** (the Nodes panel and Settings): this PC, its network cards and their subnets, read from the PC alone and added through the Import… review.
+- **Screen lock** (Settings): Topo saves and covers the screen after 30 minutes without use (Off or another time); a PIN or the server sign-in unlocks it. It hides an unattended screen; it is not encryption.
+- **Monitor from this PC** (Settings, off as shipped): the app asks the devices you mark "are you answering?" (ping, TCP, HTTP(S), DNS, SMTP, DICOM C-ECHO, NTP, RTSP, SIP, HL7 MLLP, IPP, IMAP, POP), one fixed request each, and keeps how long they take. It never scans, discovers, logs in or sends a message. Offered with the system tray and Open Topo at sign-in so it goes on with the window closed. Statistics are kept 360 days on this PC (or Off).
+- **Issues and alarms.** A device that stops answering becomes an issue in Problems until someone acknowledges it, reports it or marks it expected. **Show alarms on this PC** (off as shipped) adds a full-screen card with a short chime and a system notification; on Wayland the card may not stay above other windows, so the notification always goes too. Nothing is sent by email, SMS or push.
+- **Site monitors on a Topo server.** An owner can make a PC the site's monitor: it keeps checking and reporting with no one signed in, and every signed-in page, the website too, sees the status and the issues. Owners revoke it in Members.
+- **Monitor during this visit** (provider mode): checks only the provider's devices for the visit, and Record visit adds the figures to the visit report.
+- **Monitoring report** (the file menu): availability against a target with how much was measured, response times, outages with MTTR and MTBF, and the provider's report, through the print preview with CSV.
+- **The welcome**: a few skippable questions the first time Topo starts; Settings, **Run the welcome again**.
+- **The Mac app icon** sits on the map's blueprint blue in the Dock, the size of its neighbours.
+- Files are now document version 19. Topo 0.0.1 opens them read-only.
+- Built and tested on Linux. The Windows and macOS builds of the new desktop pieces (ICMP, notifications, the keychain, This computer's readers, Open Topo at sign-in) were not run on those systems before this release.
+
 ## Which file
 
 The architecture is in each file name: `x64`, `amd64` or `x86_64` is for Intel and AMD processors, `arm64` or `aarch64` for Arm (Apple silicon, Windows on Arm, Arm Linux).

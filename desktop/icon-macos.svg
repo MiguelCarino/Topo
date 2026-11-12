@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- The macOS app icon (builds.yml makes icon.icns from it): the mark of
+       logo.svg, unchanged, on the map's blueprint blue (#1b4f8c, css/app.css
+       .map-blue) in Apple's icon grid: an 824 px rounded square, 100 px in
+       from each edge, so the Dock draws it the size of its neighbours. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#1b4f8c"/>
+  <svg x="202" y="202" width="620" height="620" viewBox="0 0 100 100">
+    <path d="M 81.07 25.82 A 34.81 34.81 0 1 0 81.07 74.18" fill="none" stroke="#eab308" stroke-width="16.38" stroke-linecap="butt"/>
+    <g transform="translate(36.030 30.000) scale(1.66667)" fill="none" stroke="#eab308" stroke-width="3.0" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 5L5 18h14z"/>
+      <circle cx="12" cy="5" r="3" fill="#eab308"/>
+      <circle cx="5" cy="18" r="3" fill="#eab308"/>
+      <circle cx="19" cy="18" r="3" fill="#eab308"/>
+    </g>
+  </svg>
+</svg>
