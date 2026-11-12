@@ -68,7 +68,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- The website ----
     ok('on the website there is no host', !window.__TAURI__);
     ok('…nothing is hooked: js/server.js keeps its own fetch', !T._hooks.force && T._hooks.fetch === null && T._hooks.EventSource === null);
-    openSettings(); await settle();
+    openSettings('server'); await settle();
     ok('…and Settings has no "Connect to a Topo server"', el('setDcSec').hidden === true);
     closeSettings();
 
@@ -125,7 +125,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
     // ---- Not connected ----
     await restart();
-    openSettings(); await settle();
+    openSettings('server'); await settle();
     ok('the section shows in the app', !el('setDcSec').hidden && el('setDcHead').textContent === 'Connect to a Topo server');
     ok('…not connected: the networks stay on this PC, the address field', /Not connected/.test(el('setDcStatus').textContent) && !el('setDcForm').hidden && el('setDcOn').hidden && el('setDcCompare').hidden);
     ok('…and nothing is hooked yet', !T._hooks.force && T.state.status === 'off');
@@ -173,7 +173,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     await restart();
     ok('after the reload the hooks are the app\'s', T._hooks.force === true && T._hooks.origin === LAN && T._hooks.fetch === DC.hostFetch && T._hooks.EventSource === DC.HostEventSource);
     ok('it opens signed out, through the app', T.state.status === 'signed-out' && calls.some((c) => c.cmd === 'client_request' && c.args.path === '/api/health' && c.args.method === 'GET'), T.state.status);
-    openSettings(); await settle();
+    openSettings('server'); await settle();
     ok('Settings: connected, Sign in, the pinned fingerprint, Disconnect', /Connected\. Sign in/.test(el('setDcStatus').textContent) && !el('setDcSignIn').hidden
       && el('setDcAddr').textContent === LAN && el('setDcPin').textContent === FP && !el('setDcDisconnect').hidden && el('setDcForm').hidden);
     closeSettings();
@@ -194,7 +194,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const id = claimDocument('Office', null);
     await TopoServerUI.putOnServer(id);
     ok('a network put on the server through the app', Y.rec(id) && Y.rec(id).baseN === 1 && Y.cardSync(id).state === 'synced' && fake.state.sites.get(Y.rec(id).siteId).revs.length === 1);
-    openSettings(); await settle();
+    openSettings('server'); await settle();
     ok('Settings: connected and signed in as the owner', /signed in as owner@example\.test/.test(el('setDcStatus').textContent) && el('setDcSignIn').hidden);
     for (const theme of ['gold', 'color']) {
       root.setAttribute('data-carino-theme', theme);
@@ -295,7 +295,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     el('topoToast').textContent = '';
     try { await T.api('GET', '/api/me'); } catch (e) { /* again */ }
     ok('…only once', DC.state.told === true && el('topoToast').textContent === '');
-    openSettings(); await settle();
+    openSettings('server'); await settle();
     ok('Settings says why, and offers to check it again', /certificate changed since this window connected/.test(el('setDcStatus').textContent) && el('setDcStatus').classList.contains('ds-err')
       && !el('setDcAgain').hidden && el('setDcSignIn').hidden);
     reloads = 0;
@@ -308,7 +308,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('after the reload: still signed in (the same server keeps the session)', await until(() => T.state.status === 'ready'), T.state.status);
 
     // ---- Disconnect ----
-    openSettings(); await settle();
+    openSettings('server'); await settle();
     const prev = setDialogResponder(() => false);
     el('setDcDisconnect').click(); await wait(120);
     ok('Disconnect asks first; No keeps it', !calls.some((c) => c.cmd === 'client_disconnect') && host.url === LAN);
@@ -354,7 +354,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const n0 = reqs();
     await wait(400);
     ok('…and not retried on its own', reqs() === n0, `${reqs() - n0} more requests`);
+    // The toast sends the person to Settings: the gear opens at Topo server
+    // over the kept tab while the certificate waits for a decision (D362).
+    try { sessionStorage.setItem('topo.settings.tab', 'general'); } catch (e) { /* none */ }
     openSettings(); await settle();
+    ok('the gear opens Settings at Topo server while the certificate waits (over the kept tab)', el('setTab-server').getAttribute('aria-selected') === 'true'
+      && !el('setPanel-server').hidden && !el('setDcAgain').hidden, document.querySelector('#settingsDialog .set-tab[aria-selected="true"]')?.dataset.tab);
+    closeSettings(); await settle();
+    openSettings('server'); await settle();
     ok('Settings says the certificate cannot be checked, and offers to check it again', /cannot be checked any more/.test(el('setDcStatus').textContent) && !/does not answer/.test(el('setDcStatus').textContent)
       && el('setDcStatus').classList.contains('ds-err') && !el('setDcAgain').hidden);
     reloads = 0;
@@ -381,7 +388,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     try { sessionStorage.removeItem('topo-desktop-client-reloaded'); } catch (e) { /* fine */ }
     await restart();
     setLocale('es'); applyLocale('es'); await settle();
-    openSettings(); await settle();
+    openSettings('server'); await settle();
     ok('Spanish', el('setDcHead').textContent === 'Conectar a un servidor Topo' && el('setDcConnect').textContent === 'Conectar' && /^No conectado/.test(el('setDcStatus').textContent),
       el('setDcHead').textContent + ' / ' + el('setDcStatus').textContent);
     ok('an error code in Spanish', DC.dcErrText('needs-https').startsWith('El servidor de otro PC necesita https'));

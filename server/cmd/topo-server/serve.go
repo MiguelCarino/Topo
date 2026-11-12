@@ -107,7 +107,15 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func
 		cfg.PublicURL = &url.URL{Scheme: cfg.PublicURL.Scheme, Host: addr}
 	}
 
-	mailer, err := mail.New(cfg, log, mail.Options{})
+	// A server only this computer reaches that sends no email keeps sign-in
+	// codes for the desktop app that set it up (D358).
+	var codes *mail.CodeBox
+	if cfg.LocalCodes() {
+		codes = mail.NewCodeBox(nil)
+	} else if cfg.LocalCodeKey != "" {
+		log.Warn("TOPO_LOCAL_CODE_KEY is used only by a server only this computer reaches with TOPO_MAIL=log: ignored")
+	}
+	mailer, err := mail.New(cfg, log, mail.Options{Codes: codes})
 	if err != nil {
 		ln.Close()
 		return err
@@ -125,7 +133,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, ready func
 	baseCtx, cancelBase := context.WithCancel(context.Background())
 	defer cancelBase()
 	backups := newBackupEngine(cfg, st, key, log, worker.Wake)
-	handler := api.New(api.Deps{Cfg: cfg, Store: st, App: app, Log: log, Version: version, Build: build, Key: key, Wake: worker.Wake, Hub: events, Backups: backups})
+	handler := api.New(api.Deps{Cfg: cfg, Store: st, App: app, Log: log, Version: version, Build: build, Key: key, Wake: worker.Wake, Hub: events, Backups: backups, LocalCodes: codes})
 
 	// The mail worker and housekeeping stop with the base context; serve
 	// waits for them (an in-flight send finishes) before closing the store.

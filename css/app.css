@@ -3022,9 +3022,38 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
     .dlg-parts .dlg-section input { margin-top: 0; }
 }
 
-/* Settings (js/settings.js): three sections, each change kept at once. */
-.modal.topo-settings { max-width: 34rem; }
-.topo-settings .set-body { display: flex; flex-direction: column; gap: 18px; max-height: min(70vh, 640px); overflow-y: auto; }
+/* Settings (js/settings.js): section tabs as the navbar's About window
+   (D361): the tabs down the side, one panel scrolling beside them; on a
+   phone the tabs are a row across the top that scrolls sideways inside
+   itself. A fixed height, so changing tab does not make the dialog jump.
+   Each change is kept at once. */
+.modal.topo-settings { max-width: 48rem; height: min(90vh, 640px); max-height: 100%; }
+.topo-settings .set-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 11.5rem minmax(0, 1fr); padding: 0; overflow: hidden; }
+.topo-settings .set-tabs { display: flex; flex-direction: column; gap: 4px; padding: 14px 8px; border-right: 1px solid var(--border); overflow-y: auto; min-height: 0; }
+.topo-settings .set-tab { display: block; width: 100%; min-height: 40px; padding: 9px 12px; text-align: left; border: 0; border-left: 3px solid transparent; border-radius: 8px;
+    background: transparent; color: var(--text-sec); font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1.25; cursor: pointer; overflow-wrap: anywhere; }
+.topo-settings .set-tab:hover { color: var(--text); background: var(--accent-faint); }
+.topo-settings .set-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.topo-settings .set-tab[aria-selected="true"] { color: var(--text); background: var(--accent-faint); border-left-color: var(--accent); }
+.topo-settings .set-tab[hidden] { display: none; }
+.topo-settings .set-panels { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
+.topo-settings .set-panel { display: flex; flex-direction: column; gap: 18px; outline: none; }
+.topo-settings .set-panel[hidden] { display: none; }
+@media (max-width: 640px) {
+    #settingsDialog.modal-scrim { padding: 8px; }
+    .modal.topo-settings { height: 100%; }
+    .topo-settings .set-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+    .topo-settings .set-tabs { flex-direction: row; gap: 2px; padding: 4px 8px; border-right: 0; border-bottom: 1px solid var(--border);
+        overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; }
+    .topo-settings .set-tabs::-webkit-scrollbar { display: none; }
+    .topo-settings .set-tab { width: auto; flex: none; min-height: 44px; padding: 8px 12px; white-space: nowrap; overflow-wrap: normal;
+        border-left: 0; border-bottom: 3px solid transparent; border-radius: 8px 8px 0 0; }
+    .topo-settings .set-tab[aria-selected="true"] { border-bottom-color: var(--accent); }
+    .topo-settings .set-panels { padding: 14px 16px; }
+}
+@media (max-width: 900px), (pointer: coarse) {
+    .topo-settings .set-tab { min-height: 44px; }
+}
 .topo-settings .set-sec { display: flex; flex-direction: column; gap: 10px; }
 .topo-settings .set-sec + .set-sec { border-top: 1px solid var(--border); padding-top: 16px; }
 .topo-settings .set-head { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-sec); }
@@ -3919,6 +3948,13 @@ html.topo-locked body { overflow: hidden; }
 .topo-welcome .wl-foot #wlNext { margin-left: auto; }
 .topo-welcome .wl-foot .btn, .topo-welcome #wlHandoff .btn, .topo-welcome .modal-x { min-height: 44px; min-width: 44px; }
 .topo-welcome .wl-foot .btn[hidden] { display: none; }
+/* Setup's server steps (D353): the message under a step, an address or a
+   fingerprint that wraps anywhere, the email server's fields for other PCs. */
+.topo-welcome .wl-msg.wl-err { color: var(--err); font-weight: 600; }
+.topo-welcome .wl-mono { font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; overflow-wrap: anywhere; word-break: break-all; }
+.topo-welcome .wl-smtp { display: flex; flex-direction: column; gap: 10px; padding-left: 12px; border-left: 2px solid var(--accent-dim); }
+.topo-welcome .wl-smtp[hidden] { display: none; }
+.topo-welcome .wl-foot .btn:disabled { opacity: 0.6; cursor: progress; }
 @media (max-width: 480px) {
     .modal-scrim#welcomeDialog { padding: 8px; }
     .topo-welcome .wl-body { max-height: calc(100dvh - 150px); }

@@ -767,7 +767,7 @@ function onSectionClick(e) {
     const node = _sectionNode ? getNode(_sectionNode) : null;
     if (!node) return;
     const what = b.dataset.ck;
-    if (what === 'settings') { if (typeof openSettings === 'function') openSettings(); return; }
+    if (what === 'settings') { if (typeof openSettings === 'function') openSettings('setMonOn'); return; }
     if (what === 'report') { TopoReports.openMonitoringReport({ scope: 'node', id: node.id, period: 'week' }).catch((err) => console.warn('Monitoring report:', err)); return; }
     if (what === 'add') { editChecks(node, (list) => list.push(firstCheckFor(node))); return; }
     if (what === 'del') {

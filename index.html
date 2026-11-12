@@ -1428,372 +1428,399 @@
                         <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
                     </div>
                     <div class="modal-body set-body">
-                        <section class="set-sec" aria-labelledby="setMapHead">
-                            <h3 id="setMapHead" class="set-head" data-i18n>Map</h3>
-                            <label class="set-row">
-                                <input type="checkbox" id="setProviderHover">
-                                <span><span data-i18n>Show the provider on hover</span><br><span class="dlg-dim" data-i18n>Hovering over a device or a cable names who is responsible for it and how to reach them. Off by default.</span></span>
-                            </label>
-                            <label class="set-row">
-                                <input type="checkbox" id="setSubnetZones">
-                                <span><span data-i18n>Draw subnet zones</span><br><span class="dlg-dim" data-i18n>The shaded area round each subnet's devices.</span></span>
-                            </label>
-                            <div class="set-field">
-                                <label class="prop-lbl" for="setMapInk" data-i18n>Background</label>
-                                <select id="setMapInk" class="select">
-                                    <option value="" data-i18n>Light</option>
-                                    <option value="dark" data-i18n>Dark</option>
-                                    <option value="blue" data-i18n>Blueprint</option>
-                                </select>
+                        <!-- Section tabs, as the navbar's About window (D361): down the
+                             side, a scrolling row across the top on a phone. js/settings.js
+                             shows one panel, hides a tab whose sections are all hidden
+                             (the desktop-only ones on the website) and keeps the last tab
+                             for this browser tab (sessionStorage). -->
+                        <div class="set-tabs" role="tablist" aria-orientation="vertical" aria-labelledby="settingsTitle">
+                            <button type="button" class="set-tab" role="tab" id="setTab-general" aria-controls="setPanel-general" aria-selected="true" tabindex="0" data-tab="general" data-i18n>Map and reports</button>
+                            <button type="button" class="set-tab" role="tab" id="setTab-lock" aria-controls="setPanel-lock" aria-selected="false" tabindex="-1" data-tab="lock" data-i18n>Screen lock</button>
+                            <button type="button" class="set-tab" role="tab" id="setTab-server" aria-controls="setPanel-server" aria-selected="false" tabindex="-1" data-tab="server" data-i18n>Topo server</button>
+                            <button type="button" class="set-tab" role="tab" id="setTab-monitor" aria-controls="setPanel-monitor" aria-selected="false" tabindex="-1" data-tab="monitor" data-i18n>Monitoring</button>
+                            <button type="button" class="set-tab" role="tab" id="setTab-backup" aria-controls="setPanel-backup" aria-selected="false" tabindex="-1" data-tab="backup" data-i18n>Back-ups</button>
+                            <button type="button" class="set-tab" role="tab" id="setTab-setup" aria-controls="setPanel-setup" aria-selected="false" tabindex="-1" data-tab="setup" data-i18n>Setup</button>
+                        </div>
+                        <div class="set-panels">
+                            <div class="set-panel" role="tabpanel" id="setPanel-general" aria-labelledby="setTab-general" tabindex="-1">
+                                <section class="set-sec" aria-labelledby="setMapHead">
+                                    <h3 id="setMapHead" class="set-head" data-i18n>Map</h3>
+                                    <label class="set-row">
+                                        <input type="checkbox" id="setProviderHover">
+                                        <span><span data-i18n>Show the provider on hover</span><br><span class="dlg-dim" data-i18n>Hovering over a device or a cable names who is responsible for it and how to reach them. Off by default.</span></span>
+                                    </label>
+                                    <label class="set-row">
+                                        <input type="checkbox" id="setSubnetZones">
+                                        <span><span data-i18n>Draw subnet zones</span><br><span class="dlg-dim" data-i18n>The shaded area round each subnet's devices.</span></span>
+                                    </label>
+                                    <div class="set-field">
+                                        <label class="prop-lbl" for="setMapInk" data-i18n>Background</label>
+                                        <select id="setMapInk" class="select">
+                                            <option value="" data-i18n>Light</option>
+                                            <option value="dark" data-i18n>Dark</option>
+                                            <option value="blue" data-i18n>Blueprint</option>
+                                        </select>
+                                    </div>
+                                </section>
+                                <section class="set-sec" aria-labelledby="setReportHead">
+                                    <h3 id="setReportHead" class="set-head" data-i18n>Reports</h3>
+                                    <div class="set-field">
+                                        <label class="prop-lbl" for="setEngineer" data-i18n>Prepared by, unless the network says</label>
+                                        <input type="text" id="setEngineer" data-keys="words" class="input" maxlength="120" autocomplete="off" data-i18n-placeholder placeholder="Your name — your company">
+                                    </div>
+                                    <label class="set-row">
+                                        <input type="checkbox" id="setReportSummary">
+                                        <span data-i18n>Simple summary ticked to start</span>
+                                    </label>
+                                    <label class="set-row">
+                                        <input type="checkbox" id="setReportTechnical">
+                                        <span data-i18n>Technical details ticked to start</span>
+                                    </label>
+                                </section>
+                                <!-- Address history (js/trail.js): kept in this browser
+                                     only. Shown in every view (the owner, 2026-11-05):
+                                     the recording switch, and whether the Simple views'
+                                     device panel shows a short read-only history (off
+                                     unless ticked). -->
+                                <section class="set-sec" aria-labelledby="setHistoryHead">
+                                    <h3 id="setHistoryHead" class="set-head" data-i18n>History</h3>
+                                    <label class="set-row">
+                                        <input type="checkbox" id="setTrailRecording">
+                                        <span><span data-i18n>Remember how each device changes</span><br><span class="dlg-dim" data-i18n>Each time you back up a network or make a report, Topo notes each device's name, address and where it is plugged in. This stays in this browser. Turning it off stops new notes and keeps the old ones; to delete them, use Clear history on the network's card.</span></span>
+                                    </label>
+                                    <label class="set-row">
+                                        <input type="checkbox" id="setTrailSimple">
+                                        <span><span data-i18n>Show address history in Simple view</span><br><span class="dlg-dim" data-i18n>A few plain lines under the selected device: the addresses, names and sockets it had at earlier back-ups and reports. Read only. Off by default.</span></span>
+                                    </label>
+                                </section>
+                                <!-- Who reports a problem from this browser (js/incidents.js):
+                                     filled in on Report a problem, kept here only. -->
+                                <section class="set-sec" aria-labelledby="setReporterHead">
+                                    <h3 id="setReporterHead" class="set-head" data-i18n>Problem reports</h3>
+                                    <p class="dlg-dim set-note" data-i18n>Filled in when you report a problem. Kept in this browser; a report you send carries them.</p>
+                                    <div class="set-field">
+                                        <label class="prop-lbl" for="setReporterName" data-i18n>Your name</label>
+                                        <input type="text" id="setReporterName" data-keys="name" class="input" maxlength="120" autocomplete="name">
+                                    </div>
+                                    <div class="set-field">
+                                        <label class="prop-lbl" for="setReporterPhone" data-i18n>Your phone</label>
+                                        <input type="tel" id="setReporterPhone" data-keys="tel" class="input" maxlength="200" autocomplete="tel">
+                                    </div>
+                                    <div class="set-field">
+                                        <label class="prop-lbl" for="setReporterEmail" data-i18n>Your email</label>
+                                        <input type="email" id="setReporterEmail" data-keys="email" class="input" maxlength="200" autocomplete="email">
+                                    </div>
+                                </section>
                             </div>
-                        </section>
-                        <section class="set-sec" aria-labelledby="setReportHead">
-                            <h3 id="setReportHead" class="set-head" data-i18n>Reports</h3>
-                            <div class="set-field">
-                                <label class="prop-lbl" for="setEngineer" data-i18n>Prepared by, unless the network says</label>
-                                <input type="text" id="setEngineer" data-keys="words" class="input" maxlength="120" autocomplete="off" data-i18n-placeholder placeholder="Your name — your company">
+                            <div class="set-panel" role="tabpanel" id="setPanel-lock" aria-labelledby="setTab-lock" tabindex="-1" hidden>
+                                <!-- The idle lock (js/idlelock.js, D165, D169, D213-D222):
+                                     this PC's, never the document's; the website and
+                                     the desktop app alike. -->
+                                <section class="set-sec" id="setLockSec" aria-labelledby="setLockHead">
+                                    <h3 id="setLockHead" class="set-head" data-i18n>Screen lock</h3>
+                                    <p class="dlg-dim set-note" data-i18n>After this long without use, Topo saves, closes the open network and covers the screen until it is unlocked. For this PC only.</p>
+                                    <div class="set-field">
+                                        <label class="prop-lbl" for="setLockAfter" data-i18n>Lock after</label>
+                                        <select id="setLockAfter" class="select">
+                                            <option value="0" data-i18n>Off</option>
+                                            <option value="5" data-i18n>5 min</option>
+                                            <option value="15" data-i18n>15 min</option>
+                                            <option value="30" data-i18n>30 min</option>
+                                            <option value="60" data-i18n>60 min</option>
+                                            <option value="custom" data-i18n>Custom</option>
+                                        </select>
+                                    </div>
+                                    <div class="set-field" id="setLockCustomRow" hidden>
+                                        <label class="prop-lbl" for="setLockCustom" data-i18n>Minutes (1 to 1440)</label>
+                                        <input type="number" id="setLockCustom" data-keys="int" class="input" min="1" max="1440" step="1">
+                                    </div>
+                                    <p class="set-note" id="setLockPinState"></p>
+                                    <div id="setLockPinForm" hidden>
+                                        <div class="set-field">
+                                            <label class="prop-lbl" for="setLockPin1" data-i18n>New PIN (4 to 12 digits)</label>
+                                            <input type="password" id="setLockPin1" class="input" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="new-password">
+                                        </div>
+                                        <div class="set-field">
+                                            <label class="prop-lbl" for="setLockPin2" data-i18n>The same PIN again</label>
+                                            <input type="password" id="setLockPin2" class="input" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="new-password">
+                                        </div>
+                                        <p class="set-note lock-set-msg" id="setLockPinMsg" role="status" aria-live="polite"></p>
+                                        <div class="set-acts">
+                                            <button type="button" id="setLockPinSave" class="btn btn-primary" data-i18n>Save the PIN</button>
+                                            <button type="button" id="setLockPinCancel" class="btn" data-i18n>Cancel</button>
+                                        </div>
+                                    </div>
+                                    <div class="set-acts">
+                                        <button type="button" id="setLockPinSet" class="btn">Set a PIN…</button>
+                                        <button type="button" id="setLockPinRemove" class="btn" data-i18n hidden>Remove the PIN</button>
+                                        <button type="button" id="setLockNow" class="btn" data-i18n>Lock now</button>
+                                    </div>
+                                    <div class="set-note lock-set-note" id="setLockNoteRow" hidden>
+                                        <p id="setLockNote"></p>
+                                        <button type="button" id="setLockNoteOk" class="btn" data-i18n>OK</button>
+                                    </div>
+                                    <p class="dlg-dim set-note" data-i18n>Unlock with the PIN, or by signing in to your Topo server again with a code sent to your email. Each wrong PIN says how many tries are left, and after 10 only the sign-in unlocks. With no server to sign in to, the PIN can be forgotten from the fifth wrong try, which Settings then says, and after 10 each further try waits longer.</p>
+                                    <p class="dlg-dim set-note" data-i18n>The lock stops someone using a screen left unattended. It is not encryption: the networks stay in this browser as before, and anyone who can use this PC's account can read them with the browser's own tools. Without a PIN or a sign-in it only hides the screen.</p>
+                                </section>
                             </div>
-                            <label class="set-row">
-                                <input type="checkbox" id="setReportSummary">
-                                <span data-i18n>Simple summary ticked to start</span>
-                            </label>
-                            <label class="set-row">
-                                <input type="checkbox" id="setReportTechnical">
-                                <span data-i18n>Technical details ticked to start</span>
-                            </label>
-                        </section>
-                        <!-- Address history (js/trail.js): kept in this browser
-                             only. Shown in every view (the owner, 2026-11-05):
-                             the recording switch, and whether the Simple views'
-                             device panel shows a short read-only history (off
-                             unless ticked). -->
-                        <section class="set-sec" aria-labelledby="setHistoryHead">
-                            <h3 id="setHistoryHead" class="set-head" data-i18n>History</h3>
-                            <label class="set-row">
-                                <input type="checkbox" id="setTrailRecording">
-                                <span><span data-i18n>Remember how each device changes</span><br><span class="dlg-dim" data-i18n>Each time you back up a network or make a report, Topo notes each device's name, address and where it is plugged in. This stays in this browser. Turning it off stops new notes and keeps the old ones; to delete them, use Clear history on the network's card.</span></span>
-                            </label>
-                            <label class="set-row">
-                                <input type="checkbox" id="setTrailSimple">
-                                <span><span data-i18n>Show address history in Simple view</span><br><span class="dlg-dim" data-i18n>A few plain lines under the selected device: the addresses, names and sockets it had at earlier back-ups and reports. Read only. Off by default.</span></span>
-                            </label>
-                        </section>
-                        <!-- The idle lock (js/idlelock.js, D165, D169, D213-D222):
-                             this PC's, never the document's; the website and
-                             the desktop app alike. -->
-                        <section class="set-sec" id="setLockSec" aria-labelledby="setLockHead">
-                            <h3 id="setLockHead" class="set-head" data-i18n>Screen lock</h3>
-                            <p class="dlg-dim set-note" data-i18n>After this long without use, Topo saves, closes the open network and covers the screen until it is unlocked. For this PC only.</p>
-                            <div class="set-field">
-                                <label class="prop-lbl" for="setLockAfter" data-i18n>Lock after</label>
-                                <select id="setLockAfter" class="select">
-                                    <option value="0" data-i18n>Off</option>
-                                    <option value="5" data-i18n>5 min</option>
-                                    <option value="15" data-i18n>15 min</option>
-                                    <option value="30" data-i18n>30 min</option>
-                                    <option value="60" data-i18n>60 min</option>
-                                    <option value="custom" data-i18n>Custom</option>
-                                </select>
+                            <div class="set-panel" role="tabpanel" id="setPanel-server" aria-labelledby="setTab-server" tabindex="-1" hidden>
+                                <!-- Connect to a Topo server (js/desktopclient.js, D144):
+                                     the desktop app only. This window becomes a client
+                                     of a Topo server; every request goes through the
+                                     app (Rust), so the page's CSP is unchanged. Hidden
+                                     on the website and the offline zip. -->
+                                <section class="set-sec" id="setDcSec" aria-labelledby="setDcHead" hidden>
+                                    <h3 id="setDcHead" class="set-head" data-i18n>Connect to a Topo server</h3>
+                                    <p class="dlg-dim set-note" data-i18n>This window keeps networks on a Topo server and syncs with the other PCs that use it. Sign in with your email, as in a browser.</p>
+                                    <p class="set-note ds-status" id="setDcStatus" role="status" aria-live="polite"></p>
+                                    <div id="setDcForm">
+                                        <div class="set-field">
+                                            <label class="prop-lbl" for="setDcUrl" data-i18n>Server address</label>
+                                            <input type="text" id="setDcUrl" data-keys="code" class="input" maxlength="300" autocomplete="off" spellcheck="false" placeholder="https://192.168.1.20:7380">
+                                        </div>
+                                        <div class="set-acts">
+                                            <button type="button" id="setDcConnect" class="btn btn-primary" data-i18n>Connect</button>
+                                        </div>
+                                    </div>
+                                    <div class="dc-compare" id="setDcCompare" hidden>
+                                        <p class="set-note" data-i18n>This server signs its own certificate. Compare this fingerprint with the one the server shows (on the server PC: Settings, This PC as the server, or its log). Connect only if they are the same.</p>
+                                        <p class="set-note"><span data-i18n>Certificate fingerprint (SHA-256):</span> <code id="setDcFp" class="ds-code"></code></p>
+                                        <div class="set-acts">
+                                            <button type="button" id="setDcTrust" class="btn btn-primary" data-i18n>They are the same: connect</button>
+                                            <button type="button" id="setDcCancel" class="btn" data-i18n>Cancel</button>
+                                        </div>
+                                    </div>
+                                    <div id="setDcOn" hidden>
+                                        <p class="set-note"><span data-i18n>Server:</span> <code id="setDcAddr" class="ds-code"></code></p>
+                                        <p class="set-note" id="setDcPinRow" hidden><span data-i18n>Certificate fingerprint (SHA-256):</span> <code id="setDcPin" class="ds-code"></code></p>
+                                        <div class="set-acts">
+                                            <button type="button" id="setDcSignIn" class="btn btn-primary" data-i18n hidden>Sign in</button>
+                                            <button type="button" id="setDcAgain" class="btn" data-i18n hidden>Check the certificate again</button>
+                                            <button type="button" id="setDcDisconnect" class="btn" data-i18n>Disconnect</button>
+                                        </div>
+                                    </div>
+                                </section>
+                                <!-- This PC as the server (js/desktopserver.js, D113, D125):
+                                     the desktop app only, where the bundled topo-server
+                                     answers; hidden on the website and the offline zip.
+                                     As a service from startup, or only while Topo is open. -->
+                                <section class="set-sec" id="setDsSec" aria-labelledby="setDsHead" hidden>
+                                    <h3 id="setDsHead" class="set-head" data-i18n>This PC as the server</h3>
+                                    <p class="dlg-dim set-note" data-i18n>Other PCs on site sign in and sync with this one.</p>
+                                    <p class="dlg-dim set-note" id="setDsHow"></p>
+                                    <p class="set-note ds-status" id="setDsStatus" role="status" aria-live="polite"></p>
+                                    <ul class="ds-urls" id="setDsUrls" hidden></ul>
+                                    <p class="set-note ds-fp" id="setDsFpRow" hidden><span data-i18n>Certificate fingerprint (SHA-256):</span> <code id="setDsFp" class="ds-code"></code><br><span class="dlg-dim" data-i18n>Each other PC's browser warns about the certificate once. Check that it shows this fingerprint, then go on to the page.</span></p>
+                                    <div class="set-acts">
+                                        <button type="button" id="setDsStart" class="btn btn-primary" data-i18n>Start</button>
+                                        <button type="button" id="setDsHere" class="btn btn-primary" data-i18n hidden>Open it in this window</button>
+                                        <button type="button" id="setDsStop" class="btn" data-i18n hidden>Stop</button>
+                                    </div>
+                                    <label class="set-row" id="setDsEnabledRow">
+                                        <input type="checkbox" id="setDsEnabled">
+                                        <span data-i18n>Start it when Topo opens</span>
+                                    </label>
+                                    <div class="set-field">
+                                        <label class="prop-lbl" for="setDsWho" data-i18n>Who can open it</label>
+                                        <select id="setDsWho" class="select">
+                                            <option value="pc" data-i18n>This PC only</option>
+                                            <option value="lan" data-i18n>Other PCs on this network</option>
+                                        </select>
+                                    </div>
+                                    <div class="set-field" id="setDsShareRow" hidden>
+                                        <label class="prop-lbl" for="setDsShare" data-i18n>Address to give people</label>
+                                        <select id="setDsShare" class="select">
+                                            <option value="" data-i18n>Automatic</option>
+                                        </select>
+                                    </div>
+                                    <p class="dlg-dim set-note" id="setDsLanNote" data-i18n hidden>Other PCs reach it over https with a certificate this PC makes. Give this PC a fixed address (a DHCP reservation): the address is in every sign-in link. The firewall may ask to let Topo server in.</p>
+                                    <div class="set-field">
+                                        <label class="prop-lbl" for="setDsPort" data-i18n>Port</label>
+                                        <input type="number" id="setDsPort" data-keys="int" class="input" min="1024" max="65535" inputmode="numeric" autocomplete="off">
+                                    </div>
+                                    <div class="set-field">
+                                        <label class="prop-lbl" for="setDsOwner" data-i18n>Owner's email</label>
+                                        <input type="email" id="setDsOwner" data-keys="email" class="input" maxlength="200" autocomplete="off">
+                                    </div>
+                                    <div class="set-field">
+                                        <label class="prop-lbl" for="setDsMail" data-i18n>Sign-in codes</label>
+                                        <select id="setDsMail" class="select">
+                                            <option value="smtp" data-i18n>Sent by email (SMTP)</option>
+                                            <option value="none" data-i18n>No email: Setup gets the sign-in codes (this PC only)</option>
+                                        </select>
+                                    </div>
+                                    <div class="ds-smtp" id="setDsSmtp">
+                                        <div class="set-field">
+                                            <label class="prop-lbl" for="setDsSmtpHost" data-i18n>SMTP server</label>
+                                            <input type="text" id="setDsSmtpHost" data-keys="code" class="input" maxlength="200" autocomplete="off" spellcheck="false" placeholder="smtp.office365.com">
+                                        </div>
+                                        <div class="set-field">
+                                            <label class="prop-lbl" for="setDsSmtpPort" data-i18n>SMTP port</label>
+                                            <input type="number" id="setDsSmtpPort" data-keys="int" class="input" min="1" max="65535" inputmode="numeric" autocomplete="off">
+                                        </div>
+                                        <div class="set-field">
+                                            <label class="prop-lbl" for="setDsSmtpSec" data-i18n>Security</label>
+                                            <select id="setDsSmtpSec" class="select">
+                                                <option value="starttls">STARTTLS</option>
+                                                <option value="tls">TLS</option>
+                                                <option value="none" data-i18n>None (a relay on this PC)</option>
+                                            </select>
+                                        </div>
+                                        <div class="set-field">
+                                            <label class="prop-lbl" for="setDsSmtpUser" data-i18n>SMTP user</label>
+                                            <input type="text" id="setDsSmtpUser" data-keys="code" class="input" maxlength="200" autocomplete="off" spellcheck="false">
+                                        </div>
+                                        <div class="set-field">
+                                            <label class="prop-lbl" for="setDsSmtpPass" data-i18n>SMTP password</label>
+                                            <input type="password" id="setDsSmtpPass" class="input" maxlength="500" autocomplete="new-password">
+                                        </div>
+                                        <div class="set-field">
+                                            <label class="prop-lbl" for="setDsSmtpFrom" data-i18n>Send from</label>
+                                            <input type="text" id="setDsSmtpFrom" data-keys="email" class="input" maxlength="200" autocomplete="off" spellcheck="false" placeholder="Topo &lt;topo@example.com&gt;">
+                                        </div>
+                                    </div>
+                                    <div class="set-acts">
+                                        <button type="button" id="setDsService" class="btn btn-primary" data-i18n hidden>Run it in the background from startup</button>
+                                        <button type="button" id="setDsSave" class="btn" data-i18n>Save</button>
+                                        <button type="button" id="setDsRemove" class="btn" data-i18n hidden>Stop using this PC as the server</button>
+                                    </div>
+                                    <details class="ds-logbox">
+                                        <summary data-i18n>Log</summary>
+                                        <pre id="setDsLog" class="ds-log" tabindex="0"></pre>
+                                    </details>
+                                </section>
                             </div>
-                            <div class="set-field" id="setLockCustomRow" hidden>
-                                <label class="prop-lbl" for="setLockCustom" data-i18n>Minutes (1 to 1440)</label>
-                                <input type="number" id="setLockCustom" data-keys="int" class="input" min="1" max="1440" step="1">
+                            <div class="set-panel" role="tabpanel" id="setPanel-monitor" aria-labelledby="setTab-monitor" tabindex="-1" hidden>
+                                <!-- Monitor from this PC (js/checks.js, D131, step 7f): the
+                                     desktop app only, off as shipped. The app asks each
+                                     device and service with an answer check one question
+                                     and keeps the statistics on this PC. Hidden on the
+                                     website and the offline zip, which never probe. -->
+                                <section class="set-sec" id="setMonSec" aria-labelledby="setMonHead" hidden>
+                                    <h3 id="setMonHead" class="set-head" data-i18n>Monitor from this PC</h3>
+                                    <p class="dlg-dim set-note" data-i18n>Asks each device and service with an answer check one question, "are you answering?", from this PC, and keeps how long they take. It never scans or discovers anything, and never reads a device's settings.</p>
+                                    <label class="set-row">
+                                        <input type="checkbox" id="setMonOn">
+                                        <span data-i18n>Monitor from this PC</span>
+                                    </label>
+                                    <div class="mon-offer" id="setMonOffer" hidden>
+                                        <p class="set-note" id="setMonOfferText"></p>
+                                        <label class="set-row">
+                                            <input type="checkbox" id="setMonOfferTray" checked>
+                                            <span data-i18n>Keep Topo in the system tray when the window is closed</span>
+                                        </label>
+                                        <label class="set-row">
+                                            <input type="checkbox" id="setMonOfferAuto" checked>
+                                            <span data-i18n>Open Topo at sign-in</span>
+                                        </label>
+                                        <div class="set-acts">
+                                            <button type="button" id="setMonOfferGo" class="btn btn-primary" data-i18n>Turn on</button>
+                                            <button type="button" id="setMonOfferCancel" class="btn" data-i18n>Cancel</button>
+                                        </div>
+                                    </div>
+                                    <p class="set-note ds-status" id="setMonStatus" role="status" aria-live="polite"></p>
+                                    <div id="setMonOnBox" class="mon-on" hidden>
+                                        <button type="button" id="setMonOther" class="btn" data-i18n hidden>Monitor this network instead</button>
+                                        <label class="set-row">
+                                            <input type="checkbox" id="setMonTray">
+                                            <span data-i18n>Keep Topo in the system tray when the window is closed</span>
+                                        </label>
+                                        <label class="set-row">
+                                            <input type="checkbox" id="setMonAuto">
+                                            <span data-i18n>Open Topo at sign-in</span>
+                                        </label>
+                                        <div class="set-field">
+                                            <label class="prop-lbl" for="setMonQuiet" data-i18n>Quiet the whole site (maintenance)</label>
+                                            <select id="setMonQuiet" class="select">
+                                                <option value="" data-i18n>Quiet for…</option>
+                                                <option value="1h" data-i18n>For 1 hour</option>
+                                                <option value="4h" data-i18n>For 4 hours</option>
+                                                <option value="morning" data-i18n>Until 08:00 tomorrow</option>
+                                                <option value="24h" data-i18n>For 24 hours</option>
+                                                <option value="end" data-i18n hidden>End the quiet</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="set-field">
+                                        <label class="prop-lbl" for="setMonKeep" data-i18n>Keep statistics</label>
+                                        <select id="setMonKeep" class="select">
+                                            <option value="0">Off</option>
+                                            <option value="30">30</option>
+                                            <option value="90">90</option>
+                                            <option value="180">180</option>
+                                            <option value="360">360</option>
+                                            <option value="720">720</option>
+                                            <option value="3650">3650</option>
+                                        </select>
+                                    </div>
+                                    <p class="dlg-dim set-note" id="setMonKeepSite" hidden></p>
+                                    <p class="dlg-dim set-note" data-i18n>Kept on this PC only: every check for 7 days, and hourly figures for as long as chosen here. Off keeps nothing; the states still show.</p>
+                                    <p class="dlg-dim set-note" data-i18n>On some desktops (Wayland among them) the tray icon may not show. Then Topo keeps checking only while its window is open.</p>
+                                    <!-- This PC as the site's monitor (js/monitors.js, step 7h):
+                                         the app, connected to a Topo server, on a network kept there. -->
+                                    <div class="set-sub" id="setSiteMon" hidden>
+                                        <h4 class="set-head" data-i18n>The site's monitor</h4>
+                                        <p class="set-note ds-status" id="setSiteMonStatus" role="status" aria-live="polite"></p>
+                                        <div id="setSiteMonGroups" class="site-mon-groups" hidden></div>
+                                        <div class="set-acts">
+                                            <button type="button" id="setSiteMonOn" class="btn btn-primary" data-i18n hidden>Make this PC the site's monitor</button>
+                                            <button type="button" id="setSiteMonOff" class="btn" data-i18n hidden>Stop being the site's monitor</button>
+                                        </div>
+                                    </div>
+                                    <!-- Show alarms on this PC (js/issues.js, desktop/alarm.html, step 7g) -->
+                                    <div class="set-sub" id="setAlarmBox" hidden>
+                                        <label class="set-row">
+                                            <input type="checkbox" id="setAlarmOn">
+                                            <span data-i18n>Show alarms on this PC</span>
+                                        </label>
+                                        <p class="dlg-dim set-note" data-i18n>When a device stops answering, a card covers every screen of this PC with its name, how long it has been down and what is behind it, with a short chime (the volume is left as it is), and a system notification goes out. It stays an open issue until someone acknowledges it, reports it or marks it expected. A device answering again is a small notification only.</p>
+                                        <p class="dlg-dim set-note" data-i18n>On Wayland a window cannot always stay above the others, and with several screens the card may show on one of them only: there the system notification is the one to rely on.</p>
+                                        <div class="set-acts">
+                                            <button type="button" id="setAlarmTest" class="btn" data-i18n>Test the alarm</button>
+                                        </div>
+                                    </div>
+                                </section>
                             </div>
-                            <p class="set-note" id="setLockPinState"></p>
-                            <div id="setLockPinForm" hidden>
-                                <div class="set-field">
-                                    <label class="prop-lbl" for="setLockPin1" data-i18n>New PIN (4 to 12 digits)</label>
-                                    <input type="password" id="setLockPin1" class="input" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="new-password">
-                                </div>
-                                <div class="set-field">
-                                    <label class="prop-lbl" for="setLockPin2" data-i18n>The same PIN again</label>
-                                    <input type="password" id="setLockPin2" class="input" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="new-password">
-                                </div>
-                                <p class="set-note lock-set-msg" id="setLockPinMsg" role="status" aria-live="polite"></p>
-                                <div class="set-acts">
-                                    <button type="button" id="setLockPinSave" class="btn btn-primary" data-i18n>Save the PIN</button>
-                                    <button type="button" id="setLockPinCancel" class="btn" data-i18n>Cancel</button>
-                                </div>
+                            <div class="set-panel" role="tabpanel" id="setPanel-backup" aria-labelledby="setTab-backup" tabindex="-1" hidden>
+                                <!-- A back-up folder (js/backupdir.js, D108): Chrome and
+                                     Edge only (the File System Access API); hidden
+                                     elsewhere, where Download a back-up stays a download. -->
+                                <section class="set-sec" id="setBackupSec" aria-labelledby="setBackupHead" hidden>
+                                    <h3 id="setBackupHead" class="set-head" data-i18n>Back-ups</h3>
+                                    <p class="set-note"><span data-i18n>Back-up folder:</span> <b id="setBackupDirName" class="set-folder"></b></p>
+                                    <div class="set-acts">
+                                        <button type="button" id="setBackupDirPick" class="btn">Choose a folder…</button>
+                                        <button type="button" id="setBackupDirStop" class="btn" data-i18n hidden>Stop using it</button>
+                                    </div>
+                                    <p class="dlg-dim set-note" data-i18n>Download a back-up saves there instead. Pick a OneDrive, Google Drive or Nextcloud folder and its own app uploads the files.</p>
+                                    <label class="set-row">
+                                        <input type="checkbox" id="setBackupDirAuto">
+                                        <span><span data-i18n>Also back up a network I change, once a day</span><br><span class="dlg-dim" data-i18n>A minute after your last edit, while the browser still lets Topo use the folder. Topo keeps the last day, then one a day for a week, one a week for a month and one a month for a year, and deletes only files it wrote.</span></span>
+                                    </label>
+                                </section>
                             </div>
-                            <div class="set-acts">
-                                <button type="button" id="setLockPinSet" class="btn">Set a PIN…</button>
-                                <button type="button" id="setLockPinRemove" class="btn" data-i18n hidden>Remove the PIN</button>
-                                <button type="button" id="setLockNow" class="btn" data-i18n>Lock now</button>
+                            <div class="set-panel" role="tabpanel" id="setPanel-setup" aria-labelledby="setTab-setup" tabindex="-1" hidden>
+                                <!-- Setup (js/welcome.js, D141-D143, D170, D353): its
+                                     questions again, on the website and in the app. -->
+                                <section class="set-sec" id="setWelcomeSec" aria-labelledby="setWelcomeHead">
+                                    <h3 id="setWelcomeHead" class="set-head" data-i18n>Setup</h3>
+                                    <p class="dlg-dim set-note" data-i18n>The questions Topo asks the first time: how it looks, the view, where networks are kept (in the app, connecting to a Topo server or making this PC the server), the screen lock and how to start.</p>
+                                    <div class="set-acts">
+                                        <button type="button" id="setWelcomeAgain" class="btn" data-i18n>Run the setup again</button>
+                                    </div>
+                                </section>
+                                <!-- This computer (js/thiscomputer.js, D166): the desktop
+                                     app only. This PC's own interfaces, read by the app and
+                                     added through the Import… review. -->
+                                <section class="set-sec" id="setTcSec" aria-labelledby="setTcHead" hidden>
+                                    <h3 id="setTcHead" class="set-head" data-i18n>This computer</h3>
+                                    <p class="dlg-dim set-note" data-i18n>Adds this PC to the open network: its name, its network cards with their addresses, and their subnets, read from this PC alone. Nothing is sent onto the network, the default gateway is only shown, and the review shows everything before it is kept.</p>
+                                    <div class="set-acts">
+                                        <button type="button" id="setTcAdd" class="btn btn-primary" data-i18n>Add this computer…</button>
+                                    </div>
+                                </section>
                             </div>
-                            <div class="set-note lock-set-note" id="setLockNoteRow" hidden>
-                                <p id="setLockNote"></p>
-                                <button type="button" id="setLockNoteOk" class="btn" data-i18n>OK</button>
-                            </div>
-                            <p class="dlg-dim set-note" data-i18n>Unlock with the PIN, or by signing in to your Topo server again with a code sent to your email. Each wrong PIN says how many tries are left, and after 10 only the sign-in unlocks. With no server to sign in to, the PIN can be forgotten from the fifth wrong try, which Settings then says, and after 10 each further try waits longer.</p>
-                            <p class="dlg-dim set-note" data-i18n>The lock stops someone using a screen left unattended. It is not encryption: the networks stay in this browser as before, and anyone who can use this PC's account can read them with the browser's own tools. Without a PIN or a sign-in it only hides the screen.</p>
-                        </section>
-                        <!-- A back-up folder (js/backupdir.js, D108): Chrome and
-                             Edge only (the File System Access API); hidden
-                             elsewhere, where Download a back-up stays a download. -->
-                        <section class="set-sec" id="setBackupSec" aria-labelledby="setBackupHead" hidden>
-                            <h3 id="setBackupHead" class="set-head" data-i18n>Back-ups</h3>
-                            <p class="set-note"><span data-i18n>Back-up folder:</span> <b id="setBackupDirName" class="set-folder"></b></p>
-                            <div class="set-acts">
-                                <button type="button" id="setBackupDirPick" class="btn">Choose a folder…</button>
-                                <button type="button" id="setBackupDirStop" class="btn" data-i18n hidden>Stop using it</button>
-                            </div>
-                            <p class="dlg-dim set-note" data-i18n>Download a back-up saves there instead. Pick a OneDrive, Google Drive or Nextcloud folder and its own app uploads the files.</p>
-                            <label class="set-row">
-                                <input type="checkbox" id="setBackupDirAuto">
-                                <span><span data-i18n>Also back up a network I change, once a day</span><br><span class="dlg-dim" data-i18n>A minute after your last edit, while the browser still lets Topo use the folder. Topo keeps the last day, then one a day for a week, one a week for a month and one a month for a year, and deletes only files it wrote.</span></span>
-                            </label>
-                        </section>
-                        <!-- This computer (js/thiscomputer.js, D166): the desktop
-                             app only. This PC's own interfaces, read by the app and
-                             added through the Import… review. -->
-                        <section class="set-sec" id="setTcSec" aria-labelledby="setTcHead" hidden>
-                            <h3 id="setTcHead" class="set-head" data-i18n>This computer</h3>
-                            <p class="dlg-dim set-note" data-i18n>Adds this PC to the open network: its name, its network cards with their addresses, and their subnets, read from this PC alone. Nothing is sent onto the network, the default gateway is only shown, and the review shows everything before it is kept.</p>
-                            <div class="set-acts">
-                                <button type="button" id="setTcAdd" class="btn btn-primary" data-i18n>Add this computer…</button>
-                            </div>
-                        </section>
-                        <!-- Monitor from this PC (js/checks.js, D131, step 7f): the
-                             desktop app only, off as shipped. The app asks each
-                             device and service with an answer check one question
-                             and keeps the statistics on this PC. Hidden on the
-                             website and the offline zip, which never probe. -->
-                        <section class="set-sec" id="setMonSec" aria-labelledby="setMonHead" hidden>
-                            <h3 id="setMonHead" class="set-head" data-i18n>Monitor from this PC</h3>
-                            <p class="dlg-dim set-note" data-i18n>Asks each device and service with an answer check one question, "are you answering?", from this PC, and keeps how long they take. It never scans or discovers anything, and never reads a device's settings.</p>
-                            <label class="set-row">
-                                <input type="checkbox" id="setMonOn">
-                                <span data-i18n>Monitor from this PC</span>
-                            </label>
-                            <div class="mon-offer" id="setMonOffer" hidden>
-                                <p class="set-note" id="setMonOfferText"></p>
-                                <label class="set-row">
-                                    <input type="checkbox" id="setMonOfferTray" checked>
-                                    <span data-i18n>Keep Topo in the system tray when the window is closed</span>
-                                </label>
-                                <label class="set-row">
-                                    <input type="checkbox" id="setMonOfferAuto" checked>
-                                    <span data-i18n>Open Topo at sign-in</span>
-                                </label>
-                                <div class="set-acts">
-                                    <button type="button" id="setMonOfferGo" class="btn btn-primary" data-i18n>Turn on</button>
-                                    <button type="button" id="setMonOfferCancel" class="btn" data-i18n>Cancel</button>
-                                </div>
-                            </div>
-                            <p class="set-note ds-status" id="setMonStatus" role="status" aria-live="polite"></p>
-                            <div id="setMonOnBox" class="mon-on" hidden>
-                                <button type="button" id="setMonOther" class="btn" data-i18n hidden>Monitor this network instead</button>
-                                <label class="set-row">
-                                    <input type="checkbox" id="setMonTray">
-                                    <span data-i18n>Keep Topo in the system tray when the window is closed</span>
-                                </label>
-                                <label class="set-row">
-                                    <input type="checkbox" id="setMonAuto">
-                                    <span data-i18n>Open Topo at sign-in</span>
-                                </label>
-                                <div class="set-field">
-                                    <label class="prop-lbl" for="setMonQuiet" data-i18n>Quiet the whole site (maintenance)</label>
-                                    <select id="setMonQuiet" class="select">
-                                        <option value="" data-i18n>Quiet for…</option>
-                                        <option value="1h" data-i18n>For 1 hour</option>
-                                        <option value="4h" data-i18n>For 4 hours</option>
-                                        <option value="morning" data-i18n>Until 08:00 tomorrow</option>
-                                        <option value="24h" data-i18n>For 24 hours</option>
-                                        <option value="end" data-i18n hidden>End the quiet</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="set-field">
-                                <label class="prop-lbl" for="setMonKeep" data-i18n>Keep statistics</label>
-                                <select id="setMonKeep" class="select">
-                                    <option value="0">Off</option>
-                                    <option value="30">30</option>
-                                    <option value="90">90</option>
-                                    <option value="180">180</option>
-                                    <option value="360">360</option>
-                                    <option value="720">720</option>
-                                    <option value="3650">3650</option>
-                                </select>
-                            </div>
-                            <p class="dlg-dim set-note" id="setMonKeepSite" hidden></p>
-                            <p class="dlg-dim set-note" data-i18n>Kept on this PC only: every check for 7 days, and hourly figures for as long as chosen here. Off keeps nothing; the states still show.</p>
-                            <p class="dlg-dim set-note" data-i18n>On some desktops (Wayland among them) the tray icon may not show. Then Topo keeps checking only while its window is open.</p>
-                            <!-- This PC as the site's monitor (js/monitors.js, step 7h):
-                                 the app, connected to a Topo server, on a network kept there. -->
-                            <div class="set-sub" id="setSiteMon" hidden>
-                                <h4 class="set-head" data-i18n>The site's monitor</h4>
-                                <p class="set-note ds-status" id="setSiteMonStatus" role="status" aria-live="polite"></p>
-                                <div id="setSiteMonGroups" class="site-mon-groups" hidden></div>
-                                <div class="set-acts">
-                                    <button type="button" id="setSiteMonOn" class="btn btn-primary" data-i18n hidden>Make this PC the site's monitor</button>
-                                    <button type="button" id="setSiteMonOff" class="btn" data-i18n hidden>Stop being the site's monitor</button>
-                                </div>
-                            </div>
-                            <!-- Show alarms on this PC (js/issues.js, desktop/alarm.html, step 7g) -->
-                            <div class="set-sub" id="setAlarmBox" hidden>
-                                <label class="set-row">
-                                    <input type="checkbox" id="setAlarmOn">
-                                    <span data-i18n>Show alarms on this PC</span>
-                                </label>
-                                <p class="dlg-dim set-note" data-i18n>When a device stops answering, a card covers every screen of this PC with its name, how long it has been down and what is behind it, with a short chime (the volume is left as it is), and a system notification goes out. It stays an open issue until someone acknowledges it, reports it or marks it expected. A device answering again is a small notification only.</p>
-                                <p class="dlg-dim set-note" data-i18n>On Wayland a window cannot always stay above the others, and with several screens the card may show on one of them only: there the system notification is the one to rely on.</p>
-                                <div class="set-acts">
-                                    <button type="button" id="setAlarmTest" class="btn" data-i18n>Test the alarm</button>
-                                </div>
-                            </div>
-                        </section>
-                        <!-- Connect to a Topo server (js/desktopclient.js, D144):
-                             the desktop app only. This window becomes a client
-                             of a Topo server; every request goes through the
-                             app (Rust), so the page's CSP is unchanged. Hidden
-                             on the website and the offline zip. -->
-                        <section class="set-sec" id="setDcSec" aria-labelledby="setDcHead" hidden>
-                            <h3 id="setDcHead" class="set-head" data-i18n>Connect to a Topo server</h3>
-                            <p class="dlg-dim set-note" data-i18n>This window keeps networks on a Topo server and syncs with the other PCs that use it. Sign in with your email, as in a browser.</p>
-                            <p class="set-note ds-status" id="setDcStatus" role="status" aria-live="polite"></p>
-                            <div id="setDcForm">
-                                <div class="set-field">
-                                    <label class="prop-lbl" for="setDcUrl" data-i18n>Server address</label>
-                                    <input type="text" id="setDcUrl" data-keys="code" class="input" maxlength="300" autocomplete="off" spellcheck="false" placeholder="https://192.168.1.20:7380">
-                                </div>
-                                <div class="set-acts">
-                                    <button type="button" id="setDcConnect" class="btn btn-primary" data-i18n>Connect</button>
-                                </div>
-                            </div>
-                            <div class="dc-compare" id="setDcCompare" hidden>
-                                <p class="set-note" data-i18n>This server signs its own certificate. Compare this fingerprint with the one the server shows (on the server PC: Settings, This PC as the server, or its log). Connect only if they are the same.</p>
-                                <p class="set-note"><span data-i18n>Certificate fingerprint (SHA-256):</span> <code id="setDcFp" class="ds-code"></code></p>
-                                <div class="set-acts">
-                                    <button type="button" id="setDcTrust" class="btn btn-primary" data-i18n>They are the same: connect</button>
-                                    <button type="button" id="setDcCancel" class="btn" data-i18n>Cancel</button>
-                                </div>
-                            </div>
-                            <div id="setDcOn" hidden>
-                                <p class="set-note"><span data-i18n>Server:</span> <code id="setDcAddr" class="ds-code"></code></p>
-                                <p class="set-note" id="setDcPinRow" hidden><span data-i18n>Certificate fingerprint (SHA-256):</span> <code id="setDcPin" class="ds-code"></code></p>
-                                <div class="set-acts">
-                                    <button type="button" id="setDcSignIn" class="btn btn-primary" data-i18n hidden>Sign in</button>
-                                    <button type="button" id="setDcAgain" class="btn" data-i18n hidden>Check the certificate again</button>
-                                    <button type="button" id="setDcDisconnect" class="btn" data-i18n>Disconnect</button>
-                                </div>
-                            </div>
-                        </section>
-                        <!-- This PC as the server (js/desktopserver.js, D113, D125):
-                             the desktop app only, where the bundled topo-server
-                             answers; hidden on the website and the offline zip.
-                             As a service from startup, or only while Topo is open. -->
-                        <section class="set-sec" id="setDsSec" aria-labelledby="setDsHead" hidden>
-                            <h3 id="setDsHead" class="set-head" data-i18n>This PC as the server</h3>
-                            <p class="dlg-dim set-note" data-i18n>Other PCs on site sign in and sync with this one.</p>
-                            <p class="dlg-dim set-note" id="setDsHow"></p>
-                            <p class="set-note ds-status" id="setDsStatus" role="status" aria-live="polite"></p>
-                            <ul class="ds-urls" id="setDsUrls" hidden></ul>
-                            <p class="set-note ds-fp" id="setDsFpRow" hidden><span data-i18n>Certificate fingerprint (SHA-256):</span> <code id="setDsFp" class="ds-code"></code><br><span class="dlg-dim" data-i18n>Each other PC's browser warns about the certificate once. Check that it shows this fingerprint, then go on to the page.</span></p>
-                            <div class="set-acts">
-                                <button type="button" id="setDsStart" class="btn btn-primary" data-i18n>Start</button>
-                                <button type="button" id="setDsHere" class="btn btn-primary" data-i18n hidden>Open it in this window</button>
-                                <button type="button" id="setDsStop" class="btn" data-i18n hidden>Stop</button>
-                            </div>
-                            <label class="set-row" id="setDsEnabledRow">
-                                <input type="checkbox" id="setDsEnabled">
-                                <span data-i18n>Start it when Topo opens</span>
-                            </label>
-                            <div class="set-field">
-                                <label class="prop-lbl" for="setDsWho" data-i18n>Who can open it</label>
-                                <select id="setDsWho" class="select">
-                                    <option value="pc" data-i18n>This PC only</option>
-                                    <option value="lan" data-i18n>Other PCs on this network</option>
-                                </select>
-                            </div>
-                            <div class="set-field" id="setDsShareRow" hidden>
-                                <label class="prop-lbl" for="setDsShare" data-i18n>Address to give people</label>
-                                <select id="setDsShare" class="select">
-                                    <option value="" data-i18n>Automatic</option>
-                                </select>
-                            </div>
-                            <p class="dlg-dim set-note" id="setDsLanNote" data-i18n hidden>Other PCs reach it over https with a certificate this PC makes. Give this PC a fixed address (a DHCP reservation): the address is in every sign-in link. The firewall may ask to let Topo server in.</p>
-                            <div class="set-field">
-                                <label class="prop-lbl" for="setDsPort" data-i18n>Port</label>
-                                <input type="number" id="setDsPort" data-keys="int" class="input" min="1024" max="65535" inputmode="numeric" autocomplete="off">
-                            </div>
-                            <div class="set-field">
-                                <label class="prop-lbl" for="setDsOwner" data-i18n>Owner's email</label>
-                                <input type="email" id="setDsOwner" data-keys="email" class="input" maxlength="200" autocomplete="off">
-                            </div>
-                            <div class="set-field">
-                                <label class="prop-lbl" for="setDsMail" data-i18n>Sign-in codes</label>
-                                <select id="setDsMail" class="select">
-                                    <option value="smtp" data-i18n>Sent by email (SMTP)</option>
-                                    <option value="none" data-i18n>Shown in the log below (this PC only)</option>
-                                </select>
-                            </div>
-                            <div class="ds-smtp" id="setDsSmtp">
-                                <div class="set-field">
-                                    <label class="prop-lbl" for="setDsSmtpHost" data-i18n>SMTP server</label>
-                                    <input type="text" id="setDsSmtpHost" data-keys="code" class="input" maxlength="200" autocomplete="off" spellcheck="false" placeholder="smtp.office365.com">
-                                </div>
-                                <div class="set-field">
-                                    <label class="prop-lbl" for="setDsSmtpPort" data-i18n>SMTP port</label>
-                                    <input type="number" id="setDsSmtpPort" data-keys="int" class="input" min="1" max="65535" inputmode="numeric" autocomplete="off">
-                                </div>
-                                <div class="set-field">
-                                    <label class="prop-lbl" for="setDsSmtpSec" data-i18n>Security</label>
-                                    <select id="setDsSmtpSec" class="select">
-                                        <option value="starttls">STARTTLS</option>
-                                        <option value="tls">TLS</option>
-                                        <option value="none" data-i18n>None (a relay on this PC)</option>
-                                    </select>
-                                </div>
-                                <div class="set-field">
-                                    <label class="prop-lbl" for="setDsSmtpUser" data-i18n>SMTP user</label>
-                                    <input type="text" id="setDsSmtpUser" data-keys="code" class="input" maxlength="200" autocomplete="off" spellcheck="false">
-                                </div>
-                                <div class="set-field">
-                                    <label class="prop-lbl" for="setDsSmtpPass" data-i18n>SMTP password</label>
-                                    <input type="password" id="setDsSmtpPass" class="input" maxlength="500" autocomplete="new-password">
-                                </div>
-                                <div class="set-field">
-                                    <label class="prop-lbl" for="setDsSmtpFrom" data-i18n>Send from</label>
-                                    <input type="text" id="setDsSmtpFrom" data-keys="email" class="input" maxlength="200" autocomplete="off" spellcheck="false" placeholder="Topo &lt;topo@example.com&gt;">
-                                </div>
-                            </div>
-                            <div class="set-acts">
-                                <button type="button" id="setDsService" class="btn btn-primary" data-i18n hidden>Run it in the background from startup</button>
-                                <button type="button" id="setDsSave" class="btn" data-i18n>Save</button>
-                                <button type="button" id="setDsRemove" class="btn" data-i18n hidden>Stop using this PC as the server</button>
-                            </div>
-                            <details class="ds-logbox">
-                                <summary data-i18n>Log</summary>
-                                <pre id="setDsLog" class="ds-log" tabindex="0"></pre>
-                            </details>
-                        </section>
-                        <!-- Who reports a problem from this browser (js/incidents.js):
-                             filled in on Report a problem, kept here only. -->
-                        <section class="set-sec" aria-labelledby="setReporterHead">
-                            <h3 id="setReporterHead" class="set-head" data-i18n>Problem reports</h3>
-                            <p class="dlg-dim set-note" data-i18n>Filled in when you report a problem. Kept in this browser; a report you send carries them.</p>
-                            <div class="set-field">
-                                <label class="prop-lbl" for="setReporterName" data-i18n>Your name</label>
-                                <input type="text" id="setReporterName" data-keys="name" class="input" maxlength="120" autocomplete="name">
-                            </div>
-                            <div class="set-field">
-                                <label class="prop-lbl" for="setReporterPhone" data-i18n>Your phone</label>
-                                <input type="tel" id="setReporterPhone" data-keys="tel" class="input" maxlength="200" autocomplete="tel">
-                            </div>
-                            <div class="set-field">
-                                <label class="prop-lbl" for="setReporterEmail" data-i18n>Your email</label>
-                                <input type="email" id="setReporterEmail" data-keys="email" class="input" maxlength="200" autocomplete="email">
-                            </div>
-                        </section>
-                        <!-- The welcome (js/welcome.js, D141-D143, D170): its
-                             questions again, on the website and in the app. -->
-                        <section class="set-sec" id="setWelcomeSec" aria-labelledby="setWelcomeHead">
-                            <h3 id="setWelcomeHead" class="set-head" data-i18n>Welcome</h3>
-                            <p class="dlg-dim set-note" data-i18n>The questions Topo asks the first time: how it looks, the view, where networks are kept, the screen lock and how to start.</p>
-                            <div class="set-acts">
-                                <button type="button" id="setWelcomeAgain" class="btn" data-i18n>Run the welcome again</button>
-                            </div>
-                        </section>
+                        </div>
                     </div>
                     <div class="modal-foot">
                         <button type="button" id="settingsDoneBtn" class="btn btn-primary" data-i18n>Done</button>
@@ -1801,19 +1828,20 @@
                 </div>
             </div>
 
-            <!-- The first-run welcome (js/welcome.js; docs/SCOPE.md D141-D143,
-                 D170, D326-D335). Once per PC or browser, on a plain start;
-                 never for a link, an intake or a mode entry. Every step can
-                 be skipped; each one hands over to the piece that already
-                 does it (the theme switch, the mode picker's profile, the
-                 desktop app's Connect to a Topo server and This PC as the
-                 server, the screen lock, This computer, Monitor from this
-                 PC, the landing's Open a file, Add devices and New network). -->
+            <!-- Setup, the first-run welcome (js/welcome.js; docs/SCOPE.md
+                 D141-D143, D170, D326-D336, D353). Once per PC or browser, on
+                 a plain start; never for a link, an intake or a mode entry.
+                 Every step can be skipped; each one hands over to the piece
+                 that already does it (the theme switch, the mode picker's
+                 profile, the desktop app's Connect to a Topo server and This
+                 PC as the server, step by step with their own functions, the
+                 screen lock, This computer, Monitor from this PC, the
+                 landing's Open a file, Add devices and New network). -->
             <div id="welcomeDialog" class="modal-scrim" hidden>
                 <div class="modal topo-welcome" role="dialog" aria-modal="true" aria-labelledby="wlTitle">
                     <div class="modal-head">
-                        <h2 id="wlTitle" class="modal-title" data-i18n>Welcome to Topo</h2>
-                        <button type="button" class="modal-x" id="wlClose" data-close data-i18n-aria-label aria-label="Skip the welcome" data-i18n-title title="Skip the welcome">✕</button>
+                        <h2 id="wlTitle" class="modal-title" data-i18n>Set up Topo</h2>
+                        <button type="button" class="modal-x" id="wlClose" data-close data-i18n-aria-label aria-label="Skip the setup" data-i18n-title title="Skip the setup">✕</button>
                     </div>
                     <div class="modal-body wl-body">
                         <p class="wl-count" id="wlCount" aria-live="polite"></p>
@@ -1850,7 +1878,105 @@
                                 </div>
                                 <p class="dlg-dim wl-note" data-i18n>A Topo server opens at its own address: if your organisation has one, open that address in the browser and sign in there.</p>
                             </div>
+                            <div id="wlWhereOn" hidden>
+                                <div class="wl-choices">
+                                    <div class="wl-choice wl-fixed" aria-pressed="true"><b data-i18n>Connected to a Topo server</b><span class="wl-blurb wl-mono" id="wlWhereOnUrl"></span></div>
+                                </div>
+                                <p class="dlg-dim wl-note" data-i18n>Disconnect in Settings, Connect to a Topo server.</p>
+                            </div>
                         </section>
+                        <!-- The server, step by step (D353): Settings' own
+                             functions do each part (js/desktopclient.js
+                             dcConnect, dcTrust, dcConnectOwn; js/desktopserver.js
+                             dsSetUpWith; js/server.js requestCode, verifyCode). -->
+                        <section class="wl-step" data-step="srvAddr" hidden>
+                            <h3 class="wl-head" data-i18n>Connect to a Topo server</h3>
+                            <p class="wl-text" data-i18n>Type the server's address as your organisation gives it, for example https://192.168.1.20:7380.</p>
+                            <div class="wl-field">
+                                <label class="prop-lbl" for="wlSrvUrl" data-i18n>Server address</label>
+                                <input type="text" id="wlSrvUrl" data-keys="code" class="input" maxlength="300" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://192.168.1.20:7380">
+                            </div>
+                        </section>
+                        <section class="wl-step" data-step="srvCompare" hidden>
+                            <h3 class="wl-head" data-i18n>Compare the certificate</h3>
+                            <p class="wl-text" data-i18n>This server signs its own certificate. Compare this fingerprint with the one the server shows (on the server PC: Settings, This PC as the server, or its log). Connect only if they are the same.</p>
+                            <p class="wl-text"><span data-i18n>Server:</span> <code class="wl-mono" id="wlSrvFpUrl"></code></p>
+                            <p class="wl-text"><span data-i18n>Certificate fingerprint (SHA-256):</span> <code class="wl-mono" id="wlSrvFp"></code></p>
+                        </section>
+                        <section class="wl-step" data-step="srvOwner" hidden>
+                            <h3 class="wl-head" data-i18n>Make this PC the server</h3>
+                            <p class="wl-text" data-i18n>It runs in the background from startup, even when Topo is closed or nobody is signed in. Setting it up asks for an administrator.</p>
+                            <div class="wl-field">
+                                <label class="prop-lbl" for="wlSrvOwner" data-i18n>Owner's email</label>
+                                <input type="email" id="wlSrvOwner" data-keys="email" class="input" maxlength="200" autocomplete="email" inputmode="email" spellcheck="false">
+                            </div>
+                            <div class="wl-field">
+                                <label class="prop-lbl" for="wlSrvWho" data-i18n>Who can open it</label>
+                                <select id="wlSrvWho" class="select">
+                                    <option value="pc" data-i18n>This PC only</option>
+                                    <option value="lan" data-i18n>Other PCs on this network</option>
+                                </select>
+                            </div>
+                            <p class="dlg-dim wl-note" id="wlSrvPcNote" data-i18n>This PC's server sends no email: Setup gets each sign-in code from it, for this account only. Other PCs can be added later in Settings, This PC as the server.</p>
+                            <div class="wl-smtp" id="wlSrvSmtp" hidden>
+                                <p class="dlg-dim wl-note" data-i18n>Other PCs need sign-in codes by email: fill in the email server that sends them.</p>
+                                <div class="wl-field">
+                                    <label class="prop-lbl" for="wlSrvSmtpHost" data-i18n>SMTP server</label>
+                                    <input type="text" id="wlSrvSmtpHost" data-keys="code" class="input" maxlength="200" autocomplete="off" spellcheck="false" placeholder="smtp.office365.com">
+                                </div>
+                                <div class="wl-field">
+                                    <label class="prop-lbl" for="wlSrvSmtpPort" data-i18n>SMTP port</label>
+                                    <input type="number" id="wlSrvSmtpPort" data-keys="int" class="input" min="1" max="65535" inputmode="numeric" autocomplete="off">
+                                </div>
+                                <div class="wl-field">
+                                    <label class="prop-lbl" for="wlSrvSmtpSec" data-i18n>Security</label>
+                                    <select id="wlSrvSmtpSec" class="select">
+                                        <option value="starttls">STARTTLS</option>
+                                        <option value="tls">TLS</option>
+                                        <option value="none" data-i18n>None (a relay on this PC)</option>
+                                    </select>
+                                </div>
+                                <div class="wl-field">
+                                    <label class="prop-lbl" for="wlSrvSmtpUser" data-i18n>SMTP user</label>
+                                    <input type="text" id="wlSrvSmtpUser" data-keys="code" class="input" maxlength="200" autocomplete="off" spellcheck="false">
+                                </div>
+                                <div class="wl-field">
+                                    <label class="prop-lbl" for="wlSrvSmtpPass" data-i18n>SMTP password</label>
+                                    <input type="password" id="wlSrvSmtpPass" class="input" maxlength="500" autocomplete="new-password">
+                                </div>
+                                <div class="wl-field">
+                                    <label class="prop-lbl" for="wlSrvSmtpFrom" data-i18n>Send from</label>
+                                    <input type="text" id="wlSrvSmtpFrom" data-keys="email" class="input" maxlength="200" autocomplete="off" spellcheck="false" placeholder="Topo &lt;topo@example.com&gt;">
+                                </div>
+                            </div>
+                        </section>
+                        <section class="wl-step" data-step="srvWait" hidden>
+                            <h3 class="wl-head" data-i18n>Starting the server</h3>
+                            <p class="wl-text" data-i18n>Topo waits for the server to answer on this PC, then connects this window to it.</p>
+                        </section>
+                        <section class="wl-step" data-step="srvEmail" hidden>
+                            <h3 class="wl-head" data-i18n>Sign in to Topo</h3>
+                            <p class="wl-text" id="wlSrvEmailText"></p>
+                            <div class="wl-field">
+                                <label class="prop-lbl" for="wlSrvEmail" data-i18n>Email</label>
+                                <input type="email" id="wlSrvEmail" data-keys="email" class="input" maxlength="200" autocomplete="email" inputmode="email" spellcheck="false">
+                            </div>
+                            <div class="wl-field" id="wlSrvTokenRow" hidden>
+                                <label class="prop-lbl" for="wlSrvToken" data-i18n>Setup code</label>
+                                <input type="text" id="wlSrvToken" data-keys="code" class="input" maxlength="200" autocomplete="off" spellcheck="false">
+                                <span class="dlg-dim wl-note" data-i18n>The first person to sign in becomes the owner of this server. The setup code is in the server's log.</span>
+                            </div>
+                        </section>
+                        <section class="wl-step" data-step="srvCode" hidden>
+                            <h3 class="wl-head" data-i18n>Sign in to Topo</h3>
+                            <p class="wl-text" id="wlSrvCodeText"></p>
+                            <div class="wl-field">
+                                <label class="prop-lbl" for="wlSrvCode" id="wlSrvCodeLbl">Code from the email</label>
+                                <input type="text" id="wlSrvCode" data-keys="int" class="input" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code">
+                            </div>
+                        </section>
+                        <p class="wl-msg" id="wlSrvMsg" role="status" aria-live="polite"></p>
+                        <p class="dlg-dim wl-note" id="wlSrvLater" data-i18n hidden>Skip this step to finish it later in Settings.</p>
                         <section class="wl-step" data-step="lock" hidden>
                             <h3 class="wl-head" data-i18n>Lock the screen when nobody is using it?</h3>
                             <p class="wl-text" data-i18n>After this long without use, Topo saves, closes the open network and covers the screen until it is unlocked. For this PC only.</p>
@@ -1898,7 +2024,7 @@
                             </div>
                             <div id="wlHandoff" hidden>
                                 <p class="wl-text" id="wlHandoffText"></p>
-                                <button type="button" class="btn btn-primary" id="wlHandoffGo" data-i18n>Open Settings</button>
+                                <button type="button" class="btn btn-primary" id="wlHandoffGo" data-i18n>Finish</button>
                             </div>
                         </section>
                     </div>

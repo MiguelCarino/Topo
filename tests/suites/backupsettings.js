@@ -310,10 +310,10 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- Settings, Back-ups (on this Chromium the API exists) ----
     const hadPicker = typeof window.showDirectoryPicker === 'function';
     if (!hadPicker) window.showDirectoryPicker = async () => null;
-    openSettings(); await settle();
-    ok('Settings shows Back-ups where the folder API exists', !el('setBackupSec').hidden && /\(none\)/.test(el('setBackupDirName').textContent));
-    el('setBackupSec').scrollIntoView();
-    await both('Settings, Back-ups', async () => { openSettings(); el('setBackupSec').scrollIntoView(); });
+    openSettings('backup'); await settle();
+    ok('Settings shows Back-ups where the folder API exists, in its own tab (D361)', !el('setBackupSec').hidden && !el('setTab-backup').hidden
+      && el('setTab-backup').getAttribute('aria-selected') === 'true' && el('setBackupSec').getClientRects().length > 0 && /\(none\)/.test(el('setBackupDirName').textContent));
+    await both('Settings, Back-ups', async () => { openSettings('setBackupSec'); });
     closeSettings();
     if (!hadPicker) delete window.showDirectoryPicker;
 
@@ -325,8 +325,19 @@ window.addEventListener('load', () => { setTimeout(async () => {
     U.openBackups();
     ok('the sheet in Spanish', await until(() => el('serverSheetTitle').textContent === 'Copias de seguridad' && /Dónde/.test(text())), el('serverSheetTitle').textContent);
     ok('errors in Spanish', U.backupErrText({ code: 'backup-dest', data: { code: 'full' } }) === 'El destino está lleno.');
+    // The sheet's own words, not the storage banner's or the summary's (D350).
+    const legends = () => [...body().querySelectorAll('legend')].map((x) => x.textContent);
+    ok('es: the sheet says "Hacer copia ahora", not the storage banner\'s "Respaldar ahora"', !!button('Hacer copia ahora') && !button('Respaldar ahora') && legends().includes('Estado'), `${!!button('Hacer copia ahora')} ${legends().join(',')}`);
     await both('the Backups sheet in Spanish');
     U.closeSheet();
+    for (const [loc, where, status] of [['ru', 'Куда', 'Состояние'], ['ja', '保存先', '状態']]) {
+      setLocale(loc); applyLocale(loc);
+      U.openBackups();
+      ok(`${loc}: the sheet's Where is the destination and its Status the backups' state`,
+         await until(() => [...body().querySelectorAll('label, legend, span')].some((x) => x.textContent === where) && legends().includes(status)),
+         `${legends().join(',')} | ${text().slice(0, 120)}`);
+      U.closeSheet();
+    }
     for (const loc of ['ja', 'ru', 'pt-BR']) {
       setLocale(loc);
       ok(`${loc}: the sheet's words are translated`, ['Backups', 'Keep a readable copy too', 'Saved (type to replace)', 'Open the latest backup here', 'The destination is full.', 'Connect', 'Connect again', 'Connected as {account}.', 'Path-style addresses', 'How to set this up', 'The bucket keeps files locked; Topo cannot delete old backups there.'].every((k) => t(k) !== k || CarinoI18N.has(loc, k)));

@@ -15,7 +15,7 @@ There was no 0.0.2: this release follows 0.0.1.
 - **Site monitors on a Topo server.** An owner can make a PC the site's monitor: it keeps checking and reporting with no one signed in, and every signed-in page, the website too, sees the status and the issues. Owners revoke it in Members.
 - **Monitor during this visit** (provider mode): checks only the provider's devices for the visit, and Record visit adds the figures to the visit report.
 - **Monitoring report** (the file menu): availability against a target with how much was measured, response times, outages with MTTR and MTBF, and the provider's report, through the print preview with CSV.
-- **The welcome**: a few skippable questions the first time Topo starts; Settings, **Run the welcome again**.
+- **Setup**: a few skippable questions the first time Topo starts; in the app it connects to a Topo server or makes this PC the server step by step, and signs you in; Settings, **Run the setup again**.
 - **The Mac app icon** sits on the map's blueprint blue in the Dock, the size of its neighbours.
 - Files are now document version 19. Topo 0.0.1 opens them read-only.
 - Built and tested on Linux. The Windows and macOS builds of the new desktop pieces (ICMP, notifications, the keychain, This computer's readers, Open Topo at sign-in) were not run on those systems before this release.

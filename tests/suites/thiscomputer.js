@@ -100,7 +100,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- The website ----
     ok('on the website there is no host', !window.__TAURI__ && !TC.hasHost());
     ok('…and no Add this computer in the Nodes panel', el('addThisPcBtn').classList.contains('hidden'));
-    openSettings(); await settle();
+    openSettings('setup'); await settle();
     ok('…nor in Settings', el('setTcSec').hidden === true);
     closeSettings();
     ok('nothing was asked of an app', calls.length === 0);
@@ -224,7 +224,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a second undo step takes back the first run', state.nodes.map((x) => x.name).sort().join() === beforeNames && !mine().length);
 
     // ---- Settings ----
-    openSettings(); await settle();
+    openSettings('setup'); await settle();
     ok('Settings shows This computer in the app', el('setTcSec').hidden === false);
     calls.length = 0;
     el('setTcAdd').click();

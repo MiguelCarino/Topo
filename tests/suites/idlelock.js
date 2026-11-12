@@ -82,7 +82,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
     // ---- The setting ----
     ok('30 min as shipped', L.lockAfterMin() === 30 && localStorage.getItem('topo-lock-after') === null);
-    openSettings(); await settle();
+    openSettings('lock'); await settle();
     ok('Settings has Screen lock, showing 30 min', shown('setLockSec') && el('setLockAfter').value === '30');
     ok('the choices are Off, 5, 15, 30, 60 min and Custom', [...el('setLockAfter').options].map((o) => o.value).join(',') === '0,5,15,30,60,custom');
     ok('it says it is not encryption at rest', /not encryption/.test(el('setLockSec').textContent));
@@ -163,7 +163,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     function NoStream() { this.addEventListener = () => {}; this.close = () => {}; this.readyState = 1; }
     Object.assign(TopoServer._hooks, { force: true, fetch: fake.fetch, EventSource: NoStream, BroadcastChannel: null, locks: null });
     TopoServer.state.me = { id: owner.id, email: owner.email };
-    openSettings(); await settle();
+    openSettings('lock'); await settle();
     el('setLockNow').click();
     ok('Lock now locks at once', await until(() => reloads.length === 3));
     const m2 = JSON.parse(localStorage.getItem(LOCK));

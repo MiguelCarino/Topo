@@ -1874,7 +1874,7 @@ function devicesSection(devices, groups) {
             + (by.has('') ? heading(t('Not in a group'), count(by.get('').length)) + hostOrdered(by.get('')).map(deviceRows).join('') : '');
     }
     return `<table class="inv">
-        <thead><tr><th>${t('Device')}</th><th>${t('Type')}</th><th>${t('Interface')}</th><th>${t('Address')}</th><th>${t('MAC')}</th>${cols.map((f) => `<th>${t(f.report.column)}</th>`).join('')}</tr></thead>
+        <thead><tr><th>${t('Device')}</th><th>${t('report::Type')}</th><th>${t('Interface')}</th><th>${t('Address')}</th><th>${t('MAC')}</th>${cols.map((f) => `<th>${t(f.report.column)}</th>`).join('')}</tr></thead>
         <tbody>${rows}</tbody></table>`;
 }
 

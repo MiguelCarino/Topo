@@ -830,7 +830,7 @@ async function openBackups(arrived) {
         const where = h('select', { class: 'select', 'data-k': 'kind', onchange: (e) => { st.kind = e.target.value; st.secrets = {}; st.fields = st.kind === st.savedKind ? Object.assign({}, st.data.config.fields || {}) : {}; rerender(); } },
             h('option', { value: '', text: t('Off') }), (d.kinds || Object.keys(BACKUP_KINDS)).filter((k) => BACKUP_KINDS[k]).map((k) => h('option', { value: k, text: t(BACKUP_KINDS[k]) })));
         where.value = st.kind;
-        out.push(field(t('Where'), where));
+        out.push(field(t('backups::Where'), where));
         if (BACKUP_HELP[st.kind]) {
             out.push(h('p', { class: 'srv-p srv-dim' }, h('a', { href: BACKUP_HELP_BASE + BACKUP_HELP[st.kind], class: 'srv-help', target: '_blank', rel: 'noopener noreferrer', 'data-k': 'help', text: t('How to set this up') })));
         }
@@ -884,7 +884,7 @@ async function openBackups(arrived) {
         out.push(h('div', { class: 'srv-acts' },
             btn(t('Save'), save, 'btn primary'),
             st.kind ? btn(t('Test'), test) : null,
-            d.config.enabled ? btn(t('Back up now'), backupNow) : null,
+            d.config.enabled ? btn(t('backups::Back up now'), backupNow) : null,
             d.config.enabled ? btn(t('Check now'), checkNow) : null));
         // How it went.
         const s = d.status || {};
@@ -901,7 +901,7 @@ async function openBackups(arrived) {
             if (missing) lines.push(t('{n} backups are missing from the destination.', { n: missing }));
             if (d.previousDest) lines.push(t('{n} older backups are on an earlier destination.', { n: d.previousDest }));
         }
-        if (lines.length) out.push(h('fieldset', { class: 'srv-group' }, h('legend', { text: t('Status') }), lines.map((l) => para(l, 'srv-p'))));
+        if (lines.length) out.push(h('fieldset', { class: 'srv-group' }, h('legend', { text: t('backups::Status') }), lines.map((l) => para(l, 'srv-p'))));
         // Networks.
         if ((d.sites || []).length) {
             const box = h('fieldset', { class: 'srv-group' }, h('legend', { text: t('Networks') }));

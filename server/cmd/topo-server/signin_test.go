@@ -162,3 +162,66 @@ func TestMailTestCommand(t *testing.T) {
 		t.Fatalf("%d %s", code, errb.String())
 	}
 }
+
+// D358: the desktop app's "This PC only" server with no email. The code
+// reaches the app that holds TOPO_LOCAL_CODE_KEY, over loopback, and the
+// sign-in finishes with it; the code is never in the log at info.
+func TestLocalSigninCodeEndToEnd(t *testing.T) {
+	const key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	data := t.TempDir()
+	cfg := loadCfg(t, "TOPO_DATA="+data, "TOPO_LISTEN=127.0.0.1:0", "TOPO_STATIC="+staticDir(t), "TOPO_MAIL=log",
+		"TOPO_OWNER_EMAIL=boss@example.test", "TOPO_LOCAL_CODE_KEY="+key)
+	r := start(t, cfg)
+	base := "http://" + r.addr
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	fetch := func(k string) (int, map[string]any) {
+		req, _ := http.NewRequest("GET", base+"/api/local/signin-code", nil)
+		req.Header.Set("X-Topo-Local-Key", k)
+		req.Header.Set("X-Topo-Email", "boss@example.test")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var m map[string]any
+		json.NewDecoder(resp.Body).Decode(&m)
+		return resp.StatusCode, m
+	}
+	sent := time.Now().UnixMilli()
+	code, m := call(t, c, "POST", base+"/api/auth/request", base, map[string]any{"email": "boss@example.test"})
+	if code != 202 {
+		t.Fatalf("%d %v", code, m)
+	}
+	var got map[string]any
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		st, b := fetch(key)
+		if st == 200 {
+			got = b
+			break
+		}
+		if st != 404 || b["error"] != "no-code" || time.Now().After(deadline) {
+			t.Fatalf("waiting for the code: %d %v", st, b)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if at, _ := got["at"].(float64); int64(at) < sent-1000 {
+		t.Fatalf("at %v before the request %d", got["at"], sent)
+	}
+	if st, b := fetch("wrong" + key); st != 404 || b["error"] != "not-found" {
+		t.Fatalf("wrong key: %d %v", st, b)
+	}
+	if code, m := call(t, c, "POST", base+"/api/auth/verify", base, map[string]any{"challenge": m["challenge"], "code": got["code"]}); code != 200 {
+		t.Fatalf("verify %d %v", code, m)
+	}
+	r.stop(t)
+	for _, l := range strings.Split(r.log.String(), "\n") {
+		if strings.Contains(l, "level=DEBUG") {
+			continue
+		}
+		if strings.Contains(l, got["code"].(string)) || strings.Contains(l, key) {
+			t.Fatalf("a secret above debug in the log: %s", l)
+		}
+	}
+}

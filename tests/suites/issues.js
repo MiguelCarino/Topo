@@ -129,7 +129,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     await settle();
 
     // The website first: nothing is asked of anyone.
-    openSettings(); await settle();
+    openSettings('monitor'); await settle();
     ok('on the website: no Show alarms on this PC', el('setAlarmBox').hidden === true);
     closeSettings();
     ok('…and nothing asked', asked.length === 0 && !IS.hasHost());
@@ -374,7 +374,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
     // ---- Settings: Show alarms on this PC ----
     await TopoChecks.refreshInfo();
-    openSettings(); await settle();
+    openSettings('monitor'); await settle();
     ok('in the app: Show alarms on this PC, off as shipped', el('setAlarmBox').hidden === false && el('setAlarmOn').checked === false);
     ok('…its help says what it does and the Wayland caveat', /covers every screen/.test(el('setAlarmBox').textContent) && /Wayland/.test(el('setAlarmBox').textContent));
     change(el('setAlarmOn'), true);

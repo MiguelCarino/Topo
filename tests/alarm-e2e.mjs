@@ -269,10 +269,9 @@ try {
         const rowText = row ? row.textContent : '';
         const btns = row ? [...row.querySelectorAll('button')].map((b) => b.getBoundingClientRect()).filter((b) => b.width > 0) : [];
         const rowSideways = document.documentElement.scrollWidth > innerWidth;
-        openSettings();
+        openSettings('setAlarmBox');   // the Monitoring tab (D361)
         await wait(300);
         const box = document.getElementById('setAlarmBox');
-        box.scrollIntoView();
         await wait(100);
         const res = { rowText, buttons: btns.length, smallButtons: btns.filter((b) => b.height < 44).length, rowSideways,
           alarmBox: !box.hidden, alarmOff: document.getElementById('setAlarmOn').checked === false,

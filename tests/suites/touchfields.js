@@ -211,7 +211,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
     // 8. The dialogs.
     await dialog('Add devices', () => openAddDevices(), () => closeAddDevices(), 10);
-    await dialog('Settings', () => openSettings(), () => closeSettings());
+    // Settings shows one section tab at a time (D361): each tab with
+    // something in it is measured on its own (D362).
+    openSettings(); await settle();
+    const setKeys = [...document.querySelectorAll('#settingsDialog .set-tab')].filter((x) => !x.hidden).map((x) => x.dataset.tab);
+    closeSettings(); await settle();
+    ok('Settings: its tabs found', setKeys.length >= 3, setKeys.join());
+    // Back-ups and Setup hold only buttons and ticks: no field to measure.
+    for (const k of setKeys) await dialog('Settings, ' + k, () => openSettings(k), () => closeSettings(), ['backup', 'setup'].includes(k) ? 0 : 1);
     await dialog('the report', () => openReportDialog(), () => closeReportDialog());
     await dialog('Save search', () => openSearchDialog(), () => closeSearchDialog());
     setView('table'); await settle();

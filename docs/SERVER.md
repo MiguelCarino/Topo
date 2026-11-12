@@ -158,6 +158,7 @@ that holds the value (podman and docker secrets).
 | TOPO_TLS_SELF | 0 | 1: built-in https with a certificate the server signs itself, in `$TOPO_DATA/tls` (see "TLS"); not with TOPO_TLS_CERT |
 | TOPO_TRUSTED_PROXIES | | CIDRs (e.g. `127.0.0.1/32`) whose X-Forwarded-For is believed for the per-address limits |
 | TOPO_OWNER_EMAIL (\_FILE) | | the server owner (see "First sign-in") |
+| TOPO_LOCAL_CODE_KEY (\_FILE) | | the desktop app's key for sign-in codes on its "This PC only" server (32 to 256 characters; used only with `TOPO_MAIL=log` when the listen and public addresses are both loopback; written by the app, D358) |
 | TOPO_MAIL | `smtp` when TOPO_SMTP_HOST is set, else `log` | `smtp`, `file` (one .eml per message plus `outbox.jsonl`, for tests) or `log` |
 | TOPO_MAIL_DIR | `$TOPO_DATA/mail` | the `file` sink's folder |
 | TOPO_SMTP_HOST, TOPO_SMTP_PORT | –, 587 | the SMTP server |
@@ -1033,7 +1034,8 @@ later.
 
   `configure` takes only the settings the app writes (TOPO_LISTEN,
   TOPO_PUBLIC_URL, TOPO_ALLOWED_HOSTS, TOPO_TLS_SELF, TOPO_OWNER_EMAIL,
-  TOPO_MAIL, TOPO_SMTP_HOST/PORT/SECURITY/USER/FROM, TOPO_BACKUP_FOLDERS),
+  TOPO_LOCAL_CODE_KEY, TOPO_MAIL, TOPO_SMTP_HOST/PORT/SECURITY/USER/FROM,
+  TOPO_BACKUP_FOLDERS),
   checks them as the server will and keeps the old file if the server would
   refuse them. The SMTP password goes into the service's own folder
   (`smtp.pass`), never into the settings file. The Windows exe is
@@ -1181,7 +1183,19 @@ it stops when the app closes. When the service is set up (above), the
 section talks to the service instead and this way is not offered.
 
 - **This PC only**: `http://127.0.0.1:<port>` (7380 by default). Sign-in
-  codes can be sent by email or shown in the section's log.
+  codes can be sent by email, or with no email the app fetches them (D358):
+  the app makes a key once (`local.key` in its own data folder, readable by
+  this account only) and writes it into the server's settings as
+  `TOPO_LOCAL_CODE_KEY`; the server keeps each address's newest sign-in
+  code in memory (30 minutes, taken once) and hands it only to a caller on
+  loopback showing that key (`GET /api/local/signin-code`), which Setup
+  does. The code is never written to the log above debug: the system log
+  (the journal for wheel and adm, the Windows Application log for every
+  account signed in) is readable by other people on a shared PC, and on a
+  Mac or for a person outside those groups not by the app at all. A
+  service set up before this key hands out nothing until it is saved
+  again. Settings' own sign-in sheet does not fetch the code yet: sign in
+  through Setup (Settings, Run the setup again).
 - **Other PCs on this network**: https on every address of the PC, with the
   self-signed certificate above (`TOPO_TLS_SELF`). The section lists each
   address (`https://192.168.1.20:7380`) with Copy, and the certificate's
@@ -1299,8 +1313,10 @@ packages are installed from a file the client trusts by its source.
   its data refuses to start. Back up first.
 - **Logs** go to stderr (the journal, `podman logs`): one line per request
   with the route (never a token), status, time and user id. Email addresses
-  are masked and codes are never logged (except at debug with `TOPO_MAIL=log`,
-  for development).
+  are masked and codes are never logged above debug: `TOPO_MAIL=log` writes
+  them at debug, for development. The desktop app's "This PC only" server
+  hands them to the app instead (`TOPO_LOCAL_CODE_KEY`, D358, which
+  replaced D352's info line).
 - **Health**: `GET /api/health` answers
   `{"ok":true,"server":"topo","api":1,"version","appHash","app","secure","setup","maxRevBytes","signedIn"}`;
   `topo-server healthcheck` uses it.

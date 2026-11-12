@@ -1,7 +1,9 @@
 // @realtime @touch 360x780
-// The first-run welcome (js/welcome.js; docs/SCOPE.md D141-D143, D170,
-// D326-D335), on the website and in the desktop app (a stub of the app's
-// commands, as tests/suites/desktopserver.js and thiscomputer.js do).
+// Setup, the first-run welcome (js/welcome.js; docs/SCOPE.md D141-D143,
+// D170, D326-D336, D352-D357), on the website and in the desktop app (a stub
+// of the app's commands, as tests/suites/desktopserver.js, desktopclient.js
+// and thiscomputer.js do; the server's requests go to the in-page fake
+// server, tests/fixtures/fakeserver.js).
 // Real clock (the PIN is a PBKDF2 hash, js/idlelock.js). Covered:
 //   - not shown for this run's own way in (#advanced), nor for '#setup',
 //     '#provider', a share link, '#simple', '?profile=', or a start that is
@@ -24,18 +26,39 @@
 //     Add devices' new network, An empty network starts one;
 //   - the desktop app: where offers this PC, Connect to a Topo server and,
 //     Make this PC the server wherever the service can run and does not yet
-//     (D336); D125's answer goes once ('yes' only through Open Settings with
-//     it chosen; skipping, Not now or ✕ is 'no'); an app that already
-//     answered is not asked again; a chosen server ends in Settings at
-//     its section; an app window already connected skips "where"; the pc step
-//     queues Add this computer and Monitor from this PC until a network is
-//     open and nothing is on screen, then runs them in turn, given up 30
+//     (D336); D125's answer goes once ('yes' once Setup set the service up;
+//     skipping, Not now or ✕ is 'no'); an app that already answered is not
+//     asked again; an app window already connected skips "where"; the pc
+//     step queues Add this computer and Monitor from this PC until a network
+//     is open and nothing is on screen, then runs them in turn, given up 30
 //     minutes after they were queued;
+//   - the server, step by step (D353-D355). Connect: the address (no
+//     address and nobody there said on the step, Back, retry), a
+//     self-signed certificate compared (Back cancels, nothing pinned),
+//     pinned by dcTrust, the reload, Setup resumed at the sign-in (Back shows
+//     the server connected to), no email said, the code asked through the
+//     app, a wrong code said, the right one signs in with keys, then the
+//     lock, the end with Finish; Setup's word older than 30 minutes given up.
+//     Make this PC the server: the owner's email and who opens it, other PCs'
+//     email server fields, the service's own refusals in Settings' words,
+//     set up through Settings' own form (dsSetUpWith), D125's 'yes', the wait
+//     (no Next), a server that does not start said with Try again (Settings'
+//     Start), this window connected to it (dcConnectOwn), the reload, the
+//     owner's email filled in, the code fetched from this PC's server by the
+//     app with its key (D358; an older code it hands back first is not
+//     taken; a server set up without the key said on the step), signed in
+//     as the owner; Back from the wait to the owner step and Set it up
+//     again uses Settings' Save, not a second service. Closed (Esc) while
+//     the administrator prompt is up: Setup waits for it, says so, then
+//     closes with D125's 'yes' (D359); closed while comparing a
+//     certificate: nothing pinned, no comparison left for Settings.
+//     Skip on a server step ends the walk with nothing set up;
 //   - where the welcome does not run, D125's own prompt still asks once;
-//   - Settings, Run the welcome again;
-//   - Spanish and Japanese ("PC");
-//   - each step at 360 and 390 through tests/fixtures/touchaudit.js, and at
-//     1280; no sideways scroll; no console error.
+//   - Settings, Run the setup again (the section named Setup, D356);
+//   - Spanish and Japanese ("PC"); every Setup string in es, pt-BR, ru, ja;
+//   - each step at 360 and 390 through tests/fixtures/touchaudit.js (the
+//     server steps in Gold and Colourful), and at 1280; no sideways scroll;
+//     no console error.
 window.addEventListener('load', () => { setTimeout(async () => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
@@ -253,10 +276,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
     await W.atBoot(); await settle();
     W.skip(); W.skip(); await settle();
     ok('an app that already answered (0.0.1): Make this PC the server still offered (D336)', !srv.hidden);
-    srv.click(); W.next(); await settle(); W.skip(); await settle(); W.skip(); await settle();
-    el('wlHandoffGo').click();
-    ok('chosen there: Settings at This PC as the server, the question not answered again', await until(() => settingsOpen() && !el('setDsSec').hidden) && done() === '');
-    closeSettings(); await settle();
+    srv.click(); W.next(); await settle();
+    ok('chosen there: Setup goes on to the owner\'s email, not to Settings (D353)', step() === 'srvOwner' && !settingsOpen()
+      && /Step 4 of 10/.test(el('wlCount').textContent), el('wlCount').textContent);
+    W.skip(); await settle();
+    ok('Skip on a server step ends the walk: the lock next, nothing set up', step() === 'lock' && !calls.some((c) => c.cmd === 'server_service_install')
+      && !W.state.steps.some((s) => /^srv/.test(s)));
+    await close();
+    ok('…and the question is not answered again', done() === '');
     host.installed = true;
     plain(); desktop();
     await W.atBoot(); await settle();
@@ -266,38 +293,32 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('and nothing answered for it', done() === '');
     host.installed = false;
 
-    // Make this PC the server chosen, then the welcome ends without Open
-    // Settings: "not now", Settings not opened (D170, D336).
+    // Make this PC the server chosen, its steps skipped, then Setup ends:
+    // "not now", nothing set up, Settings not opened (D170, D353).
     for (const [label, end] of [['Not now', () => el('wlSkip').click()], ['✕', () => W.finish('closed')]]) {
       calls.length = 0; host.ask = true;
       plain(); desktop();
       await W.atBoot(); await settle();
       W.skip(); W.skip(); await settle();
-      srv.click(); W.next(); await settle(); W.skip(); await settle(); W.skip(); await settle();
-      ok(`server chosen, then ${label} at the hand-over…`, step() === 'start' && !el('wlHandoff').hidden);
+      srv.click(); W.next(); await settle(); W.skip(); await settle(); W.skip(); await settle(); W.skip(); await settle();
+      ok(`server chosen and skipped, then ${label} at the start…`, step() === 'start' && !el('wlStarts').hidden && el('wlHandoff').hidden);
       end(); await settle();
-      ok(`…answers "not now", Settings not opened (${label})`, !shown() && done() === 'no' && !settingsOpen());
+      ok(`…answers "not now", Settings not opened (${label})`, !shown() && done() === 'no' && !settingsOpen() && !calls.some((c) => c.cmd === 'server_service_install'));
     }
 
-    calls.length = 0; host.ask = true;
+    // This PC's two ticks wait for an open network (D331).
+    calls.length = 0; host.ask = false;
     plain(); desktop();
     await W.atBoot(); await settle();
-    W.skip(); W.skip(); await settle();
-    srv.click(); await settle();
-    ok('choosing it marks it', srv.getAttribute('aria-pressed') === 'true');
-    W.next(); await settle(); W.skip(); await settle();
+    W.skip(); W.skip(); W.next(); await settle(); W.skip(); await settle();
     el('wlAddPc').click(); el('wlMonitor').click();
     el('wlNext').click(); await settle();
-    ok('a server chosen: the start step hands over to Settings', step() === 'start' && el('wlStarts').hidden && !el('wlHandoff').hidden
-      && /This PC as the server/.test(el('wlHandoffText').textContent));
-    for (const wd of [360, 390]) { await window.__viewport(wd, wd === 360 ? 780 : 844); await audit('The welcome, hand-over'); }
-    await window.__viewport(1280, 900); await settle();
-    el('wlHandoffGo').click();
-    ok('"yes" answered once, Settings open at This PC as the server', await until(() => settingsOpen() && !el('setDsSec').hidden) && done() === 'yes'
-      && document.activeElement === el('setDsOwner'));
+    ok('on this PC only: the start step shows its three ways', step() === 'start' && !el('wlStarts').hidden && el('wlHandoff').hidden);
+    el('wlSkip').click(); await settle();
     const queued = JSON.parse(sessionStorage.getItem(W.NEXT_KEY));
     ok('Add this computer and Monitor wait for an open network, with the time they were queued', JSON.stringify(queued.tasks) === '["pc","monitor"]'
       && typeof queued.at === 'number' && Date.now() - queued.at < 60000);
+    openSettings(); await settle();
     ok('not while Settings and the landing are up', !W.runNext() && !W.idle());
     closeSettings(); await settle();
     ok('nor with only the landing up', !W.runNext());
@@ -309,7 +330,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     await settle();
     let monChanged = 0;
     el('setMonOn').addEventListener('change', () => { monChanged++; }, { once: true });
-    ok('then Monitor from this PC: Settings at it, its tick asked (the offer, or why not yet)', W.runNext() && settingsOpen() && !el('setMonSec').hidden && monChanged === 1);
+    ok('then Monitor from this PC: Settings at it, its tick asked (the offer, or why not yet)', W.runNext() && settingsOpen() && !el('setMonSec').hidden && monChanged === 1
+      && el('setTab-monitor').getAttribute('aria-selected') === 'true' && !el('setPanel-monitor').hidden && el('setMonSec').getClientRects().length > 0,
+      document.querySelector('#settingsDialog .set-tab[aria-selected="true"]')?.dataset.tab);
     ok('nothing left waiting', !sessionStorage.getItem(W.NEXT_KEY));
     closeSettings(); await settle();
     // The 30 minutes run from the queueing, not from this page's load (D331, D336).
@@ -318,18 +341,318 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a queue older than 30 minutes is given up, even with the page idle', W.idle() && !W.runNext() && !sessionStorage.getItem(W.NEXT_KEY)
       && calls.filter((c) => c.cmd === 'this_computer').length === thisComputerCalls);
     while (asked.length) asked.pop();
+    if (!landingIsOpen()) openLanding(true);
 
-    // Connect: Settings at Connect to a Topo server.
-    calls.length = 0; host.ask = false;
-    plain(); desktop();
+    // ---- The server, step by step (D353-D355) ----
+    // The app's commands as clientcmd.rs and server.rs answer them; every
+    // request goes to an in-page fake Topo server (tests/fixtures/fakeserver.js),
+    // as tests/suites/desktopclient.js and desktopserver.js stub them.
+    await loadScript('tests/fixtures/fakeserver.js');
+    const T = window.TopoServer, Y = window.TopoServerSync, UI = window.TopoServerUI;
+    const FP = 'A6:08:2D:50:E7:2C:E3:6B:3E:2B:0F:A0:BF:6A:CF:18:EE:68:34:75:AA:29:1A:20:C4:CD:32:3B:30:CF:7B:6C';
+    const LAN = 'https://192.168.1.20:7380', OWN = 'http://127.0.0.1:7380';
+    const fakeOrg = FakeTopoServer({ ownerEmail: 'owner@example.test' });
+    const fakeOwn = FakeTopoServer({ ownerEmail: 'it@clinica.test' });
+    fakeOwn.code = '482915';
+    const net = { url: '', pin: '', reloads: 0 };
+    // The code box of this PC's own server (D358): the newest code, handed
+    // to the app after deliverAfter asks (the mail worker's moment); stale:
+    // an older code handed back first; noKey: set up before the app's key.
+    const box = { code: null, stale: null, polls: 0, deliverAfter: 2, noKey: false };
+    const svc = { installed: false, running: false, startable: true, polls: 0, runAfter: 2, installDelay: 0, log: ['level=INFO msg="topo-server started"'],
+      settings: { enabled: false, port: 7380, lan: false, ownerEmail: '', mail: 'none', smtpPort: 587, smtpSecurity: 'starttls', shareAddress: '' } };
+    const svcInfo = () => ({ available: true, mode: svc.installed ? 'service' : 'app', service: { supported: true, installed: svc.installed }, running: svc.running, error: '',
+      urls: svc.running ? [svc.settings.lan ? LAN : OWN] : [], log: svc.log.slice(), lanAddresses: ['192.168.1.20'], settings: JSON.parse(JSON.stringify(svc.settings)),
+      fingerprint: svc.running && svc.settings.lan ? FP : '', hasSmtpPass: false });
+    const checkSettings = (st) => {
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(st.ownerEmail || '')) throw 'owner-email';
+      if (st.lan && st.mail === 'none') throw 'lan-needs-email';
+      if (st.mail === 'smtp' && (!st.smtpHost || !st.smtpFrom || !st.smtpPort)) throw 'smtp';
+    };
+    const norm = (u) => { const s = String(u || '').trim(); if (!s) return null; const w = s.includes('://') ? s : 'https://' + s; try { return new URL(w).origin; } catch (e) { return null; } };
+    const invoke2 = async (cmd, args) => {
+      calls.push({ cmd, args: cmd === 'client_events' ? { path: args.path } : JSON.parse(JSON.stringify(args || {})) });
+      await wait(2);
+      if (cmd === 'server_question') return host.ask;
+      if (cmd === 'server_question_done') { host.ask = false; return null; }
+      if (cmd === 'server_info') {
+        if (svc.installed && !svc.running && svc.startable && ++svc.polls >= svc.runAfter) svc.running = true;
+        return svcInfo();
+      }
+      if (cmd === 'server_service_install') { if (svc.installDelay) await wait(svc.installDelay); checkSettings(args.settings); svc.installed = true; svc.settings = Object.assign({}, args.settings); svc.polls = 0; return svcInfo(); }
+      if (cmd === 'server_save') { checkSettings(args.settings); svc.settings = Object.assign({}, args.settings); return svcInfo(); }
+      if (cmd === 'server_start') { svc.startable = true; svc.polls = 0; return svcInfo(); }
+      if (cmd === 'server_signin_code') {
+        if (!svc.installed || svc.settings.lan || svc.settings.mail !== 'none') throw 'not-local';
+        if (box.noKey) throw 'no-code-key';
+        if (args.email !== svc.settings.ownerEmail) return null;
+        if (box.stale) { const c = box.stale; box.stale = null; return c; }
+        if (box.code && ++box.polls >= box.deliverAfter) { const c = box.code; box.code = null; return c; }
+        return null;
+      }
+      if (cmd === 'client_info') return { url: net.url, pin: net.pin };
+      if (cmd === 'client_probe' || cmd === 'client_connect') {
+        const url = norm(args.url);
+        if (!url) throw 'address';
+        if (/nobody/.test(url)) { if (cmd === 'client_probe') return { url, error: 'offline', fingerprint: '' }; throw 'offline'; }
+        const fp = /192\.168/.test(url) ? FP : '';
+        const pinned = (args.pin || '') === fp;
+        if (cmd === 'client_probe') return { url, error: fp && !pinned ? 'untrusted' : '', fingerprint: fp };
+        if (fp && !pinned) throw 'untrusted:' + fp;
+        net.url = url; net.pin = args.pin || '';
+        return { url: net.url, pin: net.pin };
+      }
+      if (cmd === 'client_disconnect') { net.url = ''; net.pin = ''; return { url: '', pin: '' }; }
+      if (cmd === 'client_request') {
+        if (!net.url) throw 'not-connected';
+        const fake = net.url === OWN ? fakeOwn : fakeOrg;
+        let r;
+        try { r = await fake.fetch(args.path, { method: args.method, body: args.body || undefined, headers: { 'X-Topo': '1' } }); } catch (e) { throw 'offline'; }
+        // This PC's own server with no email: the code waits in its box for
+        // the app (D358), never in its log.
+        if (fake === fakeOwn && args.path === '/api/auth/request' && r.status === 202) { box.code = { code: fakeOwn.code, at: Date.now() }; box.polls = 0; }
+        return { status: r.status, contentType: 'application/json', body: await r.text(), b64: false };
+      }
+      if (cmd === 'client_events') return 1;
+      if (cmd === 'client_events_close') return null;
+      if (cmd === 'this_computer') return null;
+      return null;
+    };
+    class StubChannel { constructor() { this.onmessage = null; } }
+    const app2 = () => {
+      W.state.invoke = invoke2; DS.state.invoke = invoke2; TC.state.invoke = invoke2; CK.state.invoke = invoke2;
+      Object.assign(DC.state, { invoke: invoke2, Channel: StubChannel, reload: () => { net.reloads++; } });
+      W.state.waitMs = 20;
+    };
+    UI.setServerResponder((q) => (q.kind === 'recovery' ? 'ok' : q.kind === 'show-name' ? false : null));
+    // What a reload does: the page goes, the boot reads the mirror and asks
+    // the app (js/desktopclient.js), opens the server client, then Setup's
+    // atBoot. The landing is what a plain start shows.
+    const reload = async () => {
+      W._unload();
+      T._reset(); Y._reset(); DC.detach();
+      Object.assign(DC.state, { info: null, changed: '', changedKind: '', told: false, probe: null, note: '' });
+      Object.assign(W.ARRIVAL, { hash: '', profile: false });
+      if (!landingIsOpen()) openLanding(true);
+      await DC.boot();
+      await openServerClient();
+      await settle();
+      const r = await W.atBoot();
+      await settle();
+      return r;
+    };
+    const msg = () => el('wlSrvMsg').textContent;
+    const shots = async (label) => {
+      for (const theme of ['gold', 'color']) {
+        document.documentElement.setAttribute('data-carino-theme', theme);
+        for (const wd of [360, 390]) { await window.__viewport(wd, wd === 360 ? 780 : 844); await audit(`Setup, ${label} (${theme})`); }
+      }
+      document.documentElement.setAttribute('data-carino-theme', theme0);
+      await window.__viewport(1280, 900); await settle();
+      ok(`Setup, ${label} @1280: no sideways scroll`, document.documentElement.scrollWidth <= innerWidth);
+    };
+
+    // -- Connect to a Topo server --
+    calls.length = 0; host.ask = true;
+    plain(); app2();
     await W.atBoot(); await settle();
     W.skip(); W.skip(); await settle();
-    el('wlWhereApp').querySelector('[data-where="connect"]').click();
-    W.next(); await settle(); W.skip(); await settle(); W.skip(); await settle();
-    ok('Connect chosen: the hand-over names it', /Connect to a Topo server/.test(el('wlHandoffText').textContent));
+    el('wlWhereApp').querySelector('[data-where="connect"]').click(); await settle();
+    ok('Connect chosen: its steps join the count (address, sign-in, code)', /Step 3 of 9/.test(el('wlCount').textContent), el('wlCount').textContent);
+    el('wlNext').click(); await settle();
+    ok('Next: the address step, Connect as its button, nothing asked of the app yet', step() === 'srvAddr' && el('wlNext').textContent === 'Connect'
+      && !el('wlSrvLater').hidden && !calls.some((c) => c.cmd === 'client_probe') && document.activeElement === el('wlSrvUrl'));
+    await shots('the address');
+    el('wlNext').click();
+    ok('no address: said on the step, as Settings says it', await until(() => /not a server address/.test(msg())) && el('wlSrvMsg').classList.contains('wl-err')
+      && el('wlSrvMsg').getAttribute('role') === 'alert' && step() === 'srvAddr');
+    el('wlSrvUrl').value = 'nobody.example';
+    el('wlNext').click();
+    ok('nobody there: said, and the step stays to try again', await until(() => /No Topo server answered/.test(msg())) && step() === 'srvAddr' && !sessionStorage.getItem(W.RESUME_KEY));
+    el('wlBack').click(); await settle();
+    ok('Back from the address: the where step, the error gone', step() === 'where' && msg() === '');
+    el('wlNext').click(); await settle();
+    el('wlSrvUrl').value = '192.168.1.20:7380';
+    el('wlNext').click();
+    ok('a server that signs its own certificate: compare it (dcConnect\'s probe)', await until(() => step() === 'srvCompare') && el('wlSrvFp').textContent === FP
+      && el('wlSrvFpUrl').textContent === LAN && el('wlNext').textContent === 'They are the same: connect' && /Step 5 of 10/.test(el('wlCount').textContent)
+      && document.activeElement === el('wlNext'));
+    await shots('compare the certificate');
+    el('wlBack').click(); await settle();
+    ok('Back: the address again, nothing pinned (dcCancel)', step() === 'srvAddr' && !DC.state.probe && !calls.some((c) => c.cmd === 'client_connect'));
+    el('wlNext').click();
+    await until(() => step() === 'srvCompare');
+    el('wlNext').click();
+    ok('they are the same: connected with that fingerprint pinned (dcTrust), the window reloads', await until(() => net.reloads === 1)
+      && JSON.stringify(calls.find((c) => c.cmd === 'client_connect').args) === JSON.stringify({ url: LAN, pin: FP }) && localStorage.getItem(DC.MIRROR_KEY) === JSON.stringify({ url: LAN }));
+    const left = JSON.parse(sessionStorage.getItem(W.RESUME_KEY) || 'null');
+    ok('Setup left word to go on at the sign-in after the reload', left && left.step === 'srvEmail' && left.where === 'connect' && left.serverAsk === true && !W.doneMark());
+
+    ok('after the reload Setup goes on by itself (D355)', (await reload()) === 'resumed' && shown() && step() === 'srvEmail', step());
+    ok('…the sign-in step: the email, no setup code (the server has its owner), Send me a code', el('wlNext').textContent === 'Send me a code'
+      && el('wlSrvTokenRow').hidden && /A code to sign in will be sent there/.test(el('wlSrvEmailText').textContent) && T.state.status === 'signed-out');
+    await shots('sign in');
+    el('wlBack').click(); await settle();
+    ok('Back from the sign-in: where, showing the server this window is connected to', step() === 'where' && !el('wlWhereOn').hidden && el('wlWhereApp').hidden
+      && el('wlWhereOnUrl').textContent === LAN);
+    el('wlNext').click(); await settle();
+    el('wlNext').click();
+    ok('no email: said on the step', await until(() => /Type your email address/.test(msg()) && el('wlSrvMsg').classList.contains('wl-err')) && step() === 'srvEmail');
+    el('wlSrvEmail').value = 'owner@example.test';
+    el('wlNext').click();
+    ok('a code asked for (requestCode, through the app): the code step', await until(() => step() === 'srvCode') && el('wlNext').textContent === 'Sign in'
+      && el('wlSrvCodeLbl').textContent === 'Code from the email' && /owner@example\.test/.test(el('wlSrvCodeText').textContent)
+      && calls.some((c) => c.cmd === 'client_request' && c.args.path === '/api/auth/request'));
+    await shots('the code');
+    el('wlSrvCode').value = '111111';
+    el('wlNext').click();
+    ok('a wrong code: the server\'s words, the step stays', await until(() => msg() !== '' && msg() !== 'Signing in…') && step() === 'srvCode' && el('wlSrvMsg').classList.contains('wl-err'), msg());
+    el('wlSrvCode').value = '123456';
+    el('wlNext').click();
+    ok('the right code: signed in with keys (verifyCode), then the lock step', await until(() => step() === 'lock', 300) && T.state.status === 'ready'
+      && T.me().email === 'owner@example.test' && !sessionStorage.getItem(W.RESUME_KEY), T.state.status);
+    W.skip(); await settle(); W.skip(); await settle();
+    ok('the end: what was done, and Finish (the start page is the server\'s)', step() === 'start' && el('wlStarts').hidden && !el('wlHandoff').hidden
+      && /connected to https:\/\/192\.168\.1\.20:7380 and signed in as owner@example\.test/.test(el('wlHandoffText').textContent)
+      && el('wlHandoffGo').textContent === 'Finish' && el('wlSkip').hidden && el('wlStartHead').textContent === 'All set');
+    await shots('all set');
     el('wlHandoffGo').click(); await settle();
-    ok('Settings open at Connect to a Topo server, the address focused', settingsOpen() && !el('setDcSec').hidden && document.activeElement === el('setDcUrl'));
-    closeSettings(); await settle();
+    ok('Finish: Setup done, D125 answered "not now" (nothing set up on this PC)', !shown() && W.doneMark() && W.doneMark().how === 'done'
+      && calls.filter((c) => c.cmd === 'server_question_done').map((c) => c.args.answer).join() === 'no');
+
+    // A reload with Setup's word older than 30 minutes: not resumed.
+    sessionStorage.setItem(W.RESUME_KEY, JSON.stringify({ at: Date.now() - 31 * 60000, step: 'srvEmail', where: 'connect' }));
+    host.ask = false;
+    ok('Setup\'s word older than 30 minutes is given up', (await reload()) === 'done' && !shown() && !sessionStorage.getItem(W.RESUME_KEY));
+    await wait(1700);   // D125's own prompt had its turn (nothing to ask)
+    // Back to a window that is not a client.
+    await T.signOut().catch(() => {});
+    net.url = ''; net.pin = ''; localStorage.removeItem(DC.MIRROR_KEY);
+    T._reset(); Y._reset(); DC.detach(); DC.state.info = { url: '', pin: '' };
+
+    // -- Make this PC the server --
+    calls.length = 0; host.ask = true;
+    plain(); app2();
+    await W.atBoot(); await settle();
+    W.skip(); W.skip(); await settle();
+    srv.click(); el('wlNext').click(); await settle();
+    ok('Make this PC the server: the owner\'s email and who opens it, Set it up', step() === 'srvOwner' && el('wlNext').textContent === 'Set it up'
+      && el('wlSrvWho').value === 'pc' && el('wlSrvSmtp').hidden && !el('wlSrvPcNote').hidden && /Step 4 of 10/.test(el('wlCount').textContent), el('wlCount').textContent);
+    await shots('make this PC the server');
+    el('wlSrvWho').value = 'lan'; el('wlSrvWho').dispatchEvent(new Event('change'));
+    await settle();
+    ok('other PCs too: the email server\'s fields', !el('wlSrvSmtp').hidden && el('wlSrvPcNote').hidden && el('wlSrvSmtpPort').value === '587');
+    await shots('other PCs, the email server');
+    el('wlSrvOwner').value = 'it@clinica.test';
+    el('wlNext').click();
+    ok('no email server for other PCs: the service\'s own refusal, in Settings\' words', await until(() => /Fill in the SMTP server/.test(msg())) && step() === 'srvOwner' && !svc.installed);
+    el('wlSrvWho').value = 'pc'; el('wlSrvWho').dispatchEvent(new Event('change'));
+    el('wlSrvOwner').value = '';
+    el('wlNext').click();
+    ok('no owner\'s email: said, nothing set up', await until(() => /Type the owner's email/.test(msg())) && !svc.installed && done() === '');
+    el('wlSrvOwner').value = 'it@clinica.test';
+    svc.startable = false;
+    W.state.waitFor = 1500;
+    el('wlNext').click();
+    const inst = await until(() => svc.installed);
+    const ic = calls.filter((c) => c.cmd === 'server_service_install').pop();
+    ok('Set it up: Settings\' own "Run it in the background from startup", with what Setup asked', inst && ic.args.settings.ownerEmail === 'it@clinica.test'
+      && ic.args.settings.lan === false && ic.args.settings.mail === 'none' && ic.args.settings.port === 7380 && el('setDsOwner').value === 'it@clinica.test');
+    ok('D125 answered "yes" once the service is set up', await until(() => done() === 'yes'));
+    ok('then the wait: no Next while it waits', await until(() => step() === 'srvWait') && el('wlNext').hidden && /Waiting for the server/.test(msg()));
+    await shots('waiting for the server');
+    ok('a server that does not start: said, with Try again', await until(() => !el('wlNext').hidden, 300) && el('wlNext').textContent === 'Try again'
+      && /has not started yet/.test(msg()) && el('wlSrvMsg').classList.contains('wl-err'));
+    // Back to the owner step, then Set it up again: the service is set up
+    // now, so Settings' Save, never a second service (the real way there).
+    const installs = calls.filter((c) => c.cmd === 'server_service_install').length;
+    el('wlBack').click(); await settle();
+    ok('Back from the wait: the owner step again, as set up', step() === 'srvOwner' && el('wlSrvOwner').value === 'it@clinica.test' && msg() === '');
+    el('wlNext').click();
+    ok('Set it up again after Back: Settings\' Save, not a second service, then the wait again', await until(() => calls.some((c) => c.cmd === 'server_save'))
+      && calls.filter((c) => c.cmd === 'server_service_install').length === installs && await until(() => step() === 'srvWait')
+      && calls.filter((c) => c.cmd === 'server_save').pop().args.settings.ownerEmail === 'it@clinica.test');
+    ok('…and it gives up again, with Try again', await until(() => !el('wlNext').hidden, 300) && el('wlNext').textContent === 'Try again');
+    W.state.waitFor = 90000;
+    el('wlNext').click();
+    ok('Try again: Settings\' Start, then running, and this window connected to it (dcConnectOwn), which reloads', await until(() => net.reloads === 2, 300)
+      && calls.some((c) => c.cmd === 'server_start') && JSON.stringify(calls.filter((c) => c.cmd === 'client_connect').pop().args) === JSON.stringify({ url: OWN, pin: null }));
+    const left2 = JSON.parse(sessionStorage.getItem(W.RESUME_KEY) || 'null');
+    ok('Setup left word: the sign-in, on this PC\'s own server with no email', left2 && left2.step === 'srvEmail' && left2.own === true && left2.mail === 'none'
+      && left2.email === 'it@clinica.test' && left2.serverAnswered === true);
+
+    ok('after the reload: the sign-in, the owner\'s email filled in', (await reload()) === 'resumed' && step() === 'srvEmail' && el('wlSrvEmail').value === 'it@clinica.test'
+      && /gets the sign-in code from it, for this account only/.test(el('wlSrvEmailText').textContent) && el('wlSrvTokenRow').hidden);
+    // A server set up before the app's key: said on the step, no retry loop.
+    box.noKey = true;
+    el('wlNext').click();
+    ok('a server without the app\'s key: said on the code step, what to do', await until(() => /without this app's key/.test(msg()), 300) && step() === 'srvCode'
+      && el('wlSrvMsg').classList.contains('wl-err') && el('wlSrvCode').value === '');
+    box.noKey = false;
+    el('wlBack').click(); await settle();
+    ok('Back: the email again', step() === 'srvEmail');
+    // An older code waiting (another attempt): handed back first, not taken.
+    box.stale = { code: '999999', at: Date.now() - 60000 };
+    el('wlNext').click();
+    ok('the code fetched from this PC\'s server with the app\'s key (D358) and filled in, the older one not taken', await until(() => el('wlSrvCode').value === '482915', 300)
+      && step() === 'srvCode' && box.stale === null && el('wlSrvCodeLbl').textContent === 'Sign-in code' && /got the code from this PC's server/.test(msg())
+      && calls.filter((c) => c.cmd === 'server_signin_code').every((c) => c.args.email === 'it@clinica.test'));
+    await shots('the code from this PC\'s server');
+    el('wlNext').click();
+    ok('signed in as the owner, on to the lock', await until(() => step() === 'lock', 300) && T.state.status === 'ready' && T.me().email === 'it@clinica.test' && T.me().serverRole === 'owner');
+    await close();
+    ok('closed: D125 answered once only ("yes")', done() === 'yes' && !sessionStorage.getItem(W.RESUME_KEY));
+
+    // Closed (Esc) while the administrator prompt is up (D359): Setup
+    // waits for the set-up, says so, then closes with D125's "yes".
+    const fresh = async () => {
+      await T.signOut().catch(() => {});
+      net.url = ''; net.pin = ''; localStorage.removeItem(DC.MIRROR_KEY);
+      T._reset(); Y._reset(); DC.detach(); DC.state.info = { url: '', pin: '' };
+      Object.assign(DC.state, { probe: null, note: '' });
+    };
+    const esc = () => (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    calls.length = 0; host.ask = true;
+    await fresh();
+    Object.assign(svc, { installed: false, running: false, startable: false, installDelay: 400 });
+    plain(); app2();
+    await W.atBoot(); await settle();
+    W.skip(); W.skip(); await settle();
+    srv.click(); el('wlNext').click(); await settle();
+    el('wlSrvOwner').value = 'it@clinica.test';
+    el('wlNext').click();
+    await until(() => calls.some((c) => c.cmd === 'server_service_install'));
+    esc(); await settle();
+    ok('Esc while the administrator prompt is up: Setup stays, and says it closes once the step is done', shown() && step() === 'srvOwner'
+      && /closes once this step is done/.test(msg()) && W.doneMark() && W.doneMark().how === 'closed', msg());
+    ok('…then closes, with D125 answered "yes": the service was set up', await until(() => !shown(), 300) && svc.installed
+      && calls.filter((c) => c.cmd === 'server_question_done').map((c) => c.args.answer).join() === 'yes' && !sessionStorage.getItem(W.RESUME_KEY));
+    const polls = calls.filter((c) => c.cmd === 'server_info').length;
+    await wait(200);
+    ok('…and nothing waits for the service after it closed', calls.filter((c) => c.cmd === 'server_info').length === polls && !W.state.busy);
+    svc.installDelay = 0;
+
+    // Closed while comparing a certificate: nothing pinned, and no
+    // comparison left behind for Settings to show.
+    calls.length = 0; host.ask = false;
+    await fresh();
+    plain(); app2();
+    await W.atBoot(); await settle();
+    W.skip(); W.skip(); await settle();
+    el('wlWhereApp').querySelector('[data-where="connect"]').click(); el('wlNext').click(); await settle();
+    el('wlSrvUrl').value = '192.168.1.20:7380';
+    el('wlNext').click();
+    ok('the comparison again', await until(() => step() === 'srvCompare') && !!DC.state.probe);
+    esc(); await settle();
+    ok('Esc while comparing: closed, the comparison cancelled (dcCancel), nothing pinned', !shown() && !DC.state.probe && !calls.some((c) => c.cmd === 'client_connect'));
+    svc.startable = true;
+
+    // Back to the page as the earlier checks left it.
+    net.url = ''; localStorage.removeItem(DC.MIRROR_KEY);
+    T._reset(); Y._reset(); DC.detach();
+    Object.assign(DC.state, { Channel: null, reload: null });
+    UI.setServerResponder(null);
+    if (!landingIsOpen()) openLanding(true);
     // An app window already connected to a server: no where step.
     host.connected = 'https://topo.clinica.lan:7380';
     plain(); desktop();
@@ -346,11 +669,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('…still asks D125\'s question by its own prompt, once', await until(() => asked.some((q) => q.kind === 'confirm' && /server for your network/.test(q.title || '')), 120)
       && await until(() => done() === 'no'));
 
-    // ---- Run the welcome again ----
+    // ---- Run the setup again ----
     W._reset(); W.state.invoke = null; TC.state.invoke = null; CK.state.invoke = null; DS.state.invoke = null; DC.state.invoke = null; DC.state.info = null;
     W.finish('done'); localStorage.setItem(W.WL_KEY, JSON.stringify({ v: 1, at: 1, how: 'done' }));
-    openSettings(); await settle();
-    ok('Settings has Run the welcome again', !el('setWelcomeSec').hidden && el('setWelcomeAgain').textContent === 'Run the welcome again');
+    openSettings('setup'); await settle();
+    ok('Settings has Run the setup again (Setup, D356)', !el('setWelcomeSec').hidden && el('setWelcomeAgain').textContent === 'Run the setup again' && el('setWelcomeHead').textContent === 'Setup');
     el('setWelcomeAgain').click();
     ok('it runs again from step 1, Settings closed', await until(() => shown()) && !settingsOpen() && step() === 'theme');
     await close();
@@ -361,11 +684,35 @@ window.addEventListener('load', () => { setTimeout(async () => {
       plain(); await W.atBoot(); await settle();
       const txt = el('welcomeDialog').textContent;
       ok(`${lang}: the welcome is translated`, el('wlCount').textContent.includes(count) && el('wlSkip').textContent !== 'Skip this step'
-        && (!title || el('wlTitle').textContent !== 'Welcome to Topo'), el('wlCount').textContent + ' | ' + el('wlTitle').textContent);
+        && (!title || el('wlTitle').textContent !== 'Set up Topo'), el('wlCount').textContent + ' | ' + el('wlTitle').textContent);
       if (lang === 'ja') ok('ja: says PC', /PC/.test(txt) && !/コンピューター/.test(txt));
       await window.__viewport(360, 780); await audit(`The welcome (${lang})`);
       await window.__viewport(1280, 900); await settle();
       await close();
+    }
+    // Every Setup string, in markup and in its server steps, in every
+    // language (Japanese says PC).
+    {
+      const keys = new Set();
+      document.querySelectorAll('#welcomeDialog [data-i18n], #setWelcomeSec [data-i18n]').forEach((n) => keys.add(n.dataset.i18nKey || n.textContent.trim()));
+      ['Connect', 'They are the same: connect', 'Set it up', 'Send me a code', 'Sign in', 'Try again', 'Next', 'Finish', 'All set', 'Sign-in code', 'Skip the setup',
+        'This window is connected to {server} and signed in as {email}. The networks kept on the server are on the start page.',
+        'This window is connected to {server}. Sign in from the start page to see the networks kept on it.',
+        'This PC\'s server sends no email: Topo gets the sign-in code from it, for this account only. The owner\'s email is filled in.',
+        'Topo gets the code from this PC\'s server and fills it in. Then Sign in.', 'Topo got the code from this PC\'s server. Sign in.',
+        'No code came from this PC\'s server. Back, then send a new code.', 'The server has not started yet. Its log is in Settings, This PC as the server.',
+        'This PC\'s server was set up without this app\'s key for sign-in codes. Save it again in Settings, This PC as the server, then send a new code.',
+        'Settings is still busy with the server. Try again.', 'Setup closes once this step is done.', 'No email: Setup gets the sign-in codes (this PC only)',
+        'Set up. Waiting for the server to start…', 'Running. Connecting this window to it…', 'This window is not connected to the server. Try again.',
+        'Setting it up… The administrator prompt may ask for a password.', 'Type the 6-digit code.'].forEach((k) => keys.add(k));
+      for (const loc of ['es', 'pt-BR', 'ru', 'ja']) {
+        const missing = [...keys].filter((k) => k && !CarinoI18N.has(loc, k));
+        ok(loc + ': every Setup string translated (' + keys.size + ')', missing.length === 0, missing.slice(0, 3).join(' | '));
+      }
+      setLocale('ja');
+      const ja = [...keys].map((k) => t(k)).join(' ');
+      ok('ja: Setup\'s strings say PC, never コンピューター', /PC/.test(ja) && !/コンピューター/.test(ja));
+      setLocale('en');
     }
     setLocale('en'); applyLocale();
     ok('no console error', errors.length === 0, errors.slice(0, 3).join(' | '));

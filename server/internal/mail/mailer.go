@@ -30,6 +30,10 @@ type Mailer interface {
 type Options struct {
 	Now     func() time.Time
 	RootCAs *x509.CertPool // SMTP TLS roots (nil = the system's)
+	// Codes, with TOPO_MAIL=log, keeps each address's newest sign-in code
+	// in memory for the desktop app that set this server up (D358; serve
+	// passes one only when cfg.LocalCodes()). nil keeps none.
+	Codes *CodeBox
 }
 
 // New returns the transport cfg.Mail names.
@@ -64,7 +68,11 @@ func New(cfg *config.Config, log *slog.Logger, o Options) (Mailer, error) {
 		}
 		return &File{sender: base, dir: dir}, nil
 	case "log", "":
-		return &Log{sender: base, log: log, debugCodes: true}, nil
+		// The code is never written to the log above debug: on a shared PC
+		// the system log is readable by other accounts (D358 replaces D352).
+		// The app that set up a server only this computer reaches fetches
+		// it from Codes instead.
+		return &Log{sender: base, log: log, debugCodes: true, codes: o.Codes}, nil
 	}
 	return nil, fmt.Errorf("mail: unknown transport %q", cfg.Mail)
 }
@@ -309,10 +317,13 @@ func safeName(s string) string {
 // Log writes one slog line per message: kind, masked address and subject.
 // The code is logged at debug only (TOPO_MAIL=log is for development
 // without SMTP); a sign-in subject carries the code, so it is left out.
+// codes: a sign-in code is also kept for the desktop app that set this
+// server up (D358), never written above debug.
 type Log struct {
 	sender
 	log        *slog.Logger
 	debugCodes bool
+	codes      *CodeBox
 }
 
 func (l *Log) Name() string { return "log" }
@@ -329,5 +340,68 @@ func (l *Log) Send(ctx context.Context, m *Message) error {
 	if l.debugCodes && (m.Code != "" || m.Link != "") {
 		l.log.Debug("mail sign-in", "to", Mask(m.To), "code", m.Code, "link", m.Link)
 	}
+	if l.codes != nil && m.Kind == "signin" && m.Code != "" {
+		l.codes.put(m.To, m.Code, l.now())
+	}
 	return nil
+}
+
+// CodeBox holds each address's newest sign-in code, in memory only, for
+// the desktop app that set up a server only this computer reaches and that
+// sends no email (D358). The app asks for it with the key it wrote into
+// the server's settings (GET /api/local/signin-code); nothing else reads it.
+// A code is dropped once taken or after CodeBoxTTL.
+type CodeBox struct {
+	mu  sync.Mutex
+	now func() time.Time
+	m   map[string]BoxedCode
+}
+
+// BoxedCode is one sign-in code and when it was sent (unix ms).
+type BoxedCode struct {
+	Code string `json:"code"`
+	At   int64  `json:"at"`
+}
+
+// CodeBoxTTL is how long a code waits to be taken (a sign-in code lives
+// 15 minutes by default, TOPO_CODE_TTL).
+const CodeBoxTTL = 30 * time.Minute
+
+// NewCodeBox returns an empty box (now nil: time.Now).
+func NewCodeBox(now func() time.Time) *CodeBox {
+	if now == nil {
+		now = time.Now
+	}
+	return &CodeBox{now: now, m: map[string]BoxedCode{}}
+}
+
+func boxKey(addr string) string { return strings.ToLower(strings.TrimSpace(addr)) }
+
+func (b *CodeBox) put(to, code string, at time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.prune()
+	b.m[boxKey(to)] = BoxedCode{Code: code, At: at.UnixMilli()}
+}
+
+// Take returns and forgets the newest code sent to addr, if one is waiting.
+func (b *CodeBox) Take(addr string) (BoxedCode, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.prune()
+	k := boxKey(addr)
+	c, ok := b.m[k]
+	if ok {
+		delete(b.m, k)
+	}
+	return c, ok
+}
+
+func (b *CodeBox) prune() {
+	cut := b.now().Add(-CodeBoxTTL).UnixMilli()
+	for k, c := range b.m {
+		if c.At < cut {
+			delete(b.m, k)
+		}
+	}
 }

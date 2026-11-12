@@ -61,7 +61,7 @@ const (
 
 // serviceConfTemplate is the first topo.conf of a Windows service. Nothing
 // in it is required: as written, the server answers only on this PC at
-// http://127.0.0.1:7380 and writes sign-in codes to the log.
+// http://127.0.0.1:7380 and writes sign-in codes to the log at debug only.
 const serviceConfTemplate = `# Topo server settings (KEY=VALUE, one per line; docs/SERVER.md lists every key).
 # After a change: topo-server service stop, then topo-server service start
 # (or Services, Topo server, Restart).
@@ -101,7 +101,8 @@ const serviceConfTemplate = `# Topo server settings (KEY=VALUE, one per line; do
 const unixConfTemplate = `# Topo server settings (KEY=VALUE, one per line; docs/SERVER.md lists every key).
 # The Topo app writes this file (Settings, This PC as the server). As
 # shipped every line is a comment: the server answers only on this computer
-# (http://127.0.0.1:7380) and writes sign-in codes to its log.
+# (http://127.0.0.1:7380). With no email, the app that set it up fetches the
+# sign-in codes with its key (TOPO_LOCAL_CODE_KEY); they are not in the log.
 #TOPO_LISTEN=127.0.0.1:7380
 #TOPO_OWNER_EMAIL=it@example.com
 `
@@ -115,6 +116,7 @@ var appConfKeys = map[string]bool{
 	"TOPO_ALLOWED_HOSTS":  true,
 	"TOPO_TLS_SELF":       true,
 	"TOPO_OWNER_EMAIL":    true,
+	"TOPO_LOCAL_CODE_KEY": true,
 	"TOPO_MAIL":           true,
 	"TOPO_SMTP_HOST":      true,
 	"TOPO_SMTP_PORT":      true,

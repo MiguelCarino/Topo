@@ -302,8 +302,9 @@ window.addEventListener('load', () => { setTimeout(() => {
   // grammatical places ("The whole network" in the share dialog's accusative
   // and as the report's scope) silently changes the other place's text. The
   // source is read as text, because the loaded MESSAGES has already lost the
-  // first copy. KNOWN: the 13 conflicting copies from before step 7, left as
-  // they were (D342); any other key repeated with a different value fails.
+  // first copy. Any key repeated with a different value fails: the 13 from
+  // before step 7 (D342) were given a context key each, or one translation
+  // where both places meant the same thing (D350).
   {
     const req = new XMLHttpRequest(); req.open('GET', 'js/i18n.js', false); req.send();
     const text = req.responseText;
@@ -339,16 +340,75 @@ window.addEventListener('load', () => { setTimeout(() => {
         k = m - 1;
       }
     }
-    const KNOWN = new Set(['es:Change', 'es:Past the {total}-port faceplate', 'es:Back up now',
-      'pt-BR:Change', 'pt-BR:Past the {total}-port faceplate',
-      'ru:Change', 'ru:Past the {total}-port faceplate', 'ru:Status', 'ru:Where',
-      'ja:Type', 'ja:Past the {total}-port faceplate', 'ja:Status', 'ja:Where']);
-    const fresh = conflicts.filter((c) => !KNOWN.has(c));
-    ok('no key is written twice in one locale with two different translations', entries > 4 * 1000 && fresh.length === 0,
-       `${entries} entries read; ${fresh.slice(0, 4).join(' | ')}`);
+    ok('no key is written twice in one locale with two different translations', entries > 4 * 1000 && conflicts.length === 0,
+       `${entries} entries read; ${conflicts.slice(0, 4).join(' | ')}`);
     ok('the share dialog\'s "The whole network" and the report\'s "Whole network" are two keys',
        MESSAGES.ru['The whole network'] === 'Всю сеть' && MESSAGES.ru['Whole network'] === 'Вся сеть'
        && locales.every((l) => MESSAGES[l]['Whole network']), `${MESSAGES.ru['The whole network']} / ${MESSAGES.ru['Whole network']}`);
+  }
+
+  // ---- Context keys: one English word, one translation per place (D350) ----
+  {
+    setLocale('en');
+    ok('the report inventory\'s Type column is "Type" in English', devicesSection([], []).includes('<th>Type</th>'));
+    ok('a context key shows its plain English', t('changes::Change') === 'Change' && t('backups::Status') === 'Status' && t('backups::Where') === 'Where',
+       [t('changes::Change'), t('backups::Status'), t('backups::Where')].join(' / '));
+    setLocale('ru');
+    ok('a context key missing from a locale falls back to its English, placeholders filled', t('changes::Plain {n} words', { n: 2 }) === 'Plain 2 words', t('changes::Plain {n} words', { n: 2 }));
+    const addrs = ['fe80::1', '::1', 'fe::1', 'ff::', 'dead::beef', 'cafe::1', 'nowhere::text'];
+    ok('only a listed context is cut: an IPv6 address, hex-only ones included, or other text with "::" stays whole',
+       addrs.every((a) => t(a) === a), addrs.map((a) => t(a)).join(' / '));
+    ok('no context is ever shown: every key with "::" starts with a listed context, its English without "::"',
+       locales.every((l) => Object.keys(MESSAGES[l]).every((k) => !/::/.test(k)
+         || (window.I18N_CONTEXTS.includes(k.split('::')[0]) && !k.split('::').slice(1).join('::').includes('::')))));
+
+    // Each place, rendered, in the three locales whose words differ.
+    const C = window.CarinoChanges;
+    const ch = { at: Date.UTC(2026, 10, 1), kind: 'backup', rows: [{ op: 'Added', what: 'Device', name: 'SW1', detail: '' }] };
+    const changesHead = () => { const d = document.createElement('div'); d.innerHTML = C.changesSection(ch); return d.querySelector('th').textContent; };
+    const rackChange = () => document.querySelector('#rackPlaceWhere .rkp-change').textContent;
+    const want = {
+      es: { noun: 'Cambio', verb: 'Cambiar', libBackup: 'Respaldar ahora', srvBackup: 'Hacer copia ahora', status: 'Estado', srvStatus: 'Estado', where: 'Dónde', srvWhere: 'Dónde', type: 'Tipo', repType: 'Tipo', past: 'Fuera del frontal de 24 puertos' },
+      ru: { noun: 'Изменение', verb: 'Изменить', libBackup: 'Сделать копию сейчас', srvBackup: 'Сделать копию сейчас', status: 'Статус', srvStatus: 'Состояние', where: 'Где', srvWhere: 'Куда', type: 'Тип', repType: 'Тип', past: 'За пределами панели на 24 портов' },
+      ja: { noun: '変更', verb: '変更', libBackup: '今すぐバックアップ', srvBackup: '今すぐバックアップ', status: 'ステータス', srvStatus: '状態', where: '場所', srvWhere: '保存先', type: '種類', repType: '種別', past: '24 ポートの前面パネルの外' }
+    };
+    // The report's two tables, rendered: the summary's device list (its
+    // Where column, a place) and the technical report's inventory (its Type).
+    const heads = (html, cls) => { const d = document.createElement('div'); d.innerHTML = html; return [...d.querySelectorAll(`table.${cls} thead th`)].map((th) => th.textContent); };
+    const summaryHeads = () => heads(summarySheet({ meta: {}, findings: [], devices: [{ name: 'SW1', typeName: 'Switch', place: 'Rack A' }] }), 'summary-list');
+    const inventoryHeads = () => heads(devicesSection([], []), 'inv');
+    Object.entries(want).forEach(([loc, w]) => {
+      setLocale(loc); applyLocale(loc);
+      ok(`${loc}: the changes list's column says the noun, the rack view's button the verb`,
+         changesHead() === w.noun && rackChange() === w.verb, `${changesHead()} / ${rackChange()}`);
+      ok(`${loc}: the storage banner's and the server backups' Back up now`,
+         document.getElementById('storageBackupBtn').textContent === w.libBackup && t('backups::Back up now') === w.srvBackup,
+         `${document.getElementById('storageBackupBtn').textContent} / ${t('backups::Back up now')}`);
+      const propStatus = document.querySelector('label[for="propStatus"]').textContent;
+      ok(`${loc}: an asset's or a problem's Status, and the backups' Status`,
+         propStatus === w.status && t('Status') === w.status && t('backups::Status') === w.srvStatus, `${propStatus} / ${t('backups::Status')}`);
+      ok(`${loc}: the summary's Where column (a place) and the backups' Where (a destination)`,
+         summaryHeads()[2] === w.where && t('backups::Where') === w.srvWhere, `${summaryHeads().join(',')} / ${t('backups::Where')}`);
+      ok(`${loc}: the report inventory's Type column keeps its own word, the rack view's type picker its own`,
+         inventoryHeads()[1] === w.repType && document.getElementById('rackPlaceTypes').getAttribute('aria-label') === w.type,
+         `${inventoryHeads().join(',')} / ${document.getElementById('rackPlaceTypes').getAttribute('aria-label')}`);
+      ok(`${loc}: "Past the {total}-port faceplate" reads as written`,
+         t('Past the {total}-port faceplate', { total: 24 }) === w.past, t('Past the {total}-port faceplate', { total: 24 }));
+    });
+
+    // Markup: data-i18n-ctx builds the context key for the text and the
+    // marked attributes, and switching back to English shows the plain word.
+    const probe = document.createElement('span');
+    probe.setAttribute('data-i18n', ''); probe.setAttribute('data-i18n-ctx', 'changes');
+    probe.setAttribute('data-i18n-title', ''); probe.title = 'Change'; probe.textContent = 'Change';
+    document.body.appendChild(probe);
+    setLocale('ru'); applyStaticI18n();
+    ok('data-i18n-ctx: the markup reads its context key', probe.dataset.i18nKey === 'changes::Change' && probe.textContent === 'Изменение'
+       && probe.getAttribute('data-i18n-title') === 'changes::Change' && probe.title === 'Изменение', `${probe.dataset.i18nKey} ${probe.textContent} ${probe.title}`);
+    setLocale('en'); applyStaticI18n();
+    ok('data-i18n-ctx: English shows the plain word', probe.textContent === 'Change' && probe.title === 'Change', `${probe.textContent} ${probe.title}`);
+    probe.remove();
+    applyLocale('en');
   }
 
   // Switching back has to actually switch back, or one language test poisons

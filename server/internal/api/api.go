@@ -20,6 +20,7 @@ import (
 	"carino.systems/topo/server/internal/backup"
 	"carino.systems/topo/server/internal/config"
 	"carino.systems/topo/server/internal/hub"
+	"carino.systems/topo/server/internal/mail"
 	"carino.systems/topo/server/internal/store"
 )
 
@@ -118,6 +119,10 @@ type Deps struct {
 	// Backups is the backup engine (step 5b; nil: no engine, every touch
 	// is a no-op and Test/Save cannot check a destination).
 	Backups *backup.Engine
+	// LocalCodes is the log transport's box of sign-in codes for the
+	// desktop app that set this server up (D358; nil: none, the route
+	// answers 404).
+	LocalCodes *mail.CodeBox
 }
 
 // Server is the assembled handler.
@@ -217,6 +222,7 @@ func (s *Server) routesV1() {
 	s.handle("POST /api/auth/verify", Public, s.authVerify)
 	s.handle("POST /api/auth/link", Public, s.authLink)
 	s.handle("POST /api/auth/signout", User, s.authSignout)
+	s.handle("GET /api/local/signin-code", Public, s.localSigninCode)
 	s.handle("GET /api/me", User, s.getMe)
 	s.handle("PATCH /api/me", User, s.patchMe)
 	s.handle("GET /api/me/sessions", User, s.mySessions)

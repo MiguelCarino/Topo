@@ -287,6 +287,7 @@ fn main() {
             server::server_service_remove,
             server::server_question,
             server::server_question_done,
+            server::server_signin_code,
             clientcmd::client_info,
             clientcmd::client_probe,
             clientcmd::client_connect,

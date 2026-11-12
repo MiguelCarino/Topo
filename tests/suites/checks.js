@@ -192,7 +192,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('on the website: no host', !window.__TAURI__ && !CK.hasHost());
     ok('…no Answer checks in the device panel', el('checkGroup').hidden === true);
     ok('…no dot on the map', !document.querySelector('#layer-nodes .node-status') && checkMarkEl(getNode(prn.id)) === null);
-    openSettings(); await settle();
+    openSettings('monitor'); await settle();
     ok('…no Monitor from this PC in Settings', el('setMonSec').hidden === true);
     closeSettings();
     ok('…and nothing was asked of an app', asked.length === 0);
@@ -200,7 +200,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- In the app ----
     window.__TAURI__ = { core: { invoke }, event: { listen } };
     await CK.refreshInfo();
-    openSettings(); await settle();
+    openSettings('monitor'); await settle();
     ok('in the app, Settings shows Monitor from this PC', el('setMonSec').hidden === false);
     ok('off as shipped', el('setMonOn').checked === false && el('setMonOnBox').hidden && el('setMonOffer').hidden);
     ok('Keep statistics: 360 days', el('setMonKeep').value === '360' && el('setMonKeep').selectedOptions[0].textContent === '360 days (default)');
@@ -211,6 +211,16 @@ window.addEventListener('load', () => { setTimeout(async () => {
     el('checkGroup').open = true; await settle(); await until(() => el('checkBody').children.length > 0);
     ok('the section shows its check, and says the monitor is off', el('checkBody').querySelectorAll('.ck-card').length === 1
       && /Monitor from this PC is off/.test(el('checkBody').textContent));
+    // Its Settings… opens at the Monitoring tab and the tick, whatever tab
+    // was kept (D361, D362).
+    try { sessionStorage.setItem('topo.settings.tab', 'general'); } catch (e) { /* none */ }
+    el('checkBody').querySelector('[data-ck="settings"]').click(); await settle();
+    ok('its Settings… opens Settings at Monitoring, Monitor from this PC focused', settingsOpen()
+      && el('setTab-monitor').getAttribute('aria-selected') === 'true' && !el('setPanel-monitor').hidden
+      && el('setMonOn').getClientRects().length > 0 && document.activeElement === el('setMonOn'),
+      String(document.activeElement && document.activeElement.id));
+    closeSettings(); await settle();
+    try { sessionStorage.removeItem('topo.settings.tab'); } catch (e) { /* none */ }
     const before = JSON.stringify(serializeDoc());
     el('checkBody').querySelector('[data-ck="add"]').click(); await settle();
     const added = getNode(prn.id).checks;
@@ -238,14 +248,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
     // ---- Turning it on ----
     replaceDocument(clone(site), { origin: 'file' });
-    openSettings(); await settle();
+    openSettings('monitor'); await settle();
     change(el('setMonOn'), true); await settle();
     ok('a network not kept is refused in words', await until(() => dialogs.some((d) => /Keep this network in My networks first/.test(d.message))) && el('setMonOn').checked === false
       && !asked.some((a) => a.cmd === 'monitor_set'));
     closeSettings();
     replaceDocument(libraryEntry('k1').doc, { libraryId: 'k1', origin: 'library' });
     getNode(prn.id).checks = [{ id: 'p', proto: 'ping' }]; save();
-    openSettings(); await settle();
+    openSettings('monitor'); await settle();
     change(el('setMonOn'), true); await settle();
     ok('the offer names the network, with the tray and sign-in ticked', !el('setMonOffer').hidden && /It checks HQ/.test(el('setMonOfferText').textContent)
       && el('setMonOfferTray').checked && el('setMonOfferAuto').checked);
@@ -331,7 +341,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     undo(); undo(); flushAutosave(); getNode(prn.id).ports = was; save(); select(prn.id, 'node'); await settle();
 
     // ---- Keep statistics ----
-    openSettings(); await settle();
+    openSettings('monitor'); await settle();
     confirmAnswer = false;
     const sets = asked.filter((a) => a.cmd === 'monitor_set').length;
     change(el('setMonKeep'), '30');
@@ -371,7 +381,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     setLocale('en');
 
     // ---- Turning it off ----
-    openSettings(); await settle();
+    openSettings('monitor'); await settle();
     change(el('setMonOn'), false);
     ok('off: the app is told', await until(() => info.on === false) && lastSet().args.args.on === false);
     closeSettings();

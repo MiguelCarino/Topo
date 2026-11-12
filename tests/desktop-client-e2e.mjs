@@ -241,7 +241,7 @@ try {
     await A.p.waitForLoadState('load');
 
     // 1. Connect: compare, pin.
-    await A.p.evaluate(() => openSettings());
+    await A.p.evaluate(() => openSettings('server'));
     ok('1. Settings has "Connect to a Topo server" in the app', await until(A.p, () => !document.getElementById('setDcSec').hidden));
     await A.p.fill('#setDcUrl', ORIGIN);
     await A.p.click('#setDcConnect');
@@ -323,7 +323,7 @@ try {
     await A.p.reload(); await A.p.waitForLoadState('load');
     ok('7. the changed certificate is refused: nothing opens', await until(A.p, () => TopoServer.state.status === 'unreachable'), await status(A.p));
     ok('7. …and said', await until(A.p, () => /certificate changed/.test(document.getElementById('topoToast').textContent)));
-    await A.p.evaluate(() => openSettings());
+    await A.p.evaluate(() => openSettings('server'));
     ok('7. Settings says why and offers to check it again', await until(A.p, () => /certificate changed since this window connected/.test(document.getElementById('setDcStatus').textContent) && !document.getElementById('setDcAgain').hidden));
     await A.p.click('#setDcAgain');
     ok('7. checking again shows the new fingerprint', await until(A.p, () => !document.getElementById('setDcCompare').hidden) && (await A.p.textContent('#setDcFp')) === fp2);
@@ -331,7 +331,7 @@ try {
     ok('7. pinned again: still signed in (the same server keeps the session)', await until(A.p, () => TopoServer.state.status === 'ready'), await status(A.p));
 
     // 8. Disconnect.
-    await A.p.evaluate(() => { setDialogResponder(() => true); openSettings(); });
+    await A.p.evaluate(() => { setDialogResponder(() => true); openSettings('server'); });
     await until(A.p, () => !document.getElementById('setDcOn').hidden);
     await reloaded(A.p, () => A.p.click('#setDcDisconnect'));
     await A.p.waitForTimeout(500);
@@ -344,7 +344,7 @@ try {
     plain = true;
     startServer();
     ok('9. the server is back on plain http at 127.0.0.1', await serverUp());
-    await A.p.evaluate(() => openSettings());
+    await A.p.evaluate(() => openSettings('server'));
     await until(A.p, () => !document.getElementById('setDcForm').hidden);
     await A.p.fill('#setDcUrl', PLAIN);
     await reloaded(A.p, () => A.p.click('#setDcConnect'));

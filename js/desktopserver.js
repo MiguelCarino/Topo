@@ -61,6 +61,7 @@ function dsErrText(code) {
     if (c === 'not-authorized') return t('This account may not do that: an administrator has to.');
     if (c === 'no-service') return t('This copy of Topo cannot run the server in the background (an AppImage, or not in Applications). Install the package, or run it only while Topo is open.');
     if (c === 'share') return t('Choose the address to give people again.');
+    if (c === 'no-code-key') return t('This PC\'s server was set up without this app\'s key for sign-in codes. Save it again in Settings, This PC as the server, then send a new code.');
     if (c.startsWith('service:')) return t('The server service said: {why}', { why: c.slice(8) });
     if (c.startsWith('exited:')) return t('The server stopped. The log below says why.');
     if (c.startsWith('start:')) return t('The server could not start: {why}', { why: c.slice(6) });
@@ -224,8 +225,11 @@ async function dsRefresh(fill) {
     }
 }
 
+// -> { info } when the app did it, { error } (its code) when it did not,
+// null when another act is still running. Settings shows either; Setup
+// (js/welcome.js, D353) reads it to say the same thing on its own step.
 async function dsAct(cmd, args) {
-    if (_ds.busy) return;
+    if (_ds.busy) return null;
     _ds.busy = true;
     const sec = dsEl('setDsSec');
     sec.setAttribute('aria-busy', 'true');
@@ -234,8 +238,10 @@ async function dsAct(cmd, args) {
         const done = { server_save: t('Saved.'), server_service_install: t('Set up. It starts with this PC from now on.'), server_service_remove: t('Removed. Its data stays on this PC.') };
         if (info) dsRender(info, done[cmd] || '');
         if (cmd === 'server_save' || cmd === 'server_service_install') dsEl('setDsSmtpPass').value = '';
+        return { info: info || _ds.info };
     } catch (e) {
         dsRender(_ds.info || { available: true, settings: dsFormSettings() }, dsErrText(e), true);
+        return { error: String(e && e.message ? e.message : e || '') };
     } finally {
         _ds.busy = false;
         sec.removeAttribute('aria-busy');
@@ -263,8 +269,8 @@ async function dsStart() {
     // administrator prompt, not two.
     if (_ds.info && _ds.info.mode === 'service') return dsAct('server_start');
     // What is on screen is what starts.
-    await dsSave();
-    if (dsEl('setDsStatus').classList.contains('ds-err')) return;
+    const saved = await dsSave();
+    if (!saved || saved.error) return saved;
     return dsAct('server_start');
 }
 
@@ -314,11 +320,11 @@ function renderDesktopServerSettings() {
 })();
 
 // ---- The first-run question (D125, D170) ----
-// On Linux and macOS the question is the welcome's step 3 choice "Make this
-// PC the server" (js/welcome.js, D170): asked once, and any other answer,
-// or skipping the step, is "not now". dsFirstRun is what is left of the old
-// standalone prompt: the welcome calls it only on a start where the welcome
-// itself does not run (an install that was already in use, a start by a
+// On Linux and macOS the question is Setup's step 3 choice "Make this PC
+// the server" (js/welcome.js, D170, D353): asked once; "yes" once Setup has
+// set the service up, and any other ending, or skipping the step, is "not
+// now". dsFirstRun is what is left of the old standalone prompt: Setup
+// calls it only on a start where Setup itself does not run (an install that was already in use, a start by a
 // link), so the question is still asked once where the app says to ask it
 // (server_question: a PC that can run the service and does not yet, whose
 // Windows installer did not already ask). Either way it is not asked again.
@@ -334,19 +340,43 @@ async function dsFirstRun() {
     await dsOpenSetUp();
     return true;
 }
-// "Yes, set it up" (the old prompt, or the welcome's Make this PC the
-// server): Settings opens at this section to fill in the owner and the
-// email, then "Run it in the background from startup" sets it up.
+// Setup's Make this PC the server (js/welcome.js, D353): what Setup asked
+// (the owner's email, who opens it, the email settings) goes into this
+// section's own form over the saved settings, and the section's own "Run it
+// in the background from startup" sets it up, so both ways are one.
+// -> dsAct's answer.
+async function dsSetUpWith(over, smtpPass) {
+    if (!dsHasHost() || !dsEl('setDsSec')) return { error: 'no-binary' };
+    const info = await dsRefresh(true);
+    if (!info || !info.available) return { error: 'no-binary' };
+    dsFill(Object.assign({}, info.settings || {}, over || {}));
+    dsEl('setDsSmtpPass').value = smtpPass || '';
+    // Set up already (Back in Setup, or set up before): the section's Save,
+    // which is what it offers then.
+    return info.mode === 'service' ? dsSave() : dsInstallService();
+}
+// The newest sign-in code this PC's own server sent to email, for a server
+// only this PC reaches with no email (server.rs server_signin_code, D358):
+// -> { code, at } or null while none is waiting; throws the app's code.
+async function dsSignInCode(email) {
+    const r = await dsInvoke('server_signin_code', { email });
+    return r && /^\d{6}$/.test(String(r.code || '')) ? { code: String(r.code), at: Number(r.at) || 0 } : null;
+}
+// "Yes, set it up" (the old prompt): Settings opens at this section to fill
+// in the owner and the email, then "Run it in the background from startup"
+// sets it up.
 async function dsOpenSetUp() {
-    if (typeof openSettings === 'function') openSettings();
+    if (typeof openSettings === 'function') openSettings('server');
     await dsRefresh(true);
     const sec = dsEl('setDsSec');
     if (sec && !sec.hidden) {
-        sec.scrollIntoView({ block: 'start' });
+        // Its tab, scrolled to the section (D361).
+        if (typeof revealInSettings === 'function') revealInSettings(sec, { focus: false });
+        else sec.scrollIntoView({ block: 'start' });
         dsRender(_ds.info, t('Fill in the owner\'s email (and, for other PCs, the email settings), then Run it in the background from startup.'));
         const owner = dsEl('setDsOwner');
         if (owner) owner.focus({ preventScroll: true });
     }
 }
 
-window.CarinoDesktopServer = { state: _ds, dsErrText, dsOpenHere, dsFormSettings, dsRefresh, renderDesktopServerSettings, dsSave, dsStart, dsInstallService, dsRemoveService, dsFirstRun, dsOpenSetUp, dsHasHost, dsInvoke };
+window.CarinoDesktopServer = { state: _ds, dsErrText, dsOpenHere, dsFormSettings, dsRefresh, renderDesktopServerSettings, dsSave, dsStart, dsInstallService, dsRemoveService, dsFirstRun, dsOpenSetUp, dsSetUpWith, dsSignInCode, dsHasHost, dsInvoke };

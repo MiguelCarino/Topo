@@ -55,6 +55,11 @@ type Config struct {
 	TLSSelf        bool
 	TrustedProxies []netip.Prefix
 	OwnerEmail     string
+	// LocalCodeKey is TOPO_LOCAL_CODE_KEY: the secret the desktop app that
+	// set up this server holds, so that app (and no other account on the
+	// PC) can fetch a sign-in code from a server only this computer reaches
+	// that sends no email (docs/SCOPE.md D358). Used only when LocalCodes.
+	LocalCodeKey string
 
 	Mail          string // smtp | file | log
 	MailDir       string
@@ -112,6 +117,15 @@ func (c *Config) Origin() string {
 	return c.PublicURL.Scheme + "://" + c.PublicURL.Host
 }
 
+// LocalCodes reports whether this server hands sign-in codes to the
+// desktop app that set it up (D358): it is reached only on this computer
+// (listen and public address both loopback, no TLS), sends no email
+// (TOPO_MAIL=log) and has the app's key.
+func (c *Config) LocalCodes() bool {
+	return c.LocalCodeKey != "" && c.Mail == "log" && c.ListenIsLoopback() && c.PublicURL != nil &&
+		IsLoopbackHost(c.PublicURL.Hostname()) && c.TLSCert == ""
+}
+
 // ListenIsLoopback reports whether the listen address is a loopback address
 // (or localhost). ":7380" and "0.0.0.0:7380" are not.
 func (c *Config) ListenIsLoopback() bool {
@@ -151,6 +165,7 @@ var known = []key{
 	{"TOPO_TLS_SELF", false},
 	{"TOPO_TRUSTED_PROXIES", false},
 	{"TOPO_OWNER_EMAIL", true},
+	{"TOPO_LOCAL_CODE_KEY", true},
 	{"TOPO_MAIL", false},
 	{"TOPO_MAIL_DIR", false},
 	{"TOPO_SMTP_HOST", false},
@@ -588,6 +603,16 @@ func build(v map[string]string, o Options) (*Config, []string, error) {
 			fail("TOPO_OWNER_EMAIL %q is not one email address", e)
 		} else {
 			c.OwnerEmail = strings.ToLower(a.Address)
+		}
+	}
+
+	// The desktop app's key for sign-in codes (D358): at least 32
+	// characters, nothing that could break a header.
+	if k := strings.TrimSpace(v["TOPO_LOCAL_CODE_KEY"]); k != "" {
+		if len(k) < 32 || len(k) > 256 || strings.ContainsAny(k, " \t\r\n\x00") {
+			fail("TOPO_LOCAL_CODE_KEY: want 32 to 256 characters with no spaces")
+		} else {
+			c.LocalCodeKey = k
 		}
 	}
 

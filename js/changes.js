@@ -625,7 +625,7 @@ function changesSection(ch) {
         <td>${escapeHtml(r.detail) || '<span class="muted">—</span>'}</td>
     </tr>`).join('');
     return `${lead}<table class="changes">
-        <thead><tr><th>${escapeHtml(t('Change'))}</th><th>${escapeHtml(t('Item'))}</th><th>${escapeHtml(t('Detail'))}</th></tr></thead>
+        <thead><tr><th>${escapeHtml(t('changes::Change'))}</th><th>${escapeHtml(t('Item'))}</th><th>${escapeHtml(t('Detail'))}</th></tr></thead>
         <tbody>${rows}</tbody></table>`;
 }
 

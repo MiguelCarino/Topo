@@ -1118,7 +1118,8 @@ The browser side (stage 2 of 5b):
   *Changed by D170 (built in step 7l, D332): on Linux and macOS the
   first-start question is the welcome's step 3 choice "Make this PC the
   server"; the prompt described here is kept only for a start where the
-  welcome does not run.*
+  welcome does not run. Since 7o (D353) Setup (the welcome's new name)
+  sets the server up itself when that choice is made.*
   - **Windows** (the main case): the installer is the NSIS `-setup.exe`
     only (the MSI is no longer built: it could not ask). It now installs
     for every user of the PC, in Program Files, so it asks for an
@@ -3382,6 +3383,10 @@ welcome's lock step offers Off for that.
   Topo server served, nor in an app window already connected to one. On
   the website it shows On this browser as the only choice, and the note,
   and applies nothing.
+  *Changed by D353 (7o): in the app, a server chosen in step 3 is set up
+  in Setup itself, step by step, by the functions Settings uses; there is
+  no hand-over to Settings any more. The website and a page a Topo server
+  served are as above.*
 - **D331. This PC's two ticks wait for an open network.** Add this
   computer adds to the open network and Monitor from this PC checks a kept
   one, while the welcome runs over the landing with none. Ticked, they are
@@ -3403,7 +3408,9 @@ welcome's lock step offers Off for that.
   use, a start by a link): the welcome calls it then, instead of it
   running on its own timer, so no start asks twice. *Changed by D336:*
   the choice is offered wherever the service can run and is not set up,
-  and "yes" is sent only through Open Settings.
+  and "yes" is sent only through Open Settings. *Changed by D353 (7o):*
+  "yes" is sent once Setup has set the service up (its Set it up worked);
+  any other ending is "not now", as before.
 - **D333. The lock step.** Off, 5, 15, 30 (as shipped) or 60 minutes; a
   custom time already set shows as it is, and a new custom time stays in
   Settings. The PIN (4 to 12 digits, twice, optional) is asked only when
@@ -3551,7 +3558,7 @@ audit of this section, choices the plan left open:
   {total}-port faceplate, Back up now, Status, Where, Type, in some
   locales) are listed in the test as known and left as they were: each is
   a place where one screen shows the other's wording (for example
-  Japanese "Where" as 保存先 everywhere), an open item below.
+  Japanese "Where" as 保存先 everywhere); fixed by D350.
 
 Owner's answers to the open list (2026-11-12):
 
@@ -3611,6 +3618,273 @@ Owner's answers to the open list (2026-11-12):
   Windows Arm (D193).
 - **D349. Several sites per monitor PC is a later update (D276 stands).**
   One link per PC for now; D146's several sites are not in step 7.
+- **D350. A context key for one English word with two meanings (7n; ends
+  D342's 13 known keys).** t() takes `'ctx::English'`: English, and any
+  locale that lacks the key, shows the text after `::`, so the English on
+  screen is unchanged; only a context named in I18N_CONTEXTS counts (D351),
+  so an IPv6 address is never one. Markup gets `data-i18n-ctx="ctx"`, which
+  makes the same key for the element's text and its marked attributes.
+  Every call site of the 13 keys was sorted by meaning, and each meaning
+  keeps the translation its own copy had:
+  - "Change": the changes list's column is the noun, `changes::Change`
+    (Cambio, Alteração, Изменение, 変更; js/changes.js); the rack view's
+    "Change" (index.html, the place dialog) stays the plain key, the verb
+    (Cambiar, Alterar, Изменить, 変更).
+  - "Back up now", "Where", "Status" in the server's Backups sheet
+    (js/serverui.js) are `backups::…`: Hacer copia ahora; Куда, 保存先
+    (a destination); Состояние, 状態 (the backups' state). The plain keys
+    keep the other places' words: the storage banner's Respaldar ahora;
+    the summary's Где, 場所 (a place); an asset's, a problem's and an
+    outage's Status as Статус, ステータス (a record's status, as in the
+    Asset group, Print labels, incidents and the reports).
+  - "Past the {total}-port faceplate" meant the same thing in every place
+    (a port past the faceplate, in the port grid, the table and the rack
+    view), so it stays one key with the translation every screen already
+    showed (the later copy: "Fuera del frontal de {total} puertos"), and
+    the earlier, never-shown copy is gone: two phrasings of one fact would
+    only make the screens disagree.
+  - "Type": the technical report's Device inventory column is
+    `report::Type` with the word written for it (Tipo, Tipo, Тип, 種別,
+    D351); the rack view's type picker and the CSV review keep the plain
+    key (種類).
+  English is unchanged. tests/suites/i18n.js has no known list any more
+  (any key written twice in one locale with two translations fails) and
+  checks each place's word in es, ru and ja; tests/suites/backupsettings.js
+  checks the sheet's own words.
+
+- **D351. Contexts are a fixed list, and the report keeps its own "Type"
+  (7n review).** A context counts only when it is in I18N_CONTEXTS
+  (js/i18n.js: changes, backups, report), not any lowercase word before
+  `::`, because an IPv6 address can start with hex letters only
+  ("dead::beef", "fe::1") and would have been cut; a new context is added
+  to the list, and the i18n suite fails on any key with `::` whose context
+  is not listed. The Japanese 種別 written for the report's inventory
+  column is kept there as `report::Type` instead of being dropped for the
+  rack view's 種類 (D350 asked each place to keep its own word). The
+  faceplate sentence stays one key (D350). Checks now render the places:
+  the summary's Where column, the report inventory's Type column, and the
+  faceplate sentence against a fixed string per locale.
+
+Phase 7o (2026-11-12), Setup does the server set-up itself, step by step
+(the owner's answer to D170 and D332), choices the plan left open:
+
+- **D352. A server only this PC reaches writes the sign-in code to its
+  log.** The desktop app's "This PC only" runs topo-server with
+  `TOPO_MAIL=log`, and Settings said its codes are "shown in the log
+  below", but the log transport wrote the code at debug only, so at the
+  default info level nobody could read it and the owner could not sign
+  in. The log transport now writes the code (and the sign-in link) at info
+  when the server answers only on this computer: its listen address and
+  its public address are both loopback. Anywhere else (a LAN server, a
+  server behind a proxy or a public name) it stays at debug only, as
+  before; the address stays masked either way. The service settings file's
+  comment ("writes sign-in codes to its log") is now true. Go:
+  `TestLogTransportCodesOnThisPCOnly` (server/internal/mail), and
+  `TestLogTransportHidesCodes` now runs on a server other computers
+  reach. *Replaced by D358 (7o review): the service's log cannot be read
+  by the app on a Mac or by a person outside wheel/adm/systemd-journal on
+  Linux, and on Windows (and for those groups) it can be read by other
+  accounts, who could then sign in as the owner. Codes are back at debug
+  only; the app fetches them with its own key.*
+- **D353. The server in Setup, step by step (changes D330, D332).** In the
+  desktop app, a server chosen in step 3 is set up in Setup; Settings stays
+  the other way to the same set-up, and every step calls Settings' own
+  function, so there is one implementation:
+  - *Connect to a Topo server:* the address (srvAddr: js/desktopclient.js
+    `dcConnect`, with the address Setup asked); a server that signs its
+    own certificate shows its address and fingerprint to compare
+    (srvCompare: Settings' words; Next is "They are the same: connect",
+    `dcTrust` pins it; Back is `dcCancel`, nothing pinned); the window
+    reloads as the server's client; then the sign-in.
+  - *Make this PC the server:* the owner's email and who opens it (This PC
+    only, or Other PCs on this network with the email server's fields:
+    SMTP server, port, security, user, password, Send from). Set it up
+    puts these over the saved settings into the This PC as the server
+    section's own form and presses its own "Run it in the background from
+    startup" (js/desktopserver.js `dsSetUpWith`, which is
+    `dsInstallService`; on a PC where the service is already set up, the
+    section's Save, as Settings offers then). The app's refusals are said
+    in Settings' words (`dsErrText`). D125's "yes" goes once this worked.
+    Then the wait (srvWait, no Next): `server_info` every second until it
+    runs (and, for other PCs, has its certificate's fingerprint), up to 90
+    seconds; then `dcConnectOwn` connects this window and it reloads. A
+    service that does not start, or an error from it, is said with Try
+    again, which is Settings' Start (`dsStart`), then the wait again.
+    "This PC only" sends no email: the app fetches the codes (D358);
+    sending them by email for this PC alone, the port and the address to
+    give people stay in Settings.
+  - *The sign-in, both ways:* the email (srvEmail, js/server.js
+    `requestCode`; the setup code field only when the server has no owner
+    yet and is not this PC's own) and the code (srvCode, `verifyCode`). On
+    this PC's own server with no email the owner's email is filled in and
+    the app fetches the new code from this PC's server with its own key
+    (D358; only a code sent after Send) and Setup fills it in; Sign in
+    stays the person's press. A first owner's keys and
+    recovery key follow as at any sign-in (the server sheet over Setup); a
+    locked device opens the unlock, as the sign-in sheet does.
+  - *The end:* the last step says "All set": connected to the server, and
+    signed in as whom (or to sign in from the start page), with Finish;
+    the three ways to start are not shown, since the start page behind is
+    the server's (D330).
+  - Each server step says its error on the step (in Settings' or the
+    server's words, as an alert) and Next tries again; Next, Skip and Back
+    wait while a step runs (D336). The step count follows what is chosen
+    and done (the comparison only when there is a certificate to compare).
+- **D354. Back and Skip in the server walk.** Back on a server step goes
+  to the step before, with the error cleared; from the comparison it is
+  `dcCancel`, back to the address. Skip this step on any server step ends
+  the walk (the next step is the lock): what was done stays done (a
+  connected window stays connected, a service set up stays set up), the
+  rest is in Settings, and each server step says so. A window Setup has
+  connected shows step 3 as "Connected to a Topo server" with its
+  address (Disconnect is in Settings), so Back to it changes nothing.
+- **D355. A reload in the middle resumes Setup.** Connecting reloads the
+  window (D144). Just before it, Setup keeps its place for this tab
+  (sessionStorage `topo-welcome-resume`: the step to go on at, the
+  server choice, this PC's own server and its mail, the email, D125's
+  state), and the boot's `atBoot` opens Setup there, whatever else that
+  start is, once the server client has opened: at the sign-in, or at the
+  lock when the window is already signed in; a reload that did not connect
+  goes back to the address, or to the wait with Try again. The place is
+  dropped when Setup ends, when the walk is skipped or signed in, when a
+  connect fails, and after 30 minutes. The done mark is still written only
+  when Setup ends (D328). The desktop app's own window pointed at a server
+  is not "a page a Topo server served" (D330), so its steps stay.
+- **D356. "The welcome" is called Setup on screen.** The dialog's title is
+  "Set up Topo", ✕ is "Skip the setup", and Settings' section is
+  "Setup" with "Run the setup again" (es Configuración inicial, pt-BR
+  Configuração inicial, ru Начальная настройка, ja セットアップ). The code
+  keeps the name welcome (js/welcome.js, `TopoWelcome`, the `topo-welcome`
+  mark) to avoid churn; the old keys are gone from js/i18n.js. Every new
+  string is in es, pt-BR, ru and ja; Japanese says PC.
+- **D357. How 7o is tested.** tests/suites/welcome.js (real clock) stubs
+  the app's commands as tests/suites/desktopserver.js and desktopclient.js
+  do, with the server's requests answered by tests/fixtures/fakeserver.js,
+  and simulates the reload by the boot's own steps (`DC.boot`,
+  `openServerClient`, `atBoot`). `node tests/welcome-e2e.mjs` adds the app
+  with `window.__TAURI__` stubbed (kept across reloads in sessionStorage),
+  so the reload is real, both ways through at 360, 390 and 1280 in Gold and
+  Colourful, the owner's first sign-in through the real recovery-key
+  sheet. The running app, a real service and a real server were not used
+  (D199): the service's set-up, start and log reading in the app are
+  tested through their stubs only.
+
+7o review (2026-11-12), the findings fixed:
+
+- **D358. The app fetches the "This PC only" sign-in code with its own
+  key, never from a log (replaces D352).** D352 wrote the code to the
+  service's log at info, but the app runs as the signed-in person: on a
+  Mac the log (/Library/Logs/Topo, _topo 0750) is not readable by them,
+  on Linux nobody outside wheel, adm or systemd-journal reads the journal,
+  so the owner still could not sign in; and on Windows (the Application
+  log) and for those Linux groups any other account on the PC could ask
+  127.0.0.1 for a code for the owner's email and read it, so the owner's
+  account was open to every user of a shared PC. Now:
+  - the app makes a 256-bit key once (`<app data>/server/local.key`,
+    0600, its own account's), and writes it as `TOPO_LOCAL_CODE_KEY` into
+    the server's settings (the child's environment, or the service's
+    settings file, root:topo 0640 / the ProgramData ACL) whenever it sets
+    up or saves "This PC only" with no email; never for other PCs;
+  - the server (config `LocalCodes()`: the key, `TOPO_MAIL=log`, listen
+    and public address both loopback, no TLS) keeps each address's newest
+    sign-in code in memory (`mail.CodeBox`; sign-in codes only, not
+    invitation links; 30 minutes; taken once) and answers
+    `GET /api/local/signin-code` (key in `X-Topo-Local-Key`, address in
+    `X-Topo-Email`, so neither is in a logged URL) only to a TCP peer on
+    loopback with no X-Forwarded-For and the key (compared in constant
+    time): 200 {code, at}, 404 `no-code` when the key matched and nothing
+    waits, 404 `not-found` for anything else, as if the route were not
+    there;
+  - the app's `server_signin_code` command asks it (ureq, 127.0.0.1, 5 s);
+    a 404 that is not `no-code` is `no-code-key` (a server set up before
+    the key: Setup says to save it again in Settings and stops asking);
+    js/desktopserver.js `dsSignInCode` wraps it; Setup's srvCode polls it
+    for 30 s and takes only a code whose `at` is after Send (less a
+    second), so an older code from another attempt is never filled in;
+  - the log transport writes codes at debug only again, everywhere.
+  Settings' own option is now "No email: Setup gets the sign-in codes
+  (this PC only)". Not done: Settings' sign-in sheet (js/serverui.js) does
+  not fetch the code itself; on such a server the person signs in through
+  Setup (Run the setup again).
+- **D359. Closing Setup while a step is applied waits for it.** ✕ or Esc
+  (the modal's onDismiss) while a step is being applied (the PIN's hash,
+  an administrator prompt, a connect, including the wait's `dcConnectOwn`)
+  no longer ends Setup under it: Setup says "Setup closes once this step
+  is done", drops its resume place and writes the done mark at once (a
+  connect may reload the window first; Setup then neither resumes nor
+  shows again), and closes as soon as the step ends. So a set-up that
+  succeeds sends D125's "yes" (not "no" from the close), and nothing
+  waits for the service after the close. Closing (or Skip, or Back) while
+  comparing a certificate Setup's Connect asked for cancels it
+  (`dcCancel`): nothing pinned, and Settings does not later show a
+  comparison for a server the person walked away from.
+- **D360. Two error sentences translated; the Save path tested the real
+  way.** "Settings is still busy with the server. Try again." replaces the
+  English code word in "Something went wrong: busy"; a missing desktop
+  client says "This window is not connected to the server. Try again."
+  The welcome suite reaches Settings' Save by Back from the wait to the
+  owner step and Set it up again (the service already set up), instead of
+  forcing the offer on.
+- **D361. Settings in section tabs, as the About window (7p, the owner,
+  2026-11-12).** The long Settings scroll is now six tabs down the side of
+  the dialog (on a phone, 640px and under, a row across its top that
+  scrolls sideways inside itself, each tab 44px tall), in the look of the
+  navbar's About window. Its classes are scoped to #carinoNav and
+  carino-ui.css has no such tabs, so css/app.css matches the look
+  (`.set-tabs`, `.set-tab`, `.set-panels`, `.set-panel`); carino-navbar.js
+  is not touched. The groups:
+  - **Map and reports**: Map, Reports, History, Problem reports (the
+    preferences every view has; "General" was not used because that key is
+    already the General profile's name, Russian Общий);
+  - **Screen lock**;
+  - **Topo server**: Connect to a Topo server, This PC as the server (the
+    server's members stay in the server sheet, js/serverui.js, which is not
+    Settings);
+  - **Monitoring**: Monitor from this PC with the site's monitor, Show
+    alarms on this PC and the statistics kept;
+  - **Back-ups**: the back-up folder;
+  - **Setup**: Run the setup again, then This computer.
+  Every section, control and id is kept; only their places in the markup
+  moved. A tab is hidden while all its sections are (a MutationObserver on
+  the sections' `hidden`), so the website and the zip show Map and
+  reports, Screen lock, Setup and, on Chrome and Edge, Back-ups. The tab
+  shown is kept for the browser tab (sessionStorage `topo.settings.tab`)
+  and Settings opens there again; a Screen lock note not yet read (D219)
+  wins over it, so it is seen. `openSettings(where)` takes a tab or a
+  Settings element (or its id): it opens that tab, scrolls inside the
+  panel (never `scrollIntoView`, which would also scroll the dialog's
+  clipped frame) and focuses a control; `revealInSettings(el)` does the
+  same once Settings is open. The tab asked for is remembered for that
+  opening: while the app has not yet shown its section the first tab with
+  something stands in, and the asked-for tab comes back when its section
+  shows. The deep links now pass their place: the check section's
+  Settings… (`setMonOn`), Setup's Monitor from this PC (Monitoring, the
+  section), the server prompt's Yes, set it up (`dsOpenSetUp`: Topo
+  server, This PC as the server); toasts that only name a place in
+  Settings stay words. Keys: the arrows both ways (wrapping, skipping
+  hidden tabs), Home and End; roles tablist, tab and tabpanel, with
+  aria-orientation following the layout. No sideways swipe between tabs,
+  unlike the About window: the panels hold fields and selects. The dialog
+  keeps one height (min(90vh, 640px); the whole screen less 8px on a phone)
+  so changing tab does not make it jump. New strings "Map and reports" and
+  "Topo server" in es, pt-BR, ru and ja; the others were already
+  translated.
+- **D362. 7p review: the tab in view, a waiting certificate, every tab
+  measured (2026-11-12).** On a phone the tab Settings opens at is brought
+  into the sideways row once the dialog shows (before, it was worked out
+  while the dialog was hidden and the row had no size, so a kept or asked-for
+  tab at the end of the row, Back-ups or Setup, sat off the right edge).
+  A server certificate waiting for a decision (Connect to a Topo server's
+  Check again after a refused certificate, or a fingerprint shown to
+  compare) wins over the kept tab like the Screen lock note (D219): the
+  toast that announces it says "Open Settings, Connect to a Topo server",
+  and the gear now opens there. The touch-size and phone-field audits
+  (touchsizes3, touchfields) measure each tab that has something in it, not
+  only the one shown; the check section's own Settings… button is clicked
+  in the checks suite, Setup's Monitor from this PC is checked to open at
+  the Monitoring tab, and settingstabs checks that Colourful was applied.
+  FEATURES.md no longer gives Settings an About part (the document version,
+  licence, contact and legal page are in the navbar's About window).
 
 ### Step 7: open items, for the owner
 
@@ -3633,14 +3907,7 @@ Owner's answers to the open list (2026-11-12):
    cross-check against Carino DICOM itself was not run.
 4. **Release size.** The new crates' effect on the installers' size was
    never measured (D193, D231, D258).
-5. **Keys translated twice, from before step 7** (D342). In js/i18n.js,
-   13 keys are written twice in one locale with two translations, so one
-   of their two places shows the other's wording: "Change" (es, pt-BR,
-   ru), "Past the {total}-port faceplate" (all four), "Back up now" (es),
-   "Status" and "Where" (ru, ja), "Type" (ja). Each needs its own key per
-   meaning, as "Whole network" got; the i18n suite keeps them as known
-   until then.
-6. **Several sites per monitor PC** (D146): a later update (D349).
+5. **Several sites per monitor PC** (D146): a later update (D349).
 
 **Waiting for the owner to confirm:**
 
@@ -3648,7 +3915,7 @@ Owner's answers to the open list (2026-11-12):
   shown, Forget from the fifth). Still to confirm: the lock with no PIN
   and no sign-in gives a plain Unlock.
 - D170 and D332: answered; the welcome becomes Setup and sets up the
-  server itself, step by step (being built after D349).
+  server itself, step by step: built in 7o (D352-D357; review D358-D360).
 - D329: whether Report problems chosen in the welcome should make that
   PC's plain start open the simple view (not built: it changes the
   plain-URL rule).
@@ -3725,6 +3992,16 @@ Stop after each phase and report the counts and failures as they are.
 - **7m** (D337-D342). The i18n review; docs (README, FEATURES, SERVER with
   the provider read limit, FORMAT.md for v19); a release note; the audit of
   this section and its open items ("Step 7: open items, for the owner").
+- **7n. Translation clashes** (D342, D350): a context form for t() and
+  data-i18n-ctx; the 13 keys written twice in one locale sorted by
+  meaning; the i18n suite's known list removed.
+- **7o. Setup does the server set-up** (D170, D332, D352-D360): the
+  welcome renamed Setup; Connect to a Topo server and Make this PC the
+  server walked through in it, step by step, with Settings' own functions;
+  a reload in the middle resumes it.
+- **7p. Settings in sections** (D361, D362, the owner, 2026-11-12): the Settings
+  dialog in section tabs like the About window, every deep link opening at
+  its tab and control.
 
 Tests, per phase, are the plan's list: Rust unit tests against loopback fakes
 only (no real devices, internet or email), ICMP on 127.0.0.1 where the system
@@ -4225,6 +4502,90 @@ reports in the browser at 360, 390 and 1280 in both themes and every language.
   failing: the same 4 touchfields, and desktopserver 1 and revisions 1,
   which both passed when rerun alone (55/55, 71/71). server-e2e,
   desktop-client-e2e and cargo were not rerun (no server or Rust change).
+  7n done 2026-11-12 (D350): t()'s context keys and data-i18n-ctx; the 13
+  keys written twice sorted by meaning (Change, and the Backups sheet's
+  Back up now, Where and Status, as context keys; Past the
+  {total}-port faceplate and Type one translation each); the i18n suite's
+  known list removed; open item 5 closed. Tests: i18n 140,
+  backupsettings 115, changes 77, rackplace 17, all passing; incident,
+  providerreport, reports, assets, table, rackview, rackports, ports, ui,
+  portcapacity, locatesimple, summary, sitereport, plurals, serverui,
+  backupdir, routing, csv, issues and report 1641 checks, all passing; a
+  Playwright pass (es, ru, ja at 360, 390 and 1280, Gold and Colourful:
+  each place's word, no sideways scroll, no console error) 54 checks, 0
+  failing; full web run (port 7397): 248 suites, 13995 checks, 4 failing
+  (the same 4 touchfields). No Go, server or Rust change, so those were
+  not rerun. 7n review (D351): a fixed context list (hex-only IPv6 such
+  as "dead::beef" is no longer cut), `report::Type` keeps the report's
+  種別, and the checks render the summary's Where, the inventory's Type and
+  a fixed faceplate sentence. Tests: i18n 141, sitereport 49, columns 71,
+  report 51, summary 82, all passing; full web run (port 7397, 7398 held
+  by another process): 13996 checks, 5 failing, no suite missing: the same
+  4 touchfields, and desktopserver 1, which passed 55/55 rerun alone.
+  7o done 2026-11-12 (D352-D357): the welcome is Setup on screen; in the
+  app a server chosen in step 3 is set up in Setup step by step (Connect:
+  the address, the certificate compared and pinned, the reload, the
+  sign-in; Make this PC the server: the owner and who opens it, the
+  service set up through Settings' own form, the wait, this window
+  connected, the reload, the code read from the server's log, the
+  sign-in), each step with Back, its error and Next to retry, skippable; a
+  reload in the middle resumes it; a server only this PC reaches writes
+  sign-in codes to its log at info (Go). Tests: welcome 223, keyboards 103,
+  i18n 141, desktopserver 55, desktopclient 88, desktop 29, thiscomputer
+  63, backupsettings 115, all passing; `node tests/welcome-e2e.mjs` 310
+  checks, 0 failing (the app both ways at 360, 390 and 1280 in Gold and
+  Colourful, with real reloads); `go test ./...` every package ok (mail:
+  the new `TestLogTransportCodesOnThisPCOnly`); full web run (port 7398):
+  14110 checks, 18 failing: keyboards 14 (Setup's new fields had no
+  data-keys; fixed, 103/103 rerun) and the same 4 touchfields. No Rust
+  change, so cargo was not run; server-e2e and desktop-client-e2e (file
+  mail, no log transport) were not rerun.
+  7o review 2026-11-12 (D358-D360): the "This PC only" code is fetched by
+  the app with its own key (Go route and code box, Rust
+  `server_signin_code`), never logged above debug; closing Setup while a
+  step runs waits for it; closing while comparing cancels it; two error
+  sentences translated. Tests: welcome 232, desktopclient 88, i18n 141,
+  keyboards 103, desktop 29, desktopserver 55 (54/55 once in a combined
+  run, the known "Yes removes it" check; 55/55 twice alone);
+  `node tests/welcome-e2e.mjs` 310 checks, 0 failing; `go test ./...`
+  every package ok (new `TestLocalSigninCode`, `TestLocalSigninCodeEndToEnd`,
+  `TestLogTransportCodeBox`); `cargo test` 139 passed, 1 ignored (new
+  `signin_code_fetch`), `cargo build` clean; `node tests/server-e2e.mjs
+  --port 7397` 187 checks, 0 failing (7381 held by another process);
+  `node tests/desktop-client-e2e.mjs --port 7397` 38 checks, 0 failing;
+  full web run (port 7398): 14119 checks, 4 failing, all touchfields, the
+  same 4 failing on an unmodified export of HEAD (118/122). Not run in the
+  real app with a real service (D199).
+  7p done 2026-11-12 (not yet committed; the owner's request of the day,
+  D361): Settings in six section tabs like the About window (Map and
+  reports, Screen lock, Topo server, Monitoring, Back-ups, Setup), the tab
+  kept per browser tab, every deep link opening at its tab and control
+  (openSettings(where), revealInSettings). Tests: new settingstabs 124;
+  the suites and e2e scripts that open Settings now open the tab they test
+  (desktopclient, desktopserver, checks, issues, thiscomputer, idlelock,
+  welcome, backupsettings; alarm-e2e, idlelock-e2e, desktop-client-e2e).
+  Full web run (port 7398) before those test edits: 14243 checks, 9
+  failing: idlelock 4 and desktopclient 1 (they opened Settings without a
+  tab and read controls now on another tab; fixed by passing the tab) and
+  the same 4 touchfields that fail on an unmodified copy of the tree
+  (baseline 14112 checks, those 4 plus servercrypto's vectors file, absent
+  from that copy). Rerun of the 13 affected suites (desktopclient 88,
+  desktopserver 55, checks 97, issues 79, thiscomputer 63, idlelock 171,
+  welcome 232, backupsettings 115, settingstabs 124, i18n 141, trailpanel
+  100, touchsizes3 85, navedge 41): 1391 checks, all passing.
+  Full web run again after them: 14243 checks, 4 failing, the same 4
+  touchfields only.
+  `node tests/idlelock-e2e.mjs` 42, `node tests/alarm-e2e.mjs` 106,
+  `node tests/welcome-e2e.mjs` 310, `node tests/desktop-client-e2e.mjs
+  --port 7397` 38, all passing; a Playwright pass over every tab at 360,
+  390 and 1280 in Gold and Colourful: no sideways scroll, no console
+  error. No Go or Rust change.
+  7p review 2026-11-12 (D362): the tab opened at is brought into the
+  phone's row once the dialog shows; a server certificate waiting for a
+  decision opens Settings at Topo server; touchsizes3 and touchfields
+  measure every tab; the check section's Settings… button, Setup's Monitor
+  from this PC tab and the Colourful theme are now asserted. Tests listed
+  in the review report below the full run.
   - [x] 7.0 Scope.
   - [x] 7a. Merge fixes.
   - [x] 7b. Provider visits through the owner.
@@ -4238,4 +4599,7 @@ reports in the browser at 360, 390 and 1280 in both themes and every language.
   - [x] 7j. Reports.
   - [x] 7k. The remaining checks.
   - [x] 7l. The welcome.
+  - [x] 7n. Translation clashes (D350).
+  - [x] 7o. Setup does the server set-up itself (D352-D357; review D358-D360).
   - [x] 7m. i18n review, docs and the release note.
+  - [x] 7p. Settings in sections (D361; review D362).

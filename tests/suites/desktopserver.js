@@ -105,21 +105,21 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
     // ---- The website ----
     ok('on the website there is no host', !window.__TAURI__);
-    openSettings(); await settle();
+    openSettings('server'); await settle();
     ok('…and Settings has no "This PC as the server"', el('setDsSec').hidden === true);
     closeSettings();
 
     // ---- An app without the binary ----
     DS.state.invoke = invoke;
     host.available = false;
-    openSettings(); await settle();
+    openSettings('server'); await settle();
     ok('an app with no bundled server hides the section', await until(() => calls.some((c) => c.cmd === 'server_info')) && el('setDsSec').hidden);
     closeSettings();
     host.available = true;
 
     // ---- The form ----
     host.settings.ownerEmail = 'it@example.com';
-    openSettings();
+    openSettings('server');
     ok('the section shows in the app', await until(() => !el('setDsSec').hidden));
     ok('Off, with Start and no Stop', el('setDsStatus').textContent === 'Off.' && !el('setDsStart').hidden && el('setDsStop').hidden);
     ok('the saved settings fill the form', el('setDsOwner').value === 'it@example.com' && el('setDsPort').value === '7380' && el('setDsWho').value === 'pc' && el('setDsMail').value === 'none' && !el('setDsEnabled').checked);

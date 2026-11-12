@@ -30,6 +30,14 @@
 // src/client.rs at 127.0.0.1 (D144, step 7c): its CSP stays connect-src
 // 'self'.
 //
+// Sign-in codes on "This PC only" with no email (D358): the server keeps
+// each address's newest code in memory and hands it only to a caller on
+// loopback that shows TOPO_LOCAL_CODE_KEY. The app makes that key once, keeps
+// it in <app data>/server/local.key (0600, this account's), and writes it
+// into the server's settings (readable by the service only), so this app,
+// and no other account on the PC, fetches the code (server_signin_code).
+// The code is never written to the service's log.
+//
 // Settings live in <app config>/server.json; the SMTP password in
 // <app data>/server/smtp.pass (0600, the child's) or handed to the service
 // once through a temporary file (the service keeps its own copy), never in
@@ -63,7 +71,7 @@ pub struct Settings {
     /// virtual ones: WSL, Hyper-V, Docker, VPNs).
     pub share_address: String,
     pub owner_email: String,
-    /// "smtp", or "none" (codes in the log below; this PC only).
+    /// "smtp", or "none" (this PC only: the app fetches the codes, D358).
     pub mail: String,
     pub smtp_host: String,
     pub smtp_port: u16,
@@ -350,7 +358,7 @@ fn plan(s: &Settings, lan: Vec<String>) -> Result<Plan, String> {
 /// The server's settings (TOPO_*), the same for the child's environment
 /// and the service's settings file. The data folder and the password file
 /// are added by whoever runs it.
-fn server_vars(s: &Settings, p: &Plan) -> Vec<(&'static str, String)> {
+fn server_vars(s: &Settings, p: &Plan, key: &str) -> Vec<(&'static str, String)> {
     let mut v = vec![
         ("TOPO_LISTEN", p.listen.clone()),
         ("TOPO_PUBLIC_URL", p.public.clone()),
@@ -373,8 +381,44 @@ fn server_vars(s: &Settings, p: &Plan) -> Vec<(&'static str, String)> {
         }
     } else {
         v.push(("TOPO_MAIL", "log".into()));
+        if !s.lan && !key.is_empty() {
+            v.push(("TOPO_LOCAL_CODE_KEY", key.to_string()));
+        }
     }
     v
+}
+
+/// This app's key for the server's sign-in codes (D358): made once, kept
+/// readable by this account only.
+fn local_key(app: &AppHandle) -> Result<String, String> {
+    let dir = data_dir(app)?;
+    let path = dir.join("local.key");
+    if let Ok(k) = fs::read_to_string(&path) {
+        let k = k.trim().to_string();
+        if valid_key(&k) {
+            return Ok(k);
+        }
+    }
+    use ring::rand::{SecureRandom, SystemRandom};
+    let mut b = [0u8; 32];
+    SystemRandom::new().fill(&mut b).map_err(|_| "random".to_string())?;
+    let k: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    write_private(&path, k.as_bytes())?;
+    Ok(k)
+}
+
+fn valid_key(k: &str) -> bool {
+    k.len() == 64 && k.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// A sign-in code waiting for this app (D358).
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq)]
+#[serde(default)]
+pub struct SigninCode {
+    pub code: String,
+    /// When the server sent it (unix ms).
+    pub at: i64,
 }
 
 /// The settings file `service configure` reads (KEY=VALUE lines).
@@ -611,7 +655,8 @@ fn handover(app: &AppHandle, bin: &Path, s: &Settings, pass: Option<&str>) -> Re
     let dir = data_dir(app)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let conf = dir.join("service-settings.conf");
-    write_private(&conf, conf_text(&server_vars(s, &p)).as_bytes())?;
+    let key = if s.lan { String::new() } else { local_key(app)? };
+    write_private(&conf, conf_text(&server_vars(s, &p, &key)).as_bytes())?;
     let mut h = Handover { files: vec![conf.clone()], args: vec!["--config".into(), conf.to_string_lossy().into_owned()] };
     if let Some(pw) = pass.filter(|p| !p.is_empty()) {
         if pw.contains(['\r', '\n']) {
@@ -737,7 +782,8 @@ fn start(app: &AppHandle, st: &ServerState) -> Result<(), String> {
         }
     }
     cmd.env("TOPO_DATA", &dir);
-    for (k, v) in server_vars(&settings, &p) {
+    let key = if settings.lan { String::new() } else { local_key(app)? };
+    for (k, v) in server_vars(&settings, &p, &key) {
         cmd.env(k, v);
     }
     if settings.mail == "smtp" && !settings.smtp_user.trim().is_empty() {
@@ -922,6 +968,57 @@ pub fn server_service_remove(app: AppHandle, st: State<'_, ServerState>) -> Resu
     Ok(status(&app, &st))
 }
 
+/// The newest sign-in code this PC's own server sent to `email`, for a
+/// server only this PC reaches with no email (D358): asked over loopback
+/// with this app's key. Ok(None) while none is waiting; Err("no-code-key")
+/// when the server was set up before it had the key (Save it again).
+#[tauri::command]
+pub fn server_signin_code(app: AppHandle, email: String) -> Result<Option<SigninCode>, String> {
+    let s = load_settings(&app);
+    if s.lan || s.mail != "none" {
+        return Err("not-local".into());
+    }
+    if !valid_email(&email) {
+        return Err("owner-email".into());
+    }
+    let key = local_key(&app)?;
+    fetch_signin_code(s.port, &key, email.trim())
+}
+
+/// GET /api/local/signin-code on 127.0.0.1:port with the key (D358).
+fn fetch_signin_code(port: u16, key: &str, email: &str) -> Result<Option<SigninCode>, String> {
+    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(5)).redirects(0).build();
+    let res = agent
+        .get(&format!("http://127.0.0.1:{port}/api/local/signin-code"))
+        .set("X-Topo-Local-Key", key)
+        .set("X-Topo-Email", email)
+        .call();
+    match res {
+        Ok(r) => {
+            let body = r.into_string().map_err(|_| "offline".to_string())?;
+            let c: SigninCode = serde_json::from_str(&body).map_err(|_| "offline".to_string())?;
+            if c.code.len() == 6 && c.code.chars().all(|x| x.is_ascii_digit()) {
+                Ok(Some(c))
+            } else {
+                Ok(None)
+            }
+        }
+        Err(ureq::Error::Status(404, r)) => {
+            // "no-code": the key matched, nothing waits yet. Any other 404
+            // is a server that does not take this key (set up before it,
+            // or older than the route): retrying cannot help.
+            let body = r.into_string().unwrap_or_default();
+            if body.contains("\"no-code\"") {
+                Ok(None)
+            } else {
+                Err("no-code-key".into())
+            }
+        }
+        Err(ureq::Error::Status(_, _)) => Err("offline".into()),
+        Err(ureq::Error::Transport(_)) => Err("offline".into()),
+    }
+}
+
 /// The first-run question (D125): asked once, on a computer that can run
 /// the service and does not yet, unless the Windows installer already asked.
 #[tauri::command]
@@ -1075,8 +1172,11 @@ mod tests {
         let mut s = Settings { owner_email: "it@example.com".into(), ..Default::default() };
         let p = plan(&s, vec![]).unwrap();
         assert_eq!(p.urls, vec!["http://127.0.0.1:7380"]);
-        let conf = conf_text(&server_vars(&s, &p));
+        let conf = conf_text(&server_vars(&s, &p, &"ab".repeat(32)));
         assert!(conf.contains("TOPO_LISTEN=127.0.0.1:7380\n") && conf.contains("TOPO_MAIL=log\n") && !conf.contains("TOPO_TLS_SELF"));
+        // D358: this PC only, no email: the app's key for the sign-in codes.
+        assert!(conf.contains(&format!("TOPO_LOCAL_CODE_KEY={}\n", "ab".repeat(32))));
+        assert!(valid_key(&"ab".repeat(32)) && !valid_key("short") && !valid_key(&"zz".repeat(32)));
 
         s.lan = true;
         s.share_address = "192.168.1.20".into();
@@ -1088,7 +1188,8 @@ mod tests {
         s.smtp_host = "smtp.example.com".into();
         s.smtp_from = "Topo <topo@example.com>".into();
         s.smtp_user = "topo@example.com".into();
-        let conf = conf_text(&server_vars(&s, &p));
+        let conf = conf_text(&server_vars(&s, &p, &"ab".repeat(32)));
+        assert!(!conf.contains("TOPO_LOCAL_CODE_KEY"), "other PCs: never the key");
         for want in [
             "TOPO_LISTEN=0.0.0.0:7380\n",
             "TOPO_PUBLIC_URL=https://192.168.1.20:7380\n",
@@ -1114,6 +1215,52 @@ mod tests {
         assert_eq!(win_arg(""), r#""""#);
         assert_eq!(ps_string("it's"), "'it''s'");
         assert_eq!(last_line("a\nb\n\n"), "b");
+    }
+
+    // D358: the app's fetch of the sign-in code, against a one-answer fake
+    // server on loopback: the key and the address go as headers, a code
+    // comes back, "no-code" is nothing yet, any other 404 is no-code-key.
+    #[test]
+    fn signin_code_fetch() {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpListener;
+        let serve = |status: &'static str, body: &'static str| {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = l.local_addr().unwrap().port();
+            let h = thread::spawn(move || {
+                let (mut c, _) = l.accept().unwrap();
+                let mut req = Vec::new();
+                let mut buf = [0u8; 1024];
+                while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let n = c.read(&mut buf).unwrap();
+                    if n == 0 {
+                        break;
+                    }
+                    req.extend_from_slice(&buf[..n]);
+                }
+                let resp = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                c.write_all(resp.as_bytes()).unwrap();
+                String::from_utf8_lossy(&req).to_lowercase()
+            });
+            (port, h)
+        };
+        let key = "ab".repeat(32);
+        let (port, h) = serve("200 OK", r#"{"code":"482915","at":1700000000000}"#);
+        assert_eq!(fetch_signin_code(port, &key, "it@clinica.test"), Ok(Some(SigninCode { code: "482915".into(), at: 1_700_000_000_000 })));
+        let req = h.join().unwrap();
+        assert!(req.starts_with("get /api/local/signin-code "), "{req}");
+        assert!(req.contains(&format!("x-topo-local-key: {key}")) && req.contains("x-topo-email: it@clinica.test"), "{req}");
+        let (port, h) = serve("404 Not Found", r#"{"error":"no-code"}"#);
+        assert_eq!(fetch_signin_code(port, &key, "it@clinica.test"), Ok(None));
+        h.join().unwrap();
+        let (port, h) = serve("404 Not Found", r#"{"error":"not-found"}"#);
+        assert_eq!(fetch_signin_code(port, &key, "it@clinica.test"), Err("no-code-key".into()));
+        h.join().unwrap();
+        let (port, h) = serve("200 OK", r#"{"code":"12ab","at":1}"#);
+        assert_eq!(fetch_signin_code(port, &key, "it@clinica.test"), Ok(None));
+        h.join().unwrap();
+        let free = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        assert_eq!(fetch_signin_code(free, &key, "it@clinica.test"), Err("offline".into()));
     }
 
     #[test]

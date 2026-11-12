@@ -148,8 +148,7 @@ try {
       watch(p, `${theme}@${w}`);
       await p.goto(`${ORIGIN}/index.html?lang=en&theme=${theme}#advanced`);
       await booted(p);
-      await p.evaluate(async () => { await TopoLock.setPin('1234'); openSettings(); });
-      await p.evaluate(() => document.getElementById('setLockSec').scrollIntoView());
+      await p.evaluate(async () => { await TopoLock.setPin('1234'); openSettings('setLockSec'); });   // the Screen lock tab (D361)
       await p.waitForTimeout(250);
       const sw = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth, sec: document.getElementById('setLockSec').getBoundingClientRect().width }));
       ok(`Settings, Screen lock, ${theme} @${w}: no sideways scroll`, sw.sw <= sw.iw && sw.sec > 0, JSON.stringify(sw));

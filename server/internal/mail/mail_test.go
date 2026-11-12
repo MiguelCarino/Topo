@@ -399,7 +399,8 @@ func TestFileSink(t *testing.T) {
 }
 
 func TestLogTransportHidesCodes(t *testing.T) {
-	cfg := testCfg(t, "TOPO_MAIL=log")
+	// A server other computers reach (behind a proxy): codes at debug only.
+	cfg := testCfg(t, "TOPO_MAIL=log", "TOPO_LISTEN=0.0.0.0:7380", "TOPO_PUBLIC_URL=https://topo.example.com")
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	m, _ := New(cfg, log, Options{})
@@ -418,6 +419,65 @@ func TestLogTransportHidesCodes(t *testing.T) {
 	m.Send(context.Background(), msg)
 	if !strings.Contains(buf.String(), "012345") {
 		t.Fatal("debug level should show the code for development")
+	}
+}
+
+// A server only this computer reaches (the desktop app's "This PC only",
+// D358, which replaced D352): the code is never in the log above debug,
+// even there (the system log is readable by other accounts on a shared
+// PC). It waits in the code box for the app, sign-in codes only, and is
+// gone once taken.
+func TestLogTransportCodeBox(t *testing.T) {
+	cfg := testCfg(t, "TOPO_MAIL=log", "TOPO_LISTEN=127.0.0.1:7380", "TOPO_LOCAL_CODE_KEY=0123456789abcdef0123456789abcdef")
+	if !cfg.LocalCodes() {
+		t.Fatal("loopback, log and a key: LocalCodes")
+	}
+	now := time.UnixMilli(1_700_000_000_000)
+	box := NewCodeBox(func() time.Time { return now })
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	m, err := New(cfg, log, Options{Codes: box, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, _ := Render("signin", "en", sample)
+	msg.To = "Bo@Example.com"
+	if err := m.Send(context.Background(), msg); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); strings.Contains(out, "012345") || strings.Contains(out, "mail sign-in") {
+		t.Fatalf("this PC only still logs no code at info: %q", out)
+	}
+	inv, _ := Render("invite", "en", sample)
+	inv.To = "cy@example.com"
+	m.Send(context.Background(), inv)
+	if _, ok := box.Take("cy@example.com"); ok {
+		t.Fatal("only sign-in codes wait in the box")
+	}
+	c, ok := box.Take("bo@example.com")
+	if !ok || c.Code != "012345" || c.At != now.UnixMilli() {
+		t.Fatalf("box: %+v %v", c, ok)
+	}
+	if _, ok := box.Take("bo@example.com"); ok {
+		t.Fatal("a code is taken once")
+	}
+	m.Send(context.Background(), msg)
+	now = now.Add(CodeBoxTTL + time.Minute)
+	if _, ok := box.Take("bo@example.com"); ok {
+		t.Fatal("an old code is dropped")
+	}
+	for _, env := range [][]string{
+		{"TOPO_MAIL=log", "TOPO_LISTEN=127.0.0.1:7380"},
+		{"TOPO_MAIL=log", "TOPO_LISTEN=127.0.0.1:7380", "TOPO_PUBLIC_URL=https://topo.example.com", "TOPO_LOCAL_CODE_KEY=0123456789abcdef0123456789abcdef"},
+		{"TOPO_MAIL=log", "TOPO_LISTEN=0.0.0.0:7380", "TOPO_PUBLIC_URL=http://127.0.0.1:7380", "TOPO_LOCAL_CODE_KEY=0123456789abcdef0123456789abcdef"},
+		{"TOPO_MAIL=file", "TOPO_LISTEN=127.0.0.1:7380", "TOPO_LOCAL_CODE_KEY=0123456789abcdef0123456789abcdef"},
+	} {
+		if testCfg(t, env...).LocalCodes() {
+			t.Fatalf("not only this PC, or no key: %v", env)
+		}
+	}
+	if _, err := config.Load(config.Options{Environ: []string{"TOPO_DATA=" + t.TempDir(), "TOPO_LOCAL_CODE_KEY=short"}}); err == nil {
+		t.Fatal("a short key is refused")
 	}
 }
 

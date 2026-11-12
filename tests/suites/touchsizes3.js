@@ -70,6 +70,22 @@ window.addEventListener('load', () => { setTimeout(async () => {
     await wait(150);
     ok(label + ': a tap on its ✕ closes it', !shown(d));
   };
+  // Settings shows one section tab at a time (D361): each tab with
+  // something in it is measured on its own (D362).
+  const settingsTabKeys = async () => {
+    openSettings(); await settle();
+    const keys = [...document.querySelectorAll('#settingsDialog .set-tab')].filter((x) => !x.hidden).map((x) => x.dataset.tab);
+    closeSettings(); await settle();
+    return keys;
+  };
+  const settingsDialogs = async (label) => {
+    const keys = await settingsTabKeys();
+    ok(label + ': its tabs found', keys.length >= 3, keys.join());
+    for (const k of keys) {
+      openSettings(k); await settle();
+      await dialog(`${label}, ${k}`, 'settingsDialog');
+    }
+  };
 
   try {
     await __media('reduce');
@@ -81,8 +97,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     await settle();
 
     // ---- Dialogs ----
-    openSettings(); await settle();
-    await dialog('Settings', 'settingsDialog');
+    await settingsDialogs('Settings');
     // The probe's own check: a dialog's foot button shrunk to 26px fails,
     // though the document bar (behind the dialog's scrim) is under its box.
     openSettings(); await settle();
@@ -226,8 +241,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     setView('table'); await settle();
     await screen('390: the table', el('tvScroll'));
     setView('map');
-    openSettings(); await settle();
-    await dialog('390: Settings', 'settingsDialog');
+    await settingsDialogs('390: Settings');
 
     // ---- 320x640: the narrowest phone ----
     // The drawer's tabs in provider mode (nine of them, three rows) are each
@@ -283,8 +297,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       ok(`${w}x${h}: the table does not scroll the page sideways`, document.scrollingElement.scrollWidth <= innerWidth);
       await screen(`${w}x${h}: the table`, el('tvScroll'));
       setView('map');
-      openSettings(); await settle();
-      await dialog(`${w}x${h}: Settings`, 'settingsDialog');
+      await settingsDialogs(`${w}x${h}: Settings`);
       // The bulk panel's Fill vendor from MAC: a button on its own line,
       // 44 tall on a tablet's touch screen too (not a link in a sentence).
       const two = state.nodes.filter((n) => n.type !== 'cloud').slice(0, 2);
