@@ -323,8 +323,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
       const ctl = el('sheetPreviewControls');
       ok('7.1 the menu\'s Monitoring report opens the preview: the week, the whole network, its charts and tables',
         b && /Monitoring report/.test(b.html) && (b.html.match(/<svg /g) || []).length === 4 && /Last 7 days/.test(b.html) && /_monitoring\.html$/.test(b.name), b && b.name);
-      ok('7.2 its choices in the left column: on what, the period, what goes in; Print, CSV and Download',
-        !ctl.hidden && !!ctl.querySelector('[data-rp="scope"]') && !!ctl.querySelector('[data-rp="period"]') && ctl.querySelectorAll('[data-rp="part"]').length === 3
+      ok('7.2 its choices in the left column: on what, the period, what goes in (Connections too, on a server: step 8f); Print, CSV and Download',
+        !ctl.hidden && !!ctl.querySelector('[data-rp="scope"]') && !!ctl.querySelector('[data-rp="period"]') && ctl.querySelectorAll('[data-rp="part"]').length === 4 && !!ctl.querySelector('[data-rp="part"][value="connections"]')
         && !el('sheetPreviewCsv').hidden && !el('sheetPreviewOpts').hidden, ctl.innerHTML.slice(0, 120));
       const per = ctl.querySelector('[data-rp="period"]');
       per.value = 'day'; per.dispatchEvent(new Event('change', { bubbles: true }));

@@ -1041,6 +1041,21 @@ pub fn monitor_link_info(app: AppHandle) -> LinkInfo {
     link_info_of(read_link(&app))
 }
 
+/// Check now (docs/SCOPE.md D381, step 8h): one question, once, from this
+/// PC. It needs no monitor and keeps nothing: no sample, no state, no
+/// issue, no statistics. The page builds the spec as the plan does
+/// (js/checks.js), for a device, a watched address or a trace's target.
+#[tauri::command]
+pub async fn check_now(spec: crate::checks::Spec) -> Result<crate::checks::Outcome, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::checks::run(&spec)).await.map_err(|e| e.to_string())
+}
+
+/// Show alarms on this PC (the connection's notifications, src/connwatch.rs).
+pub fn alarms_on(app: &AppHandle) -> bool {
+    let st = app.state::<MonitorState>();
+    cfg(app, &st).alarms
+}
+
 /// A notification with the page's words, when Show alarms on this PC is on
 /// (another monitor of the site stopped reporting, D151).
 #[tauri::command]

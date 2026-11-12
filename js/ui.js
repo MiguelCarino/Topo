@@ -1197,6 +1197,7 @@ function drawCanvas() {
             if (addsToSelection(event) || selectMoreTap(event)) toggleSelected('link', link.id); else select(link.id, 'link');
         });
         if (qm && !qm.links.has(link.id)) line.classList.add('q-dim');
+        if (window.TopoTraceTarget && TopoTraceTarget.linkOnPath(link.id)) line.classList.add('tt-path-link');
         const flow = reach && reach.reachableLinks.has(link.id) ? drawTraceFlow(line, link.id, medium) : null;
         // Who is responsible for the run, on hover, when Settings says so.
         if (state.settings.providerHover === true && linkProviders(link).length) {
@@ -1429,6 +1430,11 @@ function drawCanvas() {
         if (incHit && incHit.size && (incHit.has(node.id) || (!!inFold && inFold.some((x) => incHit.has(x.id))))) classes += ' inc-hit';
         // The selected device keeps its addresses at a phone's far zoom (M38, js/app.js applyMapDetail).
         if (isSelected) classes += ' node-sel';
+        // "Does A reach B?": its two ends and the path it found (js/tracetarget.js).
+        if (window.TopoTraceTarget) {
+            if (TopoTraceTarget.isEnd(node.id)) classes += ' tt-end';
+            else if (TopoTraceTarget.onPath(node.id)) classes += ' tt-path';
+        }
         g.setAttribute('class', classes);
         // Retired (js/assets.js): still in the register, no longer on the
         // network. An attribute, not a class, because it is a fact about the
@@ -1596,6 +1602,8 @@ function drawCanvas() {
 
         g.addEventListener('click', (event) => {
             event.stopPropagation();
+            // Trace to… waiting for its target (D382).
+            if (window.TopoTraceTarget && TopoTraceTarget.onClick(node.id)) return;
             if (state.linkSourceId) {
                 // Armed from a text note → complete the red leader here instead
                 // of a network link; the note owns the pairing (see toggleNoteLink).
@@ -1633,6 +1641,10 @@ function drawCanvas() {
         g.addEventListener('contextmenu', (event) => {
             event.preventDefault(); // Stops browser menu
             event.stopPropagation();
+            // The second right-click of a pair asks "Does A reach B?", and a
+            // read-only document arms the target, never link mode (js/
+            // tracetarget.js, D382, D383).
+            if (window.TopoTraceTarget && TopoTraceTarget.onContext(node.id)) return;
             state.linkSourceId = node.id;
             renderCanvasOnly();
         });

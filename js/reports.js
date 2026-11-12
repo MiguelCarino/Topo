@@ -53,8 +53,8 @@ const HOUR = 3600000, DAY = 24 * HOUR;
 const PERIOD_MS = { day: DAY, week: 7 * DAY, month: 30 * DAY, quarter: 91 * DAY };
 const PERIODS = ['day', 'week', 'month', 'quarter', 'visit'];
 const PERIOD_WORDS = { day: 'Last 24 hours', week: 'Last 7 days', month: 'Last 30 days', quarter: 'Last 91 days (a quarter)', visit: 'Since the last visit' };
-const PARTS = ['availability', 'response', 'outages'];
-const PART_WORDS = { availability: 'Availability', response: 'Response times', outages: 'Outages' };
+const PARTS = ['availability', 'response', 'outages', 'connections'];
+const PART_WORDS = { availability: 'Availability', response: 'Response times', outages: 'Outages', connections: 'Connections' };
 const SCOPES = ['site', 'group', 'node', 'provider'];
 const SCOPE_WORDS = { site: 'Whole network', group: 'A group', node: 'A device', provider: 'A provider' };
 const STEPS = [HOUR, 6 * HOUR, DAY, 7 * DAY];
@@ -502,7 +502,9 @@ function buildModel(docIn, data, opts) {
     const slowByHour = new Array(24).fill(0);
     rows.forEach((r) => r.slowByHour.forEach((s, i) => { slowByHour[i] += s; }));
     const meta = typeof providerReportMeta === 'function' ? providerReportMeta(doc) : { site: '', client: '', date: '' };
+    const connections = scope === 'site' && ok && data && Array.isArray(data.connections) ? connectionRows(data.connections, range) : null;
     return {
+        connections,
         scope, id: opts.id || null, period: range ? range.kind : opts.period, range, basis: parsed ? 'hours' : 'all',
         hoursAsked: scope === 'provider' && opts.basis === 'hours', hoursRead: !!parsed, hoursAlways: scope === 'provider' && opts.basis === 'hours' && hoursAlways(prov),
         several: provs.length > 1,
@@ -518,6 +520,26 @@ function buildModel(docIn, data, opts) {
     };
 }
 
+// The Connections section's rows (D379): per watched PC and site monitor,
+// the time connected over the time watched in the period (from when it was
+// first watched), and each gap clipped to the period with who saw it.
+function connectionRows(clients, range) {
+    const lo = range.from, hi = range.now || range.to;
+    return clients.map((c) => {
+        const from = Math.max(lo, Number(c.since) || lo);
+        const span = Math.max(0, hi - from);
+        const gaps = (Array.isArray(c.gaps) ? c.gaps : []).map((g) => {
+            const a = Math.max(from, g.from), b = Math.min(hi, g.to || hi);
+            return b > a ? { from: g.from, to: g.to || null, ms: b - a, seenBy: g.seenBy === 'client' ? 'client' : 'server' } : null;
+        }).filter(Boolean);
+        // The server's view: the time it saw no beat (the PC's own gaps are
+        // the server not answering it, listed, not counted twice).
+        const down = gaps.filter((g) => g.seenBy === 'server').reduce((s, g) => s + g.ms, 0);
+        return { id: c.id, kind: c.kind === 'monitor' ? 'monitor' : 'pc', name: c.name || c.id, email: c.email || '', lost: !!c.lost, away: !!c.away,
+            connected: span > 0 ? Math.max(0, span - down) / span : null, watchedMs: span, gaps };
+    });
+}
+
 // ---- Reading the figures ----
 // -> { source: 'server' | 'local' | 'none', streams, statsDays, off, error }.
 // A server's site: its monitors' blobs (any signed-in page); else this PC's
@@ -529,7 +551,10 @@ async function gather(range, doc) {
     if (site) {
         let st;
         try { st = await M.loadMonitors(site); } catch (e) { return { source: 'server', streams: [], error: true }; }
-        if (st.statsDays === 0) return { source: 'server', streams: [], off: true, statsDays: 0 };
+        // The connections (step 8f, D379): the site's watched PCs and monitors.
+        let connections = null;
+        if (window.TopoConnections) { try { connections = await TopoConnections.siteConnections(site, range.from, range.to); } catch (e) { connections = null; } }
+        if (st.statsDays === 0) return { source: 'server', streams: [], off: true, statsDays: 0, connections };
         const names = new Map((st.monitors || []).map((m) => [m.id, m.name || '']));
         let blobs;
         try { blobs = await M.stats(site, dayOf(range.from), dayOf(range.to - 1)); } catch (e) { return { source: 'server', streams: [], error: true, statsDays: st.statsDays }; }
@@ -540,7 +565,7 @@ async function gather(range, doc) {
             const x = b.checks[key];
             if (x && Array.isArray(x.hours)) by.get(id).hours.push(...x.hours);
         }));
-        return { source: 'server', streams: [...by.values()], statsDays: st.statsDays };
+        return { source: 'server', streams: [...by.values()], statsDays: st.statsDays, connections };
     }
     if (hasHost()) {
         const C = window.TopoChecks;
@@ -690,6 +715,17 @@ function responseHtml(m, opts = {}) {
         : `<p class="dim">${esc(t('No check was slow in this period.'))}</p>`;
     return sum + `<p class="dim">${esc(t('Each point of the charts is {step}.', { step: stepWord }))}</p>` + charts + slow;
 }
+function connectionsHtml(m) {
+    const list = m.connections || [];
+    if (!list.length) return `<p class="dim">${esc(t('No PC\'s connection is watched on this site, and it has no monitor.'))}</p>`;
+    const kindWord = (r) => t(r.kind === 'monitor' ? 'Site monitor' : 'Watched PC');
+    const seen = (g) => t(g.seenBy === 'client' ? 'the PC: the server not answering' : 'the server: lost');
+    return `<table><thead><tr><th>${esc(t('PC'))}</th><th>${esc(t('Connected'))}</th><th>${esc(t('Gaps'))}</th></tr></thead><tbody>`
+        + list.map((r) => `<tr><td>${esc(r.name)}<br><span class="dim">${esc([kindWord(r), r.email].filter(Boolean).join(' · '))}</span>${r.lost ? `<br><span class="bad">${esc(t('lost its connection'))}</span>` : ''}</td>`
+            + `<td>${esc(r.connected == null ? '—' : pctText(r.connected))}</td>`
+            + `<td>${r.gaps.length ? r.gaps.map((g) => esc(t('{from}, {time}, seen by {who}', { from: whenText(g.from), time: durText(g.ms), who: seen(g) }))).join('<br>') : esc(t('None'))}</td></tr>`).join('')
+        + '</tbody></table>';
+}
 function actText(a) {
     const what = t(ACT_WORDS[a.act] || 'Acknowledged');
     return a.by ? t('{what} by {name}, {time}', { what, name: a.by, time: whenText(a.at) }) : t('{what}, {time}', { what, time: whenText(a.at) });
@@ -739,7 +775,8 @@ function bodyHtml(m, opts = {}) {
         return `<div class="mr">${head}${m.rows.length ? tilesHtml(m) : ''}${m.parts.includes('availability') ? `<h3>${esc(t('Availability'))}</h3>${availabilityHtml(m)}` : ''}`
             + `${m.parts.includes('response') ? `<h3>${esc(t('Response times'))}</h3>${responseHtml(m, { compact: true })}` : ''}${m.parts.includes('outages') ? `<h3>${esc(t('Outages'))}</h3>${outagesHtml(m, { compact: true })}` : ''}</div>`;
     }
-    return { head, tiles: m.rows.length ? tilesHtml(m) : '', parts: sec('availability', availabilityHtml(m)) + sec('response', responseHtml(m)) + sec('outages', outagesHtml(m)) };
+    return { head, tiles: m.rows.length ? tilesHtml(m) : '', parts: sec('availability', availabilityHtml(m)) + sec('response', responseHtml(m)) + sec('outages', outagesHtml(m))
+        + (m.connections ? sec('connections', connectionsHtml(m)) : '') };
 }
 const FOOT = 'Availability is the time answering divided by the time answering and not answering: maintenance (quiet windows, Expected) and unknown time (the monitor off or not reporting) are left out, and how much of the period was measured is printed beside every figure. A target is judged without the time a device was down only because a device upstream was.';
 function reportHtml(m) {
@@ -852,6 +889,8 @@ function currentModel() {
     const o = _rp.opts;
     return buildModel(doc, _rp.data || { source: 'none', streams: [] }, Object.assign({}, o, { range: rangeFor(o, doc) }));
 }
+// Connections only for the whole site on a Topo server (D379).
+const connectionsOffered = (o) => o.scope === 'site' && !!(window.TopoMonitors && TopoMonitors.siteOfOpen && TopoMonitors.siteOfOpen());
 // The left column: on what, the period, the hours and what goes in.
 function controlsInto(box) {
     const o = _rp.opts;
@@ -876,7 +915,8 @@ function controlsInto(box) {
             + `<label><input type="radio" name="rpBasis" value="hours" data-rp="basis"${o.basis === 'hours' ? ' checked' : ''}> <span>${esc(t('Only during their support hours'))}</span></label></fieldset>`;
     }
     h += `<fieldset><legend>${esc(t('What goes in'))}</legend>`
-        + PARTS.map((k) => `<label><input type="checkbox" value="${k}" data-rp="part"${o.parts.includes(k) ? ' checked' : ''}> <span>${esc(t(PART_WORDS[k]))}</span></label>`).join('') + '</fieldset>';
+        + PARTS.filter((k) => k !== 'connections' || connectionsOffered(o))
+            .map((k) => `<label><input type="checkbox" value="${k}" data-rp="part"${o.parts.includes(k) ? ' checked' : ''}> <span>${esc(t(PART_WORDS[k]))}</span></label>`).join('') + '</fieldset>';
     box.innerHTML = h;
 }
 async function onControl(e) {

@@ -905,7 +905,7 @@ const PHONE_MIN_ZOOM = 0.1;        // a phone may zoom out this far, so any map 
 const SIMPLE_OVERVIEW_ZOOM = 0.33;
 const PHONE_FIT_PAD = 16;
 const MAP_TOP_OVERLAYS = '#canvasContainer > .topo-topbar';
-const MAP_BOTTOM_OVERLAYS = '#docBar, #handyBar, #readOnlyBanner, #storageBanner, #selBar, #linkBanner, #problemPickBanner';
+const MAP_BOTTOM_OVERLAYS = '#docBar, #handyBar, #readOnlyBanner, #storageBanner, #selBar, #linkBanner, #problemPickBanner, #traceTargetBar';
 function mapViewport() {
     const r = document.getElementById('networkCanvas').getBoundingClientRect();
     const full = { left: 0, top: 0, width: r.width, height: r.height };
@@ -2355,6 +2355,8 @@ window.addEventListener('mousedown', (event) => {
         _panPress = null;
         // Select more (a phone's, js/ui.js): a tap on empty map keeps the set
         // and only drops link mode, if it was armed.
+        // A click on empty map clears "Does A reach B?" too (D382).
+        if (event.button === 0 && window.TopoTraceTarget) TopoTraceTarget.clear();
         if (event.button === 0 && selectMoreOn()) {
             if (state.linkSourceId) { state.linkSourceId = null; renderCanvasOnly(); }
         } else if (event.button === 0 && !isDraggingNode && !event.ctrlKey && !event.metaKey && (state.selection.size || state.linkSourceId)) {
@@ -2854,6 +2856,10 @@ const SHORTCUTS = [
       run: () => fitToView() },
     { keys: ['A'], label: 'Findings tab (and back)', simpleHidden: true, test: (e) => e.key.toLowerCase() === 'a',
       run: () => toggleFindingsTab() },
+    // Trace to… (D382): the next click or tap on a device asks whether the
+    // selected one reaches it.
+    { keys: ['G'], label: 'Trace to… (does it reach a device?)', simpleHidden: true, test: (e) => e.key.toLowerCase() === 'g',
+      run: () => { if (state.selectedType === 'node' && state.selectedId && window.TopoTraceTarget) TopoTraceTarget.armFrom(state.selectedId); } },
     { keys: ['L'], label: 'Link from the selected node', test: (e) => e.key.toLowerCase() === 'l',
       run: () => { if (state.selectedType === 'node' && state.selectedId) { state.linkSourceId = state.selectedId; renderCanvasOnly(); } } },
     { keys: ['1'], label: 'Nodes tab', simpleLabel: 'Devices tab', test: (e) => e.key === '1', run: () => showLibraryTab('nodes') },
@@ -2887,7 +2893,7 @@ const SHORTCUTS = [
       // Over the landing or a dialog, Esc closes that instead (closeTopoOverlay).
       // It ends Select more too (js/ui.js): only an Esc that reached the map,
       // not one a dialog, an overlay or a field took.
-      run: () => { setSelectMore(false); state.linkSourceId = null; select(null, null); renderCanvasOnly(); } },
+      run: () => { setSelectMore(false); state.linkSourceId = null; if (window.TopoTraceTarget) TopoTraceTarget.clear(); select(null, null); renderCanvasOnly(); } },
     { keys: ['?'], label: 'Show this list', test: (e) => e.key === '?', run: () => toggleShortcutHelp() }
 ];
 

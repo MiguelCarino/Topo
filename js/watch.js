@@ -269,6 +269,9 @@ function renderSheet() {
     (d.checks || []).forEach((c) => { h += TC().checkCardHtml(holder, c, ro); });
     if (!(d.checks || []).length) h += `<p class="rail-none">${escapeHtml(t('No answer checks: it is not checked, and has no state.'))}</p>`;
     if (!ro && (d.checks || []).length < CHECKS_MAX) h += `<button type="button" class="btn ck-add" data-ck="add">${escapeHtml(t('＋ Add a check'))}</button>`;
+    // Check now (D381): the desktop app, once, kept nowhere.
+    if (TC().hasHost()) h += `<div class="ck-row ck-checknow"><button type="button" class="btn" data-ck="checknow">${escapeHtml(t('Check now'))}</button>`
+        + `<p class="rail-note ck-note" id="watchNowResult" aria-live="polite">${escapeHtml(t('Once, from this PC: nothing is kept.'))}</p></div>`;
     h += '</div>';
     el('watchBody').innerHTML = h;
     el('watchError').textContent = _wt.error;
@@ -303,7 +306,15 @@ function onSheetChange(e) {
 function onSheetClick(e) {
     const b = e.target.closest('[data-ck]');
     const d = _wt.draft;
-    if (!b || !d || state.readOnly) return;
+    if (!b || !d) return;
+    if (b.dataset.ck === 'checknow') {
+        if (!state.readOnly) readForm();
+        const address = asWatchAddress(d.address);
+        if (!address) { el('watchNowResult').textContent = t('Type the address to check.'); return; }
+        TC().runCheckNow(Object.assign(TC().watchHolder(d), { address }), el('watchNowResult'));
+        return;
+    }
+    if (state.readOnly) return;
     readForm();
     if (b.dataset.ck === 'add') d.checks = (d.checks || []).concat([{ id: nextId('ck'), proto: 'ping' }]);
     else if (b.dataset.ck === 'del') { const cid = b.closest('.ck-card').dataset.check; d.checks = (d.checks || []).filter((x) => x.id !== cid); }

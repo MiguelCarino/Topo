@@ -451,6 +451,9 @@ func (s *Server) putStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	s.publishSite(ctx, site, "monitor-status", map[string]any{"site": site, "monitor": sess.UserID, "n": n})
 	if wasStale {
+		if err := store.CloseGap(ctx, s.d.Store.W, sess.UserID, now); err != nil {
+			s.d.Log.Warn("monitor gap", "err", err)
+		}
 		s.publishSite(ctx, site, "monitor", map[string]any{"site": site, "monitor": sess.UserID, "stale": false})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"n": n})
@@ -698,6 +701,14 @@ func (s *Server) SweepMonitors(ctx context.Context) {
 		return
 	}
 	for _, m := range ms {
+		// Its gap, for the report's Connections (D379).
+		from := m.LastReport
+		if from == 0 {
+			from = m.Created
+		}
+		if err := store.AddGap(ctx, s.d.Store.W, store.Gap{ClientID: m.ID, From: from, SeenBy: "server"}); err != nil {
+			s.d.Log.Warn("monitor gap", "err", err)
+		}
 		s.publishSite(ctx, m.SiteID, "monitor", map[string]any{"site": m.SiteID, "monitor": m.ID, "name": m.Name, "stale": true, "lastReport": m.LastReport})
 	}
 }

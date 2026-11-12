@@ -84,6 +84,13 @@ fn current(app: &AppHandle, st: &ClientState) -> Option<Arc<Client>> {
     st.client.lock().unwrap().clone()
 }
 
+/// The connected server's client, for what the app does on its own (the
+/// connection heartbeat, src/connwatch.rs).
+pub fn current_client(app: &AppHandle) -> Option<Arc<Client>> {
+    let st = app.state::<ClientState>();
+    current(app, &st)
+}
+
 /// The connected server's address and pin, as kept (a site monitor copies
 /// them when it is turned on, step 7h).
 pub fn saved_server(app: &AppHandle) -> Option<(String, String)> {
@@ -140,6 +147,8 @@ pub async fn client_connect(app: AppHandle, url: String, pin: Option<String>) ->
 #[tauri::command]
 pub fn client_disconnect(app: AppHandle, st: State<'_, ClientState>) -> Result<Info, String> {
     current(&app, &st);
+    // Forgetting the server is going away (D377), said while it still can be.
+    crate::connwatch::away(&app);
     st.close_all();
     *st.client.lock().unwrap() = None;
     store(&app, &st)?.disconnect()?;

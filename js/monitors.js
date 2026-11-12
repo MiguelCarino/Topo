@@ -372,10 +372,14 @@ function renderBanner() {
     const box = el('srvIssueBanner');
     if (!box) return;
     const siteId = siteOfOpen();
-    if (!siteId || (window.TopoLock && TopoLock.isLocked && TopoLock.isLocked())) { box.hidden = true; box.textContent = ''; return; }
+    if (window.TopoLock && TopoLock.isLocked && TopoLock.isLocked()) { box.hidden = true; box.textContent = ''; return; }
+    // The connections (step 8f, js/connections.js): this app's server not
+    // answering, the watched PCs that lost theirs; with or without a site open.
+    const conn = window.TopoConnections ? TopoConnections.bannerLines() : [];
+    if (!siteId) { drawBannerLines(box, conn); return; }
     const issues = openIssues(siteId);
     const stale = staleMonitors(siteId);
-    const lines = [];
+    const lines = conn.slice();
     if (issues.length) {
         const first = issues[0];
         const since = first.outages.length ? first.outages[first.outages.length - 1].from : 0;
@@ -395,6 +399,9 @@ function renderBanner() {
         const n = [...s.refused.values()].filter((x) => x.why !== 'no-key').length;
         if (n) lines.push({ text: tn(n, '{n} record was refused: not signed by a member allowed to write it.', '{n} records were refused: not signed by a member allowed to write them.'), cls: 'srv-ib-refused' });
     }
+    drawBannerLines(box, lines);
+}
+function drawBannerLines(box, lines) {
     box.hidden = !lines.length;
     box.innerHTML = '';
     lines.forEach((l) => {
@@ -434,6 +441,7 @@ function listen() {
 function refresh() {
     listen();
     const siteId = siteOfOpen();
+    if (window.TopoConnections) { TopoConnections.listen(); if (siteId) TopoConnections.loadSite(siteId); }
     if (!siteId) { renderBanner(); return Promise.resolve(null); }
     return load(siteId).catch((e) => { console.warn('Topo: the monitors\' records could not be read:', e); return null; });
 }

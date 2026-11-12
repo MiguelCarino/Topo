@@ -266,6 +266,7 @@ func monitorSweep(ctx context.Context, h *api.Server, every time.Duration) {
 			return
 		case <-t.C:
 			h.SweepMonitors(ctx)
+			h.SweepConnections(ctx)
 		}
 	}
 }

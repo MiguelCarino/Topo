@@ -4481,6 +4481,85 @@ it asked, from the PC that asked, and for nothing else.
   first routing device), the HTTPS one and the gateway on the internet
   providers. More than room left (64): the first that fit.
 
+**8f. Connections (2026-11-12)**
+
+- **D414. Where it is kept.** Server tables `connections` (one row per
+  watched PC, by its device: name, since, interval, last beat, lost, away)
+  and `connection_gaps` (a PC's device id or a monitor's m_ id, from, to,
+  seen by 'server' or 'client'), migration 0006. A beat from a session
+  with no device (a browser that never set up keys) or a monitor's token
+  is refused. Gaps are pruned past ten years; a site sees them only within
+  its Keep statistics, none with it Off.
+- **D415. Who is told.** Everyone who is a granted person member of any
+  site the PC's person is in (the person included); the banner shows the
+  lines on every signed-in page of the app or the website, with or without
+  a site open. The site's list for the report holds its members' PCs and
+  its monitors. The monitors' existing "stopped reporting" keeps its own
+  line; their gaps now go in connection_gaps too. On a phone the banner
+  sat under the floating search (its first line could not be tapped, a
+  monitor's outage line too); it now starts below it (css, found in the
+  browser pass).
+- **D416. Going away.** The app says it on quit (RunEvent::Exit) and when
+  the server is forgotten; the server marks it on sign-out itself. A PC
+  that went away is not lost until it beats again and stops.
+- **D417. The app's side.** A thread from setup beats every 60 s while
+  on; a 401/403 is nobody signed in (no failure, nothing said). Three
+  minutes of failures say "not answering" once (the event to the page,
+  and with alarms on a notification in the page's words, {min} put in);
+  the next beat that reaches the server is followed at once by one
+  carrying the gap. A single failed beat is no gap. Turning it off tells
+  the server to stop watching (DELETE).
+- **D418. Not done in 8f.** An owner turning it on for someone else's PC
+  in Members (D376's second way) is not built: the heartbeat comes from the
+  PC's own app, which only its person sets; the notification for another
+  PC's loss needs the page open (the server's events reach the page, not
+  the tray). The running desktop app was not driven (no GUI session): the
+  Rust state machine, the Go server and the page are tested apart.
+
+**8h. Trace to a target (2026-11-12)**
+
+- **D419. The path.** The shortest way through the cables the trace's
+  walk reached, as traffic goes: only switches, access points and routers
+  are hops (a host is an end), and with the VLAN tick one VLAN at a time
+  (an end lets it through as endPassesVlan reads it; only a router changes
+  it). The line names the hops and the VLANs: "VLAN 10 → 20 at R1", the
+  router where it changed. Where the walk reached B but no such way is
+  found, the VLAN-blind way is drawn. On every sample Trace and the answer
+  agree (the suite asks 12 × 11 pairs each).
+- **D420. Why not, in this order.** No cable at all (any way over any
+  cable), a retired device on that way, the target's Allowed ports (with a
+  port asked), the first VLAN the start walks on that a cable does not
+  carry (vlanPath's stop, in its words), then on another subnet: the start
+  has no gateway, a NAT router the walk reached on the way, a routing device
+  where it stops; else "Nothing recorded explains it." Plus "It stops at
+  {name}.", the reached device nearest the target by cables. Inbound
+  through NAT is said only where the walk reached the NAT router and not
+  past it; the map has no port forwards, so nothing is guessed.
+- **D421. The gestures and the bar.** The second right-click (or the
+  long-press's contextmenu) of a pair asks; a third device after an answer
+  arms link mode from it, and the right-click after that asks from there.
+  A right-click then a left click still files a cable. Trace to… is a
+  button in the Trace box and the key G; it waits for a click or a tap.
+  Esc and a click on empty map clear it, and the port with it. Read-only:
+  the first right-click arms the target. The answer is a bar at the top
+  of the map under the search (the bottom held the docbar, the zoom and a
+  phone's bars), with On port, And back? and Check now. The link banner's
+  Start from here is not built: Esc then a right-click starts anew.
+- **D422. Check now (D381).** One Rust command, `check_now`, runs a
+  check once (checks.rs run) on a blocking thread and keeps nothing. The
+  page builds the spec as the plan does: a device's checks or, with none,
+  a ping (its first address, its documented TCP port as the fallback); a
+  watched address's checks; the trace target's B (a ping, or TCP on the
+  port asked). Offered in a device's Answer checks and the watched sheet
+  (the desktop app only), and on the bar only when A is this PC (its MAC on
+  the map, D166). The answer says when ("answered in 3 ms, 10:42").
+- **D423. Not done in 8h.** A real finger's long-press could not be driven
+  (headless Chromium sends no contextmenu for one, and lifting a CDP finger
+  adds a tap a phone does not): the pass dispatches the long-press's
+  contextmenu at the finger's point, as the touch suite does. Check now was
+  not run against a real device (no app session): the Rust check is the
+  monitor's, tested there.
+
 ### Phases
 
 Stop after each phase and report the counts and failures as they are.
@@ -5112,6 +5191,10 @@ Stop after each phase and report the counts and failures as they are.
   - [x] 8c. Report a problem to them (2026-11-12, eccd1bc; D400-D402).
   - [x] 8d. Watched addresses (2026-11-12; D403-D410).
   - [x] 8e. TLS certificate and Check the Internet (2026-11-12; D411-D413).
-  - [ ] 8f. Connections.
-  - [ ] 8h. Trace to a target.
-  - [ ] 8g. i18n, docs and the browser pass.
+  - [x] 8f. Connections (2026-11-12; D414-D418).
+  - [x] 8h. Trace to a target (2026-11-12; D419-D423).
+  - [ ] 8g. i18n, docs and the browser pass. The i18n is done (2026-11-12):
+    every literal t() of watch.js, connections.js, tracetarget.js, issues.js
+    and changes.js is in es, pt-BR, ja and ru (tests/suites/i18n.js sweeps
+    them), and the step's clock times follow the page's language. Docs, the
+    release note and the browser pass remain.

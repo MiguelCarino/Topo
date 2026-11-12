@@ -564,6 +564,9 @@ function drawSection(node) {
     checks.forEach((c) => { html += checkCardHtml(node, c, ro); });
     if (!checks.length) html += `<p class="rail-none">${escapeHtml(t('No answer checks. Add one to ask this device "are you answering?" from a PC that monitors.'))}</p>`;
     if (!ro && checks.length < CHECKS_MAX) html += `<button type="button" class="btn ck-add" data-ck="add">${escapeHtml(t('＋ Add a check'))}</button>`;
+    // Check now (D381): once, from this PC, kept nowhere.
+    html += `<div class="ck-row ck-checknow"><button type="button" class="btn" data-ck="checknow">${escapeHtml(t('Check now'))}</button>`
+        + `<p class="rail-note ck-note" id="ckNowResult" aria-live="polite">${escapeHtml(t(checks.length ? 'Once, from this PC: nothing is kept.' : 'A ping, once, from this PC: nothing is kept.'))}</p></div>`;
     // The availability target and the quiet window.
     html += `<div class="ck-row"><label class="prop-lbl" for="ckTarget">${escapeHtml(t('Availability target (%)'))}</label>`
         + `<input type="text" id="ckTarget" class="input mono ck-target" inputmode="decimal" maxlength="7" autocomplete="off" placeholder="99.5" value="${escapeHtml(node.target != null ? String(node.target) : '')}"${ro ? ' disabled' : ''}></div>`;
@@ -729,6 +732,32 @@ function holderLook(h) {
     if (!(hasHost() && live()) && !serverMode() && !visitLive()) return null;
     return nodeLook(h) || 'unknown';
 }
+// ---- Check now (D381, step 8h) ----
+// One question, once, from this PC (the desktop app): the item's checks, or
+// a ping when it has none. Nothing is kept: no sample, no state, no issue, no
+// statistics; the item stays unchecked afterwards (D380).
+function checkNowSpecs(holder) {
+    const spec = (c) => ({
+        proto: c.proto, host: holder.address || checkHost(holder, c), port: c.proto === 'ping' ? 0 : (c.port || 0),
+        fallbackPort: c.proto === 'ping' ? (holder.address ? (c.port || 0) : fallbackPort(holder, c)) : 0,
+        path: c.path || '', name: c.name || '', starttls: c.starttls === true, calledAe: c.calledAe || '', callingAe: c.callingAe || '',
+        tls: c.tls || '', transport: c.transport || ''
+    });
+    const list = Array.isArray(holder.checks) && holder.checks.length ? holder.checks : [{ proto: 'ping' }];
+    return list.map((c) => ({ label: protoLabel(c.proto), spec: spec(c) }));
+}
+async function runCheckNow(holder, box) {
+    if (!hasHost() || !box) return [];
+    box.textContent = t('Asking from this PC…');
+    const out = [];
+    for (const { label, spec } of checkNowSpecs(holder)) {
+        let o = null;
+        try { o = await ckInvoke('check_now', { spec }); } catch (e) { o = null; }
+        out.push({ label, o, text: `${label}: ${window.TopoTraceTarget ? TopoTraceTarget.outcomeText(o) : (o && o.ok ? t('Answering') : t('Not answering'))}` });
+    }
+    box.textContent = out.map((x) => x.text).join(' · ');
+    return out;
+}
 // What a new check asks first: what the device is for.
 function firstCheckFor(node) {
     if (node.type === 'dicom') return { proto: 'dicom' };
@@ -832,6 +861,7 @@ function onSectionClick(e) {
     if (what === 'settings') { if (typeof openSettings === 'function') openSettings('setMonOn'); return; }
     if (what === 'report') { TopoReports.openMonitoringReport({ scope: 'node', id: node.id, period: 'week' }).catch((err) => console.warn('Monitoring report:', err)); return; }
     if (what === 'add') { editChecks(node, (list) => list.push(firstCheckFor(node))); return; }
+    if (what === 'checknow') { runCheckNow(node, el('ckNowResult')); return; }
     if (what === 'del') {
         const cid = b.closest('.ck-card').dataset.check;
         editChecks(node, (list) => { const i = list.findIndex((x) => x.id === cid); if (i >= 0) list.splice(i, 1); });
@@ -983,6 +1013,7 @@ function renderMonitorSettings() {
     if (typeof renderAlarmSettings === 'function') renderAlarmSettings();
     // This PC as the site's monitor (js/monitors.js, step 7h).
     if (typeof renderSiteMonitorSettings === 'function') renderSiteMonitorSettings();
+    if (window.TopoConnections) TopoConnections.refreshInfo().then(() => TopoConnections.renderSettings());
 }
 const keepText = (d) => (d === 0 ? t('Off: keep nothing') : d >= 3650 ? t('10 years') : d === 360 ? t('360 days (default)') : t('{n} days', { n: d }));
 function renderMonitorSettingsStatus() {
@@ -1137,7 +1168,7 @@ function serverStatusChanged() {
     if (!live()) rerenderSelected();
 }
 window.TopoChecks = { state: _ck, hasHost, monitorPlan, monitorChains, refreshInfo, onStatuses, look, nodeLook, nowText,
-    watchHolder, holderLook, checkCardHtml, applyCheckField, loadHistory, quietItem, quietNow, quietUntil, QUIET_FOR, QUIET_WORDS, LOOK_WORDS, NOT_CHECKED_RULE,
+    readMacs, checkNowSpecs, runCheckNow, watchHolder, holderLook, checkCardHtml, applyCheckField, loadHistory, quietItem, quietNow, quietUntil, QUIET_FOR, QUIET_WORDS, LOOK_WORDS, NOT_CHECKED_RULE,
     monitorOn, live, watching, serverMode, protoLabel, warnOf, ownerOfSite,
     dayBuckets, daySummary, quietUntil, pushPlan, firstCheckFor, labels, meOnMap, serverStatusChanged, statusesOf, redrawDots,
     pushPlanNow: () => { _ck.sent = ''; return pushPlan(true); } };

@@ -295,6 +295,12 @@ func (s *Server) routesV1() {
 	s.handle("GET /api/sites/{site}/stats", Reader, s.listStats)
 	s.handle("GET /api/monitor", Monitor, s.monitorSelf)
 
+	// Connections (docs/SCOPE.md step 8f, D376-D379).
+	s.handle("POST /api/connection/beat", User, s.connectionBeat)
+	s.handle("POST /api/connection/away", User, s.connectionAway)
+	s.handle("DELETE /api/connection", User, s.connectionStop)
+	s.handle("GET /api/sites/{site}/connections", Reader, s.siteConnections)
+
 	// Backups (step 5b, D99-D105).
 	s.handle("GET /api/admin/backups", Admin, s.adminBackups)
 	s.handle("PUT /api/admin/backups", Admin, s.adminPutBackups)

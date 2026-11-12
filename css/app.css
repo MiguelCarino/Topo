@@ -3903,6 +3903,11 @@ html.topo-locked body { overflow: hidden; }
     display: flex; flex-direction: column; gap: 4px; width: min(36rem, calc(100% - 32px));
 }
 .srv-issue-banner[hidden] { display: none; }
+/* On a phone, below the floating search (its first line sat under it; the
+   connection lines of step 8f made that common). */
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
+    .srv-issue-banner { top: 68px; }
+}
 .srv-ib-line {
     min-height: 44px; padding: 8px 12px; text-align: left; cursor: pointer;
     font: inherit; font-size: var(--fs-sm); font-weight: 700; line-height: 1.35; overflow-wrap: anywhere;
@@ -3967,3 +3972,39 @@ html.topo-locked body { overflow: hidden; }
     .modal-scrim#welcomeDialog { padding: 8px; }
     .topo-welcome .wl-body { max-height: calc(100dvh - 150px); }
 }
+
+/* ---- "Does A reach B?" (js/tracetarget.js, step 8h, D382-D387) ----
+   The answer over the map, top centre under the search (clear of the
+   docbar, the zoom column and a phone's bars at the bottom).
+   The path it found is lit, its two ends ringed. */
+.tt-bar {
+    position: fixed; left: 50%; top: calc(var(--nav-h, 0px) + 64px); transform: translateX(-50%); z-index: 2147480000;
+    width: max-content; max-width: min(40rem, calc(100vw - 32px)); padding: 8px 8px 8px 14px;
+    display: flex; flex-direction: column; gap: 4px;
+    background: var(--bg-card); color: var(--text); border: 1px solid var(--accent); border-radius: 12px;
+    box-shadow: var(--topo-float-shadow);
+}
+.tt-bar[hidden] { display: none; }
+.tt-head { display: flex; align-items: flex-start; gap: 8px; }
+.tt-lines { flex: 1 1 auto; min-width: 0; }
+.tt-line { margin: 0; font-weight: 700; font-size: var(--fs-sm); line-height: 1.35; overflow-wrap: anywhere; }
+.tt-line.tt-ok { color: var(--ok, #16a34a); }
+.tt-line.tt-no { color: var(--err, #dc2626); }
+.tt-line.tt-back { margin-top: 4px; }
+.tt-why, .tt-note, .tt-live { margin: 0; font-size: var(--fs-label); color: var(--text-muted); overflow-wrap: anywhere; }
+.tt-live.tt-ok { color: var(--ok, #16a34a); }
+.tt-live.tt-no { color: var(--err, #dc2626); }
+.tt-x { flex: none; min-width: 32px; min-height: 32px; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 16px; }
+.tt-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.tt-port { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-label); color: var(--text-muted); }
+.tt-port .input { width: 6.5rem; }
+.trace-to-btn { margin-top: 6px; }
+#layer-nodes .tt-path { filter: drop-shadow(0 0 4px var(--accent)); }
+#layer-nodes .tt-end { filter: drop-shadow(0 0 6px var(--accent)) drop-shadow(0 0 2px var(--accent)); }
+.tt-path-link { stroke: var(--accent) !important; stroke-width: 4 !important; stroke-dasharray: none !important; }
+@media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
+    .tt-bar { left: 12px; right: 12px; top: calc(var(--nav-h, 0px) + 72px); transform: none; width: auto; max-width: none; }
+    .tt-x { min-width: 44px; min-height: 44px; }
+    .tt-acts .btn, .tt-port .input { min-height: 44px; }
+}
+@media print { .tt-bar { display: none !important; } }

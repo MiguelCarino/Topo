@@ -553,6 +553,16 @@ It **can**:
   big it is, which revision it was made on, whether a later one replaced it
   (a copy names its report by a hash only), and whether an owner approved or
   rejected it;
+- **see the connections' metadata** (step 8f, docs/SCOPE.md D376-D379):
+  for each PC whose person turned on **Watch this PC's connection**, its
+  name (the PC's own), whose it is, since when it is watched, when it last
+  sent its heartbeat (every 60 s), whether it said it was going away (quit,
+  signed out), and each gap: when no heartbeat came (the server's view)
+  and when that PC could not reach the server (its own view, told once it
+  could); the same gaps for the site monitors. These are kept in the
+  clear, as the monitors' heartbeat is, for as long as the site's Keep
+  statistics (nothing shown with it Off; at most ten years), and are
+  shown to the members of the sites that PC's person shares;
 - **see the monitors' metadata**: each monitor's PC name (as the owner
   typed it), who turned it on and when, its reporting interval and when it
   last reported (the heartbeat, which is how it says "stopped reporting"
@@ -1237,6 +1247,22 @@ section talks to the service instead and this way is not offered.
 | `PUT /api/sites/{site}/stats/{day}` | the monitor | its hourly figures of one UTC day (refused while Off) |
 | `GET /api/sites/{site}/stats?from=&to=` | member | the days' blobs, every monitor |
 | `GET /api/monitor` | the monitor | who it is, its site's epoch and Keep statistics |
+
+### Connections' routes (step 8f)
+
+| Route | Who | What |
+|---|---|---|
+| `POST /api/connection/beat` | a person's desktop app (a device) | the heartbeat `{name, intervalMs?, gaps?}`: watched from its first beat; `gaps` the times it could not reach the server, at most 20, ended and in the past |
+| `POST /api/connection/away` | the same | it is going (quit): its silence is not lost; signing out does the same |
+| `DELETE /api/connection` | the same | stop watching this PC (its gaps stay) |
+| `GET /api/sites/{site}/connections?from=&to=` | member | the watched PCs of the site's members and its monitors, each with its last beat, `lost`, `away` and its gaps in the period (none with Keep statistics Off) |
+
+Every TOPO_MONITOR_SWEEP the server marks a watched PC that missed 3
+intervals as lost and sends the event `connection` `{device, name, lost,
+at}` once to everyone who shares a site with its person; its next beat
+sends `{back, from, to}`, and a beat carrying the PC's own gaps sends
+`{serverSilent, from, to}`. Migration 0006 adds the tables `connections`
+and `connection_gaps`. A browser tab has no device and never beats.
 
 Records not yet folded go into the site's backup file (`records`), so a
 restore loses no open issue. Migration 0005 adds the role `monitor` (the

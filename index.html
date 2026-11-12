@@ -863,6 +863,9 @@
                             </label>
                             <span id="traceStatus" class="cs-trace-status">Trace off</span>
                         </div>
+                        <!-- Does it reach a device? (js/tracetarget.js, D382): the next
+                             click or tap on a device asks. Right-click it, then the target, does the same. -->
+                        <button type="button" id="traceToBtn" class="btn trace-to-btn" data-i18n-title title="Then click or tap the device to ask whether the selected one reaches it" data-i18n>Trace to…</button>
                         <div class="trace-port-row">
                             <label class="prop-check" data-i18n-title title="Filter the trace by a port. Off = IP reachability only — the port stays typed in, just ignored.">
                                 <input type="checkbox" id="tracePortToggle">
@@ -1788,6 +1791,15 @@
                                             <button type="button" id="setSiteMonOn" class="btn btn-primary" data-i18n hidden>Make this PC the site's monitor</button>
                                             <button type="button" id="setSiteMonOff" class="btn" data-i18n hidden>Stop being the site's monitor</button>
                                         </div>
+                                    </div>
+                                    <!-- Watch this PC's connection (js/connections.js, step 8f, D376):
+                                         the app, connected to a Topo server. -->
+                                    <div class="set-sub" id="setConnWatch" hidden>
+                                        <label class="set-row">
+                                            <input type="checkbox" id="setConnWatchOn">
+                                            <span data-i18n>Watch this PC's connection</span>
+                                        </label>
+                                        <p class="dlg-dim set-note" id="setConnWatchStatus" role="status" aria-live="polite"></p>
                                     </div>
                                     <!-- Show alarms on this PC (js/issues.js, desktop/alarm.html, step 7g) -->
                                     <div class="set-sub" id="setAlarmBox" hidden>
@@ -3043,8 +3055,10 @@
     <script src="js/thiscomputer.js"></script>
     <script src="js/checks.js"></script>
     <script src="js/watch.js"></script>
+    <script src="js/tracetarget.js"></script>
     <script src="js/issues.js"></script>
     <script src="js/monitors.js"></script>
+    <script src="js/connections.js"></script>
     <script src="js/visitmonitor.js"></script>
     <script src="js/reports.js"></script>
     <script src="js/welcome.js"></script>

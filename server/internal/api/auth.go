@@ -509,6 +509,12 @@ func (s *Server) authLink(w http.ResponseWriter, r *http.Request) {
 // the cookie cleared.
 func (s *Server) authSignout(w http.ResponseWriter, r *http.Request) {
 	sess := SessionFrom(r.Context())
+	// A watched PC signing out is going away, not lost (D377).
+	if sess != nil && sess.DeviceID != "" {
+		if err := store.ConnectionAway(r.Context(), s.d.Store.W, sess.DeviceID); err != nil {
+			s.d.Log.Warn("connection away", "err", err)
+		}
+	}
 	if sess != nil && len(sess.hash) > 0 {
 		if _, err := store.DeleteSessionByHash(r.Context(), s.d.Store.W, sess.hash); err != nil {
 			s.internal(w, "sign out", err)

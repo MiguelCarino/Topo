@@ -16,6 +16,7 @@ mod server;
 // with every request and the event stream going through Rust.
 mod client;
 mod clientcmd;
+mod connwatch;
 // "Add this computer" (D166, step 7d): this PC's own interfaces, gateways
 // and DNS servers, read and never sent anywhere.
 mod thiscomputer;
@@ -267,6 +268,7 @@ fn main() {
         .manage(clientcmd::ClientState::default())
         .manage(monitorcmd::MonitorState::default())
         .manage(visitcmd::VisitState::default())
+        .manage(connwatch::ConnState::default())
         // A page that reloads or leaves drops its event streams with it.
         .on_page_load(|webview, payload| {
             if payload.event() == PageLoadEvent::Started {
@@ -317,6 +319,9 @@ fn main() {
             monitorcmd::monitor_unenroll,
             monitorcmd::alarm_notify,
             monitorcmd::monitor_figures,
+            monitorcmd::check_now,
+            connwatch::connection_watch_info,
+            connwatch::connection_watch_set,
             visitcmd::visit_monitor_start,
             visitcmd::visit_monitor_plan,
             visitcmd::visit_monitor_info,
@@ -328,6 +333,8 @@ fn main() {
             // Off the main thread: starting waits a moment for a refusal.
             let server_handle = app.handle().clone();
             std::thread::spawn(move || server::autostart(&server_handle));
+            // Watch this PC's connection (step 8f): the heartbeat, off until turned on.
+            connwatch::start(app.handle().clone());
             // Open Topo at sign-in starts it with --background: the monitor
             // and the tray, no window until the tray's Open Topo.
             if !monitorcmd::on_start(app.handle()) {
@@ -342,7 +349,11 @@ fn main() {
             // The window closed while this PC monitors with its tray icon:
             // the app stays (the tray's Quit Topo ends it).
             RunEvent::ExitRequested { code: None, api, .. } if monitorcmd::keeps_running(handle) => api.prevent_exit(),
-            RunEvent::Exit => server::on_exit(handle),
+            RunEvent::Exit => {
+                // Quitting is going away, not a lost connection (D377).
+                connwatch::away(handle);
+                server::on_exit(handle)
+            }
             _ => {}
         });
 }
