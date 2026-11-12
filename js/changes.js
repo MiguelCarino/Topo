@@ -376,6 +376,8 @@ function docChanges(baseDoc, curDoc) {
     const providers = simple(pair(base.providers, cur.providers, (p) => ({ id: p.id, name: p.name || p.id })), PROVIDER_FIELDS, (p) => p.name || p.id);
     const columns = simple(pair(base.columns, cur.columns, (c) => ({ id: c.id, name: c.name })), CUSTOM_COLUMN_DIFF_FIELDS, (c) => c.name);
     const searches = simple(pair(base.searches, cur.searches, (s) => ({ id: s.id, name: s.name || s.id })), SEARCH_FIELDS, (s) => s.name || s.id);
+    // The watched addresses (v20) likewise, by name or address.
+    const watch = simple(pair(base.watch, cur.watch, (w) => ({ id: w.id, name: watchLabel(w) })), WATCH_FIELDS, (w) => watchLabel(w));
     // The problem reports (v18): reported, sent, visited, closed.
     const incidents = simple(pair(base.incidents, cur.incidents, (x) => ({ id: x.id, name: incidentChangeName(x) })), INCIDENT_DIFF_FIELDS);
     incidents.changed.forEach((c) => { c.fields = [...new Set(c.fields)]; });
@@ -414,12 +416,12 @@ function docChanges(baseDoc, curDoc) {
     const hWas = base.report || {}, hNow = cur.report || {};
     const header = REPORT_FIELDS.filter(({ key }) => key !== 'date' && (hWas[key] || '') !== (hNow[key] || '')).map(({ label }) => label);
 
-    const out = { devices, cables, subnets, wifi, groups, providers, columns, searches, incidents, expectedLife, tableView, notes, accepted, pinned, header };
+    const out = { devices, cables, subnets, wifi, groups, providers, watch, columns, searches, incidents, expectedLife, tableView, notes, accepted, pinned, header };
     out.other = unsaidParts(base, cur, out);
 
     const count = (g) => g.added.length + g.removed.length + g.changed.length;
     out.total = count(devices) + devices.moved.length + count(cables) + count(subnets) + count(wifi) + count(groups)
-        + count(providers) + count(columns) + count(searches) + count(incidents) + (expectedLife.length ? 1 : 0) + (tableView ? 1 : 0) + count(notes)
+        + count(providers) + count(watch) + count(columns) + count(searches) + count(incidents) + (expectedLife.length ? 1 : 0) + (tableView ? 1 : 0) + count(notes)
         + accepted.added + accepted.reopened + pinned.added + pinned.removed + (header.length ? 1 : 0) + out.other.length;
     return out;
 }
@@ -428,7 +430,7 @@ function docChanges(baseDoc, curDoc) {
 // it is said under `other`.
 const CHANGE_KINDS = {
     nodes: { kind: 'devices', what: 'Device' }, links: { kind: 'cables', what: 'Cable' }, networks: { kind: 'subnets', what: 'Subnet' },
-    groups: { kind: 'groups', what: 'Group' }, wifi: { kind: 'wifi', what: 'Wi-Fi network' }, providers: { kind: 'providers', what: 'Provider' },
+    groups: { kind: 'groups', what: 'Group' }, wifi: { kind: 'wifi', what: 'Wi-Fi network' }, providers: { kind: 'providers', what: 'Provider' }, watch: { kind: 'watch', what: 'Watched address' },
     columns: { kind: 'columns', what: 'Custom column' }, searches: { kind: 'searches', what: 'Saved search' }, incidents: { kind: 'incidents', what: 'Problem report' },
     annotations: { kind: 'notes', what: 'Text notes' }, accepted: { what: 'Accepted findings' }, pinned: { what: 'Pinned findings' },
     expectedLife: { what: 'Expected life by type' }, tableView: { what: 'Table layout' }, report: { what: 'Report header' }
@@ -521,6 +523,7 @@ function changeRows(ch) {
     listed(ch.wifi, 'Wi-Fi network');
     listed(ch.groups, 'Group');
     listed(ch.providers, 'Provider');
+    listed(ch.watch, 'Watched address');
     listed(ch.columns, 'Custom column');
     listed(ch.searches, 'Saved search');
     listed(ch.incidents, 'Problem report');

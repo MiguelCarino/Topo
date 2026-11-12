@@ -289,6 +289,9 @@
                          js/providers.js): the ISP, IT support, the alarm
                          company. A plain word, so translated. -->
                     <button id="providerTabBtn" data-adv class="cfg-tab" data-cfgtab="providers" role="tab" aria-selected="false" data-i18n>Providers</button>
+                    <!-- The watched addresses (doc.watch, js/watch.js, D371-D374):
+                         addresses checked beside the devices. A plain word, so translated. -->
+                    <button id="watchTabBtn" data-adv class="cfg-tab" data-cfgtab="watch" role="tab" aria-selected="false" data-i18n>Watched</button>
                     <!-- The findings of the whole map (js/diagnostics.js, "The
                          Findings tab"), docked here instead of floating over
                          the canvas. A plain word, so translated; the count is
@@ -936,6 +939,17 @@
                         <button id="addProviderBtn" type="button" class="link-btn" data-i18n>+ Provider</button>
                     </div>
                     <div id="providerList" class="net-list"></div>
+                </div>
+
+                <!-- The watched addresses (doc.watch): one row each with its state
+                     (only while one is known), what an outage does, its checks;
+                     Edit, Add to the map, Quiet for…, Delete. js/watch.js. -->
+                <div id="cfgPanel-watch" data-adv class="cfg-panel hidden">
+                    <div class="prop-headrow net-toolbar">
+                        <p class="rail-note grp-intro" data-i18n>Topo checks only what you ask it to. Anything not checked has no state.</p>
+                        <button id="addWatchBtn" type="button" class="link-btn" data-i18n>+ Address</button>
+                    </div>
+                    <div id="watchList" class="net-list"></div>
                 </div>
 
                 <!-- Provider mode's report: what, where, the client's words and
@@ -2382,6 +2396,23 @@
                  sheet, top to bottom, phone first. What is wrong, where, what
                  happened, who you are, whom to contact; then Send: a locked
                  link (or the file) and the ways to pass it on. Translated. -->
+            <!-- Add an address / Edit a watched address (js/watch.js, D371-D373). -->
+            <div id="watchDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-watch" role="dialog" aria-modal="true" aria-labelledby="watchDlgTitle">
+                    <div class="modal-head">
+                        <h2 id="watchDlgTitle" class="modal-title" data-i18n>Add an address</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="watchBody"></div>
+                        <p id="watchError" class="dlg-error" role="alert"></p>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" class="btn" data-close data-i18n>Cancel</button>
+                        <button type="button" id="watchSaveBtn" class="btn btn-primary" data-i18n>Save</button>
+                    </div>
+                </div>
+            </div>
             <div id="problemDialog" class="modal-scrim" hidden>
                 <div class="modal topo-paste topo-problem" role="dialog" aria-modal="true" aria-labelledby="problemTitle">
                     <div class="modal-head">
@@ -3009,6 +3040,7 @@
     <script src="js/importui.js"></script>
     <script src="js/thiscomputer.js"></script>
     <script src="js/checks.js"></script>
+    <script src="js/watch.js"></script>
     <script src="js/issues.js"></script>
     <script src="js/monitors.js"></script>
     <script src="js/visitmonitor.js"></script>

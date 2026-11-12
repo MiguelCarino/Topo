@@ -147,6 +147,20 @@ function stepFor(range) {
 // ---- What is in the report ----
 function docCtx(doc) { return { nodes: doc.nodes || [], links: doc.links || [], groups: doc.groups || [], providers: doc.providers || [] }; }
 const hasChecks = (n) => !!n && Array.isArray(n.checks) && n.checks.length > 0;
+// The watched addresses (v20, D371) as the report reads a device: their
+// "w:" id (the statistics' and the outages'), name, group, providers,
+// target and checks. Only the checked ones: one with no check has no state
+// and is never in a figure (D380).
+function watchItems(doc) {
+    return (doc.watch || []).filter((w) => w && w.address && hasChecks(w)).map((w) => ({
+        id: watchItemId(w.id), name: watchLabel(w), type: 'watch', group: w.group, providers: w.providers,
+        target: w.target, checks: w.checks, interfaces: [], watch: true
+    }));
+}
+// The document with its checked watched addresses among the devices.
+const withWatchItems = (doc) => Object.assign({}, doc, { nodes: (doc.nodes || []).concat(watchItems(doc)) });
+// The item an outage is about: its device, or its watched address's "w:" id.
+const outageRoot = (inc) => (inc.nodeIds || [])[0] || ((inc.watchIds || [])[0] ? watchItemId(inc.watchIds[0]) : '');
 // Every group a device is in, outermost first.
 function groupsOfNode(n, groups) {
     const g = n && n.group ? groupById(n.group, groups) : null;
@@ -175,7 +189,7 @@ function scopeNodes(doc, scope, id) {
 // The keys this network's checks are known by: "<device>/<check>".
 function checkKeys(doc) {
     const out = [];
-    (doc.nodes || []).forEach((n) => { if (hasChecks(n)) n.checks.forEach((c) => out.push(`${n.id}/${c.id}`)); });
+    withWatchItems(doc).nodes.forEach((n) => { if (hasChecks(n)) n.checks.forEach((c) => out.push(`${n.id}/${c.id}`)); });
     return out.slice(0, KEYS_MAX);
 }
 
@@ -284,7 +298,9 @@ function causeAt(outages, nodeId, from, to) {
 // data: { source, streams: [{ key, monitor, name, hours }], statsDays, off,
 // error }. Numbers and names only: the words are put on when it is drawn,
 // so a language switch redraws the same model.
-function buildModel(doc, data, opts) {
+function buildModel(docIn, data, opts) {
+    // The checked watched addresses are rows like the devices (D371).
+    const doc = withWatchItems(docIn);
     const scope = SCOPES.includes(opts.scope) ? opts.scope : 'site';
     const range = opts.range;
     const ok = !!range && !range.none;
@@ -317,7 +333,7 @@ function buildModel(doc, data, opts) {
     const expSpans = new Map();
     outagesAll.forEach((inc) => {
         const ex = expectedAct(inc);
-        const root = (inc.nodeIds || [])[0];
+        const root = outageRoot(inc);
         if (!ex || !root) return;
         if (!expSpans.has(root)) expSpans.set(root, []);
         (inc.outages || []).forEach((o) => expSpans.get(root).push([o.from, Math.max(o.from, Number.isFinite(o.to) ? o.to : ex.at)]));
@@ -439,7 +455,7 @@ function buildModel(doc, data, opts) {
     const outs = [];
     const lo = ok ? range.from : Infinity, hi = ok ? range.now : -Infinity;
     if (ok) outagesAll.forEach((inc) => {
-        const root = (inc.nodeIds || [])[0];
+        const root = outageRoot(inc);
         const behindHere = (inc.behind || []).filter((id) => inScope.has(id));
         if (!inScope.has(root) && !behindHere.length) return;
         const spans = (inc.outages || []).filter((o) => o.from < hi && (o.to == null ? Infinity : o.to) > lo);
@@ -454,7 +470,7 @@ function buildModel(doc, data, opts) {
             from: spans[0].from, to: spans[spans.length - 1].to == null ? null : spans[spans.length - 1].to,
             downMs: spans.reduce((s, o) => s + clip(o), 0), times: spans.length,
             flapping: !!inc.flapping, gone: !!inc.gone, monitor: inc.monitor || '',
-            expected: !!ex,
+            expected: !!ex, recordOnly: !!inc.recordOnly,
             acts: (inc.acts || []).map((a) => ({ act: a.act, at: a.at, by: a.by || '', note: a.note || '' })),
             ackMs: firstAct && first ? Math.max(0, firstAct.at - first.from) : null
         });
@@ -470,7 +486,7 @@ function buildModel(doc, data, opts) {
         nodes.forEach((n) => {
             const spans = [];
             outagesAll.forEach((inc) => {
-                if ((inc.nodeIds || [])[0] !== n.id) return;
+                if (outageRoot(inc) !== n.id) return;
                 if (expectedAct(inc)) return;
                 (inc.outages || []).forEach((o) => { if (o.from >= range.from && o.from < range.now) spans.push(o); });
             });
@@ -496,6 +512,8 @@ function buildModel(doc, data, opts) {
         parts: (opts.parts || PARTS).filter((p) => PARTS.includes(p)),
         source: (data && data.source) || 'none', off: !!(data && data.off), error: !!(data && data.error), statsDays: data && Number.isFinite(data.statsDays) ? data.statsDays : null,
         checked: nodes.filter(hasChecks).length, step,
+        // What was checked, named (D380): devices and watched addresses apart.
+        checkedDevices: nodes.filter((n) => hasChecks(n) && !n.watch).length, checkedWatch: nodes.filter((n) => hasChecks(n) && n.watch).length,
         rows, devices, groups, providers, total, outages: outs, reliability: reliab, slowByHour, meta
     };
 }
@@ -592,6 +610,15 @@ function periodText(m) {
     const line = t('{period}: {from} to {to}.', { period: t(PERIOD_WORDS[m.period] || PERIOD_WORDS.week), from: whenText(r.from), to: whenText(r.to) });
     return m.parts.includes('outages') ? line + ' ' + t('The outages are listed up to {time}.', { time: whenText(r.now) }) : line;
 }
+// What the figures are about, never more (D380): "Checked: 12 devices and 3
+// watched addresses". Nothing unchecked is counted or said to be down.
+function checkedText(m) {
+    const d = m.checkedDevices || 0, w = m.checkedWatch || 0;
+    if (!d && !w) return '';
+    const dev = tn(d, '{n} device', '{n} devices'), wat = tn(w, '1 watched address', '{n} watched addresses');
+    const what = d && w ? t('{list} and {last}', { list: dev, last: wat }) : d ? dev : wat;
+    return t('Checked: {what}. Anything not checked has no figures here.', { what });
+}
 function sourceText(m) {
     if (m.off) return t('Statistics are off for this network: no figures are kept. The outages below come from the network itself.');
     if (m.error) return m.source === 'server' ? t('The site\'s figures could not be read from the server. The outages below come from the network itself.')
@@ -672,8 +699,8 @@ function outagesHtml(m, opts = {}) {
     let html = list.length ? `<table><thead><tr><th>${esc(t('Device'))}</th><th>${esc(t('Not answering from'))}</th><th>${esc(t('Down for'))}</th><th>${esc(t('Root cause'))}</th><th>${esc(t('Who acted'))}</th><th>${esc(t('Time to acknowledge'))}</th></tr></thead><tbody>`
         + list.map((o) => {
             const cause = o.own ? (o.behind.length ? tn(o.behind.length, 'Its own; {n} device behind it', 'Its own; {n} devices behind it') : t('Its own')) : t('down because {name}', { name: o.name });
-            const who = o.acts.length ? o.acts.map(actText).map(esc).join('<br>') : esc(t('Nobody yet'));
-            const extra = [o.times > 1 ? t('Went down {n} times while open.', { n: o.times }) : '', o.flapping ? t('It keeps going down and coming back (flapping).') : '', o.gone ? t('No longer checked.') : '', o.monitor ? t('Checked by monitor {pc}.', { pc: o.monitor }) : ''].filter(Boolean);
+            const who = o.acts.length ? o.acts.map(actText).map(esc).join('<br>') : esc(o.recordOnly ? '—' : t('Nobody yet'));
+            const extra = [o.recordOnly ? t('Recorded only: no issue was raised.') : '', o.times > 1 ? t('Went down {n} times while open.', { n: o.times }) : '', o.flapping ? t('It keeps going down and coming back (flapping).') : '', o.gone ? t('No longer checked.') : '', o.monitor ? t('Checked by monitor {pc}.', { pc: o.monitor }) : ''].filter(Boolean);
             return `<tr><td>${esc(o.own ? o.name : o.behindHere.join(', '))}${extra.length ? `<br><span class="dim">${esc(extra.join(' '))}</span>` : ''}</td>`
                 + `<td>${esc(whenText(o.from))}${o.to == null ? `<br><span class="bad">${esc(t('still not answering'))}</span>` : ''}</td><td>${esc(durText(o.downMs))}</td><td>${esc(cause)}</td><td>${who}</td><td>${esc(o.ackMs == null ? '—' : durText(o.ackMs))}</td></tr>`;
         }).join('') + '</tbody></table>'
@@ -705,7 +732,7 @@ const SECTION_CSS = `.mr table { border-collapse: collapse; width: 100%; font-si
 // parts asked for. opts.compact: the provider's section (no charts, no
 // MTTR table).
 function bodyHtml(m, opts = {}) {
-    const lines = [periodText(m), basisText(m), sourceText(m), keptNote(m)].filter(Boolean);
+    const lines = [periodText(m), basisText(m), sourceText(m), checkedText(m), keptNote(m)].filter(Boolean);
     const sec = (key, inner) => (m.parts.includes(key) ? `<section class="part"><h2>${esc(t(PART_WORDS[key]))}</h2><div class="dev-block">${inner}</div></section>` : '');
     const head = `<div class="mr-lines">${lines.map((l) => `<p class="dim">${esc(l)}</p>`).join('')}</div>`;
     if (opts.compact) {

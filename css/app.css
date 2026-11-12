@@ -3851,6 +3851,14 @@ html.topo-locked body { overflow: hidden; }
 .ck-dot.ck-cause { background: transparent; border: 2px solid var(--err, #dc2626); }
 .ck-dot.ck-quiet { background: var(--text-muted); }
 .ck-dot.ck-unknown { background: transparent; border: 2px solid var(--text-muted); }
+/* The Watched tab and its sheet (js/watch.js, step 8d). */
+.wt-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.wt-addr { font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; min-width: 0; }
+.wt-quiet { width: auto; max-width: 100%; }
+.wt-outage, .wt-providers { border: 1px solid var(--border); border-radius: 6px; margin: 8px 0; padding: 6px 10px 8px; min-width: 0; }
+.wt-checks-head { margin: 12px 0 4px; }
+.ck-rule { margin-top: 0; }
+.wt-simple .inc-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ck-now { margin: 0; font-size: var(--fs-sm); line-height: 1.4; overflow-wrap: anywhere; color: var(--text-sec); }
 .ck-now-down, .ck-now-flapping { color: var(--err); }
 .ck-now.ck-warn { color: var(--warn); }

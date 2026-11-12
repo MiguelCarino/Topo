@@ -129,11 +129,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
       && asTarget('99.9994') === 99.999 && asTarget('0.0006') === 0.001, [asTarget('99.9999'), asTarget('0.0001')].join());
     const v18 = { v: 18, nodes: [{ id: 'a', type: 'server', name: 'A', x: 0, y: 0, interfaces: [], checks: [{ id: 'c1', proto: 'ping' }], target: 99.5 }, { id: 'b', type: 'pc', name: 'B', x: 0, y: 0, interfaces: [] }], links: [] };
     const mig = migrateDoc(clone(v18));
-    ok('v18 -> v19: nothing to convert', mig.from === 18 && mig.doc.v === 19 && !mig.newer && JSON.stringify(mig.doc.nodes[0].checks) === '[{"id":"c1","proto":"ping"}]');
+    ok('v18 -> v20: nothing to convert', mig.from === 18 && mig.doc.v === 20 && !mig.newer && JSON.stringify(mig.doc.nodes[0].checks) === '[{"id":"c1","proto":"ping"}]');
     replaceDocument(clone(v18), { origin: 'file' });
     const ser = serializeDoc();
     ok('a device with checks keeps them; one without writes no key', JSON.stringify(ser.nodes[0].checks) === '[{"id":"c1","proto":"ping"}]' && ser.nodes[0].target === 99.5
-      && !/checks|target/.test(JSON.stringify(ser.nodes[1])) && ser.v === 19, JSON.stringify(ser.nodes));
+      && !/checks|target/.test(JSON.stringify(ser.nodes[1])) && ser.v === 20, JSON.stringify(ser.nodes));
     const schema = JSON.parse(await (await fetch(`schema/topo-v${DOC_VERSION}.json`)).text());
     const keysOf = Object.keys(schema.$defs.check.properties).sort().join();
     ok('the schema names the check block\'s keys', keysOf === ['id', 'proto', 'ip', 'port', 'path', 'name', 'starttls', 'tls', 'transport', 'calledAe', 'callingAe', 'interval', 'slowMs', 'monitors'].sort().join(), keysOf);

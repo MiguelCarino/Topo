@@ -231,7 +231,7 @@ window.addEventListener('load', async () => {
        && de.summary === 'Visit by Juan approved: successful.', show(de));
     ok('8.2 an unknown result or outcome is dropped', !('result' in normalizeLogEntry(Object.assign({}, de, { result: 'maybe' }))) && !('outcome' in normalizeLogEntry(Object.assign({}, de, { outcome: 'fixed' }))));
     const m18 = migrateDoc({ v: 18, nodes: [], log: [] });
-    ok('8.3 v18 -> v19: nothing to convert', DOC_VERSION === 19 && m18.doc.v === 19 && m18.from === 18 && !m18.newer);
+    ok('8.3 v18 -> v20: nothing to convert', DOC_VERSION === 20 && m18.doc.v === 20 && m18.from === 18 && !m18.newer);
 
     // ---- 10. A copy answered through a newer one (D191) ----
     const e1 = copyBack('pA', 'Juan Pérez', 'incA', (d) => { d.nodes.find((n) => n.id === 'pc').notes = 'first visit'; }, { doc: clone(libraryEntry(K).doc), ident: { rev: randomToken() } });

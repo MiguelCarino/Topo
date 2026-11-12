@@ -83,6 +83,7 @@ const incidentById = (id, list = state.incidents) => (list || []).find((x) => x 
 function incidentWhereText(inc, ctx = {}) {
     const nodes = ctx.nodes || state.nodes, groups = ctx.groups || state.groups;
     const names = (inc.nodeIds || []).map((id) => nodes.find((n) => n.id === id)).filter(Boolean).map(locPlainName);
+    (inc.watchIds || []).map((id) => watchById(id, ctx.watch || state.watch)).filter(Boolean).forEach((w) => names.push(watchLabel(w)));
     const group = inc.groupId ? groupById(inc.groupId, groups) : null;
     const parts = [];
     if (names.length) parts.push(names.slice(0, 5).join(', ') + (names.length > 5 ? ` +${names.length - 5}` : ''));
@@ -272,6 +273,8 @@ async function createIncident(d) {
         visits: []
     };
     if (d.groupId && groupById(d.groupId)) inc.groupId = d.groupId;
+    const watched = (d.watchIds || []).filter((id) => watchById(id));
+    if (watched.length) inc.watchIds = watched;
     // Made from an outage: saving it is that outage's Report a problem, in
     // the same commit (one undo step: the report, the act, both entries).
     let outageAct = null;
@@ -390,7 +393,7 @@ async function incidentLinkFor(id, opts = {}) {
 const _pb = {
     open: false, stage: 'form', gen: 0, busy: false, picking: false,
     symptom: '', nodeIds: [], groupId: '', text: '', name: '', phone: '', email: '', remember: true,
-    sendTo: [], ticksTouched: false, incidentId: null, send: null, forProvider: null,
+    sendTo: [], ticksTouched: false, incidentId: null, send: null, forProvider: null, watchIds: [],
     fromIssue: null     // the outage this report is made from (js/issues.js, step 7g)
 };
 const problemDialogOpen = () => _pb.open;
@@ -398,7 +401,7 @@ const problemDialogOpen = () => _pb.open;
 function resetProblemDraft() {
     const rep = state.settings.reporter || {};
     Object.assign(_pb, { stage: 'form', busy: false, picking: false, symptom: '', nodeIds: [], groupId: '', text: '',
-        name: rep.name || '', phone: rep.phone || '', email: rep.email || '', remember: true, sendTo: [], ticksTouched: false, incidentId: null, send: null, fromIssue: null, forProvider: null });
+        name: rep.name || '', phone: rep.phone || '', email: rep.email || '', remember: true, sendTo: [], ticksTouched: false, incidentId: null, send: null, fromIssue: null, forProvider: null, watchIds: [] });
     // The device selected now is the likely one.
     if (state.selectedType === 'node' && state.selectedId && getNode(state.selectedId)) _pb.nodeIds = [state.selectedId];
 }
@@ -465,7 +468,7 @@ function problemSheetBack() {
 // The idle lock (js/idlelock.js, D218): the open form's draft, plain, so
 // the lock can keep it in the tab while the page is cleared, and reopen it
 // after the unlock. Only the form: the send step's report is already saved.
-const PROBLEM_DRAFT_FIELDS = ['symptom', 'nodeIds', 'groupId', 'text', 'name', 'phone', 'email', 'remember', 'sendTo', 'ticksTouched', 'incidentId', 'fromIssue', 'forProvider'];
+const PROBLEM_DRAFT_FIELDS = ['symptom', 'nodeIds', 'watchIds', 'groupId', 'text', 'name', 'phone', 'email', 'remember', 'sendTo', 'ticksTouched', 'incidentId', 'fromIssue', 'forProvider'];
 function problemDraftForLock() {
     if (!_pb.open || _pb.stage !== 'form') return null;
     if (!_pb.picking) readProblemForm();
@@ -480,6 +483,7 @@ function reopenProblemDraft(d) {
     const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
     _pb.symptom = INCIDENT_SYMPTOMS.includes(d.symptom) ? d.symptom : '';
     _pb.nodeIds = Array.isArray(d.nodeIds) ? d.nodeIds.filter((id) => typeof id === 'string' && getNode(id)) : [];
+    _pb.watchIds = Array.isArray(d.watchIds) ? d.watchIds.filter((id) => typeof id === 'string' && watchById(id)) : [];
     _pb.groupId = typeof d.groupId === 'string' && (state.groups || []).some((g) => g.id === d.groupId) ? d.groupId : '';
     _pb.text = str(d.text, 2000); _pb.name = str(d.name, 120); _pb.phone = str(d.phone, 200); _pb.email = str(d.email, 200);
     _pb.remember = d.remember !== false;
@@ -504,7 +508,7 @@ function readProblemForm() {
 }
 
 function problemRoute() {
-    return routeIncident(undefined, { nodeIds: _pb.nodeIds, groupId: _pb.groupId || undefined, symptom: _pb.symptom || 'other' }, { now: new Date(_incHooks.now()) });
+    return routeIncident(undefined, { nodeIds: _pb.nodeIds, watchIds: _pb.watchIds, groupId: _pb.groupId || undefined, symptom: _pb.symptom || 'other' }, { now: new Date(_incHooks.now()) });
 }
 // The ticks to start with: the top contact, and any tied with it.
 function defaultSendTo(route) {
@@ -546,6 +550,18 @@ function renderProblemForm() {
     const where = incEl('problemWhere');
     where.textContent = '';
     _pb.nodeIds = _pb.nodeIds.filter((id) => getNode(id));
+    // A watched address the report is about (from its outage, D374).
+    _pb.watchIds = (_pb.watchIds || []).filter((id) => watchById(id));
+    _pb.watchIds.forEach((id) => {
+        const w = watchById(id);
+        const chip = document.createElement('span'); chip.className = 'pv-chip';
+        const nm = document.createElement('span'); nm.textContent = `${watchLabel(w)} (${w.address})`;
+        const x = document.createElement('button');
+        x.type = 'button'; x.className = 'pv-chip-x'; x.dataset.removeWatch = id; x.textContent = '✕';
+        x.setAttribute('aria-label', t('Remove {name}', { name: watchLabel(w) }));
+        chip.append(nm, x);
+        where.appendChild(chip);
+    });
     _pb.nodeIds.forEach((id) => {
         const n = getNode(id);
         const chip = document.createElement('span'); chip.className = 'pv-chip';
@@ -1187,6 +1203,8 @@ function problemDialogLocale() {
         if (r) r.focus();
     });
     incEl('problemWhere').addEventListener('click', (e) => {
+        const w = e.target.closest('[data-remove-watch]');
+        if (w) { readProblemForm(); _pb.watchIds = _pb.watchIds.filter((id) => id !== w.dataset.removeWatch); renderProblemDialog(); return; }
         const x = e.target.closest('[data-remove]');
         if (!x) return;
         readProblemForm();
@@ -1440,12 +1458,21 @@ function renderProblemsSimpleAll() {
     if (!box) return;
     box.textContent = '';
     const live = isReduced() ? incidentsNewestFirst(liveIncidents()) : [];
-    box.classList.toggle('hidden', !live.length);
-    if (!live.length) return;
-    box.appendChild(incNode('p', 'rail-sub inc-sub', t(live.length === 1 ? 'Open problems: 1' : 'Open problems: {n}', { n: live.length })));
-    const ul = incNode('ul', 'inc-list');
-    live.forEach((inc) => ul.appendChild(incidentRowEl(inc, { compact: true })));
-    box.appendChild(ul);
+    // The watched addresses with a state known here, read only (D372).
+    const watched = isReduced() && window.TopoWatch ? TopoWatch.simpleRows() : [];
+    box.classList.toggle('hidden', !live.length && !watched.length);
+    if (live.length) {
+        box.appendChild(incNode('p', 'rail-sub inc-sub', t(live.length === 1 ? 'Open problems: 1' : 'Open problems: {n}', { n: live.length })));
+        const ul = incNode('ul', 'inc-list');
+        live.forEach((inc) => ul.appendChild(incidentRowEl(inc, { compact: true })));
+        box.appendChild(ul);
+    }
+    if (watched.length) {
+        box.appendChild(incNode('p', 'rail-sub inc-sub', t('Watched addresses')));
+        const ul = incNode('ul', 'inc-list wt-simple-list');
+        watched.forEach((li) => ul.appendChild(li));
+        box.appendChild(ul);
+    }
 }
 // The Simple views, one device selected: its reports not closed
 // (renderLocate, js/locate.js, hands the device).

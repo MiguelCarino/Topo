@@ -4407,6 +4407,54 @@ it asked, from the PC that asked, and for nothing else.
   provider it opens at once, with several it asks "Whose report?", with
   none it says so. Read-only prints too. The card has no report button now.
 
+**8d. Watched addresses (2026-11-12)**
+
+- **D403. The record.** `doc.watch`, at most 64: `{ id ('wa'), name,
+  address, group, via, providers, outage ('raise' or absent), target,
+  notes, checks }`. The address is one IP or one host name whose last label
+  has a letter, so "10.0.0.1-20" or "10.0.0.*" is never read as a name. Its
+  checks are a device's without `ip`. `via` is the device on the map it is
+  reached through (D371's "reached through"). A device's mode is `outage:
+  'record'` (absent: raise); a watched address's is `outage: 'raise'`
+  (absent: record), so each default writes nothing. Schema
+  schema/topo-v20.json, docs/FORMAT.md updated.
+- **D404. One id space, prefixed.** In the monitor's plan, its states, its
+  statistics and its issue records a watched address goes by `w:<id>` (its
+  checks `w:<id>/<check>`), so nothing in the Rust monitor changed but
+  Record only, and a watched address can never meet a device's id. Its
+  chain is the chain of the device it is reached through, then that device.
+- **D405. Record only in the monitor.** The plan item carries `recordOnly`;
+  the status carries it on; an issue record whose device has no raising
+  check opens **closed** (`closed` = when it went down) with `recordOnly`,
+  so no card, no banner and nothing to act on, and a second outage is a
+  record of its own. "Answering again" is not said either (no note, no
+  toast). The page folds it as an outage with `recordOnly`, status closed.
+- **D406. Routing.** A report about a watched address starts from the
+  device it is reached through, and its own providers come first
+  whatever their service ("Internet for Public DNS").
+- **D407. The tab and the sheet.** A Watched tab beside Providers (full
+  editor; a read-only network shows the rows). The sheet uses the device
+  panel's check cards and field parser (js/checks.js applyCheckField) on
+  a stand-in holder; Save is one undo step. Quiet for… is on the row, sent
+  under the `w:` id. Add to the map makes a cloud (public address) or a
+  server (private), cabled to its "reached through" device, and moves its
+  outages' `watchIds` to `nodeIds`; its statistics stay under the old key
+  (a new key from then on). A host name cannot go on the map.
+- **D408. The report and D380.** The report treats each checked watched
+  address as a row-holder like a device (its group, its providers, its
+  target), names what was checked ("Checked: 12 devices and 3 watched
+  addresses. Anything not checked has no figures here.") and marks an
+  outage "Recorded only". An unchecked device or address is in no table,
+  no count and no figure.
+- **D409. watched.csv.** Exported once there is one, read back by
+  `watch_id` then by address; the checks are not in it (D229), a group by
+  its path, the device by name or id, raise_issue true or false. A sheet
+  with a `watch_id` heading is never taken for devices.
+- **D410. Not done in 8d.** Check now (D381) and the TLS check (8e) are
+  later phases; the running desktop app was not driven (no GUI session),
+  so the alarm skipping a Record only outage is tested in Rust and the
+  page with a stand-in monitor only.
+
 ### Phases
 
 Stop after each phase and report the counts and failures as they are.
@@ -5033,10 +5081,10 @@ Stop after each phase and report the counts and failures as they are.
 - [ ] 8. The provider loop, links back, watched addresses and connections
   (section 8). 8.0 written 2026-11-12: D363-D387, the phase list.
   - [x] 8.0 Scope.
-  - [x] 8a. Links back (2026-11-12, not yet committed; D388-D394).
-  - [x] 8b. The part is the path (2026-11-12, not yet committed; D395-D399).
-  - [x] 8c. Report a problem to them (2026-11-12, not yet committed; D400-D402).
-  - [ ] 8d. Watched addresses.
+  - [x] 8a. Links back (2026-11-12, eccd1bc; D388-D394).
+  - [x] 8b. The part is the path (2026-11-12, eccd1bc; D395-D399).
+  - [x] 8c. Report a problem to them (2026-11-12, eccd1bc; D400-D402).
+  - [x] 8d. Watched addresses (2026-11-12; D403-D410).
   - [ ] 8e. TLS certificate and Check the Internet.
   - [ ] 8f. Connections.
   - [ ] 8h. Trace to a target.

@@ -79,7 +79,23 @@ const locked = () => !!(window.TopoLock && TopoLock.isLocked());
 const OUTAGE_SYMPTOM = { cloud: 'internet', router: 'internet', firewall: 'internet', edge: 'internet', modem: 'internet', ap: 'wifi', voip: 'phone', camera: 'camera', nvr: 'camera', printer: 'printer' };
 const symptomForType = (type) => OUTAGE_SYMPTOM[type] || 'other';
 const outageNode = (inc, nodes = state.nodes) => (inc && inc.nodeIds && inc.nodeIds[0] ? nodes.find((n) => n.id === inc.nodeIds[0]) : null) || null;
-const outageName = (inc, nodes) => { const n = outageNode(inc, nodes); return n ? locPlainName(n) : (inc && inc.nodeIds && inc.nodeIds[0]) || t('A device'); };
+// A watched address's outage (v20, D374) names it in watchIds.
+const outageWatch = (inc, watch = state.watch) => (inc && inc.watchIds && inc.watchIds[0] ? watchById(inc.watchIds[0], watch) : null);
+function outageName(inc, nodes, watch) {
+    const n = outageNode(inc, nodes);
+    if (n) return locPlainName(n);
+    const w = outageWatch(inc, watch);
+    if (w) return watchLabel(w);
+    return (inc && ((inc.watchIds && inc.watchIds[0]) || (inc.nodeIds && inc.nodeIds[0]))) || t('A device');
+}
+// What a record is about in `doc`: a device, or a watched address ("w:" id).
+function recordSubject(r, doc) {
+    if (!r || !r.nodeId) return null;
+    const wid = watchIdOfItem(r.nodeId);
+    if (wid) { const w = watchById(wid, (doc && doc.watch) || []); return w ? { watch: w } : null; }
+    const n = ((doc && doc.nodes) || []).find((x) => x.id === r.nodeId);
+    return n ? { node: n } : null;
+}
 const lastSpan = (inc) => (inc && Array.isArray(inc.outages) && inc.outages.length ? inc.outages[inc.outages.length - 1] : null);
 // Answering again since (the last time down ended), or null.
 function outageRecovered(inc) {
@@ -124,11 +140,13 @@ function outageFromRecord(r, had, doc) {
         if (!acts.some((y) => outageActKey(y) === outageActKey(x))) acts.push(x);
     });
     acts.sort((a, b) => a.at - b.at);
+    const wid = watchIdOfItem(r.nodeId);
     const inc = Object.assign(base, {
         kind: 'outage', at: spans.length ? spans[0].from : (base.at || Date.now()),
         symptom: had ? had.symptom : symptomForType(node && node.type),
-        nodeIds: [r.nodeId]
+        nodeIds: wid ? [] : [r.nodeId]
     });
+    if (wid) inc.watchIds = [wid];
     if (spans.length) inc.outages = spans; else delete inc.outages;
     const behind = (r.behind || []).filter((id) => nodes.some((n) => n.id === id));
     if (behind.length) inc.behind = behind; else delete inc.behind;
@@ -139,6 +157,11 @@ function outageFromRecord(r, had, doc) {
         inc.acts = acts;
         inc.status = 'closed';
         inc.closedAt = Math.min(acts[0].at, Number.isFinite(base.closedAt) ? base.closedAt : Infinity);
+    }
+    // Record only (D373): recorded, closed as it opened; nothing to act on.
+    if (r.recordOnly || (had && had.recordOnly)) {
+        inc.recordOnly = true;
+        if (inc.status !== 'closed') { inc.status = 'closed'; inc.closedAt = inc.at; }
     }
     return inc;
 }
@@ -201,8 +224,8 @@ async function foldIssues() {
                 if (had && !isOutage(had)) return;   // an id that is not an outage's: never touched
                 // Its device is no longer in the document: the app drops it
                 // once its outage is over (D253).
-                if (!r.nodeId || !doc.nodes.some((n) => n.id === r.nodeId)) { dropped.push(r.id); return; }
-                const next = normalizeIncident(outageFromRecord(r, had, doc), { nodes: doc.nodes });
+                if (!recordSubject(r, doc)) { dropped.push(r.id); return; }
+                const next = normalizeIncident(outageFromRecord(r, had, doc), { nodes: doc.nodes, watch: doc.watch || [] });
                 if (!next) return;
                 // Acts the document holds that the record lacks go to the
                 // app, compared as the document would hold the record's.
@@ -276,7 +299,9 @@ function onRecords(list) {
         if (back && was && !_is.seenRecovered.has(r.id + '/' + last.to) && r.networkId === state.libraryId) {
             _is.seenRecovered.add(r.id + '/' + last.to);
             const node = getNode(r.nodeId);
-            showToast(t('{name} is answering again (down {time}).', { name: node ? locPlainName(node) : r.name || r.nodeId, time: minutesText(last.to - last.from) }), 'ok');
+            const w = watchById(watchIdOfItem(r.nodeId));
+            // Record only: answering again is not said either (D373).
+            if (!r.recordOnly) showToast(t('{name} is answering again (down {time}).', { name: node ? locPlainName(node) : w ? watchLabel(w) : r.name || r.nodeId, time: minutesText(last.to - last.from) }), 'ok');
         }
     });
     scheduleFold();
@@ -323,6 +348,8 @@ function mayActOnOutage(inc) {
     if (!provider) return true;
     const pid = window.TopoProviderMode ? TopoProviderMode.providerSelfOf(state.docId || state.libraryId) : null;
     if (!pid) return false;
+    const w = outageWatch(inc);
+    if (w) return (w.providers || []).includes(pid);
     const covered = new Set(providerCovers(pid).nodes.map((n) => n.id));
     return (inc.nodeIds || []).length > 0 && inc.nodeIds.every((id) => covered.has(id));
 }
@@ -421,7 +448,7 @@ function reportOutage(id) {
         : t('{name} has not answered since {time}.', { name: outageName(inc), time: clockText(since) })];
     if (inc.behind && inc.behind.length) lines.push(tn(inc.behind.length, '{n} device behind it is not answering either.', '{n} devices behind it are not answering either.'));
     if (inc.monitor) lines.push(t('Checked by monitor {pc}.', { pc: inc.monitor }));
-    const ok = TopoIncidents.reopenProblemDraft({ symptom: inc.symptom, nodeIds: inc.nodeIds.slice(), text: lines.join(' '), name: rep.name || '', phone: rep.phone || '', email: rep.email || '', remember: true });
+    const ok = TopoIncidents.reopenProblemDraft({ symptom: inc.symptom, nodeIds: inc.nodeIds.slice(), watchIds: (inc.watchIds || []).slice(), text: lines.join(' '), name: rep.name || '', phone: rep.phone || '', email: rep.email || '', remember: true });
     if (ok) TopoIncidents.draft.fromIssue = id;
     return ok;
 }
@@ -454,7 +481,8 @@ function outageRowEl(inc, opts = {}) {
     li.dataset.inc = inc.id;
     const head = node('div', 'inc-head');
     const first = (inc.acts || [])[0];
-    const pill = closed && first ? t(ACT_STATUS[first.act]) : rec ? t('Answering again') : t('Not answering');
+    // Record only (D373): said so, whatever its state.
+    const pill = inc.recordOnly ? t('Recorded only') : closed && first ? t(ACT_STATUS[first.act]) : rec ? t('Answering again') : t('Not answering');
     head.appendChild(node('span', `pm-status pm-${closed ? 'closed' : rec ? 'recovered' : 'down'}`, pill));
     const name = outageName(inc);
     const behind = (inc.behind || []).length;
@@ -601,11 +629,11 @@ async function foldRecordsIntoDoc(doc, recs) {
     const entries = [];
     const now = Date.now();
     (recs || []).forEach((r) => {
-        if (!r || !r.nodeId || !next.nodes.some((n) => n.id === r.nodeId)) return;
+        if (!recordSubject(r, next)) return;
         const i = next.incidents.findIndex((x) => x && x.id === r.id);
         const had = i >= 0 ? next.incidents[i] : null;
         if (had && !isOutage(had)) return;
-        const inc = normalizeIncident(outageFromRecord(r, had, next), { nodes: next.nodes });
+        const inc = normalizeIncident(outageFromRecord(r, had, next), { nodes: next.nodes, watch: next.watch || [] });
         if (!inc) return;
         if (!had) entries.push(outageLogEntry(inc, 'outage', now, {}, next.nodes));
         const known = new Set((had && had.acts || []).map(outageActKey));

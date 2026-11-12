@@ -1094,7 +1094,7 @@ function serializeDoc() {
     // (v16): the saved searches, through SEARCH_FIELDS, no key when none.
     // And `log` (v17): the network log, through LOG_FIELDS, last, no key
     // when it is empty (js/model.js "Network log").
-    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), providers: serializeProviders(state.providers), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView), searches: serializeSearches(state.searches), incidents: serializeIncidents(state.incidents), log: serializeLog(state.log) };
+    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), providers: serializeProviders(state.providers), watch: serializeWatch(state.watch), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView), searches: serializeSearches(state.searches), incidents: serializeIncidents(state.incidents), log: serializeLog(state.log) };
 }
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
@@ -1848,6 +1848,8 @@ function loadDocState(doc) {
     // The providers, and every device, cable and group naming one.
     state.providers = normalizeProviders(d.providers);
     normalizeProviderRefs(state.nodes, state.links, state.groups, state.providers);
+    // The watched addresses (v20) after the devices, groups and providers they name.
+    state.watch = normalizeWatch(d.watch, { nodes: state.nodes, groups: state.groups, providers: state.providers });
     state.accepted = normalizeAccepted(d.accepted);
     state.pinned = normalizePinned(d.pinned);
     // After the devices and cables they name: an id the file does not hold
@@ -1878,7 +1880,7 @@ function loadDocState(doc) {
     state.log = normalizeLog(d.log);
     // The problem reports (v18), after the devices, groups and providers
     // they name: a reference to one the document lacks is dropped.
-    state.incidents = normalizeIncidents(d.incidents, { nodes: state.nodes, groups: state.groups, providers: state.providers });
+    state.incidents = normalizeIncidents(d.incidents, { nodes: state.nodes, groups: state.groups, providers: state.providers, watch: state.watch });
     return { newer };
 }
 
@@ -1889,7 +1891,7 @@ function loadDocState(doc) {
 // list: a key one of them forgot (the log was the risk) would leave the
 // borrowed document's in the open one, and the next save would write it
 // into the open card.
-const DOC_STATE_KEYS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'accepted', 'pinned', 'expectedLife', 'columns', 'tableView', 'searches', 'annotations', 'report', 'log', 'incidents'];
+const DOC_STATE_KEYS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'watch', 'accepted', 'pinned', 'expectedLife', 'columns', 'tableView', 'searches', 'annotations', 'report', 'log', 'incidents'];
 function holdDocState() {
     const held = {};
     DOC_STATE_KEYS.forEach((k) => { held[k] = state[k]; });
@@ -3042,6 +3044,7 @@ function showConfigTab(name) {
     if (name === 'groups') renderGroupsPanel(true);   // and the Groups tab (js/groups.js)
     if (name === 'wifi') renderWifiPanel(true);       // and the Wi-Fi tab (js/wifi.js)
     if (name === 'providers') renderProvidersPanel(true);   // and the Providers tab (js/providers.js)
+    if (name === 'watch' && window.TopoWatch) TopoWatch.render(true);   // and the Watched tab (js/watch.js)
     if (name === 'visit' && typeof renderProviderPanel === 'function') renderProviderPanel();   // provider mode's report (js/providermode.js)
     if (name === 'incidents' && typeof renderIncidentsPanel === 'function') renderIncidentsPanel();   // the problem reports (js/incidents.js)
 }

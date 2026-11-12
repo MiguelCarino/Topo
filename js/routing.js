@@ -169,8 +169,8 @@ function hoursOpenAt(parsed, date) {
 function routeCtx(ctx) {
     // A document passed in answers for itself: a list it lacks is empty,
     // never the live document's.
-    if (!ctx) return { nodes: state.nodes, links: state.links, groups: state.groups || [], providers: state.providers || [] };
-    return { nodes: ctx.nodes || [], links: ctx.links || [], groups: ctx.groups || [], providers: ctx.providers || [] };
+    if (!ctx) return { nodes: state.nodes, links: state.links, groups: state.groups || [], providers: state.providers || [], watch: state.watch || [] };
+    return { nodes: ctx.nodes || [], links: ctx.links || [], groups: ctx.groups || [], providers: ctx.providers || [], watch: ctx.watch || [] };
 }
 // The outermost host of a VM or container, and the hosts on the way,
 // innermost first (as nodeProviders walks them).
@@ -247,7 +247,9 @@ function routePath(seed, g) {
 // or a group the routing devices in it (none: no path, only the groups and
 // the network's list).
 function routeSeeds(c, q, g) {
-    const named = (q.nodeIds || []).map((id) => g.byId.get(id)).filter(Boolean);
+    // A watched address starts from the device it is reached through (v20).
+    const via = (q.watchIds || []).map((id) => watchById(id, c.watch)).filter((w) => w && w.via).map((w) => w.via);
+    const named = [...new Set((q.nodeIds || []).concat(via))].map((id) => g.byId.get(id)).filter(Boolean);
     if (named.length) return named;
     const inGroup = q.groupId ? new Set([q.groupId, ...groupDescendantIds(q.groupId, c.groups)]) : null;
     const where = (n) => !inGroup || inGroup.has(n.group) || (isVirtualType(n.type) && routeHosts(n, g.byId).some((h) => inGroup.has(h.group)));
@@ -282,6 +284,10 @@ function routeIncident(ctx, query = {}, opts = {}) {
         found.get(provider.id).push({ distance, via });
     };
     let pathMax = 0;
+    // A watched address's own providers first: they answer for it (D371).
+    (query.watchIds || []).map((id) => watchById(id, c.watch)).filter(Boolean).forEach((w) => {
+        providerRefsOf(w).forEach((id) => add(providerById(id, c.providers), 0, { kind: 'watch', id: w.id, label: watchLabel(w), how: 'own', from: null }));
+    });
     seeds.forEach((seed) => {
         const p = routePath(seed, g);
         p.devices.forEach(({ node, distance }) => {
@@ -339,7 +345,9 @@ function routeIncident(ctx, query = {}, opts = {}) {
             if (seenAlso.has(k) || o.via.kind === 'network' || alsoFor.length >= ROUTE_ALSO_MAX) return;
             seenAlso.add(k); alsoFor.push({ kind: o.via.kind, id: o.via.id, label: o.via.label, distance: o.distance });
         });
-        const r = { provider, service, serviceRank: routeServiceRank(service, symptom), distance: best.distance, via: best.via, open, hoursText, alsoFor };
+        // A watched address's own provider comes first, whatever its service
+        // (D374: the report is routed to its provider).
+        const r = { provider, service, serviceRank: best.via.kind === 'watch' ? -1 : routeServiceRank(service, symptom), distance: best.distance, via: best.via, open, hoursText, alsoFor };
         r.reason = routeReasonText(r);
         results.push(r);
     });
@@ -358,6 +366,7 @@ function routeReasonText(r) {
     const service = routeServiceWord(r.service), v = r.via || {}, n = r.distance, name = v.label;
     let s;
     if (v.kind === 'network') s = t('{service}, listed for this network', { service });
+    else if (v.kind === 'watch') s = t('{service} for {name}', { service, name });
     else if (v.kind === 'group') s = t('{service} for {name} (its group)', { service, name });
     else if (v.kind === 'power') s = t('{service} for {name}, in the same place', { service, name });
     else if (v.kind === 'cable') s = n === 1 ? t('{service} for the cable to {name}, 1 step upstream', { service, name })

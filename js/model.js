@@ -1670,6 +1670,12 @@ function asTarget(v) {
     return r > 0 && r < 100 ? r : undefined;
 }
 const checkPortOf = (c) => (c && (c.port || (c.tls === 'implicit' && CHECK_TLS_PORTS[c.proto]) || CHECK_PORTS[c.proto])) || null;
+// What an outage does (v20, D373): a device raises an issue unless it says
+// 'record'; a watched address only records unless it says 'raise'.
+const asNodeOutage = (v) => (v === 'record' ? 'record' : undefined);
+const asWatchOutage = (v) => (v === 'raise' ? 'raise' : undefined);
+const nodeRecordsOnly = (n) => !!n && n.outage === 'record';
+const watchRecordsOnly = (w) => !!w && w.outage !== 'raise';
 
 const NODE_FIELDS = [
     { key: 'id', kind: 'raw', read: (v) => v || nextId('n'), label: 'ID', csv: 'id' },
@@ -1865,7 +1871,11 @@ const NODE_FIELDS = [
     // in the spreadsheet: they are what this site's monitors ask, not the
     // register's facts (D229).
     { key: 'checks', kind: 'raw', label: 'Answer checks', read: (v) => asChecks(v, true), write: (v) => asChecks(v, false) },
-    { key: 'target', kind: 'raw', label: 'Availability target (%)', read: asTarget, write: asTarget }
+    { key: 'target', kind: 'raw', label: 'Availability target (%)', read: asTarget, write: asTarget },
+    // v20 (D373): what an outage of its checks does. Absent: Raise an issue
+    // (as before); 'record': Record only (no issue, no banner, no alarm; the
+    // outage is still recorded and reported, marked "recorded only").
+    { key: 'outage', kind: 'raw', label: 'When it is not answering', read: asNodeOutage, write: asNodeOutage }
 ];
 
 // A cable's own facts (link.cable, plan section 4): the label on both ends of
@@ -5119,6 +5129,93 @@ function normalizeProviders(list) {
 // provider serializes as it did before they existed.
 const serializeProviders = (list) => (list && list.length ? list.map((p) => writeFields(PROVIDER_FIELDS, p)) : undefined);
 const makeProvider = (fields) => readFields(PROVIDER_FIELDS, Object.assign({ id: nextId('pv') }, fields));
+
+// ---- Watched addresses (document v20, docs/SCOPE.md D371-D374, step 8d) ----
+// Addresses the owner wrote down to be checked, beside the devices: a public
+// resolver, the ISP's gateway, a cloud service, a box not drawn. Never a
+// scanner (D380): one address each, never a range, a subnet or a wildcard,
+// and nothing is checked unless it has checks and a PC monitors. doc.watch,
+// at most WATCH_MAX, each:
+//   id         'wa' and a number, stable (its checks' states and statistics)
+//   name       what it is ("Google DNS", "ISP gateway")
+//   address    one IPv4 or IPv6 address, or one host name
+//   group      the group it is in (its quiet windows, the site monitors'
+//              assignment); absent: the whole site
+//   via        the device on the map it is reached through (root cause:
+//              not answering because that device is not answering)
+//   providers  who answers for it (routing, targets, their report), by id
+//   outage     'raise': an outage raises an issue; absent: Record only (a
+//              new watched address starts there, D373)
+//   target     its availability target, as a device's
+//   notes      free text
+//   checks     its answer checks, as a device's (no `ip`: it has one address)
+// Not on the map and not in the findings. In the spreadsheet as
+// watched.csv once there is one.
+const WATCH_MAX = 64;
+const WATCH_NAME_MAX = 120;
+// One address, never more: an IP, or a host name whose last label has a
+// letter (so "10.0.0.1-20" or "10.0.0.*" is not read as a name).
+function asWatchAddress(v) {
+    const s = typeof v === 'string' ? v.trim() : '';
+    if (!s || s.length > 253) return undefined;
+    if (isIpText(s)) return s;
+    const name = asCheckName(s);
+    if (!name) return undefined;
+    const last = name.split('.').pop();
+    return /[A-Za-z]/.test(last) ? name : undefined;
+}
+// A watched address's checks: a device's, without `ip`.
+function asWatchChecks(v, mint) {
+    const list = asChecks(v, mint);
+    if (!list) return undefined;
+    list.forEach((c) => { delete c.ip; });
+    return list;
+}
+const WATCH_FIELDS = [
+    { key: 'id', kind: 'raw', read: (v) => asGroupRef(v) || nextId('wa'), label: 'ID', csv: 'watch_id' },
+    { key: 'name', kind: 'raw', read: providerLine(WATCH_NAME_MAX), write: providerLine(WATCH_NAME_MAX), label: 'Name', csv: 'name' },
+    { key: 'address', kind: 'raw', read: asWatchAddress, write: asWatchAddress, label: 'Address', csv: 'address' },
+    { key: 'group', kind: 'raw', read: asGroupRef, write: asGroupRef, label: 'Group', csv: 'group' },
+    { key: 'via', kind: 'raw', read: asGroupRef, write: asGroupRef, label: 'Reached through', csv: 'reached_through' },
+    { key: 'providers', kind: 'raw', read: asProviderRefs, write: asProviderRefs, label: 'Providers', csv: 'provider', toText: (v) => providerRefsText(v) },
+    { key: 'outage', kind: 'raw', read: asWatchOutage, write: asWatchOutage, label: 'When it is not answering', csv: 'raise_issue' },
+    { key: 'target', kind: 'raw', read: asTarget, write: asTarget, label: 'Availability target (%)', csv: 'availability_target' },
+    { key: 'notes', kind: 'raw', read: providerNotes, write: providerNotes, label: 'Notes', csv: 'notes' },
+    { key: 'checks', kind: 'raw', read: (v) => asWatchChecks(v, true), write: (v) => asWatchChecks(v, false), label: 'Answer checks' }
+];
+// Load: coerced, one per id, an address required, at most WATCH_MAX; with
+// ctx { nodes, groups, providers }, a reference to one the document lacks
+// is dropped (the providers kept in the document's order).
+function normalizeWatch(list, ctx = {}) {
+    const held = (l) => (Array.isArray(l) ? new Set(l.map((r) => r && r.id)) : null);
+    const nodeIds = held(ctx.nodes), groupIds = held(ctx.groups);
+    const rank = Array.isArray(ctx.providers) ? new Map(ctx.providers.map((p, i) => [p.id, i])) : null;
+    const out = keepIdsUnique((Array.isArray(list) ? list : [])
+        .filter((w) => w && typeof w === 'object' && !Array.isArray(w))
+        .map((w) => readFields(WATCH_FIELDS, w))
+        .filter((w) => !!w.address)
+        .slice(0, WATCH_MAX), 'wa');
+    out.forEach((w) => {
+        if (w.via && nodeIds && !nodeIds.has(w.via)) delete w.via;
+        if (w.group && groupIds && !groupIds.has(w.group)) delete w.group;
+        if (w.providers && rank) {
+            const kept = w.providers.filter((id) => rank.has(id)).sort((a, b) => rank.get(a) - rank.get(b));
+            if (kept.length) w.providers = kept; else delete w.providers;
+        }
+    });
+    return out;
+}
+// Save: no key when there are none (a v19 document's shape).
+const serializeWatch = (list) => (list && list.length ? list.map((w) => writeFields(WATCH_FIELDS, w)) : undefined);
+const makeWatch = (fields) => readFields(WATCH_FIELDS, Object.assign({ id: nextId('wa') }, fields));
+const watchById = (id, list = state.watch) => (id ? (list || []).find((w) => w.id === id) || null : null);
+// What a watched address is called: its name, else its address.
+const watchLabel = (w) => (w ? (w.name || w.address || w.id) : '');
+// A watched address in the monitor, its issue records and its statistics
+// goes by "w:" and its id, so it never meets a device's id (D371).
+const WATCH_ITEM_PREFIX = 'w:';
+const watchItemId = (id) => WATCH_ITEM_PREFIX + id;
+const watchIdOfItem = (nodeId) => (typeof nodeId === 'string' && nodeId.startsWith(WATCH_ITEM_PREFIX) ? nodeId.slice(WATCH_ITEM_PREFIX.length) : null);
 // A record's providers as stored (v18): a list of ids, unique, or undefined
 // when it names none, so an item that names nobody writes no key. Tolerant:
 // a single id (a hand-made file, a v17 field set straight onto a record) is a
@@ -6059,6 +6156,8 @@ function withoutIncidents(doc) {
 //   symptom   one of INCIDENT_SYMPTOMS
 //   nodeIds   the devices with the problem ([] for the whole place or a group)
 //   groupId   the group, when the place is one
+//   watchIds  the watched addresses with the problem (v20, D374): an outage
+//             of a watched address names it here, and a report may too
 //   text      the client's words (INCIDENT_TEXT_MAX)
 //   reporter  { name, phone?, email? }
 //   routedTo  the providers it was sent (or is to be sent) to, by id
@@ -6081,6 +6180,8 @@ function withoutIncidents(doc) {
 //   monitor   the PC that saw it ("Checked by monitor ...")
 //   flapping  true when it kept going down and coming back
 //   gone      true when the device left the monitored checks while down
+//   recordOnly  true when the item was set to Record only (v20, D373): no
+//             issue to act on, no banner, no alarm; still in the reports
 //   acts      [{ act, at, by?, note?, reportId? }]: Acknowledge ('ack'),
 //             Report a problem ('report', with the report's id) or Expected
 //             ('expected', its time counted as maintenance), oldest first;
@@ -6209,7 +6310,7 @@ function normalizeIncident(x, ctx = {}) {
     if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
     if (typeof x.id !== 'string' || !LOG_ID_RE.test(x.id) || !INCIDENT_SYMPTOMS.includes(x.symptom)) return null;
     const has = (list) => (Array.isArray(list) ? new Set(list.map((r) => r && r.id)) : null);
-    const nodeIds = has(ctx.nodes), groupIds = has(ctx.groups), providerIds = has(ctx.providers);
+    const nodeIds = has(ctx.nodes), groupIds = has(ctx.groups), providerIds = has(ctx.providers), watchIds = has(ctx.watch);
     const ids = (v, held, ok = docRefOk) => {
         const out = [];
         (Array.isArray(v) ? v : []).forEach((id) => { if (ok(id) && !out.includes(id) && (!held || held.has(id))) out.push(id); });
@@ -6218,6 +6319,8 @@ function normalizeIncident(x, ctx = {}) {
     const out = { id: x.id, at: logTime(x.at) || 0, status: INCIDENT_STATUSES.includes(x.status) ? x.status : 'open', symptom: x.symptom };
     out.nodeIds = ids(x.nodeIds, nodeIds);
     if (docRefOk(x.groupId) && (!groupIds || groupIds.has(x.groupId))) out.groupId = x.groupId;
+    const watched = ids(x.watchIds, watchIds);
+    if (watched.length) out.watchIds = watched;
     const text = logProse(x.text, INCIDENT_TEXT_MAX);
     if (text) out.text = text;
     const r = x.reporter && typeof x.reporter === 'object' && !Array.isArray(x.reporter) ? x.reporter : {};
@@ -6256,6 +6359,7 @@ function normalizeOutageFields(x, out, ids, nodeIds) {
     if (mon) out.monitor = mon;
     if (x.flapping === true) out.flapping = true;
     if (x.gone === true) out.gone = true;
+    if (x.recordOnly === true) out.recordOnly = true;
     const acts = [];
     (Array.isArray(x.acts) ? x.acts : []).forEach((a) => {
         if (!a || !OUTAGE_ACTS.includes(a.act) || !logTime(a.at)) return;
@@ -6325,7 +6429,7 @@ function decisionLogEntry({ id, at, visits, incidentId, providerId, provider, vi
     return normalizeLogEntry({ id, at, kind: 'decision', visits, incidentId, providerId, provider, visitBy, by, result, outcome, note, file, summary });
 }
 
-const DOC_VERSION = 19;
+const DOC_VERSION = 20;
 
 // ---- What a Topo file says it is ----
 // Every .json Topo writes (a network's back-up, a binder) opens with a
@@ -6527,7 +6631,12 @@ const MIGRATIONS = [
     // new kind of entry, nothing to convert. A build that reads only v18
     // would drop them (and break the log's chain with the entries), so it
     // opens a v19 document read-only.
-    { from: 18, to: 19, run: (doc) => ({ ...doc, v: 19 }) }
+    { from: 18, to: 19, run: (doc) => ({ ...doc, v: 19 }) },
+    // v20 (step 8d, docs/SCOPE.md D371-D374): the watched addresses
+    // (doc.watch), a device's `outage` (Record only), an incident's
+    // `watchIds` and an outage's `recordOnly`. A v19 document has none of
+    // them: nothing to convert. Older builds open a v20 document read-only.
+    { from: 19, to: 20, run: (doc) => ({ ...doc, v: 20 }) }
 ];
 
 // The v2 interface zone flags of `src`, put back on the same node as written.

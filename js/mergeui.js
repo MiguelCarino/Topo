@@ -47,12 +47,12 @@ const MERGE_DELTA_MS = 250;
 const MERGE_VALUE_MAX = 160;
 // The kinds as the review names them: one, and the filter's many.
 const MERGE_KIND_ONE = {
-    nodes: 'Device', links: 'Cable', networks: 'Subnet', groups: 'Group', wifi: 'Wi-Fi network', providers: 'Provider', incidents: 'Problem report',
+    nodes: 'Device', links: 'Cable', networks: 'Subnet', groups: 'Group', wifi: 'Wi-Fi network', providers: 'Provider', watch: 'Watched address', incidents: 'Problem report',
     annotations: 'Note', searches: 'Saved search', columns: 'Custom column', accepted: 'Accepted finding', pinned: 'Pinned finding',
     report: 'Report header', expectedLife: 'Expected life by type', tableView: 'Table view', ifaces: 'Interface'
 };
 const MERGE_KIND_MANY = {
-    nodes: 'Devices', links: 'Cables', networks: 'Subnets', groups: 'Groups', wifi: 'Wi-Fi networks', providers: 'Providers', incidents: 'Problem reports',
+    nodes: 'Devices', links: 'Cables', networks: 'Subnets', groups: 'Groups', wifi: 'Wi-Fi networks', providers: 'Providers', watch: 'Watched addresses', incidents: 'Problem reports',
     annotations: 'Notes', searches: 'Saved searches', columns: 'Custom columns', accepted: 'Accepted findings', pinned: 'Pinned findings',
     report: 'Report header', expectedLife: 'Expected life by type', tableView: 'Table view'
 };
@@ -68,7 +68,7 @@ const MERGE_MARK = Object.fromEntries(MERGE_CHIPS.map((c) => [c.status, c.mark])
 // How a match was made, when it was not the id both carried.
 const MERGE_MATCHED_BY = {
     assetTag: 'asset tag', serial: 'serial number', mac: 'MAC', ip: 'IP address', name: 'name', ends: 'both ends',
-    range: 'range', path: 'place', ssid: 'SSID', text: 'text', chosen: 'your choice', blank: 'a free interface'
+    range: 'range', path: 'place', ssid: 'SSID', address: 'address', text: 'text', chosen: 'your choice', blank: 'a free interface'
 };
 // Fields that hold another record's id: shown by that record's name.
 const MERGE_REF_FIELDS = {
@@ -76,7 +76,8 @@ const MERGE_REF_FIELDS = {
     links: { source: 'nodes', target: 'nodes', providers: 'providers' },
     groups: { parent: 'groups', providers: 'providers' },
     wifi: { network: 'networks' },
-    incidents: { nodeIds: 'nodes', groupId: 'groups', routedTo: 'providers' }
+    watch: { via: 'nodes', group: 'groups', providers: 'providers' },
+    incidents: { nodeIds: 'nodes', groupId: 'groups', watchIds: 'watch', routedTo: 'providers' }
 };
 // Labels for fields no descriptor list names.
 const MERGE_FIELD_WORDS = {
@@ -111,6 +112,7 @@ function mergeFieldSet(kind) {
         groups: typeof GROUP_FIELDS !== 'undefined' ? GROUP_FIELDS : null,
         wifi: typeof WIFI_FIELDS !== 'undefined' ? WIFI_FIELDS : null,
         providers: typeof PROVIDER_FIELDS !== 'undefined' ? PROVIDER_FIELDS : null,
+        watch: typeof WATCH_FIELDS !== 'undefined' ? WATCH_FIELDS : null,
         searches: typeof SEARCH_FIELDS !== 'undefined' ? SEARCH_FIELDS : null,
         report: typeof REPORT_FIELDS !== 'undefined' ? REPORT_FIELDS : null
     };

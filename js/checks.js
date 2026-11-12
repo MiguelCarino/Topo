@@ -204,7 +204,13 @@ const smtpDocumented = (node, c) => documentsPort(node, checkPortOf(c));
 function monitorPlan(doc, opts = {}) {
     const nodes = doc.nodes || [], links = doc.links || [], groups = doc.groups || [];
     const targets = nodes.filter((n) => inService(n) && Array.isArray(n.checks) && n.checks.length);
-    const chains = monitorChains(nodes, links, opts.me || null, targets.map((n) => n.id));
+    // The watched addresses (v20, D371): each checked one, reached through
+    // a device on the map (its chain, then that device) or straight.
+    const watched = (doc.watch || []).filter((w) => w && w.address && Array.isArray(w.checks) && w.checks.length);
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const viaOf = (w) => (w.via && byId.has(w.via) && inService(byId.get(w.via)) ? w.via : null);
+    const chainIds = targets.map((n) => n.id).concat(watched.map(viaOf).filter(Boolean));
+    const chains = monitorChains(nodes, links, opts.me || null, [...new Set(chainIds)]);
     const items = [];
     targets.forEach((n) => {
         const gids = groupIdsOf(n, groups);
@@ -222,7 +228,29 @@ function monitorPlan(doc, opts = {}) {
                     tls: c.tls || '', transport: c.transport || ''
                 },
                 intervalS: c.interval || CHECK_INTERVAL_DEFAULT, slowMs: c.slowMs || 0,
-                chain: chains.get(n.id) || [], groups: gids
+                chain: chains.get(n.id) || [], groups: gids, recordOnly: nodeRecordsOnly(n)
+            });
+        });
+    });
+    watched.forEach((w) => {
+        const wid = watchItemId(w.id);
+        const as = { id: wid, name: watchLabel(w), group: w.group, checks: w.checks };
+        const gids = w.group ? groupIdsOf(as, groups) : [];
+        const via = viaOf(w);
+        const chain = via ? (chains.get(via) || []).concat([via]) : [];
+        w.checks.forEach((c) => {
+            if (opts.assigned && !opts.assigned(as, c)) return;
+            items.push({
+                key: `${wid}/${c.id}`, nodeId: wid, name: `${watchLabel(w)} · ${protoLabel(c.proto)}`, nodeName: watchLabel(w),
+                spec: {
+                    proto: c.proto, host: w.address, port: c.proto === 'ping' ? 0 : (c.port || 0),
+                    fallbackPort: c.proto === 'ping' ? (c.port || 0) : 0,
+                    path: c.path || '', name: c.name || '', starttls: c.starttls === true,
+                    calledAe: c.calledAe || '', callingAe: c.callingAe || '',
+                    tls: c.tls || '', transport: c.transport || ''
+                },
+                intervalS: c.interval || CHECK_INTERVAL_DEFAULT, slowMs: c.slowMs || 0,
+                chain, groups: gids, recordOnly: watchRecordsOnly(w)
             });
         });
     });
@@ -246,7 +274,7 @@ function pushPlan(force) {
     if (!hasHost() || !watching()) return Promise.resolve(false);
     return readMacs().then(() => {
         if (!watching()) return false;
-        const plan = monitorPlan({ nodes: state.nodes, links: state.links, groups: state.groups },
+        const plan = monitorPlan({ nodes: state.nodes, links: state.links, groups: state.groups, watch: state.watch },
             { me: meOnMap(state.nodes), networkId: state.libraryId, networkName: networkName(), assigned: assignedNow() });
         const json = JSON.stringify(plan);
         if (!force && json === _ck.sent) return false;
@@ -262,6 +290,8 @@ function checksDocChanged() {
     if (window.TopoMonitors) TopoMonitors.maybeRefresh();
     // A check added during a visit joins the visit monitor (step 7i).
     if (window.TopoVisitMonitor) TopoVisitMonitor.docChanged();
+    // The Watched tab (js/watch.js) follows the document.
+    if (window.TopoWatch) TopoWatch.docChanged();
     if (!hasHost() || !monitorOn()) return;
     clearTimeout(_ck.planTimer);
     _ck.planTimer = setTimeout(() => { pushPlan(false); }, PLAN_DELAY_MS);
@@ -399,6 +429,7 @@ function onStatuses(list) {
         _ck.redraw = setTimeout(() => { if (typeof renderCanvasOnly === 'function') renderCanvasOnly(); }, 250);
     }
     refreshOpenSection(list);
+    if (window.TopoWatch) TopoWatch.statusesChanged();
     renderMonitorSettingsStatus();
 }
 
@@ -466,7 +497,7 @@ function renderCheckSection(node) {
 function drawServerSection(node) {
     const body = el('checkBody');
     const all = window.TopoMonitors ? TopoMonitors.serverStatusesOf(node) : [];
-    let html = `<p class="rail-note ck-note">${escapeHtml(t('As the site\'s monitors see it:'))}</p>`;
+    let html = `<p class="rail-note ck-note ck-rule">${escapeHtml(t(NOT_CHECKED_RULE))}</p><p class="rail-note ck-note">${escapeHtml(t('As the site\'s monitors see it:'))}</p>`;
     (node.checks || []).forEach((c) => {
         const key = `${node.id}/${c.id}`;
         const comb = serverStatus(node, key);
@@ -512,12 +543,15 @@ function sendQuiet(scope, id, until) {
     });
 }
 
+// The owner's rule (2026-11-12, D380): checking is opt-in; what is not
+// checked has no state at all, never "down" or "unknown".
+const NOT_CHECKED_RULE = 'Topo checks only what you ask it to. Anything not checked has no state.';
 function drawSection(node) {
     if (!hasHost()) { drawServerSection(node); return; }
     const body = el('checkBody');
     const checks = Array.isArray(node.checks) ? node.checks : [];
     const ro = !!state.readOnly;
-    let html = '';
+    let html = `<p class="rail-note ck-note ck-rule">${escapeHtml(t(NOT_CHECKED_RULE))}</p>`;
     if (!monitorOn()) {
         html += `<p class="rail-note ck-note">${escapeHtml(t('Monitor from this PC is off: these checks run once it is on, in Settings.'))}</p>`;
         html += `<button type="button" class="btn ck-settings" data-ck="settings">${escapeHtml(t('Settings…'))}</button>`;
@@ -557,15 +591,15 @@ function checkCardHtml(node, c, ro) {
     const id = (k) => `ck_${k}_${c.id}`;
     const dis = ro ? ' disabled' : '';
     const opt = (v, label, cur) => `<option value="${escapeHtml(String(v))}"${String(v) === String(cur) ? ' selected' : ''}>${escapeHtml(label)}</option>`;
-    const ips = getValidIps(node).map((p) => p.ip.toString());
+    const ips = node.address ? [] : getValidIps(node).map((p) => p.ip.toString());
     let h = `<div class="ck-card" data-key="${escapeHtml(key)}" data-check="${escapeHtml(c.id)}">`;
     h += `<div class="ck-head"><span class="ck-dot ck-${lk}" aria-hidden="true"></span><b>${escapeHtml(protoLabel(c.proto))}</b>`
-        + `<span class="ck-port mono">${escapeHtml(checkHost(node, c) || '')}${c.proto !== 'ping' && checkPortOf(c) ? ':' + checkPortOf(c) : ''}</span>`
+        + `<span class="ck-port mono">${escapeHtml(node.address || checkHost(node, c) || '')}${c.proto !== 'ping' && checkPortOf(c) ? ':' + checkPortOf(c) : ''}</span>`
         + (ro ? '' : `<button type="button" class="if-del ck-del" data-ck="del" title="${escapeHtml(t('Remove this check'))}" aria-label="${escapeHtml(t('Remove this check'))}">✕</button>`) + '</div>';
     h += `<p class="ck-now ck-now-${lk}${warnOf(s) ? ' ck-warn' : ''}" aria-live="polite">${escapeHtml(live() ? nowText(s, node) : '')}</p>`;
     h += '<div class="prop-grid ck-grid">';
     h += `<div><label class="prop-lbl" for="${id('proto')}">${escapeHtml(t('Asks'))}</label><select id="${id('proto')}" class="select" data-f="proto"${dis}>`
-        + CHECK_PROTOCOLS.filter((p) => p !== 'smtp' || c.proto === 'smtp' || smtpPortsOf(node).length)
+        + CHECK_PROTOCOLS.filter((p) => p !== 'smtp' || c.proto === 'smtp' || !!node.address || smtpPortsOf(node).length)
             .map((p) => opt(p, protoLabel(p), c.proto)).join('') + '</select></div>';
     h += `<div><label class="prop-lbl" for="${id('port')}">${escapeHtml(c.proto === 'ping' ? t('TCP port if this PC may not ping') : t('Port'))}</label>`
         + `<input type="text" id="${id('port')}" class="input mono" inputmode="numeric" maxlength="5" autocomplete="off" data-f="port" placeholder="${escapeHtml(String((c.tls === 'implicit' && CHECK_TLS_PORTS[c.proto]) || CHECK_PORTS[c.proto] || ''))}" value="${escapeHtml(c.port ? String(c.port) : '')}"${dis}></div>`;
@@ -600,7 +634,7 @@ function checkCardHtml(node, c, ro) {
     h += `<div><label class="prop-lbl" for="${id('slow')}">${escapeHtml(t('Slow above (ms)'))}</label><input type="text" id="${id('slow')}" class="input mono" inputmode="numeric" maxlength="6" autocomplete="off" data-f="slowMs" placeholder="—" value="${escapeHtml(c.slowMs ? String(c.slowMs) : '')}"${dis}></div>`;
     h += '</div>';
     h += monitorsChoiceHtml(c, dis);
-    if (c.proto === 'smtp' && !smtpDocumented(node, c)) {
+    if (c.proto === 'smtp' && !node.address && !smtpDocumented(node, c)) {
         h += '<p class="rail-note ck-note ck-warn">' + escapeHtml(t('This device does not document SMTP on port {port} (Allowed ports), so this check is not run.', { port: checkPortOf(c) })) + '</p>';
     }
     const note = CHECK_NOTES[c.proto];
@@ -680,6 +714,18 @@ function renderCheckSummaryOnly(node) {
     const lk = live() ? nodeLook(node) : null;
     el('checkSummary').textContent = checks.length ? `${checks.length} · ${lk ? t(LOOK_WORDS[lk]) : protoLabel(checks[0].proto)}` : '';
 }
+// A watched address as the check cards read a device: its "w:" id (the
+// monitor's, the statistics'), its address, its group and its checks.
+function watchHolder(w) {
+    return { id: watchItemId(w.id), type: 'watch', name: watchLabel(w), address: w.address, group: w.group, checks: Array.isArray(w.checks) ? w.checks : [], interfaces: [] };
+}
+// Its state now, as a device's dot: null when it is not checked or no
+// state is known here (D380: nothing is said of it then).
+function holderLook(h) {
+    if (!h || !h.checks.length) return null;
+    if (!(hasHost() && live()) && !serverMode() && !visitLive()) return null;
+    return nodeLook(h) || 'unknown';
+}
 // What a new check asks first: what the device is for.
 function firstCheckFor(node) {
     if (node.type === 'dicom') return { proto: 'dicom' };
@@ -717,13 +763,7 @@ function onSectionInput(e) {
         const [scope, what] = target.value.split(':');
         const g = node.group ? groupById(node.group) : null;
         const id = scope === 'group' ? (g && g.id) : node.id;
-        const until = what === 'end' ? 0 : quietUntil(what);
-        const toSite = sendQuiet(scope, id, until);
-        if (!hasHost() || !monitorOn()) { toSite.then(() => drawSection(node)); return; }
-        ckInvoke('monitor_quiet', { scope, id, until })
-            .then((info) => { _ck.info = info; return ckInvoke('monitor_status'); })
-            .then((list) => { onStatuses(list); drawSection(node); })
-            .catch((err) => console.warn('Topo: quiet not set:', err));
+        quietItem(scope, id, what === 'end' ? 0 : quietUntil(what)).then(() => drawSection(node));
         return;
     }
     const card = target.closest('.ck-card');
@@ -733,33 +773,52 @@ function onSectionInput(e) {
     let bad = false;
     editChecks(node, (list) => {
         const c = list.find((x) => x.id === cid);
-        if (!c) return;
-        const v = target.type === 'checkbox' ? target.checked : target.value.trim();
-        if (f === 'proto') {
-            Object.keys(c).forEach((k) => { if (k !== 'id' && k !== 'interval' && k !== 'slowMs' && k !== 'ip' && k !== 'monitors') delete c[k]; });
-            c.proto = v;
-            if (v === 'smtp') { const sp = smtpPortsOf(node); if (sp.length && !sp.includes(25)) c.port = sp[0]; }
-        } else if (f === 'port' || f === 'slowMs') {
-            const n = f === 'port' ? asCheckPort(v) : asCheckSlow(v);
-            if (v !== '' && n === undefined) { bad = true; return; }
-            c[f] = n;
-        } else if (f === 'interval') c.interval = Number(v);
-        else if (f === 'starttls') c.starttls = v === true;
-        else if (f === 'tls') c.tls = CHECK_TLS_MODES.includes(v) ? v : undefined;
-        else if (f === 'transport') c.transport = v === 'tcp' ? 'tcp' : undefined;
-        else if (f === 'calledAe' || f === 'callingAe') { const a = asCheckAe(v); if (v !== '' && !a) { bad = true; return; } c[f] = a; }
-        else if (f === 'name') { const a = asCheckName(v); if (v !== '' && !a) { bad = true; return; } c.name = a; }
-        else if (f === 'path') { const a = asCheckPath(v); if (v !== '' && v !== '/' && !a) { bad = true; return; } c.path = a; }
-        else if (f === 'ip') c.ip = v || undefined;
-        else if (f === 'monitors') {
-            const ticked = [...card.querySelectorAll('input[data-f="monitors"]')].filter((x) => x.checked).map((x) => x.value);
-            c.monitors = asCheckMonitors(ticked);
-        }
+        if (c) bad = applyCheckField(node, c, target, card);
     });
     if (bad) {
         const again = document.getElementById(target.id);
         if (again) { again.classList.add('bad'); again.value = target.value; }
     }
+}
+// A quiet window on one item (a device, a watched address's "w:" id) or a
+// group, here and on the site's monitors. -> a promise.
+function quietItem(scope, id, until) {
+    const toSite = sendQuiet(scope, id, until);
+    if (!hasHost() || !monitorOn()) return toSite;
+    return ckInvoke('monitor_quiet', { scope, id, until })
+        .then((info) => { _ck.info = info; return ckInvoke('monitor_status'); })
+        .then((list) => { onStatuses(list); })
+        .catch((err) => console.warn('Topo: quiet not set:', err));
+}
+// One field of a check card (its data-f) onto check `c`. -> true when the
+// value was refused (marked, not written).
+function applyCheckField(node, c, target, card) {
+    const f = target.dataset.f;
+    let bad = false;
+    {
+        const v = target.type === 'checkbox' ? target.checked : target.value.trim();
+        if (f === 'proto') {
+            Object.keys(c).forEach((k) => { if (k !== 'id' && k !== 'interval' && k !== 'slowMs' && k !== 'ip' && k !== 'monitors') delete c[k]; });
+            c.proto = v;
+            if (v === 'smtp' && !node.address) { const sp = smtpPortsOf(node); if (sp.length && !sp.includes(25)) c.port = sp[0]; }
+        } else if (f === 'port' || f === 'slowMs') {
+            const n = f === 'port' ? asCheckPort(v) : asCheckSlow(v);
+            if (v !== '' && n === undefined) { bad = true; return bad; }
+            c[f] = n;
+        } else if (f === 'interval') c.interval = Number(v);
+        else if (f === 'starttls') c.starttls = v === true;
+        else if (f === 'tls') c.tls = CHECK_TLS_MODES.includes(v) ? v : undefined;
+        else if (f === 'transport') c.transport = v === 'tcp' ? 'tcp' : undefined;
+        else if (f === 'calledAe' || f === 'callingAe') { const a = asCheckAe(v); if (v !== '' && !a) { bad = true; return bad; } c[f] = a; }
+        else if (f === 'name') { const a = asCheckName(v); if (v !== '' && !a) { bad = true; return bad; } c.name = a; }
+        else if (f === 'path') { const a = asCheckPath(v); if (v !== '' && v !== '/' && !a) { bad = true; return bad; } c.path = a; }
+        else if (f === 'ip') c.ip = v || undefined;
+        else if (f === 'monitors') {
+            const ticked = [...card.querySelectorAll('input[data-f="monitors"]')].filter((x) => x.checked).map((x) => x.value);
+            c.monitors = asCheckMonitors(ticked);
+        }
+    }
+    return bad;
 }
 function onSectionClick(e) {
     const b = e.target.closest('[data-ck]');
@@ -798,9 +857,10 @@ function refreshOpenSection(list) {
 
 // ---- The last 24 h ----
 
-function loadHistory(node, c) {
+function loadHistory(node, c, root) {
     const key = `${node.id}/${c.id}`;
-    const box = () => el('checkBody') && el('checkBody').querySelector(`[data-day="${CSS.escape(key)}"]`);
+    const where = () => root || el('checkBody');
+    const box = () => where() && where().querySelector(`[data-day="${CSS.escape(key)}"]`);
     const draw = (h) => { const b = box(); if (b) b.innerHTML = dayHtml(h, c); };
     if (!watching()) { const b = box(); if (b) b.innerHTML = ''; return; }
     const had = _ck.hist.get(key);
@@ -1074,6 +1134,8 @@ function serverStatusChanged() {
     if (!live()) rerenderSelected();
 }
 window.TopoChecks = { state: _ck, hasHost, monitorPlan, monitorChains, refreshInfo, onStatuses, look, nodeLook, nowText,
+    watchHolder, holderLook, checkCardHtml, applyCheckField, loadHistory, quietItem, quietNow, quietUntil, QUIET_FOR, QUIET_WORDS, LOOK_WORDS, NOT_CHECKED_RULE,
+    monitorOn, live, watching, serverMode, protoLabel, warnOf, ownerOfSite,
     dayBuckets, daySummary, quietUntil, pushPlan, firstCheckFor, labels, meOnMap, serverStatusChanged, statusesOf, redrawDots,
     pushPlanNow: () => { _ck.sent = ''; return pushPlan(true); } };
 })();

@@ -60,17 +60,17 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
   try {
     // ---- A. The format ----
-    ok('the document version is 19', DOC_VERSION === 19);
+    ok('the document version is 20', DOC_VERSION === 20);
     const v16 = { v: 16, nodes: [node('a', 'A')], links: [], searches: [{ id: 's1', name: 'S', query: 'x' }] };
     const frozen = JSON.stringify(v16);
     const m1 = migrateDoc(v16), m2 = migrateDoc(clone(v16));
-    ok('a v16 document migrates to 19, the same twice, input untouched', m1.doc.v === 19 && m1.from === 16 && !m1.newer
+    ok('a v16 document migrates to 20, the same twice, input untouched', m1.doc.v === 20 && m1.from === 16 && !m1.newer
        && JSON.stringify(m1.doc) === JSON.stringify(m2.doc) && JSON.stringify(v16) === frozen
        && JSON.stringify(Object.assign({}, m1.doc, { v: 16 })) === frozen);
-    ok('a v20 document is newer (read-only)', migrateDoc({ v: 20, nodes: [] }).newer === true);
+    ok('a v21 document is newer (read-only)', migrateDoc({ v: 21, nodes: [] }).newer === true);
     ok('isDocShape takes a log and a prior list', isDocShape({ nodes: [], log: [], prior: ['a'] }) && isDocShape({ nodes: [], log: [{ id: 'x' }] }));
     ok('and refuses a log or prior that is not a list', !isDocShape({ nodes: [], log: {} }) && !isDocShape({ nodes: [], prior: 'a' }));
-    ok('withTopoSchema names v19', withTopoSchema({ kind: 'nettopology', doc: { nodes: [] } }).$schema === 'https://topo.carino.systems/schema/topo-v19.json');
+    ok('withTopoSchema names v20', withTopoSchema({ kind: 'nettopology', doc: { nodes: [] } }).$schema === 'https://topo.carino.systems/schema/topo-v20.json');
     const fetchJson = async (u) => { try { const r = await fetch(u); return r.ok ? JSON.parse(await r.text()) : null; } catch (e) { return null; } };
     const s18 = await fetchJson('schema/topo-v18.json'), s17 = await fetchJson('schema/topo-v17.json'), s16 = await fetchJson('schema/topo-v16.json');
     ok('schema v18 parses beside the kept v17 and v16', !!s18 && !!s17 && !!s16 && s18.$id.endsWith('topo-v18.json') && s17.$id.endsWith('topo-v17.json') && s16.$id.endsWith('topo-v16.json'));
@@ -118,7 +118,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     let rendered = '';
     await withDocRendered(other, async () => { rendered = state.log.map((e) => e.id).join(); });
     ok('withDocRendered too (a binder report must not leave a site\'s log behind)', rendered === 'lg_other' && state.log.length === 1 && state.log[0].id === 'lg_mine');
-    ok('every key loadDocState writes is held', DOC_STATE_KEYS.includes('log') && DOC_STATE_KEYS.includes('incidents') && DOC_STATE_KEYS.length === 16);
+    ok('every key loadDocState writes is held', DOC_STATE_KEYS.includes('log') && DOC_STATE_KEYS.includes('incidents') && DOC_STATE_KEYS.includes('watch') && DOC_STATE_KEYS.length === 17);
 
     // ---- C. The store ----
     persistLibrary({});

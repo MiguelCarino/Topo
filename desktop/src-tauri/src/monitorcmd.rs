@@ -387,7 +387,7 @@ pub fn to_raise(changes: &[(Change, Issue)], alarms_on: bool, labels: &Labels) -
                 };
                 out.push(Raise::Card { id: i.id.clone(), body });
             }
-            Change::Recovered => {
+            Change::Recovered if !i.record_only => {
                 let min = i.recovered().map(|r| ((r - i.since()) as f64 / 60_000.0).round().max(1.0) as i64).unwrap_or(0);
                 out.push(Raise::Note { body: labels.recovered.replace("{name}", &i.name).replace("{min}", &min.to_string()) });
             }
@@ -1529,6 +1529,16 @@ mod tests {
         let back = issue("in6", 0, false, false, vec![(0, Some(14 * 60_000))]);
         assert_eq!(to_raise(&[(Change::Recovered, back.clone())], true, &l), vec![Raise::Note { body: "R1 is answering again (down 14 min)".into() }]);
         assert!(to_raise(&[(Change::Recovered, back)], false, &l).is_empty());
+    }
+
+    #[test]
+    fn record_only_raises_nothing() {
+        let l = Labels::default();
+        let mut rec = issue("in1", 0, false, true, vec![(0, None)]);
+        rec.record_only = true;
+        assert!(to_raise(&[(Change::Opened, rec.clone())], true, &l).is_empty(), "no card (D373)");
+        rec.outages = vec![issues::Outage { from: 0, to: Some(60_000) }];
+        assert!(to_raise(&[(Change::Recovered, rec)], true, &l).is_empty(), "no note when it answers again");
     }
 
     #[test]

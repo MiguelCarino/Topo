@@ -464,6 +464,27 @@ function csvProvidersSheet() {
         rows: (state.providers || []).map((p) => PROVIDER_FIELDS.map((f) => csvValue(f, p[f.key]))) };
 }
 
+// The watched addresses (v20, js/model.js "Watched addresses"), in the
+// document's order: every WATCH_FIELDS column but the checks (as a device's,
+// they are what the monitors ask, not the register's facts, D229); its group
+// by path, the device it is reached through by name (its id when two share
+// the name), raise_issue true or false.
+const CSV_WATCH_COLS = WATCH_FIELDS.filter((f) => f.csv);
+function csvWatchCell(f, w) {
+    if (f.key === 'group') { const g = w.group ? groupById(w.group) : null; return g ? groupPath(g) : ''; }
+    if (f.key === 'via') {
+        const n = w.via ? getNode(w.via) : null;
+        if (!n) return '';
+        return state.nodes.filter((x) => csvLower(x.name) === csvLower(n.name)).length > 1 ? n.id : (n.name || n.id);
+    }
+    if (f.key === 'outage') return watchRecordsOnly(w) ? 'false' : 'true';
+    return csvValue(f, w[f.key]);
+}
+function csvWatchSheet() {
+    return { name: 'watched', headers: CSV_WATCH_COLS.map((f) => f.csv),
+        rows: (state.watch || []).map((w) => CSV_WATCH_COLS.map((f) => csvWatchCell(f, w))) };
+}
+
 // ---- Saved searches (doc.searches, SEARCH_FIELDS in js/model.js) ----
 // A saved search's column, as a cell of searches.csv names it, and back.
 // Topo's own columns go by their key; a custom one by its name, unless the
@@ -529,6 +550,8 @@ const CSV_SHEETS = [
     { key: 'groups', label: 'Groups', plain: true, build: csvGroupsSheet },
     // Only once there is a provider, as the Wi-Fi sheet.
     { key: 'providers', label: 'Providers', plain: true, build: csvProvidersSheet, shown: () => (state.providers || []).length > 0 },
+    // Only once there is a watched address (v20), likewise.
+    { key: 'watched', label: 'Watched addresses', plain: true, build: csvWatchSheet, shown: () => (state.watch || []).length > 0 },
     // Only once there is a saved search, likewise.
     { key: 'searches', label: 'Saved searches', plain: true, build: csvSearchesSheet, shown: () => (state.searches || []).length > 0 },
     { key: 'findings', label: 'Findings', plain: true, build: csvFindingsSheet }
@@ -806,6 +829,20 @@ const CSV_PARSERS = {
     'lk:providers': csvProviderRefsParse,
     'grp:providers': csvProviderRefsParse,
     'pv:service': (text) => { const k = providerServiceKey(text); return k ? { value: k } : { error: true }; },
+    // watched.csv (v20): one address, never a range; a group by its path; a
+    // device by its id or its name; the providers by name; raise_issue a yes.
+    'wa:address': (text) => { const a = asWatchAddress(text); return a ? { value: a } : { error: true }; },
+    'wa:group': (text) => { const r = findGroupByPath(text); return r.group ? { value: r.group.id } : { error: true }; },
+    'wa:via': (text) => {
+        const v = String(text).trim();
+        const byId = getNode(v);
+        if (byId) return { value: byId.id };
+        const hits = state.nodes.filter((n) => csvLower(n.name) === csvLower(v));
+        return hits.length === 1 ? { value: hits[0].id } : { error: true };
+    },
+    'wa:providers': csvProviderRefsParse,
+    'wa:outage': (text) => { const r = tvBoolParse(text); return r.error ? r : { value: r.value ? 'raise' : null }; },
+    'wa:target': (text) => { const n = asTarget(text); return n === undefined ? { error: true } : { value: n }; },
     'pv:email': (text) => (providerEmailOk(text) ? { value: String(text).trim() } : { error: true }),
     'pv:notes': (text) => ({ value: String(text) }),
     // A saved search's cells (searches.csv): the query as typed, and the
@@ -1043,6 +1080,8 @@ function csvBuildTargets() {
     // A saved search's own fields (SEARCH_FIELDS, js/model.js): searches.csv.
     // Plain words, translated, but for the id.
     SEARCH_FIELDS.forEach((f) => add(`sq:${f.key}`, 'sqdef', f, f.key === 'id' ? 'Search ID' : null, f.key !== 'id'));
+    // A watched address's own fields (WATCH_FIELDS, v20): watched.csv.
+    CSV_WATCH_COLS.forEach((f) => add(`wa:${f.key}`, 'wadef', f, f.key === 'id' ? 'Watch ID' : null, f.key !== 'id'));
     return out;
 }
 let _csvTargets = null;
@@ -1161,7 +1200,10 @@ const csvIsSearchSheet = (sheet) => !!sheet.hasHeadings && !csvIsSubnetSheet(she
     && (sheet.headers.some((h) => CSV_SEARCH_HEADINGS.has(csvNorm(h)))
         || (sheet.headers.some((h) => csvNorm(h) === 'query') && sheet.headers.some((h) => csvNorm(h) === 'name')
             && sheet.headers.every((h) => CSV_SEARCH_OWN.has(csvNorm(h)))));
-const csvSheetFamily = (sheet) => (csvIsSubnetSheet(sheet) ? 'network' : csvIsGroupSheet(sheet) ? 'grpdef' : csvIsSearchSheet(sheet) ? 'sqdef' : csvIsProviderSheet(sheet) ? 'pvdef' : csvIsWifiSheet(sheet) ? 'wifidef' : null);
+// A sheet of watched addresses by its watch_id column (watched.csv, v20).
+const CSV_WATCH_HEADINGS = new Set(['watch id']);
+const csvIsWatchSheet = (sheet) => !!sheet.hasHeadings && sheet.headers.some((h) => CSV_WATCH_HEADINGS.has(csvNorm(h)));
+const csvSheetFamily = (sheet) => (csvIsWatchSheet(sheet) ? 'wadef' : csvIsSubnetSheet(sheet) ? 'network' : csvIsGroupSheet(sheet) ? 'grpdef' : csvIsSearchSheet(sheet) ? 'sqdef' : csvIsProviderSheet(sheet) ? 'pvdef' : csvIsWifiSheet(sheet) ? 'wifidef' : null);
 // With no heading row: what a column's values look like (most of them).
 function csvGuessByValues(values) {
     const vals = values.map((v) => String(v).trim()).filter(Boolean);
@@ -1257,6 +1299,10 @@ function csvSheetKind(mapping) {
     // 'providers' likewise, when a column is a provider's own field.
     if (keys.some((k) => csvTarget(k).group === 'pvdef')) {
         return keys.every((k) => csvTarget(k).group === 'pvdef') ? 'providers' : 'mixed-providers';
+    }
+    // 'watch' likewise, when a column is a watched address's own field (v20).
+    if (keys.some((k) => csvTarget(k).group === 'wadef')) {
+        return keys.every((k) => csvTarget(k).group === 'wadef') ? 'watch' : 'mixed-watch';
     }
     // 'searches' likewise, when a column is a saved search's own field.
     if (keys.some((k) => csvTarget(k).group === 'sqdef')) {
@@ -1443,6 +1489,7 @@ function csvPlanMapped(sheet, mapping, opts = {}) {
     if (kind === 'mixed-wifi') return Object.assign(empty, { errors: [t(CSV_MIXED_WIFI)] });
     if (kind === 'mixed-providers') return Object.assign(empty, { errors: [t(CSV_MIXED_PROVIDERS)] });
     if (kind === 'mixed-searches') return Object.assign(empty, { errors: [t(CSV_MIXED_SEARCHES)] });
+    if (kind === 'mixed-watch') return Object.assign(empty, { errors: [t(CSV_MIXED_WATCH)] });
     if (!mapping.some(Boolean)) return Object.assign(empty, { errors: [t('Pick what at least one column is.')] });
     // A depth column whose heading asks "half depth?" answers the opposite
     // question to rackDepth's parser, which reads a yes as full depth: its
@@ -1478,6 +1525,7 @@ function csvPlanMapped(sheet, mapping, opts = {}) {
     if (kind === 'groups') return csvPlanGroups(rows, empty);
     if (kind === 'wifi') return csvPlanWifi(rows, empty);
     if (kind === 'providers') return csvPlanProviders(rows, empty);
+    if (kind === 'watch') return csvPlanWatch(rows, empty);
     if (kind === 'searches') return csvPlanSearches(rows, empty);
     return kind === 'cables' ? csvPlanCables(rows, empty) : csvPlanDevices(rows, empty);
 }
@@ -1496,6 +1544,7 @@ const csvHalfAnswer = (raw) => {
 const CSV_MIXED_PORTS = 'A sheet of ports maps the device, the port and its label, VLANs or PoE. Leave the other columns unmapped.';
 const CSV_MIXED_SUBNETS = 'A sheet of subnets maps only what a subnet has: its CIDR, name, VLAN, gateway and so on. Leave the other columns unmapped.';
 const CSV_MIXED_GROUPS = 'A sheet of groups maps only what a group has: its id, name, kind, parent and height. Leave the other columns unmapped.';
+const CSV_MIXED_WATCH = 'A sheet of watched addresses maps only what a watched address has: its name, address, group, the device it is reached through, providers, raise_issue, target and notes. Leave the other columns unmapped.';
 const CSV_MIXED_PROVIDERS = 'A sheet of providers maps only what a provider has: its name, service, contact, phone, email, account, support hours and notes. Leave the other columns unmapped.';
 const CSV_MIXED_SEARCHES = 'A sheet of saved searches maps only what a saved search has: its name, search, columns, sort, whether it is descending and whether the site report prints it. Leave the other columns unmapped.';
 const CSV_MIXED_WIFI ='A sheet of Wi-Fi networks maps only what a Wi-Fi network has: its SSID, security, bands, subnet and whether it is hidden. Leave the other columns unmapped.';
@@ -1505,7 +1554,7 @@ const CSV_MIXED_WIFI ='A sheet of Wi-Fi networks maps only what a Wi-Fi network 
 function csvFinish(plan, results) {
     plan.rows = results.sort((a, b) => a.index - b.index);
     const seen = { add: new Set(), change: new Set(), same: new Set(), conflict: new Set() };
-    plan.rows.forEach((r) => { seen[r.status].add(r.status === 'conflict' ? `row:${r.index}` : (r.newGroup || r.nodeId || r.linkId || (r.netId && `net:${r.netId}`) || (r.grpId && `grp:${r.grpId}`) || (r.wifiId && `wf:${r.wifiId}`) || (r.pvId && `pv:${r.pvId}`) || (r.sqId && `sq:${r.sqId}`) || `row:${r.index}`)); });
+    plan.rows.forEach((r) => { seen[r.status].add(r.status === 'conflict' ? `row:${r.index}` : (r.newGroup || r.nodeId || r.linkId || (r.netId && `net:${r.netId}`) || (r.grpId && `grp:${r.grpId}`) || (r.wifiId && `wf:${r.wifiId}`) || (r.pvId && `pv:${r.pvId}`) || (r.sqId && `sq:${r.sqId}`) || (r.waId && `wa:${r.waId}`) || `row:${r.index}`)); });
     Object.keys(seen).forEach((k) => { plan.counts[k] = seen[k].size; });
     return plan;
 }
@@ -2961,6 +3010,70 @@ function csvPlanWifi(rows, plan) {
     return csvFinish(plan, results);
 }
 
+// One row per watched address (watched.csv, v20). Found by its watch_id,
+// then by its address (any case); a row matching nothing is a new one, under
+// the sheet's id when no watched address here has it, and needs its
+// address. Blank cells leave a field as it is, as everywhere here; the
+// checks are never in the sheet, so a row never touches them.
+function csvPlanWatch(rows, plan) {
+    const results = [];
+    const claimed = new Set();
+    const label = (key) => csvTargetLabel(csvTarget(`wa:${key}`));
+    const show = (key, v) => (v === undefined || v === null ? '' : key === 'outage' ? (v === 'raise' ? t('Raise an issue') : t('Record only'))
+        : key === 'group' ? (groupById(v) ? groupPath(groupById(v)) : String(v)) : key === 'via' ? (getNode(v) ? locPlainName(getNode(v)) : String(v))
+            : key === 'providers' ? providerRefsText(v) : String(v));
+    const same = (a, b) => JSON.stringify(a == null ? null : a) === JSON.stringify(b == null ? null : b);
+    let room = WATCH_MAX - (state.watch || []).length;
+    rows.forEach(({ index, vals }) => {
+        if (!Object.keys(vals).length) return;
+        const out = { index, name: '', status: 'same', changes: [], notes: [], why: '' };
+        const conflict = (why) => { results.push(Object.assign(out, { status: 'conflict', why })); };
+        const values = {}, errors = [];
+        Object.keys(vals).forEach((key) => {
+            const tg = csvTarget(key);
+            const res = tg.parse(vals[key]);
+            if (res.error) errors.push(t('{value} is not a valid {field}.', { value: String(vals[key]).trim() || '—', field: csvTargetLabel(tg) }));
+            else values[key.slice(3)] = res.value;
+        });
+        out.name = values.name || values.address || values.id || '';
+        if (errors.length) { conflict(errors.join(' ')); return; }
+        let w = values.id ? watchById(values.id) : null;
+        if (!w && values.address) w = (state.watch || []).find((x) => csvLower(x.address) === csvLower(values.address)) || null;
+        const fields = WATCH_FIELDS.map((x) => x.key).filter((k) => k !== 'id' && k !== 'checks' && values[k] !== undefined);
+        if (!w) {
+            if (!values.address) { conflict(t('A new watched address needs its address.')); return; }
+            const key = `new:${csvLower(values.address)}`;
+            if (claimed.has(key) || (values.id && claimed.has(`id:${values.id}`))) { conflict(t('Another row is this watched address.')); return; }
+            if (room <= 0) { conflict(t('A network holds at most {n} watched addresses.', { n: WATCH_MAX })); return; }
+            room--;
+            claimed.add(key);
+            const fieldsIn = {};
+            fields.forEach((k) => { if (values[k] !== null) fieldsIn[k] = values[k]; });
+            const rec = makeWatch(Object.assign({ id: values.id && !watchById(values.id) ? values.id : undefined }, fieldsIn));
+            claimed.add(`id:${rec.id}`);
+            plan.ops.push({ wa: { create: rec } });
+            fields.forEach((k) => out.changes.push({ field: label(k), before: '', after: show(k, values[k]) }));
+            Object.assign(out, { status: 'add', waId: rec.id, name: watchLabel(rec) });
+            results.push(out);
+            return;
+        }
+        if (claimed.has(w.id)) { conflict(t('Another row is this watched address.')); return; }
+        claimed.add(w.id);
+        out.waId = w.id;
+        out.name = watchLabel(w);
+        const set = {};
+        fields.forEach((k) => {
+            const next = values[k] === null ? undefined : values[k];
+            if (same(w[k], next)) return;
+            set[k] = next === undefined ? null : next;
+            out.changes.push({ field: label(k), before: show(k, w[k]), after: show(k, next) });
+        });
+        if (Object.keys(set).length) { plan.ops.push({ wa: { id: w.id, set } }); out.status = 'change'; }
+        results.push(out);
+    });
+    return csvFinish(plan, results);
+}
+
 // One row per provider (providers.csv). Found by its id, then by its name
 // (any case); a name two providers share is a conflict until the row gives
 // the id. A row matching nothing is a new provider, under the sheet's id when
@@ -3296,6 +3409,16 @@ function csvWrite(plan, doc) {
                 if (op.pv.create) { doc.providers.push(read(cloneData(op.pv.create))); return; }
                 const at = doc.providers.findIndex((p) => p.id === op.pv.id);
                 if (at > -1) doc.providers[at] = read(Object.assign({}, doc.providers[at], op.pv.set));
+            });
+            // The watched addresses likewise, through WATCH_FIELDS (v20); a
+            // field the row clears is null in the set, read as none.
+            plan.ops.forEach((op) => {
+                if (!op.wa) return;
+                if (!Array.isArray(doc.watch)) doc.watch = cloneData(state.watch || []);
+                const read = (rec) => readFields(WATCH_FIELDS, writeFields(WATCH_FIELDS, rec));
+                if (op.wa.create) { doc.watch.push(read(cloneData(op.wa.create))); return; }
+                const at = doc.watch.findIndex((x) => x.id === op.wa.id);
+                if (at > -1) doc.watch[at] = read(Object.assign({}, doc.watch[at], op.wa.set));
             });
             // The saved searches likewise, through SEARCH_FIELDS. A field the
             // row clears is null in the set, which the fields read as none.
@@ -3898,9 +4021,10 @@ function renderCsvImport() {
         : kind === 'mixed-groups' ? t(CSV_MIXED_GROUPS)
         : kind === 'mixed-wifi' ? t(CSV_MIXED_WIFI)
         : kind === 'mixed-providers' ? t(CSV_MIXED_PROVIDERS)
+        : kind === 'mixed-watch' ? t(CSV_MIXED_WATCH)
         : kind === 'mixed-searches' ? t(CSV_MIXED_SEARCHES)
             : sheet.observed && kind === 'devices' ? seenLine()
-                : t(kind === 'cables' ? 'Rows of cables: {n}' : kind === 'ports' ? 'Rows of ports: {n}' : kind === 'subnets' ? 'Rows of subnets: {n}' : kind === 'groups' ? 'Rows of groups: {n}' : kind === 'wifi' ? 'Rows of Wi-Fi networks: {n}' : kind === 'providers' ? 'Rows of providers: {n}' : kind === 'searches' ? 'Rows of saved searches: {n}' : 'Rows of devices: {n}', { n: sheet.rows.length });
+                : t(kind === 'cables' ? 'Rows of cables: {n}' : kind === 'ports' ? 'Rows of ports: {n}' : kind === 'subnets' ? 'Rows of subnets: {n}' : kind === 'groups' ? 'Rows of groups: {n}' : kind === 'wifi' ? 'Rows of Wi-Fi networks: {n}' : kind === 'providers' ? 'Rows of providers: {n}' : kind === 'watch' ? 'Rows of watched addresses: {n}' : kind === 'searches' ? 'Rows of saved searches: {n}' : 'Rows of devices: {n}', { n: sheet.rows.length });
     csvEl('csvKind').classList.toggle('csv-kind-bad', /^mixed/.test(kind));
     // 'Ports' stays English here, like 'Interface': the full editor's
     // technical vocabulary (see the header).

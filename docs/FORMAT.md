@@ -1,8 +1,8 @@
-# The Topo file format (document version 19)
+# The Topo file format (document version 20)
 
 This is the published description of the files Topo writes and reads, for
 anyone writing another tool that reads or produces them. The machine-readable
-schema is [`schema/topo-v19.json`](../schema/topo-v19.json) (JSON Schema 2020-12),
+schema is [`schema/topo-v20.json`](../schema/topo-v20.json) (JSON Schema 2020-12),
 and a server backup is described by [`schema/topo-backup-v1.json`](../schema/topo-backup-v1.json).
 Every sample network, built-in block, migrated old document and importer result
 is checked against the schema by `tests/suites/formatschema.js`, and a new field
@@ -16,7 +16,7 @@ is right and this page is a bug.
 - Plain JSON, UTF-8, saved with the extension `.json`. The media type is
   `application/vnd.carino.topo+json`.
 - The first key is `"$schema"`, the address of the schema for the document
-  version it was written at: `https://topo.carino.systems/schema/topo-v19.json`.
+  version it was written at: `https://topo.carino.systems/schema/topo-v20.json`.
   Readers ignore it, and nothing fetches it. A file without it still opens.
 - File names are `topo_<organization>_<site>_<date>[_<kind>].json`, each part
   lower case, accents folded, other scripts kept, `_` inside a part turned into
@@ -35,7 +35,7 @@ Three outer shapes, recognised by `kind`:
 **One network** (Back up this network):
 
 ```json
-{ "$schema": "https://topo.carino.systems/schema/topo-v19.json",
+{ "$schema": "https://topo.carino.systems/schema/topo-v20.json",
   "kind": "nettopology", "version": 1, "name": "Casa Roma", "doc": { "v": 19, "nodes": [], "links": [] } }
 ```
 
@@ -89,7 +89,7 @@ empty one is not written), except `nodes` and `links`.
 
 | Key | Holds |
 |---|---|
-| `v` | The document version, 19. |
+| `v` | The document version, 20. |
 | `id`, `updated`, `rev`, `base`, `prior` | Identity (section 8). Not content. |
 | `nodes` | Devices. |
 | `links` | Cables, radio associations and VPN links. |
@@ -97,6 +97,7 @@ empty one is not written), except `nodes` and `links`.
 | `groups` | Buildings, floors, rooms, racks and other groups. |
 | `wifi` | Wi-Fi networks. |
 | `providers` | Who is responsible for what (at most 100). |
+| `watch` | Watched addresses (v20, at most 64): addresses checked beside the devices. |
 | `accepted` | Findings accepted with a reason: `{ check, scope, nodeIds, linkIds, reason, until }`. |
 | `pinned` | Findings pinned with a note: `{ check, scope, nodeIds, linkIds, note }`. |
 | `expectedLife` | Expected life in years by device type, where the network says otherwise than Topo. |
@@ -149,6 +150,7 @@ custom column (`columns` and a device's `extra`) for data of your own.
 | `providers` | `provider` | Provider ids (a list since v18). |
 | `checks` | | Answer checks (v19, below): what a PC that monitors asks this device. |
 | `target` | | Availability target in percent (v19), above 0 and below 100, such as `99.5`. |
+| `outage` | | `"record"` (v20): an outage of its checks is Record only: recorded and reported, but no issue, no banner and no alarm. Absent: it raises an issue. |
 
 ### Answer checks (`nodes[].checks`, v19)
 
@@ -245,6 +247,27 @@ days and times). providers.csv carries them as `availability_target` and
 "no" under `target_support_hours` clears the tick, and a blank cell leaves
 either as it is.
 
+### Watched addresses (`watch`, v20)
+
+Addresses the owner wrote down to be checked beside the devices: the
+internet provider's gateway, a public resolver, a cloud service. Never a
+scanner: one address each, never a range, a subnet or a wildcard, and one
+with no check is never checked and has no state. At most 64, each
+`{ id, name, address, group, via, providers, outage, target, notes, checks }`:
+`id` (`wa` and a number, stable), `address` (required: one IPv4 or IPv6
+address, or one host name whose last label has a letter), `group` (the group
+it is in, for its quiet windows and the site monitors' assignment; absent:
+the whole site), `via` (the device it is reached through: an outage while
+that device is down is "because" of it), `providers` (ids, as a device's),
+`outage` (`"raise"`: an outage raises an issue; absent: Record only, the
+default of a new one), `target` (as a device's) and `checks` (as a device's,
+section above, without `ip`). In the monitor, its statistics and its issue
+records it goes by `w:` and its id (`w:wa1/c1` for a check), so it never meets
+a device's id. watched.csv carries every key but the checks: `watch_id`,
+`name`, `address`, `group` (its path), `reached_through` (the device's name,
+or its id when two share it), `provider`, `raise_issue` (`true` or `false`),
+`availability_target`, `notes`.
+
 ### Custom columns (`columns`) and `extra`
 
 `{ id: "c<n>", name, kind }`, at most 40, names unique in any case. `kind` is
@@ -304,6 +327,12 @@ devices down because of it), `monitor` (the PC that saw it), `flapping` and
 report's id) or `expected` (maintenance or planned work), oldest first). The
 first act closes it (`status: "closed"`, `closedAt` its time). Two copies
 merge an outage's acts and times down as unions, never as a question.
+
+From v20 an incident may name watched addresses (`watchIds`, ids of `watch`):
+an outage of a watched address has `watchIds` and an empty `nodeIds`, and a
+report made from it names it too. An outage of an item set to Record only
+has `recordOnly: true`: it is closed as it opens (nothing to act on) and is
+still listed in the monitoring report, marked "recorded only".
 
 ## 7. The network log (`log`)
 
@@ -400,6 +429,7 @@ reviewed.
 | 17 | The network log; `rev`, `base` and `prior`. |
 | 18 | Provider lists (`provider: "pv_1"` becomes `providers: ["pv_1"]`); problem reports. |
 | 19 | The log's `decision` entries: an owner's answer on a provider's visit; a device's answer checks (`checks`) and availability target (`target`); a provider's `target` and `targetHours`; outages (`kind: "outage"` incidents) and their `incident` events; a visit's `monitoring` section. Nothing converts: a v18 document only changes its `v`. |
+| 20 | Watched addresses (`watch`); a device's `outage` (Record only); an incident's `watchIds` and an outage's `recordOnly`. Nothing converts: a v19 document only changes its `v`. |
 
 ## 11. Writing files for Topo
 
@@ -410,7 +440,7 @@ reviewed.
   second import updates the first.
 - Addresses always carry their prefix length.
 - Never put passwords or keys in any field: a network file travels.
-- Validate against `schema/topo-v19.json`. Topo reads anything the schema
+- Validate against `schema/topo-v20.json`. Topo reads anything the schema
   allows, and a file it opens is what it will save back, so a key the schema
   does not list is dropped.
 - A newer version of this format will have a new schema address

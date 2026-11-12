@@ -98,6 +98,9 @@ pub struct Issue {
     pub closed: Option<i64>,
     /// The device left the plan while down: its outage ended unseen.
     pub gone: bool,
+    /// Record only (D373): closed from the start, never an alarm; kept for
+    /// the statistics and the reports' outages, marked "recorded only".
+    pub record_only: bool,
     /// Bumped on every change (the page folds a record once per rev).
     pub rev: u64,
 }
@@ -142,6 +145,8 @@ pub struct Issues {
 #[derive(Default)]
 struct NodeNow {
     root_down: bool,
+    /// One of its checks raises an issue (not Record only).
+    raises: bool,
     any_up: bool,
     any_down: bool,
     flapping: bool,
@@ -194,6 +199,7 @@ impl Issues {
         for s in statuses.values() {
             let n = nodes.entry(s.node_id.as_str()).or_default();
             n.flapping |= s.flapping;
+            n.raises |= !s.record_only;
             match s.state.as_str() {
                 "up" => n.any_up = true,
                 "down" => {
@@ -277,8 +283,11 @@ impl Issues {
                 flapping: n.flapping,
                 monitor: monitor.to_string(),
                 acts: Vec::new(),
-                closed: None,
+                // Record only: closed as it opens, so no card, no banner and
+                // no act asked for; its outage still runs and ends as any.
+                closed: if n.raises { None } else { Some(since) },
                 gone: false,
+                record_only: !n.raises,
                 rev: 1,
             };
             mark(&mut touched, &issue.id, Change::Opened);
@@ -643,5 +652,43 @@ mod tests {
         is.update("net", "pc", &HashMap::new(), &names(), 5, &mut mint);
         assert!(is.list[0].gone);
         assert_eq!(is.folded(&[], &[id]), 1, "open, but its device is gone from the document");
+    }
+
+    // Record only (D373, step 8d): the outage is recorded, closed from the
+    // start (no card, no banner, nothing to act on), and still ends as any.
+    #[test]
+    fn record_only_is_recorded_closed() {
+        let mut is = Issues::default();
+        let mut mint = minter();
+        let rec = |key: &str, node: &str, state: &str, since: i64| Status { record_only: true, ..st(key, node, state, None, since) };
+        let up = map(vec![rec("w:wa1/c1", "w:wa1", "up", 0)]);
+        assert!(is.update("net", "pc", &up, &names(), 10, &mut mint).is_empty());
+        let down = map(vec![rec("w:wa1/c1", "w:wa1", "down", 100)]);
+        let ch = is.update("net", "pc", &down, &names(), 120, &mut mint);
+        assert_eq!(ch.len(), 1);
+        let (c, i) = &ch[0];
+        assert_eq!(*c, Change::Opened);
+        assert!(i.record_only && !i.is_open() && i.ongoing(), "recorded, closed, going on: {i:?}");
+        assert_eq!(i.closed, Some(100));
+        // Still down: the same record, no second one.
+        assert!(is.update("net", "pc", &down, &names(), 200, &mut mint).is_empty());
+        assert_eq!(is.list.len(), 1);
+        let back = map(vec![rec("w:wa1/c1", "w:wa1", "up", 300)]);
+        let ch = is.update("net", "pc", &back, &names(), 300, &mut mint);
+        assert_eq!(ch[0].0, Change::Recovered);
+        assert_eq!(is.list[0].outages, vec![Outage { from: 100, to: Some(300) }]);
+        // Down again: a record of its own (the first is closed).
+        let ch = is.update("net", "pc", &down, &names(), 400, &mut mint);
+        assert_eq!(ch[0].0, Change::Opened);
+        assert_eq!(is.list.len(), 2);
+    }
+
+    #[test]
+    fn one_raising_check_raises() {
+        let mut is = Issues::default();
+        let mut mint = minter();
+        let down = map(vec![Status { record_only: true, ..st("r1/p", "r1", "down", None, 100) }, st("r1/w", "r1", "down", None, 100)]);
+        let ch = is.update("net", "pc", &down, &names(), 120, &mut mint);
+        assert!(!ch[0].1.record_only && ch[0].1.is_open(), "a device with one check that raises raises: {:?}", ch[0].1);
     }
 }

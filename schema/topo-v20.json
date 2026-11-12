@@ -1,0 +1,1780 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://topo.carino.systems/schema/topo-v20.json",
+  "title": "Topo network file",
+  "description": "A Topo network file (document version 19): the envelope of a network's back-up or a binder, and every field of the document. The format is described in docs/FORMAT.md in the Topo repository. Files are saved as application/vnd.carino.topo+json with a .json extension, with \"$schema\" as the first key. Readers ignore \"$schema\"; nothing fetches this address. Records allow only the keys listed here (Topo drops any other on reading), except the envelopes.",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/networkFile"
+    },
+    {
+      "$ref": "#/$defs/binderFile"
+    },
+    {
+      "$ref": "#/$defs/document"
+    }
+  ],
+  "$defs": {
+    "networkFile": {
+      "description": "One network's back-up: the envelope Topo's \"Back up\" (.json) writes.",
+      "type": "object",
+      "required": [
+        "kind",
+        "doc"
+      ],
+      "properties": {
+        "$schema": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "nettopology"
+        },
+        "version": {
+          "type": "integer",
+          "description": "The envelope's own format version (1). The document's version is doc.v."
+        },
+        "name": {
+          "type": "string",
+          "description": "The network's card name."
+        },
+        "doc": {
+          "$ref": "#/$defs/document"
+        }
+      },
+      "additionalProperties": true
+    },
+    "binderFile": {
+      "description": "A binder: several networks (and templates or blocks) in one file.",
+      "type": "object",
+      "required": [
+        "kind",
+        "sites"
+      ],
+      "properties": {
+        "$schema": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "nettopo-binder"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "exported": {
+          "type": [
+            "string",
+            "number"
+          ],
+          "description": "When the file was written: an ISO date-time, or milliseconds since 1970."
+        },
+        "sites": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "doc"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "created": {
+                "type": "number"
+              },
+              "updated": {
+                "type": "number"
+              },
+              "template": {
+                "type": "boolean"
+              },
+              "block": {
+                "type": "boolean"
+              },
+              "rev": {
+                "type": "string",
+                "description": "The site's revision as it left (v17)."
+              },
+              "base": {
+                "type": "string",
+                "description": "The revision it was started from (v17)."
+              },
+              "prior": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Earlier revisions it carried, newest first (v17)."
+              },
+              "doc": {
+                "$ref": "#/$defs/document"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "document": {
+      "description": "A Topo document. Only nodes is required; a missing list is an empty one. Older documents (a lower v, or none) are migrated when they are opened.",
+      "type": "object",
+      "required": [
+        "nodes"
+      ],
+      "properties": {
+        "v": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Document version (20 here)."
+        },
+        "id": {
+          "type": "string"
+        },
+        "updated": {
+          "type": "number"
+        },
+        "rev": {
+          "type": "string",
+          "description": "Revision token of this copy as it left (v17): a new one whenever the content changed since the last copy that left. Identity, like id and updated: not part of the content."
+        },
+        "base": {
+          "type": "string",
+          "description": "Revision this copy was started from (v17): the base of a three-way merge when it comes back."
+        },
+        "prior": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Earlier revisions this document carried, newest first, at most 8 (v17)."
+        },
+        "nodes": {
+          "type": "array",
+          "description": "Devices. Each may name the providers responsible for it (providers: a list of provider ids, v18; v15-v17 wrote one id as provider).",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "links": {
+          "type": "array",
+          "description": "Cables. Each may name its providers (providers: a list of provider ids, v18).",
+          "items": {
+            "$ref": "#/$defs/link"
+          }
+        },
+        "networks": {
+          "type": "array",
+          "description": "Subnets.",
+          "items": {
+            "$ref": "#/$defs/network"
+          }
+        },
+        "groups": {
+          "type": "array",
+          "description": "Groups (buildings, floors, rooms, racks). Each may name its providers (providers: a list of provider ids, v18), which answer for every device inside for the services the device names nobody for.",
+          "items": {
+            "$ref": "#/$defs/group"
+          }
+        },
+        "wifi": {
+          "type": "array",
+          "description": "Wi-Fi networks.",
+          "items": {
+            "$ref": "#/$defs/wifi"
+          }
+        },
+        "providers": {
+          "type": "array",
+          "description": "Who is responsible for what: a name, a service, contact details, support hours, notes.",
+          "items": {
+            "$ref": "#/$defs/provider"
+          },
+          "maxItems": 100
+        },
+        "watch": {
+          "type": "array",
+          "maxItems": 64,
+          "description": "Watched addresses (v20): addresses the owner wrote down to be checked beside the devices, one each (never a range, a subnet or a wildcard).",
+          "items": {
+            "$ref": "#/$defs/watch"
+          }
+        },
+        "accepted": {
+          "type": "array",
+          "description": "Findings accepted with a reason.",
+          "items": {
+            "$ref": "#/$defs/findingNote"
+          }
+        },
+        "pinned": {
+          "type": "array",
+          "description": "Pinned findings.",
+          "items": {
+            "$ref": "#/$defs/findingNote"
+          }
+        },
+        "expectedLife": {
+          "type": "object",
+          "description": "Expected life in years, by device type.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "annotations": {
+          "type": "array",
+          "description": "Text notes on the map.",
+          "items": {
+            "$ref": "#/$defs/annotation"
+          }
+        },
+        "report": {
+          "type": "object",
+          "description": "The report header (site, client, engineer, ref, date, scope).",
+          "properties": {
+            "site": {
+              "type": "string"
+            },
+            "client": {
+              "type": "string"
+            },
+            "engineer": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string"
+            },
+            "date": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "columns": {
+          "type": "array",
+          "description": "Custom columns.",
+          "items": {
+            "$ref": "#/$defs/column"
+          },
+          "maxItems": 40
+        },
+        "tableView": {
+          "type": "object",
+          "description": "The Devices table's arrangement."
+        },
+        "searches": {
+          "type": "array",
+          "description": "Saved searches.",
+          "items": {
+            "$ref": "#/$defs/search"
+          }
+        },
+        "incidents": {
+          "type": "array",
+          "description": "Problem reports (v18), oldest first, at most 200: a client says what is wrong and where, Topo routes it to the providers responsible, and their visits come back as 'visit' log entries. From v19 an incident can be an outage (kind 'outage'): an issue raised by a monitoring PC.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "at",
+              "status",
+              "symptom"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "'in' and 10 base-36 characters; the same id is the same report wherever it travelled."
+              },
+              "at": {
+                "type": "number",
+                "description": "When it was reported, milliseconds since 1970."
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "sent",
+                  "visited",
+                  "closed"
+                ],
+                "description": "'open', 'sent', 'visited' or 'closed'; it only moves forward."
+              },
+              "reopened": {
+                "type": "integer",
+                "description": "How many times it was reopened."
+              },
+              "symptom": {
+                "enum": [
+                  "internet",
+                  "wifi",
+                  "phone",
+                  "camera",
+                  "printer",
+                  "power",
+                  "other"
+                ],
+                "description": "'internet', 'wifi', 'phone', 'camera', 'printer', 'power' or 'other'."
+              },
+              "nodeIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The devices with the problem."
+              },
+              "groupId": {
+                "type": "string"
+              },
+              "watchIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The watched addresses with the problem (v20)."
+              },
+              "text": {
+                "type": "string",
+                "description": "The client's words, at most 2000 characters."
+              },
+              "reporter": {
+                "type": "object",
+                "description": "Who reported it: name, phone, email (each optional).",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  }
+                }
+              },
+              "routedTo": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Provider ids it was sent to."
+              },
+              "sentAt": {
+                "type": "number"
+              },
+              "visits": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Ids of its 'visit' log entries."
+              },
+              "closedAt": {
+                "type": "number"
+              },
+              "closedNote": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "outage"
+                ],
+                "description": "'outage' (v19): an issue a monitoring PC raised (a device not answering), folded in; absent for a problem a person reported."
+              },
+              "outages": {
+                "type": "array",
+                "maxItems": 50,
+                "description": "An outage's times down while its issue was open, oldest first; no 'to' while it goes on.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "from": {
+                      "type": "number"
+                    },
+                    "to": {
+                      "type": "number"
+                    }
+                  }
+                }
+              },
+              "behind": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The devices down because of it (root cause)."
+              },
+              "monitor": {
+                "type": "string",
+                "description": "The PC that saw it."
+              },
+              "flapping": {
+                "const": true
+              },
+              "gone": {
+                "const": true,
+                "description": "The device left the monitored checks while down."
+              },
+              "recordOnly": {
+                "const": true,
+                "description": "The item was set to Record only (v20): no issue to act on, still in the reports."
+              },
+              "acts": {
+                "type": "array",
+                "maxItems": 20,
+                "description": "Who acted on an outage, oldest first: Acknowledge, Report a problem (with the report's id) or Expected (counted as maintenance). The first closes it.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "act",
+                    "at"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "act": {
+                      "enum": [
+                        "ack",
+                        "report",
+                        "expected"
+                      ]
+                    },
+                    "at": {
+                      "type": "number"
+                    },
+                    "by": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "reportId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "log": {
+          "type": "array",
+          "description": "The network log (v17), oldest first, at most 500.",
+          "items": {
+            "$ref": "#/$defs/logEntry"
+          },
+          "maxItems": 500
+        }
+      },
+      "additionalProperties": true
+    },
+    "iface": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name the device gives it (eth0, Gi1/0/1). May be empty."
+        },
+        "ip": {
+          "type": "string",
+          "description": "Its address with the prefix length, \"192.168.1.10/24\" (IPv4 or IPv6). Kept as typed when it does not parse; findings then say \"Invalid CIDR\". Empty: no address."
+        },
+        "mac": {
+          "type": "string",
+          "description": "MAC address, any common notation; compared as 12 hex digits. Omitted when empty."
+        },
+        "wireless": {
+          "type": "boolean",
+          "description": "Wireless (true), wired (false), or omitted: guessed from the name."
+        },
+        "bond": {
+          "type": "object",
+          "required": [
+            "mode",
+            "members"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "active-backup",
+                "802.3ad"
+              ]
+            },
+            "members": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Interface ids of the same device."
+            }
+          },
+          "additionalProperties": false,
+          "description": "A bond (LAG) of other interfaces of this device."
+        },
+        "vlan": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4094,
+          "description": "Untagged VLAN of a wired interface (v16)."
+        },
+        "tagged": {
+          "type": "string",
+          "description": "Tagged VLANs of a wired interface (v16)."
+        },
+        "radio": {
+          "type": "object",
+          "required": [],
+          "properties": {
+            "standard": {
+              "enum": [
+                "n",
+                "ac",
+                "ax",
+                "axe",
+                "be"
+              ]
+            },
+            "bands": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "band"
+                ],
+                "properties": {
+                  "band": {
+                    "enum": [
+                      "2.4",
+                      "5",
+                      "6"
+                    ]
+                  },
+                  "channel": {
+                    "type": "integer"
+                  },
+                  "width": {
+                    "enum": [
+                      20,
+                      40,
+                      80,
+                      160,
+                      320
+                    ]
+                  },
+                  "power": {
+                    "type": "integer",
+                    "minimum": -20,
+                    "maximum": 40
+                  },
+                  "ssids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Wi-Fi ids (doc.wifi) this band broadcasts; absent: all; empty: none."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false,
+          "description": "A wireless interface's radio (v12)."
+        }
+      },
+      "additionalProperties": false,
+      "description": "An interface of a device (IFACE_FIELDS in js/model.js)."
+    },
+    "node": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "type": {
+          "type": "string",
+          "description": "The device type: cloud, router, loadbalancer, l3switch, edge, firewall, vpn, switch, ap, server, vm, container, pc, voip, iot, printer, camera, dicom, custom, or another the palette adds."
+        },
+        "name": {
+          "type": "string",
+          "description": "Its name (\"Unnamed Node\" when none was given)."
+        },
+        "x": {
+          "type": "number",
+          "description": "Position on the map."
+        },
+        "y": {
+          "type": "number",
+          "description": "Position on the map."
+        },
+        "gw": {
+          "type": "string",
+          "description": "Default gateway."
+        },
+        "dns": {
+          "type": "string",
+          "description": "DNS servers, comma separated."
+        },
+        "vendor": {
+          "type": "string",
+          "description": "Make (v16)."
+        },
+        "model": {
+          "type": "string",
+          "description": "Model (v16)."
+        },
+        "os": {
+          "type": "string",
+          "description": "Firmware or operating system."
+        },
+        "ports": {
+          "type": "string",
+          "description": "Allowed ports, as text (\"443, 22\")."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free text."
+        },
+        "nat": {
+          "type": "boolean",
+          "description": "Does NAT (routing types)."
+        },
+        "siteRef": {
+          "type": "object",
+          "required": [],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "description": "A cloud that stands for another site of the client."
+        },
+        "portCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096,
+          "description": "Faceplate ports of a switch or AP; absent: its type's size or the highest port in use."
+        },
+        "portScheme": {
+          "type": "object",
+          "required": [],
+          "properties": {
+            "prefix": {
+              "type": "string",
+              "description": "Must not end in a digit."
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9999
+            }
+          },
+          "additionalProperties": false,
+          "description": "How the ports are named: prefix + (start + n - 1)."
+        },
+        "portAttrs": {
+          "type": "object",
+          "description": "What is written about each port, by port id p1, p2...",
+          "patternProperties": {
+            "^p[1-9][0-9]{0,3}$": {
+              "type": "object",
+              "required": [],
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "vlan": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4094,
+                  "description": "An 802.1Q VLAN, 1 to 4094."
+                },
+                "tagged": {
+                  "type": "string",
+                  "description": "VLANs as canonical text: \"all\", or numbers ascending with runs of three or more as a range (\"10,11,20-23\")."
+                },
+                "poe": {
+                  "type": [
+                    "string",
+                    "number"
+                  ],
+                  "description": "af, at, bt3, bt4, or watts 0.5 to 100."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "poeBudget": {
+          "type": "number",
+          "description": "Watts all PoE ports can give together (a switch or AP)."
+        },
+        "poeDraw": {
+          "type": "number",
+          "description": "Watts this device draws over PoE."
+        },
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/iface"
+          }
+        },
+        "serial": {
+          "type": "string"
+        },
+        "assetTag": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string",
+          "description": "Where it is, as text."
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "active",
+            "retired"
+          ]
+        },
+        "inService": {
+          "type": "string",
+          "description": "A date as much as is known: \"2021\", \"2021-03\" or \"2021-03-15\"."
+        },
+        "serviced": {
+          "type": "string",
+          "description": "A date as much as is known: \"2021\", \"2021-03\" or \"2021-03-15\"."
+        },
+        "serviceEvery": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Months between services."
+        },
+        "lifeYears": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Expected life in years, when not its type's."
+        },
+        "extra": {
+          "type": "object",
+          "description": "Values of the custom columns (doc.columns), by column id.",
+          "patternProperties": {
+            "^c[0-9a-z]{1,12}$": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "group": {
+          "type": "string",
+          "description": "The group (doc.groups) it is in."
+        },
+        "rackU": {
+          "type": "integer",
+          "minimum": -99,
+          "maximum": 99,
+          "description": "In a rack: the lowest unit it occupies, counted from the bottom whatever the rack's numbering."
+        },
+        "rackHeight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 99,
+          "description": "Units it takes (1 when absent)."
+        },
+        "rackFace": {
+          "enum": [
+            "front",
+            "rear"
+          ]
+        },
+        "rackDepth": {
+          "enum": [
+            "half"
+          ],
+          "description": "Half depth; absent: full depth."
+        },
+        "portsFace": {
+          "enum": [
+            "front",
+            "rear"
+          ],
+          "description": "Where its ports are, when not its type's side."
+        },
+        "host": {
+          "type": "string",
+          "description": "A VM or container: the device it runs on."
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Provider ids (doc.providers), v18."
+        },
+        "checks": {
+          "type": "array",
+          "maxItems": 8,
+          "description": "Answer checks (v19, docs/FORMAT.md \"Answer checks\"): what a desktop app turned into a monitor asks this device, one request and its reply each.",
+          "items": {
+            "$ref": "#/$defs/check"
+          }
+        },
+        "target": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 99.999,
+          "description": "Availability target in percent (v19), such as 99.5; the reports compare against it."
+        },
+        "outage": {
+          "const": "record",
+          "description": "v20: 'record': an outage of its checks is recorded only (no issue, no banner, no alarm); absent: it raises an issue."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A device (NODE_FIELDS in js/model.js)."
+    },
+    "cable": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "length": {
+          "type": "string",
+          "description": "\"2.5 m\", \"8 ft\", or free text."
+        },
+        "color": {
+          "type": "string"
+        },
+        "via": {
+          "type": "string",
+          "description": "What it runs through, as text."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A cable's own facts."
+    },
+    "link": {
+      "type": "object",
+      "required": [
+        "id",
+        "source",
+        "target"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "source": {
+          "type": "string",
+          "description": "Device id."
+        },
+        "target": {
+          "type": "string",
+          "description": "Device id."
+        },
+        "attachment": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "How it attaches (passthrough, or null: as drawn)."
+        },
+        "medium": {
+          "enum": [
+            "utp",
+            "fiber",
+            "wireless",
+            "powerline",
+            "vpn"
+          ],
+          "description": "Absent: guessed."
+        },
+        "sourceIface": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Interface id on source (a port grid port is p<n>)."
+        },
+        "targetIface": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Interface id on target."
+        },
+        "cable": {
+          "$ref": "#/$defs/cable"
+        },
+        "wifi": {
+          "type": "object",
+          "required": [],
+          "properties": {
+            "ssid": {
+              "type": "string",
+              "description": "Wi-Fi id (doc.wifi)."
+            },
+            "band": {
+              "enum": [
+                "2.4",
+                "5",
+                "6"
+              ]
+            },
+            "signal": {
+              "type": "integer",
+              "minimum": -100,
+              "maximum": 0,
+              "description": "dBm."
+            }
+          },
+          "additionalProperties": false
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Provider ids (doc.providers), v18."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A cable, radio association or VPN link (LINK_FIELDS)."
+    },
+    "network": {
+      "type": "object",
+      "required": [
+        "id",
+        "cidr"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "cidr": {
+          "type": "string",
+          "description": "The range, \"192.168.1.0/24\". Unique in the document."
+        },
+        "name": {
+          "type": "string"
+        },
+        "vlan": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4094,
+          "description": "An 802.1Q VLAN, 1 to 4094."
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "gateway": {
+          "type": "string"
+        },
+        "dns": {
+          "type": "string"
+        },
+        "dhcp": {
+          "type": "boolean"
+        },
+        "dhcpFirst": {
+          "type": "string"
+        },
+        "dhcpLast": {
+          "type": "string"
+        },
+        "drawZone": {
+          "type": "boolean",
+          "description": "Draw its zone; absent: private ranges only."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A subnet (NETWORK_FIELDS)."
+    },
+    "group": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "name": {
+          "type": "string",
+          "description": "Absent: shown as its kind."
+        },
+        "kind": {
+          "enum": [
+            "building",
+            "floor",
+            "room",
+            "rack",
+            "custom"
+          ]
+        },
+        "parent": {
+          "type": "string",
+          "description": "Group id."
+        },
+        "uHeight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 99,
+          "description": "A rack's height in units (42 when absent)."
+        },
+        "width": {
+          "enum": [
+            "10in",
+            "19in",
+            "23in"
+          ]
+        },
+        "depthMm": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3000
+        },
+        "numbering": {
+          "enum": [
+            "top"
+          ],
+          "description": "Units numbered from the top; absent: from the bottom."
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Provider ids (doc.providers), v18."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A building, floor, room, rack or other group (GROUP_FIELDS)."
+    },
+    "wifi": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "ssid": {
+          "type": "string"
+        },
+        "security": {
+          "enum": [
+            "open",
+            "owe",
+            "wpa2",
+            "wpa3",
+            "wpa2/3",
+            "wpa2-ent",
+            "wpa3-ent",
+            "wep",
+            "wpa"
+          ]
+        },
+        "bands": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "2.4",
+              "5",
+              "6"
+            ]
+          },
+          "description": "Bands it is on; absent: all."
+        },
+        "network": {
+          "type": "string",
+          "description": "Subnet id."
+        },
+        "hidden": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A Wi-Fi network (WIFI_FIELDS). Never holds a password."
+    },
+    "provider": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique among its kind in the document (an interface: on its device). An identity to the merge only when the document carried it (docs/FORMAT.md, \"Ids\")."
+        },
+        "name": {
+          "type": "string"
+        },
+        "service": {
+          "enum": [
+            "internet",
+            "phone",
+            "it",
+            "security",
+            "power",
+            "vendor",
+            "cloud",
+            "other"
+          ]
+        },
+        "contact": {
+          "type": "string"
+        },
+        "phone": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "account": {
+          "type": "string"
+        },
+        "hours": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "target": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 99.999,
+          "description": "Availability target in percent (v19), such as 99.5, for the devices they cover; the reports compare against it when a device has none of its own."
+        },
+        "targetHours": {
+          "const": true,
+          "description": "v19: the target counts only during their support hours (`hours`), when those read as days and times. Absent: around the clock."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Who is responsible for something (PROVIDER_FIELDS), at most 100."
+    },
+    "column": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^c[0-9a-z]{1,12}$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Unique in any case."
+        },
+        "kind": {
+          "enum": [
+            "text",
+            "number",
+            "date",
+            "yesno"
+          ],
+          "description": "Absent: text (Topo writes text as absent)."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A custom column (at most 40)."
+    },
+    "search": {
+      "type": "object",
+      "required": [
+        "name",
+        "query"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "columns": {
+          "type": [
+            "array",
+            "string"
+          ]
+        },
+        "sort": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "boolean"
+        },
+        "print": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A saved search (SEARCH_FIELDS)."
+    },
+    "annotation": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "text": {
+          "type": "string"
+        },
+        "style": {
+          "enum": [
+            "note"
+          ]
+        },
+        "size": {
+          "type": "number"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "A text note on the map."
+    },
+    "findingNote": {
+      "type": "object",
+      "required": [
+        "check"
+      ],
+      "properties": {
+        "check": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "nodeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "linkIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string"
+        },
+        "until": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "An accepted (reason, until) or pinned (note) finding, by its check, scope and what it names."
+    },
+    "logEntry": {
+      "type": "object",
+      "required": [
+        "id",
+        "at",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "description": "One entry of the network log (v17; the decision kind is v19). Append-only; prev is the SHA-256 (hex) of the previous entry's stable JSON, so an edit outside Topo shows.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "at": {
+          "type": "number",
+          "description": "Milliseconds since 1970."
+        },
+        "kind": {
+          "enum": [
+            "merge",
+            "incident",
+            "visit",
+            "decision"
+          ]
+        },
+        "prev": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "source": {
+          "type": "string"
+        },
+        "by": {
+          "type": "string"
+        },
+        "counts": {
+          "type": "object"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "two-way",
+            "three-way"
+          ]
+        },
+        "rev": {
+          "type": "string"
+        },
+        "incidentId": {
+          "type": "string"
+        },
+        "event": {
+          "type": "string"
+        },
+        "symptom": {
+          "type": "string"
+        },
+        "routedTo": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "arrived": {
+          "type": "number"
+        },
+        "left": {
+          "type": "number"
+        },
+        "outcome": {
+          "enum": [
+            "fixed",
+            "partly",
+            "not-fixed",
+            "follow-up",
+            "successful",
+            "not-successful",
+            "undecided"
+          ],
+          "description": "visit: how it went (fixed, partly, not-fixed, follow-up); decision (v19): the owner's judgement (successful, not-successful, undecided)."
+        },
+        "notes": {
+          "type": "string"
+        },
+        "changes": {
+          "type": "object"
+        },
+        "signoff": {
+          "type": "string"
+        },
+        "monitoring": {
+          "type": "object",
+          "required": [
+            "from",
+            "to",
+            "items",
+            "outages"
+          ],
+          "additionalProperties": false,
+          "description": "visit (v19, step 7i): what Monitor during this visit saw on the provider's PC. Times in ms; loss, avail and coverage 0..1; response times in ms.",
+          "properties": {
+            "from": {
+              "type": "number"
+            },
+            "to": {
+              "type": "number"
+            },
+            "compared": {
+              "const": true,
+              "description": "The site monitor's 7 days before the visit were read (each item's before)."
+            },
+            "unread": {
+              "const": true,
+              "description": "The site has a monitor whose figures could not be read: no comparison (not the same as no site monitor)."
+            },
+            "more": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Checks left out past the first 60."
+            },
+            "items": {
+              "type": "array",
+              "maxItems": 60,
+              "items": {
+                "type": "object",
+                "required": [
+                  "node",
+                  "proto",
+                  "asked",
+                  "answered",
+                  "coverage"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "node": {
+                    "type": "string"
+                  },
+                  "check": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "proto": {
+                    "type": "string"
+                  },
+                  "via": {
+                    "const": "tcp",
+                    "description": "A ping asked over TCP (TCP, not ping)."
+                  },
+                  "asked": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "answered": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "loss": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "avail": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "coverage": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "med": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "p95": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "step": {
+                    "type": "integer",
+                    "minimum": 1000
+                  },
+                  "rtt": {
+                    "type": "array",
+                    "maxItems": 48,
+                    "items": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "states": {
+                    "type": "string",
+                    "pattern": "^[usdq-]{0,48}$",
+                    "description": "One per point: u up, s slow, d down, q quiet, - unknown."
+                  },
+                  "before": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "med": {
+                        "type": "number"
+                      },
+                      "p95": {
+                        "type": "number"
+                      },
+                      "avail": {
+                        "type": "number"
+                      },
+                      "coverage": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "outages": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "required": [
+                  "node",
+                  "from"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "node": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "from": {
+                    "type": "number"
+                  },
+                  "to": {
+                    "type": "number"
+                  },
+                  "cause": {
+                    "type": "string"
+                  },
+                  "causeName": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "visits": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "description": "decision (v19): the ids of the visit entries it answers."
+        },
+        "visitBy": {
+          "type": "string",
+          "description": "decision (v19): the technician who made the visit."
+        },
+        "result": {
+          "enum": [
+            "approved",
+            "rejected"
+          ],
+          "description": "decision (v19): the visit's changes applied (approved) or not (rejected)."
+        },
+        "note": {
+          "type": "string",
+          "description": "decision (v19): the owner's note to the provider."
+        },
+        "file": {
+          "type": "string",
+          "description": "decision (v19): the file a rejected copy was kept as."
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "required": [
+        "id",
+        "proto"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+          "description": "Unique on its device; its states and statistics are kept under it."
+        },
+        "proto": {
+          "enum": [
+            "ping",
+            "tcp",
+            "http",
+            "https",
+            "dns",
+            "smtp",
+            "dicom",
+            "ntp",
+            "rtsp",
+            "sip",
+            "mllp",
+            "ipp",
+            "imap",
+            "pop"
+          ]
+        },
+        "ip": {
+          "type": "string",
+          "description": "Which of the device's own addresses (absent: its first)."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Absent: the protocol's own (http 80, https 443, dns 53, smtp 25, dicom 104, ntp 123, rtsp 554, sip 5060, mllp 2575, ipp 631, imap 143 or 993 with tls implicit, pop 110 or 995 with tls implicit). On a ping: the TCP port asked where the PC may not ping (\"TCP, not ping\")."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "http, https and rtsp: the page or stream asked for (absent: /); ipp: the printer's path (absent: /ipp/print)."
+        },
+        "name": {
+          "type": "string",
+          "description": "dns: the name asked for."
+        },
+        "starttls": {
+          "const": true,
+          "description": "smtp: STARTTLS, to read the certificate's end date."
+        },
+        "tls": {
+          "enum": [
+            "starttls",
+            "implicit"
+          ],
+          "description": "imap and pop: STARTTLS (STLS for pop) or TLS from the start, to read the certificate's end date (absent: neither)."
+        },
+        "transport": {
+          "const": "tcp",
+          "description": "sip: OPTIONS over TCP (absent: UDP)."
+        },
+        "calledAe": {
+          "type": "string",
+          "pattern": "^[\\x20-\\x5b\\x5d-\\x7e]{1,16}$",
+          "description": "dicom: the called AE title (absent: ANY-SCP)."
+        },
+        "callingAe": {
+          "type": "string",
+          "pattern": "^[\\x20-\\x5b\\x5d-\\x7e]{1,16}$",
+          "description": "dicom: the calling AE title (absent: TOPO)."
+        },
+        "interval": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 900,
+          "description": "Seconds between checks (absent: 60)."
+        },
+        "slowMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600000,
+          "description": "Slow when the median of the last 5 answers is above this (absent: never slow)."
+        },
+        "monitors": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string"
+          },
+          "description": "Which site monitors check it (absent: the monitors whose groups hold the device)."
+        }
+      },
+      "additionalProperties": false,
+      "description": "One answer check of a device (v19). No check takes a password."
+    },
+    "watch": {
+      "type": "object",
+      "required": [
+        "id",
+        "address"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "'wa' and a number; stable, for its checks' states and statistics."
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 253,
+          "description": "One IPv4 or IPv6 address, or one host name."
+        },
+        "group": {
+          "type": "string",
+          "description": "The group it is in; absent: the whole site."
+        },
+        "via": {
+          "type": "string",
+          "description": "The device it is reached through (root cause)."
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Provider ids, in the order of doc.providers."
+        },
+        "outage": {
+          "const": "raise",
+          "description": "'raise': an outage raises an issue; absent: Record only."
+        },
+        "target": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 99.999,
+          "description": "Availability target in percent."
+        },
+        "notes": {
+          "type": "string"
+        },
+        "checks": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/check"
+          },
+          "description": "Its answer checks, as a device's (without ip)."
+        }
+      }
+    }
+  }
+}

@@ -78,6 +78,10 @@ pub struct Item {
     pub chain: Vec<String>,
     /// The groups it is in, innermost first (for their quiet windows).
     pub groups: Vec<String>,
+    /// Record only (docs/SCOPE.md D373, step 8d): an outage is recorded (an
+    /// issue record, closed from the start, for the statistics and the
+    /// reports) but raises no issue, no banner and no alarm.
+    pub record_only: bool,
     /// The interval in milliseconds (set by normalize; the tests shorten it).
     #[serde(skip)]
     pub interval_ms: i64,
@@ -283,6 +287,8 @@ pub struct Status {
     /// Down, but its issue was closed as Expected (maintenance or planned
     /// work, step 7g): shown and recorded as quiet until it answers again.
     pub expected: bool,
+    /// The item is Record only (D373).
+    pub record_only: bool,
 }
 
 impl Status {
@@ -363,6 +369,7 @@ pub fn status_masked(it: &Item, t: &Track, cause: Option<&String>, quiet: &Quiet
         offset_ms: last.offset_ms,
         quiet_until: if q > now { Some(q) } else { None },
         expected: masked,
+        record_only: it.record_only,
     }
 }
 

@@ -94,8 +94,8 @@ class MergeRefused extends Error {
 
 // The order the plan lists items in (the review's), and the order kinds are
 // matched in (a kind after every kind its records name).
-const MERGE_KINDS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'incidents', 'annotations', 'searches', 'columns', 'accepted', 'pinned', 'report', 'expectedLife', 'tableView'];
-const MERGE_LIST_KINDS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'incidents', 'annotations', 'searches', 'columns'];
+const MERGE_KINDS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'watch', 'incidents', 'annotations', 'searches', 'columns', 'accepted', 'pinned', 'report', 'expectedLife', 'tableView'];
+const MERGE_LIST_KINDS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'watch', 'incidents', 'annotations', 'searches', 'columns'];
 const MERGE_NOTE_KINDS = ['accepted', 'pinned'];
 const MERGE_STATUSES = ['added', 'changed', 'unchanged', 'removed', 'conflict'];
 // What a record of each kind holds that is not compared field by field: its
@@ -103,7 +103,7 @@ const MERGE_STATUSES = ['added', 'changed', 'unchanged', 'removed', 'conflict'];
 // items) and the bags split into one field each (portAttrs, extra, cable).
 const MERGE_SKIP = {
     nodes: ['id', 'x', 'y', 'interfaces', 'portAttrs', 'extra'], links: ['id', 'cable'], ifaces: ['id'],
-    networks: ['id'], groups: ['id'], wifi: ['id'], providers: ['id'], incidents: ['id', 'status', 'reopened', 'closedAt', 'closedNote'], annotations: ['id', 'x', 'y'],
+    networks: ['id'], groups: ['id'], wifi: ['id'], providers: ['id'], watch: ['id'], incidents: ['id', 'status', 'reopened', 'closedAt', 'closedNote'], annotations: ['id', 'x', 'y'],
     searches: ['id'], columns: ['id'], accepted: ['check', 'scope', 'nodeIds', 'linkIds'], pinned: ['check', 'scope', 'nodeIds', 'linkIds'],
     report: [], expectedLife: []
 };
@@ -496,9 +496,14 @@ function mergeRemap(ctx, kind, rec) {
         if (Array.isArray(r.nodeIds)) r.nodeIds = r.nodeIds.map((x) => mgRef(ctx, 'nodes', x));
         if (Array.isArray(r.behind)) r.behind = r.behind.map((x) => mgRef(ctx, 'nodes', x));
         if (r.groupId !== undefined) r.groupId = mgRef(ctx, 'groups', r.groupId);
+        if (Array.isArray(r.watchIds)) r.watchIds = r.watchIds.map((x) => mgRef(ctx, 'watch', x));
         if (Array.isArray(r.routedTo)) r.routedTo = r.routedTo.map((x) => mgRef(ctx, 'providers', x));
     } else if (kind === 'wifi') {
         if (r.network !== undefined) r.network = mgRef(ctx, 'networks', r.network);
+    } else if (kind === 'watch') {
+        if (r.via !== undefined) r.via = mgRef(ctx, 'nodes', r.via);
+        if (r.group !== undefined) r.group = mgRef(ctx, 'groups', r.group);
+        if (Array.isArray(r.providers)) r.providers = r.providers.map((x) => mgRef(ctx, 'providers', x));
     } else if (kind === 'annotations') {
         r.targets = (r.targets || []).map((x) => (ctx.T.nodeIds.has(x) ? mgRef(ctx, 'nodes', x) : mgRef(ctx, 'annotations', x)));
     } else if (kind === 'searches') {
@@ -535,6 +540,7 @@ function mergeLabel(kind, rec, names) {
     case 'networks': return rec.name ? `${rec.cidr} (${rec.name})` : rec.cidr;
     case 'groups': return rec.name || rec.kind || rec.id;
     case 'wifi': return rec.ssid || rec.id;
+    case 'watch': return rec.name ? `${rec.name} (${rec.address})` : rec.address || rec.id;
     case 'providers': return rec.name || rec.service || rec.id;
     case 'incidents': return [rec.symptom, String(rec.text || '').slice(0, 60)].filter(Boolean).join(': ') || rec.id;
     case 'annotations': return String(rec.text || '').slice(0, 60) || rec.id;
@@ -568,6 +574,8 @@ function planMerge(mine, theirs, base, opts = {}) {
     simple('providers', (p) => mgLower(p.name || p.service), 'name', (m, t) => differ(mgLower(m.name || m.service), mgLower(t.name || t.service)));
     simple('networks', (n) => mgLower(n.cidr), 'range');
     simple('wifi', (w) => w.ssid || '', 'ssid', (m, t) => differ(m.ssid || '', t.ssid || ''));
+    // Watched addresses (v20): by the address; an id match with another address is another one.
+    simple('watch', (w) => mgLower(w.address), 'address', (m, t) => differ(mgLower(m.address), mgLower(t.address)));
 
     // Groups: by path (Building / Floor / Room / Rack: names only, so it
     // needs no ids mapped first).
@@ -710,7 +718,7 @@ function planMerge(mine, theirs, base, opts = {}) {
 
     // Caps: what would not fit is not added (a note says so).
     mergeIncidentCap(ctx, items);
-    const caps = { providers: PROVIDER_MAX, searches: SEARCH_MAX, columns: CUSTOM_MAX };
+    const caps = { providers: PROVIDER_MAX, watch: WATCH_MAX, searches: SEARCH_MAX, columns: CUSTOM_MAX };
     Object.keys(caps).forEach((kind) => {
         let room = caps[kind] - mgList(M.doc, kind).length;
         for (let i = 0; i < items.length; i++) {
