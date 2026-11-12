@@ -363,11 +363,18 @@ async function incidentLinkFor(id, opts = {}) {
     if (!canSeal()) why = 'no-seal';
     else {
         const pass = String(opts.passphrase || '');
+        // The link's reply tag (D367, D368): the copy sent back carries it,
+        // and the passphrase kept under it here opens that copy unasked.
+        const tag = newReplyTag();
         try {
             if (pass.length < SEAL_MIN_PASSPHRASE) throw new Error('passphrase');
-            url = await buildShareLink('doc', true, pass, partDoc ? { doc: partDoc, max: _incHooks.urlMax() } : { incidents: true, max: _incHooks.urlMax() });
+            url = await buildShareLink('doc', true, pass, Object.assign({ max: _incHooks.urlMax(), tag }, partDoc ? { doc: partDoc } : { incidents: true }));
         } catch (e) { return failed(e); }
         if (!url) why = 'too-long';
+        else {
+            rememberReplyTag(tag, { pass, cardId: state.libraryId || null, docId: state.docId || null, incidentId: id,
+                to: to.map((p) => providerById(p)).filter(Boolean).map(providerLabel) });
+        }
     }
     if (!url) file = downloadIncidentFile('incident', partDoc);
     const inc = incidentById(id);
@@ -383,7 +390,7 @@ async function incidentLinkFor(id, opts = {}) {
 const _pb = {
     open: false, stage: 'form', gen: 0, busy: false, picking: false,
     symptom: '', nodeIds: [], groupId: '', text: '', name: '', phone: '', email: '', remember: true,
-    sendTo: [], ticksTouched: false, incidentId: null, send: null,
+    sendTo: [], ticksTouched: false, incidentId: null, send: null, forProvider: null,
     fromIssue: null     // the outage this report is made from (js/issues.js, step 7g)
 };
 const problemDialogOpen = () => _pb.open;
@@ -391,7 +398,7 @@ const problemDialogOpen = () => _pb.open;
 function resetProblemDraft() {
     const rep = state.settings.reporter || {};
     Object.assign(_pb, { stage: 'form', busy: false, picking: false, symptom: '', nodeIds: [], groupId: '', text: '',
-        name: rep.name || '', phone: rep.phone || '', email: rep.email || '', remember: true, sendTo: [], ticksTouched: false, incidentId: null, send: null, fromIssue: null });
+        name: rep.name || '', phone: rep.phone || '', email: rep.email || '', remember: true, sendTo: [], ticksTouched: false, incidentId: null, send: null, fromIssue: null, forProvider: null });
     // The device selected now is the likely one.
     if (state.selectedType === 'node' && state.selectedId && getNode(state.selectedId)) _pb.nodeIds = [state.selectedId];
 }
@@ -399,6 +406,18 @@ function resetProblemDraft() {
 function openProblemDialog() {
     if (state.readOnly) { readOnlyRefuses(); return; }
     resetProblemDraft();
+    showProblemSheet();
+}
+// Report a problem to them (a provider's card, D365): the same sheet, this
+// provider ticked as the recipient, no device picked (the form asks for one
+// as usual; the routing may tick others, which can be unticked), and on the
+// send step their report attached.
+function openProblemFor(providerId) {
+    if (state.readOnly) { readOnlyRefuses(); return; }
+    if (!providerById(providerId)) return;
+    resetProblemDraft();
+    _pb.nodeIds = [];
+    _pb.forProvider = providerId;
     showProblemSheet();
 }
 // Send again, or the send step of a report saved earlier.
@@ -415,7 +434,7 @@ function showProblemSheet() {
     const scrim = incEl('problemDialog');
     _pb.open = true;
     _pb.gen++;
-    if (window.CarinoUI) CarinoUI.modal.open(scrim, { onClose: () => { if (!_pb.picking) { _pb.open = false; _pb.gen++; } } });
+    if (window.CarinoUI) CarinoUI.modal.open(scrim, { onClose: () => { if (!_pb.picking && !_pb.printing) { _pb.open = false; _pb.gen++; } } });
     else scrim.hidden = false;
     renderProblemDialog();
 }
@@ -423,13 +442,30 @@ function closeProblemDialog() {
     const scrim = incEl('problemDialog');
     if (window.CarinoUI && CarinoUI.modal.isOpen(scrim)) CarinoUI.modal.close(scrim, 'answered');
     else scrim.hidden = true;
-    if (!_pb.picking) { _pb.open = false; _pb.gen++; }
+    if (!_pb.picking && !_pb.printing) { _pb.open = false; _pb.gen++; }
+}
+// Print their report (D401): the sheet steps aside while the preview is
+// open (a modal's focus trap would hold the preview's controls) and comes
+// back as it was, the link and the attachment still on their way: unlike a
+// pick it is not a new sheet, so nothing in flight is dropped.
+function problemSheetAside() {
+    _pb.printing = true;
+    closeProblemDialog();
+}
+function problemSheetBack() {
+    if (!_pb.printing) return;
+    _pb.printing = false;
+    if (!_pb.open) return;
+    const scrim = incEl('problemDialog');
+    if (window.CarinoUI) CarinoUI.modal.open(scrim, { onClose: () => { if (!_pb.picking && !_pb.printing) { _pb.open = false; _pb.gen++; } } });
+    else scrim.hidden = false;
+    renderProblemDialog();
 }
 
 // The idle lock (js/idlelock.js, D218): the open form's draft, plain, so
 // the lock can keep it in the tab while the page is cleared, and reopen it
 // after the unlock. Only the form: the send step's report is already saved.
-const PROBLEM_DRAFT_FIELDS = ['symptom', 'nodeIds', 'groupId', 'text', 'name', 'phone', 'email', 'remember', 'sendTo', 'ticksTouched', 'incidentId', 'fromIssue'];
+const PROBLEM_DRAFT_FIELDS = ['symptom', 'nodeIds', 'groupId', 'text', 'name', 'phone', 'email', 'remember', 'sendTo', 'ticksTouched', 'incidentId', 'fromIssue', 'forProvider'];
 function problemDraftForLock() {
     if (!_pb.open || _pb.stage !== 'form') return null;
     if (!_pb.picking) readProblemForm();
@@ -451,6 +487,7 @@ function reopenProblemDraft(d) {
     _pb.ticksTouched = !!d.ticksTouched;
     _pb.incidentId = typeof d.incidentId === 'string' && incidentById(d.incidentId) ? d.incidentId : null;
     _pb.fromIssue = typeof d.fromIssue === 'string' && incidentById(d.fromIssue) ? d.fromIssue : null;
+    _pb.forProvider = typeof d.forProvider === 'string' && providerById(d.forProvider) ? d.forProvider : null;
     showProblemSheet();
     return true;
 }
@@ -604,13 +641,21 @@ function contactRow(r, opts = {}) {
 }
 function renderProblemContacts() {
     const route = problemRoute();
-    if (!_pb.ticksTouched) _pb.sendTo = defaultSendTo(route);
+    // The provider whose card opened the sheet: first, and ticked (D365).
+    const pinned = _pb.forProvider ? providerById(_pb.forProvider) : null;
+    if (!_pb.ticksTouched) {
+        _pb.sendTo = defaultSendTo(route);
+        if (pinned && !_pb.sendTo.includes(pinned.id)) _pb.sendTo.unshift(pinned.id);
+    }
+    const results = route.results.filter((r) => !pinned || r.provider.id !== pinned.id);
+    if (pinned) results.unshift(route.results.find((r) => r.provider.id === pinned.id) || { provider: pinned, reason: t('Chosen from their card') });
+    const empty = !results.length;
     const none = incEl('problemNoProvider');
-    none.textContent = route.empty ? route.sentence : '';
-    none.classList.toggle('hidden', !route.empty);
+    none.textContent = empty ? route.sentence : '';
+    none.classList.toggle('hidden', !empty);
     const list = incEl('problemContacts');
     list.textContent = '';
-    route.results.forEach((r) => list.appendChild(contactRow(r, { tick: true })));
+    results.forEach((r) => list.appendChild(contactRow(r, { tick: true })));
 }
 
 // Save (and maybe go on to Send).
@@ -658,18 +703,24 @@ function enterSendStage() {
     }
     // What the link carries (D95): only what the chosen providers look
     // after, by default and every time; the whole network on request.
-    const scope = problemPartOf(_pb.sendTo) ? 'part' : 'whole';
+    const part = problemPartOf(_pb.sendTo);
+    const scope = part ? 'part' : 'whole';
     const hits = problemSendHits(scope);
+    // Opened from a provider's card and still going to them: their report
+    // goes with it (D365), as if Also attach the report were ticked.
+    const attach = !!(part && _pb.forProvider && _pb.sendTo.includes(_pb.forProvider));
     // A network on a Topo server, providers who are not all members: the
     // link as below, then the server emails it when it can (D87).
     const mail = typeof serverMailRoute === 'function' ? serverMailRoute(state.libraryId, _pb.sendTo) : null;
     _pb.send = { pass: canSeal() ? generatePassphrase() : '', shown: false, hits, result: null, busy: false, copied: '', failCount: 0,
-        scope, part: problemPartOf(_pb.sendTo), mail, mailed: false, mailNote: '',
-        attach: false, attachBusy: false, attachFile: null, attachError: '', attachDownloaded: false, attachGen: 0 };
+        scope, part, mail, mailed: false, mailNote: '',
+        attach, attachBusy: false, attachFile: null, attachError: '', attachDownloaded: false, attachGen: 0 };
     renderProblemDialog();
     // Nothing to warn about: the link is made at once. Otherwise the
     // warning is read first, and the link waits for a tap.
     if (!hits.length) makeIncidentLink();
+    // After the link (problemOneAtATime): the link is what the step waits on.
+    if (attach) buildProblemAttachment();
 }
 
 // The chosen providers' part of the open network (counts for the send
@@ -703,7 +754,7 @@ async function makeIncidentLink() {
     renderProblemDialog();
     const gen = _pb.gen;
     let res;
-    try { res = await sendIncident(_pb.incidentId, { providerIds: _pb.sendTo, passphrase: s.pass, server: !!s.server, scope: s.scope }); }
+    try { res = await problemOneAtATime(() => sendIncident(_pb.incidentId, { providerIds: _pb.sendTo, passphrase: s.pass, server: !!s.server, scope: s.scope })); }
     catch (e) { console.warn('Report: send failed', e); res = { ok: false, reason: 'build' }; }
     if (gen !== _pb.gen || _pb.send !== s) return;
     if (res.ok) s.sentOnce = true;
@@ -734,7 +785,7 @@ async function rebuildIncidentLink() {
     const gen = _pb.gen;
     const mine = s.linkGen = (s.linkGen || 0) + 1;
     let res;
-    try { res = await incidentLinkFor(_pb.incidentId, { providerIds: _pb.sendTo, passphrase: s.pass, scope: s.scope }); }
+    try { res = await problemOneAtATime(() => incidentLinkFor(_pb.incidentId, { providerIds: _pb.sendTo, passphrase: s.pass, scope: s.scope })); }
     catch (e) { console.warn('Report: the link could not be made again', e); res = { ok: false, reason: 'build' }; }
     if (gen !== _pb.gen || _pb.send !== s || s.linkGen !== mine) return;
     s.busy = false;
@@ -835,6 +886,16 @@ function recomposeProblemMessage(s) {
     const res = s && s.result;
     if (res && res.compose) res.message = res.compose({ attachment: s.attach && s.attachFile ? s.attachFile.name : '' });
 }
+// The report file borrows the page's document while it draws (withDoc,
+// js/providerreport.js), so the link, which reads the open network, never
+// runs at the same time: one after the other, in the order asked. Attached
+// from the start (Report a problem to them, D401) both are asked at once.
+let _pbQueue = Promise.resolve();
+function problemOneAtATime(fn) {
+    const run = _pbQueue.then(fn, fn);
+    _pbQueue = run.catch(() => {});
+    return run;
+}
 async function buildProblemAttachment() {
     const s = _pb.send;
     if (!s || !s.attach || !s.part) return;
@@ -845,8 +906,8 @@ async function buildProblemAttachment() {
     const gen = _pb.gen;
     let f = null;
     try {
-        f = await _incHooks.reportFile(s.part.providerIds, { incidentId: _pb.incidentId, audience: 'client',
-            format: s.mail && s.mail.relay && !s.mailFailed ? 'pdf' : undefined });
+        f = await problemOneAtATime(() => _incHooks.reportFile(s.part.providerIds, { incidentId: _pb.incidentId, audience: 'client',
+            format: s.mail && s.mail.relay && !s.mailFailed ? 'pdf' : undefined }));
     } catch (e) { console.warn('Report: the provider report could not be made', e); f = null; }
     if (gen !== _pb.gen || _pb.send !== s || s.attachGen !== mine) return;
     s.attachBusy = false;
@@ -958,8 +1019,11 @@ function renderProblemScope(s) {
     incEl('problemScopePartText').textContent = t(ids.length === 1 ? 'Only what {names} looks after' : 'Only what {names} look after', { names });
     const c = (s.result && s.result.counts) || s.part.counts;
     incEl('problemScopeCount').textContent = [tn(c.items, '1 device of theirs', '{n} devices of theirs'),
-        tn(c.context, '1 linked device around them', '{n} linked devices around them')].join(' · ');
+        tn(c.context, '1 linked device around them', '{n} linked devices around them'),
+        c.leftOut ? tn(c.leftOut, '1 device on their ports left out', '{n} devices on their ports left out') : ''].filter(Boolean).join(' · ');
     row.querySelectorAll('input[name="problemScope"]').forEach((r) => { r.checked = r.value === s.scope; r.disabled = !!s.busy; });
+    const printBtn = incEl('problemPrintTheirs');
+    if (printBtn) printBtn.textContent = t('Print their report');
     const box = incEl('problemAttach'), note = incEl('problemAttachNote');
     if (!box || !note) return;
     box.checked = !!s.attach;
@@ -1153,6 +1217,17 @@ function problemDialogLocale() {
     if (scopeRow) scopeRow.addEventListener('change', (e) => {
         if (e.target.name === 'problemScope' && e.target.checked) setProblemScope(e.target.value);
         else if (e.target.id === 'problemAttach') setProblemAttach(e.target.checked);
+    });
+    // Print their report (D365): the recipients' report, to print or save.
+    const printBtn = incEl('problemPrintTheirs');
+    if (printBtn) printBtn.addEventListener('click', () => {
+        const s = _pb.send;
+        if (!s || !s.part || typeof openProviderReport !== 'function') return;
+        const ids = s.part.providerIds;
+        problemSheetAside();
+        openProviderReport(ids.length === 1 ? ids[0] : ids, { doc: serializeDoc(), incidentId: _pb.incidentId, audience: 'client', onClose: problemSheetBack })
+            .then((r) => { if (!r) problemSheetBack(); })
+            .catch((e) => { console.warn('Report: the provider report could not be made', e); showToast(t('Could not build the report.'), 'err'); problemSheetBack(); });
     });
     incEl('problemPassShow').addEventListener('click', () => { if (_pb.send) { _pb.send.shown = !_pb.send.shown; renderProblemDialog(); } });
     incEl('problemPassCopy').addEventListener('click', problemCopyPass);
@@ -1506,7 +1581,7 @@ function incidentsReportSection(incidents, log) {
 window.TopoIncidents = {
     hooks: _incHooks, draft: _pb, INCIDENT_MAILTO_MAX, infraLinkHtml, incidentCopyRich, linesToHtml, tHtml,
     commitIncidentChange, createIncident, sendIncident, incidentLinkFor, setProblemScope, setProblemAttach, buildProblemAttachment, serverMailReady, mailThroughServer, problemEmail, PROBLEM_ATTACH_SERVER_MAX, problemPartOf, composeIncidentMessage, incidentDraftProblems, keepForIncident,
-    incidentWhereText, incidentSiteName, downloadIncidentFile, openProblemDialog, openIncidentSend, closeProblemDialog, problemDraftForLock, reopenProblemDraft,
+    incidentWhereText, incidentSiteName, downloadIncidentFile, openProblemDialog, openProblemFor, openIncidentSend, closeProblemDialog, problemDraftForLock, reopenProblemDraft,
     startProblemPick, endProblemPick, defaultSendTo, telHref,
     markIncidentFixed, reopenIncident, askMarkFixed, askReopen, openIncidentNodeIds, liveIncidents, incidentLogText, renderIncidentsPanel,
     renderIncidentsUi, renderProblemsSimple, openIncidentsView, landingProblemsText, incidentsReportSection, incidentStatusText, incidentById

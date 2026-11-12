@@ -243,6 +243,9 @@ function normalizePortAttrs(v) {
         if (tagged !== undefined) rec.tagged = tagged;
         const poe = asPortPoe(a.poe);
         if (poe !== undefined) rec.poe = poe;
+        // A provider's part only: a cable left out of it uses the port
+        // (js/providerpart.js, D364). Never in the client's network.
+        if (a.partUsed === true) rec.partUsed = true;
         if (Object.keys(rec).length) out[k] = rec;
     });
     return Object.keys(out).length ? out : undefined;
@@ -266,6 +269,10 @@ function portAttrOf(node, portId) {
     return { label: a && typeof a.label === 'string' ? a.label : '', vlan: vlan === undefined ? null : vlan,
         tagged: tagged === undefined ? null : tagged, poe: poe === undefined ? null : poe };
 }
+// A port a cable left out of a provider's part uses (D364): in use, though
+// no cable here lands on it.
+const portUsedAway = (node, portId) => !!(node && node.portAttrs && PORT_ID_RE.test(portId || '')
+    && Object.prototype.hasOwnProperty.call(node.portAttrs, portId) && node.portAttrs[portId] && node.portAttrs[portId].partUsed === true);
 // Whether anything is written about the port: the faceplate's dot, its
 // list's count and the report's free-port rows read this.
 const hasPortAttrs = (node, portId) => { const a = portAttrOf(node, portId); return !!a.label || a.vlan !== null || a.tagged !== null || a.poe !== null; };
@@ -2859,7 +2866,7 @@ const PORT_CAPACITY_MIN = 4;
 function portUsedTest(node) {
     const busy = new Set();
     linksAtNode(node.id).forEach((l) => busy.add(ifaceIdOn(l, node.id)));
-    const test = (id) => busy.has(id) || isBond(explicitIface(node, id)) || isBondMember(node, id);
+    const test = (id) => busy.has(id) || isBond(explicitIface(node, id)) || isBondMember(node, id) || portUsedAway(node, id);
     test.busy = busy;
     return test;
 }

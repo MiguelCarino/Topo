@@ -3,11 +3,18 @@
 //   1. the rule on a hand-made network: a group naming a provider brings
 //      ALL its members, nested groups included, even one a nearer provider
 //      of the same service covers (the owner, 2026-11-10); the host chain
-//      (D35: a VM and its container through the server); two cable hops,
-//      exactly: a radio association is a hop, a VPN tunnel is not, and a
-//      problem report's device beyond two hops comes as "where the problem
-//      is"; every kept cable has both ends; groups needed to place a kept
-//      device come with their parents;
+//      (D35: a VM and its container through the server); the context is the
+//      way to the network, not the neighbourhood (D363): the nearest two
+//      devices toward the router (for a router, toward the Internet or its
+//      upstream router), a VPN tunnel is not a way, the far end of a cable
+//      they answer for comes, and a problem report's device off the way
+//      comes as "where the problem is"; every kept cable has both ends;
+//      groups needed to place a kept device come with their parents;
+//   1b. what hangs below is left out (D364): a switch with forty PCs goes
+//      with its router only, its forty ports marked in use (not in your
+//      part), counted; the loader keeps the mark and a marked port is used;
+//      the merge strips it; a router's way to the Internet, or to its
+//      upstream router when there is none;
 //   2. what a linked device keeps (name, type, place, its facing ports in
 //      full, its other addresses) and never (notes, serial, other
 //      providers); a cable between two linked devices goes reduced;
@@ -21,8 +28,8 @@
 //   5. no provider chosen (or none the network holds): the whole network;
 //      the same part twice is the same; the part of the part is the part
 //      (partOfSelf);
-//   6. every sample, every provider: items field-identical, two hops at
-//      most, both ends kept, context keys allowed only, no foreign provider
+//   6. every sample, every provider: items field-identical (but the
+//      in-use marks), two devices of a way at most, both ends kept, context keys allowed only, no foreign provider
 //      after the loader, group parents present; the largest under 200 ms.
 window.addEventListener('load', async () => {
   const out = [];
@@ -115,21 +122,27 @@ window.addEventListener('load', async () => {
        && show(sorted(pa.items.nodes)) === show(['ap', 'pc', 'srv', 'sw', 'vm']) && show(sorted(pa.items.groups)) === show(['gSub', 'gTop']), show(sorted(pa.items.nodes)));
     ok('their cables: the ones between their devices', show(sorted(pa.items.links)) === show(['l4', 'l5', 'l6']), show(sorted(pa.items.links)));
     const hopOf = (part, id) => (part.context.get(id) || {}).hop;
-    ok('two hops: the core switch and the laptop on the radio at one, the router, the NAS and the host at two', hopOf(pa, 'core') === 1 && hopOf(pa, 'lap') === 1
-       && hopOf(pa, 'rt') === 2 && hopOf(pa, 'nas') === 2 && hopOf(pa, 'hs') === 2, show([...pa.context].map(([k, v]) => [k, v.hop])));
-    ok('nothing at three: no Internet, no backup, no guest of the host', ['isp', 'bk', 'hvm', 'ct', 'remote'].every((id) => !pa.context.has(id) && !pa.items.nodes.has(id)));
-    ok('the counts', pa.counts.items === 5 && pa.counts.context === 5, show(pa.counts));
+    ok('the way to the network: the core switch first, the router second, and nothing else', hopOf(pa, 'core') === 1 && hopOf(pa, 'rt') === 2 && pa.context.size === 2
+       && pa.context.get('core').why.has('path'), show([...pa.context].map(([k, v]) => [k, v.hop])));
+    ok('not the neighbourhood: not the laptop on their AP, not the NAS or the server beside the core, no Internet, no guest',
+       ['lap', 'nas', 'hs', 'isp', 'bk', 'hvm', 'ct', 'remote'].every((id) => !pa.context.has(id) && !pa.items.nodes.has(id)));
+    ok('the counts: the laptop on their radio left out', pa.counts.items === 5 && pa.counts.context === 2 && pa.counts.leftOut === 1 && pa.counts.busyPorts === 0, show(pa.counts));
     const ph = TP.providerPart(doc, ['pH']);
     ok('Host Co: the server, and through it its VM and the VM\'s container (D35)', show(sorted(ph.items.nodes)) === show(['ct', 'hs', 'hvm']), show(sorted(ph.items.nodes)));
     ok('the container keeps its host chain on load', (() => { const c = canonicalDoc(ph.doc); return c.nodes.find((n) => n.id === 'ct').host === 'hvm' && c.nodes.find((n) => n.id === 'hvm').host === 'hs'; })());
     const pc = TP.providerPart(doc, ['pC'], { incidentId: 'inX' });
-    ok('Cable ISP: the router at one, the core at two; the remote office over a VPN tunnel is not a hop', pc.items.nodes.has('isp') && hopOf(pc, 'rt') === 1 && hopOf(pc, 'core') === 2
-       && !pc.context.has('remote') && !pc.context.has('sw'), show([...pc.context].map(([k, v]) => [k, v.hop, [...v.why]])));
+    ok('Cable ISP: the router, where their line meets the network; nothing past it; the remote office over a VPN tunnel is not a way', pc.items.nodes.has('isp') && hopOf(pc, 'rt') === 1
+       && !pc.context.has('core') && !pc.context.has('remote') && !pc.context.has('sw'), show([...pc.context].map(([k, v]) => [k, v.hop, [...v.why]])));
     ok('the report being sent: its device, three hops off, comes as where the problem is', pc.context.has('bk') && pc.context.get('bk').hop === null && pc.context.get('bk').why.has('problem')
        && show(pc.incidents) === '["inX"]', show(pc.context.get('bk') && [...pc.context.get('bk').why]));
     const pb = TP.providerPart(doc, ['pB']);
     ok('Beta IT: the Server room, their own PC, the core switch and its NAS cable they are named on', ['srv', 'vm', 'pc', 'core'].every((id) => pb.items.nodes.has(id)) && pb.items.links.has('l9')
-       && pb.items.nodes.has('nas') === false && hopOf(pb, 'nas') === 1, show(sorted(pb.items.nodes)));
+       && pb.items.nodes.has('nas') === false && hopOf(pb, 'nas') === 1 && pb.context.get('nas').why.has('cable-end'), show(sorted(pb.items.nodes)));
+    ok('their server\'s way: the access switch, then the router (the core between is theirs)', hopOf(pb, 'sw') === 1 && hopOf(pb, 'rt') === 1, show([...pb.context].map(([k, v]) => [k, v.hop])));
+    const pbCore = pb.doc.nodes.find((n) => n.id === 'core');
+    ok('the server beside their core is left out, and its port goes marked in use; their own ports keep what is written', !pb.context.has('hs') && pb.counts.leftOut === 1 && pb.counts.busyPorts === 1
+       && show(pbCore.portAttrs.p6) === show({ partUsed: true }) && show(pbCore.portAttrs.p5) === show({ label: 'secret desk' }) && pbCore.portAttrs.p1.partUsed === undefined, show(pbCore.portAttrs));
+    ok('the mark is the part\'s: the network itself is untouched', doc.nodes.find((n) => n.id === 'core').portAttrs.p6 === undefined);
     const keptIds = (p) => new Set(p.doc.nodes.map((n) => n.id));
     const bothEnds = (p) => { const k = keptIds(p); return p.doc.links.every((l) => k.has(l.source) && k.has(l.target)); };
     ok('every kept cable has both ends kept', [pa, ph, pc, pb].every(bothEnds));
@@ -137,21 +150,51 @@ window.addEventListener('load', async () => {
     ok('the groups to place them, with their parents: Annex room and Annex', ['gTop', 'gSub', 'gOffR', 'gOff'].every((g) => pa.doc.groups.some((x) => x.id === g))
        && !pa.doc.groups.some((x) => x.id === 'gFar') && show(sorted(pa.contextGroups)) === show(['gOff', 'gOffR']), show(pa.doc.groups.map((g) => g.id)));
 
+    // ---- 1b. A switch with forty PCs (D364) ----
+    const forty = (cloud) => {
+      const nodes = [N('up', 'router'), N('rt', 'router', { providers: ['pR'] }), N('sw', 'switch', { portCount: 48, providers: ['pX'], portAttrs: { p3: { label: 'Desk 3' } } })];
+      const links = [{ id: 'k1', source: 'up', target: 'rt' }, { id: 'k2', source: 'rt', target: 'sw', targetIface: 'p48' }];
+      if (cloud) { nodes.unshift(N('isp', 'cloud')); links.push({ id: 'k0', source: 'isp', target: 'up' }); }
+      for (let i = 1; i <= 40; i++) { nodes.push(N('pc' + i, 'pc')); links.push({ id: 'kp' + i, source: 'sw', target: 'pc' + i, sourceIface: 'p' + i, targetIface: 'i1' }); }
+      return canonicalDoc({ v: DOC_VERSION, providers: [{ id: 'pX', name: 'Switch Co', service: 'it' }, { id: 'pR', name: 'Router Co', service: 'it' }], nodes, links });
+    };
+    const fd = forty(true);
+    const px = TP.providerPart(fd, ['pX']);
+    const pxSw = px.doc.nodes.find((n) => n.id === 'sw');
+    ok('forty PCs: the switch goes with its router only', show(sorted(px.doc.nodes.map((n) => n.id))) === show(['rt', 'sw']) && hopOf(px, 'rt') === 1 && px.context.size === 1, show(px.doc.nodes.map((n) => n.id)));
+    ok('the forty are counted as left out, their forty ports marked in use', px.counts.leftOut === 40 && px.counts.busyPorts === 40
+       && Array.from({ length: 40 }, (_, i) => 'p' + (i + 1)).every((p) => pxSw.portAttrs[p] && pxSw.portAttrs[p].partUsed === true)
+       && pxSw.portAttrs.p48 === undefined && pxSw.portAttrs.p3.label === 'Desk 3', show(px.counts));
+    const pxCanon = canonicalDoc(px.doc);
+    const pxSw2 = pxCanon.nodes.find((n) => n.id === 'sw');
+    ok('the loader keeps the mark', pxSw2.portAttrs.p40.partUsed === true && show(pxSw2.portAttrs.p3) === show({ label: 'Desk 3', partUsed: true }));
+    const cap = withDoc(pxCanon, () => { const s = getNode('sw'); return { cap: portCapacity(s), next: freePorts(s, 1).ids, away: portUsedAway(s, 'p7'), free: portUsedAway(s, 'p41') }; });
+    ok('at the provider: a marked port is used, the next free is past them', cap.cap.used === 41 && cap.cap.free === 7 && show(cap.next) === '["p41"]' && cap.away && !cap.free, show(cap));
+    const inSw = mergeInput(pxCanon).doc.nodes.find((n) => n.id === 'sw');
+    ok('the merge strips the mark, so it is never written into the client\'s network', show(inSw.portAttrs) === show({ p3: { label: 'Desk 3' } }), show(inSw.portAttrs));
+    const plan = TopoMerge.planMerge(fd, pxCanon, pxCanon, { part: { nodes: new Set(['rt']), groups: new Set(), known: new Set(fd.nodes.map((n) => n.id).concat(fd.links.map((l) => l.id))) } });
+    const changed = (plan.items || []).filter((x) => x.status && x.status !== 'unchanged');
+    ok('and a copy back that changed nothing merges as nothing: the forty are not removed, the ports not changed', changed.length === 0, show(changed.map((x) => [x.kind, x.id, x.status])));
+    const pr = TP.providerPart(fd, ['pR']);
+    ok('a router\'s way: toward the Internet, its upstream router then the cloud; the switch below it left out', hopOf(pr, 'up') === 1 && hopOf(pr, 'isp') === 2 && !pr.context.has('sw') && pr.counts.leftOut === 1,
+       show([...pr.context].map(([k, v]) => [k, v.hop])));
+    const pr2 = TP.providerPart(forty(false), ['pR']);
+    ok('with no Internet drawn: its upstream router', hopOf(pr2, 'up') === 1 && pr2.context.size === 1, show([...pr2.context].map(([k, v]) => [k, v.hop])));
+
     // ---- 2. What a linked device keeps ----
     const core = pa.doc.nodes.find((n) => n.id === 'core');
     const allowed = new Set(TP.PART_CONTEXT_KEYS.concat(['host', 'portAttrs', 'interfaces']));
     ok('a linked device: name, type, place and ports, nothing else', !!core && Object.keys(core).every((k) => allowed.has(k)) && core.name === 'CORE' && core.group === 'gOffR' && core.portCount === 24,
        show(core));
     ok('never its notes, its serial or its providers', core.notes === undefined && core.serial === undefined && core.providers === undefined);
-    ok('the port facing their switch, in full; not the others', show(core.portAttrs) === show({ p1: { label: 'to SW', vlan: 30 }, p2: { label: 'to NAS' } }), show(core.portAttrs));
+    ok('the port facing their switch, in full; not the others', show(core.portAttrs) === show({ p1: { label: 'to SW', vlan: 30 } }), show(core.portAttrs));
     const rt = pa.doc.nodes.find((n) => n.id === 'rt');
     ok('the router at two hops: its addresses only (its LAN), not an empty port', show(rt.interfaces) === show([{ id: 'i2', name: 'lan', ip: '10.0.0.1/24' }]) && rt.notes === undefined && rt.serial === undefined, show(rt.interfaces));
-    const lap = pa.doc.nodes.find((n) => n.id === 'lap');
-    ok('the laptop: its radio, facing the AP, in full', lap.interfaces.length === 1 && lap.interfaces[0].wireless === true && lap.interfaces[0].ip === '10.9.0.5/24' && lap.notes === undefined);
+    ok('the laptop on their radio is not sent, nor its association', !pa.doc.nodes.some((n) => n.id === 'lap') && !pa.doc.links.some((l) => l.id === 'l7'));
     const item = pa.doc.nodes.find((n) => n.id === 'sw');
     ok('their own devices in full: notes, serial', item.notes === 'sw notes' && item.serial === 'SW-1' && pa.doc.nodes.find((n) => n.id === 'pc').notes === 'pc notes');
-    const l9 = pa.doc.links.find((l) => l.id === 'l9'), l3 = pa.doc.links.find((l) => l.id === 'l3');
-    ok('a cable between two linked devices: its ends and ports only', !!l9 && l9.cable === undefined && l9.providers === undefined && l9.sourceIface === 'p2' && l9.targetIface === 'i1', show(l9));
+    const l2 = pa.doc.links.find((l) => l.id === 'l2'), l3 = pa.doc.links.find((l) => l.id === 'l3');
+    ok('a cable between two linked devices: its ends and ports only', !!l2 && l2.cable === undefined && l2.providers === undefined && l2.sourceIface === 'i2' && l2.targetIface === 'p24', show(l2));
     ok('a cable to one of theirs: in full', !!l3 && show(l3.cable) === show({ label: 'C-3' }));
     ok('the subnets their devices use, and the VLAN their port carries; not one elsewhere', show(sorted((pa.doc.networks || []).map((n) => n.id))) === show(['nL', 'nV']), show((pa.doc.networks || []).map((n) => n.id)));
     ok('the custom columns their devices use', show((pa.doc.columns || []).map((c) => c.id)) === '["col1"]');
@@ -197,6 +240,14 @@ window.addEventListener('load', async () => {
     const bad = [];
     let parts = 0, slowest = 0, slowestKey = '', biggest = { key: '', items: 0, context: 0 };
     const keys = TEMPLATE_META.map((m) => m.key).flatMap((k) => [k, k + SIMPLE_SUFFIX]).filter((k) => templatesData[k]);
+    // An item as the network holds it: the part's in-use marks off.
+    const unmark = (n) => {
+      if (!n.portAttrs) return n;
+      const c = JSON.parse(JSON.stringify(n));
+      Object.keys(c.portAttrs).forEach((k) => { delete c.portAttrs[k].partUsed; if (!Object.keys(c.portAttrs[k]).length) delete c.portAttrs[k]; });
+      if (!Object.keys(c.portAttrs).length) delete c.portAttrs;
+      return c;
+    };
     keys.forEach((k) => {
       const d = canonicalDoc(migrateDoc(cloneData(templatesData[k])).doc);
       const byId = new Map(d.nodes.map((n) => [n.id, n]));
@@ -210,7 +261,7 @@ window.addEventListener('load', async () => {
         if (part.counts.context > biggest.context) biggest = { key: `${k}/${p.id}`, items: part.counts.items, context: part.counts.context };
         const kept = new Set(part.doc.nodes.map((n) => n.id));
         part.doc.nodes.forEach((n) => {
-          if (part.items.nodes.has(n.id)) { if (show(n) !== show(byId.get(n.id))) bad.push(`${k}/${p.id}: item ${n.id} differs`); }
+          if (part.items.nodes.has(n.id)) { if (show(unmark(n)) !== show(byId.get(n.id))) bad.push(`${k}/${p.id}: item ${n.id} differs`); }
           else if (!Object.keys(n).every((x) => allowed.has(x))) bad.push(`${k}/${p.id}: ${n.id} keeps ${Object.keys(n).filter((x) => !allowed.has(x))}`);
         });
         part.context.forEach((c, id) => { if (c.hop !== null && c.hop > 2) bad.push(`${k}/${p.id}: ${id} at hop ${c.hop}`); if (c.hop === null && !c.why.has('problem')) bad.push(`${k}/${p.id}: ${id} has no hop`); });
@@ -231,7 +282,8 @@ window.addEventListener('load', async () => {
     // The strings.
     const { has, locales } = window.CarinoI18N;
     const strs = ['{list} and {last}', 'What the link carries', 'The whole network', 'Only what {names} looks after', 'Only what {names} look after',
-      '1 device of theirs', '{n} devices of theirs', '1 linked device around them', '{n} linked devices around them'];
+      '1 device of theirs', '{n} devices of theirs', '1 linked device around them', '{n} linked devices around them',
+      '1 device on their ports left out', '{n} devices on their ports left out', 'Port {port}: in use (not in your part)'];
     locales.forEach((loc) => { const missing = strs.filter((s) => !has(loc, s)); ok(`${loc} carries the part's strings`, !missing.length, missing.join(' | ')); });
   } catch (e) {
     ok('the suite ran to the end', false, e && (e.stack || e.message));

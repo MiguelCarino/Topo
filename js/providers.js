@@ -122,8 +122,8 @@ function providerCardHtml(p) {
         <div class="net-actions">
             <button type="button" class="link-btn" data-act="covers" data-pv="${id}" ${covered ? '' : 'disabled'}
                 title="${escapeHtml(t('Select every device and cable this provider is responsible for and show them on the map'))}">${escapeHtml(t('Select what it covers'))}</button>
-            <button type="button" class="link-btn" data-act="report" data-pv="${id}"
-                title="${escapeHtml(t('What this provider looks after here, the devices around it, the cables and their problems: print it, or save it as a PDF or HTML'))}">${escapeHtml(t('Report for this provider'))}</button>
+            <button type="button" class="link-btn" data-act="problem" data-pv="${id}"
+                title="${escapeHtml(t('Report a problem with what they look after: they are ticked as the recipient and their report goes with it'))}">${escapeHtml(t('Report a problem to them'))}</button>
             ${window.TopoReports ? `<button type="button" class="link-btn" data-act="monitoring" data-pv="${id}"
                 title="${escapeHtml(t('Availability of their devices against their target, response times and outages over a period'))}">${escapeHtml(t('Monitoring report'))}</button>` : ''}
             <button type="button" class="link-btn" data-act="sharepart" data-pv="${id}"
@@ -211,13 +211,15 @@ async function onProviderAction(e) {
         return;
     }
     if (act === 'covers') { selectProviderCovers(id); return; }
-    // Their report (D98): a read-only network prints too.
-    if (act === 'report') { if (typeof openProviderReport === 'function') await openProviderReport(id, { doc: serializeDoc(), audience: 'client' }); return; }
+    // Their report (D98) is Export's Provider report… and the send step's
+    // Print their report (D365).
     // Their monitoring report (js/reports.js, step 7j).
     if (act === 'monitoring') { if (window.TopoReports) await TopoReports.openMonitoringReport({ scope: 'provider', id, period: 'month' }); return; }
     if (readOnlyRefuses()) return;
     // Their part as a locked link (js/share.js), any time.
     if (act === 'sharepart') { openShareDialog('doc', { providerIds: [id] }); return; }
+    // Report a problem to them (js/incidents.js, D365).
+    if (act === 'problem') { if (typeof openProblemFor === 'function') openProblemFor(id); return; }
     if (act === 'preset') { addProviderPreset(id); return; }
     if (act === 'delete') await deleteProvider(id);
 }
@@ -442,4 +444,22 @@ const removeProviderFrom = (rec, id) => (rec ? setProviders(rec, providerRefsOf(
         removeProviderFrom(link, x.dataset.pvRemove);
         renderLinkProviderPicker(getLink(link.id) || link);
     });
+    // Export's Provider report… (D365): one provider's report with no
+    // problem attached; a read-only network prints too.
+    const prBtn = pvEl('providerReportBtn');
+    if (prBtn) prBtn.addEventListener('click', () => {
+        if (typeof closeConfigMenu === 'function') closeConfigMenu();
+        openProviderReportPicker();
+    });
 })();
+
+// Which provider's report: the only one at once, else a pick.
+async function openProviderReportPicker() {
+    const list = (state.providers || []).filter((p) => p && p.id);
+    if (!list.length) { showToast(t('This network has no providers yet. Add one in the Providers tab.')); return null; }
+    const id = list.length === 1 ? list[0].id : await askPick(t('Whose report?'), { title: t('Provider report'), ok: t('Open the report'),
+        rows: list.map((p) => ({ id: p.id, label: providerLabel(p), detail: providerServiceLabel(p.service) })) });
+    if (!id || typeof openProviderReport !== 'function') return null;
+    try { return await openProviderReport(id, { doc: serializeDoc(), audience: 'client' }); }
+    catch (e) { console.warn('Report: the provider report could not be made', e); showToast(t('Could not build the report.'), 'err'); return null; }
+}

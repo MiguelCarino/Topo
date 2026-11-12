@@ -341,10 +341,11 @@ window.addEventListener('load', async () => {
     ok('6.12 the second review lists the new visit only', !!mB.review && mB.review.notes.filter((n) => n.startsWith('Visit by ')).length === 1 && mB.review.notes.some((n) => n.startsWith('Visit by Beto Fibra (Fibra Norte)')), show(mB.review && mB.review.notes));
 
     // ---- 7. Only their part (D91-D95) ----
-    // The client's network grows past Andes IT's reach: a distribution
-    // switch beside their switch (a linked device, hop 1, with a port facing
-    // it), a camera behind it (hop 2), and further off an NVR and a server
-    // (three hops: outside the part).
+    // The client's network grows past Andes IT's reach. Their switch now
+    // reaches the router through a distribution switch (on their way, first,
+    // with a port facing it) and a camera's bridge (second); the router
+    // beyond, an NVR hanging off the camera and a server on the Internet
+    // side are off their way: outside the part (D363).
     {
       const cl = () => CarinoLibrary.loadLibrary();
       batch(() => {
@@ -353,8 +354,10 @@ window.addEventListener('load', async () => {
         state.nodes.push(N('iot', 'camera', { name: 'Hall cam', x: 300, y: 300, notes: 'iot secret', serial: 'CAM-9' }));
         state.nodes.push(N('nvr', 'nas', { name: 'NVR', x: 400, y: 300, notes: 'nvr notes' }));
         state.nodes.push(N('far1', 'server', { name: 'Far server', x: 100, y: -100 }));
+        state.links = state.links.filter((l) => l.id !== 'l2');
         state.links.push({ id: 'l7a', source: 'sw', target: 'dist', targetIface: 'p1' });
         state.links.push({ id: 'l7b', source: 'dist', target: 'iot', sourceIface: 'p5' });
+        state.links.push({ id: 'l7e', source: 'iot', target: 'rt' });
         state.links.push({ id: 'l7c', source: 'iot', target: 'nvr' });
         state.links.push({ id: 'l7d', source: 'isp', target: 'far1' });
         getNode('rt').notes = 'router private notes';
@@ -374,8 +377,8 @@ window.addEventListener('load', async () => {
       const part3 = await unseal(sent3.url);
       const partDoc3 = JSON.parse(part3);
       const lib3 = cl();
-      ok('7.1 the part leaves: their devices and the ones around them, not the far ones', sent3.ok && sent3.scope === 'part'
-         && ['sw', 'pc', 'dist', 'iot'].every((id) => partDoc3.nodes.some((n) => n.id === id)) && !partDoc3.nodes.some((n) => outsideIds.includes(n.id)), show(partDoc3.nodes.map((n) => n.id)));
+      ok('7.1 the part leaves: their devices and the two on their way, not the far ones', sent3.ok && sent3.scope === 'part'
+         && ['sw', 'pc', 'dist', 'iot'].every((id) => partDoc3.nodes.some((n) => n.id === id)) && !partDoc3.nodes.some((n) => outsideIds.concat(['rt']).includes(n.id)), show(partDoc3.nodes.map((n) => n.id)));
       ok('7.2 held here as a part, named on the card; the card\'s own revision untouched', RV.revisionWhy(K, partDoc3.rev) === 'part' && (lib3[K].partRevs || []).includes(partDoc3.rev)
          && lib3[K].rev !== partDoc3.rev && show(partDoc3.prior || []).includes(lib3[K].rev), show([lib3[K].rev, partDoc3.rev, partDoc3.prior]));
       ok('7.3 the linked devices go without their notes and serials, the client\'s notes about Andes stay home', !partDoc3.nodes.find((n) => n.id === 'dist').notes

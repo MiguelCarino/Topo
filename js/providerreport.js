@@ -92,7 +92,8 @@ const prPort = (label) => (/^\d+$/.test(String(label || '')) ? `${t('Port')} ${l
 
 const PR_HOP_WORD = { 1: 'Hop 1', 2: 'Hop 2' };
 // What a linked device is to them: a hop, a host their devices run on, or
-// where the problem is (a device a kept report names beyond two hops).
+// where the problem is (a device a kept report names off their way). Hop 1
+// and Hop 2: the first and second device on their way to the network (D363).
 function providerContextRole(c) {
     if (c.hop === 1 || c.hop === 2) return { key: `hop${c.hop}`, text: t(PR_HOP_WORD[c.hop]) };
     if (c.why.has('host')) return { key: 'host', text: t('Runs their devices') };
@@ -326,15 +327,18 @@ async function providerMonitoringOf(doc, ids) {
 // the model; null (and a toast) when the network does not name them.
 async function openProviderReport(providerId, opts = {}) {
     const doc = opts.doc || serializeDoc();
-    const part = providerPart(doc, [providerId], { incidentId: opts.incidentId || null });
+    // One provider, or several (the recipients of a problem, D365).
+    const ids = Array.isArray(providerId) ? providerId : [providerId];
+    const part = providerPart(doc, ids, { incidentId: opts.incidentId || null });
     if (part.whole) { showToast(t('This network does not name that provider.'), 'err'); return null; }
     const image = await providerReportImage(part.doc);
     const first = providerReportModel(doc, providerId, opts);
     if (!first) return null;
-    const monitoring = await providerMonitoringOf(doc, [providerId]);
+    const monitoring = await providerMonitoringOf(doc, ids);
     const kind = providerSheetKind(first.name);
     let model = first;
-    const out = openSheetPreview({ kind, meta: first.meta, build: () => {
+    // opts.onClose: called once the preview is closed (the problem sheet comes back, D401).
+    const out = openSheetPreview({ kind, meta: first.meta, onClose: opts.onClose, build: () => {
         model = providerReportModel(doc, providerId, opts) || model;
         return providerReportHtml(model, image, monitoring);
     } });

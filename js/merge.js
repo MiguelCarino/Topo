@@ -167,6 +167,18 @@ function mergeInput(doc) {
     if (migrateDoc(doc).newer) throw new MergeRefused('newer');
     const raw = mergeRawIds(doc);
     const canon = canonicalDoc(doc);
+    // A provider's part marks the ports its left-out cables use (D364); the
+    // client's network has those cables, never the mark.
+    (Array.isArray(canon.nodes) ? canon.nodes : []).forEach((n) => {
+        if (!n || !n.portAttrs || typeof n.portAttrs !== 'object') return;
+        Object.keys(n.portAttrs).forEach((k) => {
+            const a = n.portAttrs[k];
+            if (!a || a.partUsed === undefined) return;
+            delete a.partUsed;
+            if (!Object.keys(a).length) delete n.portAttrs[k];
+        });
+        if (!Object.keys(n.portAttrs).length) delete n.portAttrs;
+    });
     const log = Array.isArray(canon.log) ? canon.log : [];
     delete canon.log;
     const rev = typeof doc.rev === 'string' ? doc.rev : null;

@@ -123,6 +123,7 @@ window.addEventListener('load', async () => {
 
     // ---- 1. The provider opens it, in a browser that does not hold it ----
     CarinoLibrary.persistLibrary({});
+    localStorage.removeItem('topo_reply_tags');   // nor the passphrase the client kept for the reply (D367)
     clearSessions();
     const unsealed = await unsealFragment(fragOf(sent.url), PASS);
     // The real way in: the unlock dialog answered with the passphrase, which
@@ -296,11 +297,11 @@ window.addEventListener('load', async () => {
     ok('the message: who, how, the problem, the notes, the changes, the sign-off, the link', shortMsg.body.startsWith('Visit by Juan Pérez (Fibra Norte): Fixed.\nProblem: No internet\nWhere: Reception PC\nArrived: ')
        && shortMsg.body.includes('\n\nReplaced the modem cable.\n') && shortMsg.body.includes('Changes to the network: 2.') && shortMsg.body.includes('Signed off by: Ana')
        && shortMsg.body.includes('\nOpen the infrastructure link in Topo and keep it to bring the visit into your network.\nInfrastructure link:\n\nThe passphrase is the one you sent with the problem.')
-       && !shortMsg.body.includes('t.example') && shortMsg.body.endsWith('The passphrase is the one you sent with the problem.'), shortMsg.body);
+       && !shortMsg.body.includes('t.example') && shortMsg.body.endsWith('The passphrase is the one you sent with the problem.\nIn the Topo app: Export, Open a link…, and paste the link.'), shortMsg.body);
     ok('the full message has the raw link, the rich one the hyperlink', shortMsg.fullBody.includes('Follow the infrastructure link: https://t.example/#e~abc')
        && shortMsg.html.includes('<a href="https://t.example/#e~abc">Follow the infrastructure link</a>'), shortMsg.html);
     const newPass = PM.composeVisitMessage({ incident: inc, entry, site: 'R', link: 'https://t.example/#e~abc', sealed: true, samePass: false });
-    ok('a new passphrase: sent separately', newPass.body.endsWith('The passphrase comes separately: I will send it by another way.'));
+    ok('a new passphrase: sent separately', newPass.body.endsWith('The passphrase comes separately: I will send it by another way.\nIn the Topo app: Export, Open a link…, and paste the link.'), newPass.body);
     const filed = PM.composeVisitMessage({ incident: Object.assign({}, inc, { reporter: { name: 'Ana', phone: '555-1' } }), entry, site: 'R', file: 'topo_a_b_2026-11-09_visit.json' });
     ok('a file, and a reporter with no email: no address, attach it', filed.to.length === 0 && filed.body.includes('topo_a_b_2026-11-09_visit.json') && !filed.body.includes('passphrase'));
     PM.closeVisitDialog();
@@ -471,6 +472,7 @@ window.addEventListener('load', async () => {
     try { PM.closeVisitDialog(); } catch (e) { /* closed */ }
     try { if (PM.state.on) PM.leaveProviderMode(); } catch (e) { /* off */ }
     clearSessions();
+    try { localStorage.removeItem('topo_reply_tags'); } catch (e) { /* storage blocked */ }
     Object.assign(H, { open: held.open, copy: held.copy, copyRich: held.copyRich, share: held.share, canShare: held.canShare, now: held.now });
     window.saveBlob = held.saveBlob;
     CarinoLibrary.persistLibrary(heldLib);

@@ -106,10 +106,10 @@ window.addEventListener('load', async () => {
     const swPorts = dev('Core SW').ports;
     ok('the switch\'s ports and VLANs', swPorts.some((r) => r.label === 'Port 1' && r.vlan === '10' && r.peer === 'Box') && swPorts.some((r) => r.label === 'Port 2' && r.vlan === '20' && r.tagged.includes('30')), show(swPorts));
     const ctx = Object.fromEntries(m.context.map((c) => [c.name, c]));
-    ok('linked devices: hop 1, hop 2, where the problem is never needed here', ctx.Edge && ctx.Edge.role === 'hop1' && ctx.Modem && ctx.Modem.role === 'hop2' && !ctx.Internet && !ctx['Far PC'], show(m.context.map((c) => [c.name, c.role])));
+    ok('linked devices: their way to the network ends at the router; the modem and the Internet past it are not theirs to see (D363)', ctx.Edge && ctx.Edge.role === 'hop1' && !ctx.Modem && !ctx.Internet && !ctx['Far PC'], show(m.context.map((c) => [c.name, c.role])));
     ok('a linked device: the port facing theirs and its addresses', ctx.Edge.facing[0].port === 'lan' && ctx.Edge.facing[0].peer === 'Core SW' && ctx.Edge.facing[0].theirs
        && show(ctx.Edge.addresses) === show(['200.1.1.1/30', '10.0.0.1/24']), show(ctx.Edge));
-    ok('the cables, theirs first, ports at both ends', m.cables.length === 3 && m.cables[0].theirs && !m.cables[2].theirs
+    ok('the cables, theirs first, ports at both ends', m.cables.length === 2 && m.cables[0].theirs && m.cables[1].theirs
        && m.cables.some((c) => c.from === 'Box' && c.fromIface === 'eth0' && c.to === 'Core SW' && c.toIface === 'Port 1'), show(m.cables));
     ok('this problem, with who reported it', m.incident && m.incident.text === 'Nothing loads since 9.' && m.incident.reporter.phone === '5551', show(m.incident));
     ok('their other open problem, not one elsewhere', m.problems.length === 1 && m.problems[0].id === 'inO', show(m.problems));
@@ -136,7 +136,7 @@ window.addEventListener('load', async () => {
     ok('every section', ['problem', 'devices', 'linked', 'cables', 'problems', 'visits'].every((c) => !!dom.querySelector(`section.${c}`)), [...dom.querySelectorAll('section')].map((s) => s.className).join(','));
     ok('the header: site, client, contact and their record', html.includes('Reception · Clinica Sol') && html.includes('Ana · 5551 · ana@x.example') && html.includes('C-42') && html.includes('a@alfa.example'));
     ok('their devices\' serials, MAC and VLANs', html.includes('SN-SW') && html.includes('SN-BOX') && html.includes('00:11:22:33:44:55') && html.includes('VLAN 20') && html.includes('Tagged 30,40'));
-    ok('hop marks', dom.querySelectorAll('.hop-hop1').length === 1 && dom.querySelectorAll('.hop-hop2').length === 1);
+    ok('hop marks', dom.querySelectorAll('.hop-hop1').length === 1 && dom.querySelectorAll('.hop-hop2').length === 0);
     const leaks = ['SN-SECRET', 'Router notes', 'SN-MOD', 'Beta IT', 'B secret', 'They overcharge', 'Private scope notes', 'Elsewhere', 'Eve'].filter((s) => html.includes(s));
     ok('nothing it must not carry', !leaks.length, leaks.join(' | '));
     ok('no table and no finding: blocks the preview counts', !dom.querySelector('table') && dom.querySelectorAll('.dev-block').length >= 6 && !/Critical|Advisory/.test(html));
@@ -251,6 +251,10 @@ window.addEventListener('load', async () => {
     const strs = new Set();
     for (const mt of req.responseText.matchAll(/\bt\(\s*([^;]*?)(?:,\s*\{|\))/g)) for (const s of mt[1].matchAll(/'((?:[^'\\]|\\.)*)'/g)) strs.add(s[1].replace(/\\'/g, '\''));
     ['Hop 1', 'Hop 2', 'Devices CSV', 'Cables CSV'].forEach((s) => strs.add(s));
+    // Report a problem to them and Provider report… (D365).
+    ['Report a problem to them', 'Report a problem with what they look after: they are ticked as the recipient and their report goes with it', 'Chosen from their card',
+      'Print their report', '🧾 Provider report…', 'Provider report', 'Whose report?', 'Open the report', 'This network has no providers yet. Add one in the Providers tab.',
+      'Port {port}: in use (not in your part)'].forEach((s) => strs.add(s));
     ok('the module\'s strings found', strs.size > 30, String(strs.size));
     locales.forEach((loc) => { const missing = [...strs].filter((s) => !has(loc, s)); ok(`${loc} carries the report's strings`, !missing.length, missing.join(' | ')); });
     setLocale('ja');
@@ -279,17 +283,24 @@ window.addEventListener('load', async () => {
       ok('the file: a PDF', !!fp && fp.type === 'application/pdf' && /_alfa-it\.pdf$/.test(fp.name) && (await fp.blob.slice(0, 5).text()) === '%PDF-', fp && fp.name);
     }
     ok('the canvas is the network again after the file', state.nodes.length === full.nodes.length);
-    // The Providers tab: Report for this provider, Share their part.
+    // The Providers tab: Report a problem to them, Share their part (D365).
     showConfigTab('providers');
     renderProvidersPanel(true);
     const card = document.querySelector('.pv-card[data-pv="pA"]');
-    ok('the card has Report for this provider and Share their part', !!card && !!card.querySelector('[data-act="report"]') && !!card.querySelector('[data-act="sharepart"]')
-       && card.querySelector('[data-act="report"]').textContent === 'Report for this provider' && card.querySelector('[data-act="sharepart"]').textContent === 'Share their part');
-    card.querySelector('[data-act="report"]').click();
+    ok('the card has Report a problem to them and Share their part, no Report for this provider', !!card && !!card.querySelector('[data-act="problem"]') && !!card.querySelector('[data-act="sharepart"]')
+       && !card.querySelector('[data-act="report"]') && card.querySelector('[data-act="problem"]').textContent === 'Report a problem to them'
+       && card.querySelector('[data-act="sharepart"]').textContent === 'Share their part');
+    // Export's Provider report…: a pick among the providers, then their report.
+    const heldResponder = setDialogResponder((req) => { picked.push(req); return req.kind === 'pick' ? 'pA' : undefined; });
+    const picked = [];
+    el('providerReportBtn').click();
     await until(() => !el('sheetPreviewDialog').classList.contains('hidden') && sheetPreviewBuilt(), 600);
-    ok('Report for this provider: the preview, titled with their name', el('sheetPreviewTitle').textContent === 'Alfa IT\'s part of this network'
+    ok('Export\'s Provider report…: whose report is asked, every provider listed', picked.length === 1 && picked[0].kind === 'pick' && picked[0].message === 'Whose report?'
+       && show(picked[0].rows.map((r) => r.id)) === show(full.providers.map((p) => p.id)), show(picked.map((r) => [r.kind, r.message])));
+    ok('then the preview, titled with their name', el('sheetPreviewTitle').textContent === 'Alfa IT\'s part of this network'
        && /_alfa-it\.(html|pdf)$/.test(el('sheetPreviewName').textContent), el('sheetPreviewTitle').textContent + ' ' + el('sheetPreviewName').textContent);
     closeSheetPreview();
+    setDialogResponder(heldResponder);
     document.querySelector('.pv-card[data-pv="pA"] [data-act="sharepart"]').click();
     await tick();
     ok('Share their part: the share dialog on their part, no incidents row', !el('shareDialog').classList.contains('hidden') && el('shareTitle').textContent === 'Share their part'
@@ -331,17 +342,89 @@ window.addEventListener('load', async () => {
       try { if (heldClip) navigator.clipboard.writeText = heldClip; } catch (e) { /* read-only */ }
     }
     closeShareDialog();
-    // Read-only: the report still opens; Share their part is refused.
+    // Read-only: the report still opens; a problem and Share their part are refused.
     state.readOnly = { doc: cloneData(serializeDoc()), loaded: JSON.stringify(serializeDoc()) };
     renderProvidersPanel(true);
-    document.querySelector('.pv-card[data-pv="pA"] [data-act="report"]').click();
-    await until(() => !el('sheetPreviewDialog').classList.contains('hidden') && sheetPreviewBuilt(), 600);
-    ok('a read-only network still prints their report', !el('sheetPreviewDialog').classList.contains('hidden'));
-    closeSheetPreview();
+    {
+      const held = setDialogResponder((req) => (req.kind === 'pick' ? 'pA' : undefined));
+      el('providerReportBtn').click();
+      await until(() => !el('sheetPreviewDialog').classList.contains('hidden') && sheetPreviewBuilt(), 600);
+      ok('a read-only network still prints their report', !el('sheetPreviewDialog').classList.contains('hidden'));
+      closeSheetPreview();
+      setDialogResponder(held);
+    }
+    document.querySelector('.pv-card[data-pv="pA"] [data-act="problem"]').click();
+    await tick();
+    ok('a read-only network: Report a problem to them refused', !TopoIncidents.draft.open);
     document.querySelector('.pv-card[data-pv="pA"] [data-act="sharepart"]').click();
     await tick();
     ok('a read-only network: Share their part refused', el('shareDialog').classList.contains('hidden'));
     state.readOnly = null;
+
+    // ---- Report a problem to them (D365) ----
+    {
+      const TI = window.TopoIncidents;
+      const heldFile = TI.hooks.reportFile;
+      let fileFor = null;
+      // As the real one does (withDoc), the stand-in borrows the page's
+      // document while it works: the link must not be made meanwhile.
+      TI.hooks.reportFile = async (ids, opts) => {
+        fileFor = { ids: ids.slice(), opts };
+        const held = state.nodes;
+        state.nodes = held.filter((n) => ids.some((id) => (n.providers || []).includes(id)));
+        try { await new Promise((r) => setTimeout(r, 150)); } finally { state.nodes = held; }
+        return { name: 'alfa_report.html', type: 'text/html', bytes: 3, blob: new Blob(['abc']) };
+      };
+      try {
+        renderProvidersPanel(true);
+        // A device selected: Report a problem would start on it; their card does not.
+        state.selectedType = 'node'; state.selectedId = 'rt';
+        document.querySelector('.pv-card[data-pv="pB"] [data-act="problem"]').click();
+        await until(() => TI.draft.open, 100);
+        const firstRow = el('problemContacts').querySelector('.pb-contact');
+        ok('their card opens Report a problem: no device picked, them ticked, first', TI.draft.open && el('problemTitle').textContent === 'Report a problem' && TI.draft.nodeIds.length === 0
+           && TI.draft.sendTo[0] === 'pB' && !!firstRow && firstRow.querySelector('.pb-contact-name').textContent === 'Beta IT'
+           && firstRow.querySelector('[data-sendto="pB"]').checked, show([TI.draft.nodeIds, TI.draft.sendTo, firstRow && firstRow.textContent]));
+        // A provider the routing would not list for this network is listed all the same, as chosen.
+        TI.closeProblemDialog();
+        TI.openProblemFor('pC');
+        const rows = [...el('problemContacts').querySelectorAll('.pb-contact')];
+        const cRow = rows.find((r) => r.querySelector('[data-sendto="pC"]'));
+        ok('one the routing lists last comes first, ticked', TI.draft.sendTo[0] === 'pC' && rows[0] === cRow && cRow.querySelector('[data-sendto="pC"]').checked,
+           show([TI.draft.sendTo, rows.map((r) => r.textContent)]));
+        TI.closeProblemDialog();
+        TI.openProblemFor('pB');
+        // The form asks for the device as usual: the server, which routes to Alfa IT too.
+        TI.draft.nodeIds = ['srv']; TI.draft.symptom = 'printer';
+        renderProblemDialog();
+        ok('the routing may tick others too; theirs stays ticked', TI.draft.sendTo.includes('pB') && TI.draft.sendTo[0] === 'pB', show(TI.draft.sendTo));
+        el('problemName').value = 'Ana'; el('problemPhone').value = '5551';
+        el('problemSaveSendBtn').click();
+        await until(() => TI.draft.send && TI.draft.send.attachFile, 300);
+        const s = TI.draft.send;
+        ok('on the send step their report is attached, as Also attach the report ticked', !!s && s.scope === 'part' && s.attach === true && el('problemAttach').checked
+           && !!fileFor && fileFor.ids.includes('pB') && s.attachFile.name === 'alfa_report.html', show(s && { attach: s.attach, scope: s.scope, fileFor }));
+        ok('and Print their report is there', !el('problemScopeRow').classList.contains('hidden') && el('problemPrintTheirs').textContent === 'Print their report');
+        await until(() => !s.busy && (s.result || s.failCount), 300);
+        const whole = TopoPart.providerPart(serializeDoc(), TI.draft.sendTo, { incidentId: TI.draft.incidentId });
+        ok('the link and the attached report are made one after the other: the link\'s part is of the whole network', !!s.result && show(s.result.counts) === show(whole.counts),
+           show([s.result && s.result.counts, whole.counts]));
+        el('problemPrintTheirs').click();
+        await until(() => !el('sheetPreviewDialog').classList.contains('hidden') && sheetPreviewBuilt(), 600);
+        ok('Print their report: the recipients\' report in the preview, the sheet stepped aside', !el('sheetPreviewDialog').classList.contains('hidden') && /Beta IT/.test(el('sheetPreviewTitle').textContent)
+           && el('problemDialog').hidden && TI.draft.open, el('sheetPreviewTitle').textContent);
+        closeSheetPreview();
+        await tick();
+        ok('the preview closed, the send step is back as it was', !el('problemDialog').hidden && TI.draft.open && TI.draft.send === s && !el('problemSend').hidden && el('problemAttach').checked);
+        TI.closeProblemDialog();
+        // Report a problem from Export: no provider pinned, nothing attached.
+        TI.openProblemDialog();
+        ok('Report a problem from Export pins nobody', TI.draft.forProvider === null);
+        TI.closeProblemDialog();
+      } finally {
+        TI.hooks.reportFile = heldFile;
+      }
+    }
     replaceDocument(docNow);
   } catch (e) {
     ok('the suite ran to the end', false, e && (e.stack || e.message));

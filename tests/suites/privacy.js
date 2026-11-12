@@ -99,7 +99,10 @@ window.addEventListener('load', async () => {
   const tampered = bytes.slice(); tampered[40] ^= 1;
   ok('a tampered link is refused, not half-decoded', await code('e~' + _b64urlFromBytes(tampered), pass) === 'passphrase');
   const wrongVersion = bytes.slice(); wrongVersion[0] = 9;
-  ok('a version this build does not know is called damaged', await code('e~' + _b64urlFromBytes(wrongVersion), pass) === 'damaged');
+  // A later version is a newer Topo's link (D368), version 0 is no link at all.
+  ok('a version this build does not know is called newer', await code('e~' + _b64urlFromBytes(wrongVersion), pass) === 'newer');
+  const noVersion = bytes.slice(); noVersion[0] = 0;
+  ok('and version 0 is called damaged', await code('e~' + _b64urlFromBytes(noVersion), pass) === 'damaged');
   ok('so is a truncated one', await code(sealed.slice(0, 30), pass) === 'damaged');
   ok('and garbage', await code('e~!!!not base64!!!', pass) === 'damaged');
 

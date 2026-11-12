@@ -1731,7 +1731,7 @@ function renderFaceplate(node, container) {
         const link = linkOnIface(node.id, port.id);
         const neighbour = link ? getNode(link.source === node.id ? link.target : link.source) : null;
         const chip = document.createElement('button');
-        chip.className = 'port-chip' + (neighbour ? ' on' : '') + (hasPortAttrs(node, port.id) ? ' noted' : '');
+        chip.className = 'port-chip' + (neighbour ? ' on' : portUsedAway(node, port.id) ? ' taken away' : '') + (hasPortAttrs(node, port.id) ? ' noted' : '');
         chip.dataset.port = port.id;
         // (A port given a name of its own, an uplink called sfp1, shows it.)
         const n = Number(port.id.slice(1));
@@ -1765,7 +1765,8 @@ function portChipTitle(node, portId) {
     const link = linkOnIface(node.id, portId);
     const neighbour = link ? getNode(link.source === node.id ? link.target : link.source) : null;
     const head = portFactsText(node, portId, [ifaceLabel(node, portId), a.label]);
-    const title = neighbour ? t('Port {port} → {name}', { port: head, name: neighbour.name || neighbour.id }) : t('Port {port}: free', { port: head });
+    const title = neighbour ? t('Port {port} → {name}', { port: head, name: neighbour.name || neighbour.id })
+        : portUsedAway(node, portId) ? t('Port {port}: in use (not in your part)', { port: head }) : t('Port {port}: free', { port: head });
     const total = portCountOf(node);
     return Number(portId.slice(1)) > total ? `${title}\n${t('Past the {total}-port faceplate', { total })}` : title;
 }
@@ -2829,7 +2830,7 @@ function renderLinkPorts(link) {
             const selected = link[key] === iface.id;
             const takenBy = linksAtNode(node.id).find((l) => l.id !== link.id && ifaceIdOn(l, node.id) === iface.id && isExclusiveLink(l));
             const chip = document.createElement('button');
-            chip.className = 'port-chip' + (selected ? ' picked' : takenBy ? ' taken' : '');
+            chip.className = 'port-chip' + (selected ? ' picked' : takenBy || (hasPortGrid(node) && portUsedAway(node, iface.id)) ? ' taken' : '');
             chip.textContent = iface.name || iface.id;
             // A faceplate port's label is what the person at the rack is
             // looking for ("Reception 2"), so it is on the chip itself; its

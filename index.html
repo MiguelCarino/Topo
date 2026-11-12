@@ -154,6 +154,8 @@
                     <button id="reportBtn" class="cs-menu-item" role="menuitem">📋 Site report <span class="cs-menu-note">printable</span></button>
                     <!-- Availability, response times and outages (js/reports.js, step 7j). -->
                     <button id="monitorReportBtn" class="cs-menu-item" role="menuitem" data-i18n>📈 Monitoring report</button>
+                    <!-- One provider's printable report, no problem attached (js/providers.js, D365). -->
+                    <button id="providerReportBtn" class="cs-menu-item" role="menuitem" data-i18n>🧾 Provider report…</button>
                     <!-- A problem to report to the network's providers (js/incidents.js). Every view. -->
                     <button id="reportProblemMenuBtn" class="cs-menu-item" role="menuitem" data-i18n>⚠ Report a problem…</button>
                     <div class="cs-menu-div" data-adv></div>
@@ -179,6 +181,9 @@
                     <button id="exportNetboxBtn" data-adv class="cs-menu-item" role="menuitem" data-i18n>⇧ Export to NetBox…</button>
                     <div class="cs-menu-div" data-adv></div>
                     <button id="importFileBtn" data-adv class="cs-menu-item" role="menuitem" data-i18n>📂 Open a file…</button>
+                    <!-- A Topo link pasted into the page (js/share.js openLinkDialog, D366):
+                         the desktop app's only way in for one. Every view. -->
+                    <button id="openLinkBtn" class="cs-menu-item" role="menuitem" data-i18n>🔗 Open a link…</button>
                     <button id="saveTemplateBtn" data-adv class="cs-menu-item" role="menuitem">📐 Save as template <span class="cs-menu-note">reusable</span></button>
                 </div>
                 <input type="file" id="importFileInput" accept=".json,.nettopo,application/json,application/vnd.carino.topo+json" hidden>
@@ -1310,6 +1315,7 @@
                         <div class="landing-drop-actions">
                             <button class="landing-drop-btn primary" id="landingNewBtn" data-i18n>✚ New network</button>
                             <button class="landing-drop-btn" id="landingOpenFileBtn" data-i18n>📂 Open a file</button>
+                            <button class="landing-drop-btn" id="landingOpenLinkBtn" data-i18n>🔗 Open a link</button>
                         </div>
                     </div>
 
@@ -2435,6 +2441,7 @@
                                 <!-- Their report as a file with the email (D97): off by default. -->
                                 <label class="dlg-check pb-radio pb-attach"><input type="checkbox" id="problemAttach"> <span data-i18n>Also attach the report</span></label>
                                 <p id="problemAttachNote" class="pb-scope-count hidden" role="status"></p>
+                                <button type="button" id="problemPrintTheirs" class="btn pb-print" data-i18n>Print their report</button>
                             </fieldset>
                             <!-- Notes that look like they hold a password (js/assets.js), the client's words included. -->
                             <div id="problemLint" class="alert warn hidden" role="status"></div>

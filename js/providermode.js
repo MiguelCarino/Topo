@@ -47,6 +47,7 @@ const _pm = {
     session: null,      // { v, docId, incidentId, arrivalRev, at, prevAdvanced, prevProfile, viaLink, arrivalJson?, lastVisitJson?, lastVisitAt?, lastVisitId? }
     arrival: null,      // the copy that just arrived, for the banner: { docId, origin, rev, at, json?, kind, ids }
     pass: new Map(),    // docId -> the passphrase that opened its link (never stored)
+    tag: new Map(),     // docId -> that link's reply tag (D368), for the copy sent back; memory only, with the passphrase
     vd: null,           // the Record visit dialog's state
     prevDefault: undefined // the view the width decided before pmPreferMap, to give back
 };
@@ -119,10 +120,11 @@ const visitEntry = (id) => (state.log || []).find((e) => e && e.id === id && e.k
 function providerDocLoaded(origin) {
     const docId = state.docId || null;
     const pass = typeof takeArrivalPassphrase === 'function' ? takeArrivalPassphrase() : null;
+    const tag = typeof takeArrivalTag === 'function' ? takeArrivalTag() : null;
     if (_pm.on && _pm.docId !== docId) exitProviderView();
     _pm.arrival = null;
     if (!state.readOnly && (origin === 'link' || origin === 'file')) {
-        if (pass && docId) _pm.pass.set(docId, pass);
+        if (pass && docId) { _pm.pass.set(docId, pass); if (tag) _pm.tag.set(docId, tag); else _pm.tag.delete(docId); }
         noteArrival(origin, null);
     } else if (!state.readOnly && (origin === 'live' || origin === 'library') && !_pm.on) {
         const s = readProviderSession(docId);
@@ -689,11 +691,13 @@ function composeVisitMessage({ incident, entry, site, link = '', file = '', seal
     const pass = link && sealed ? [samePass ? t('The passphrase is the one you sent with the problem.') : t('The passphrase comes separately: I will send it by another way.')] : [];
     const fileLine = !link && file ? [t('The network is in the attached file {file}. Open it with Topo: {url}', { file, url: publicBase() })] : [];
     const keep = t('Open the infrastructure link in Topo and keep it to bring the visit into your network.');
-    const mailTail = link ? [keep, t('Infrastructure link:'), '', ...pass] : fileLine;
+    // How a link gets into the desktop app, which no click reaches (D366, D370).
+    const how = t('In the Topo app: Export, Open a link…, and paste the link.');
+    const mailTail = link ? [keep, t('Infrastructure link:'), '', ...pass, how] : fileLine;
     const notes = e.notes || '';
     const full = head(notes);
-    const fullBody = full.concat(link ? [keep, t('Follow the infrastructure link: {link}', { link }), ...pass] : fileLine).join('\n');
-    const html = `<p><strong>${escapeHtml(subject)}</strong></p>` + TopoIncidents.linesToHtml(full.concat(link ? [keep, link, ...pass] : fileLine),
+    const fullBody = full.concat(link ? [keep, t('Follow the infrastructure link: {link}', { link }), ...pass, how] : fileLine).join('\n');
+    const html = `<p><strong>${escapeHtml(subject)}</strong></p>` + TopoIncidents.linesToHtml(full.concat(link ? [keep, link, ...pass, how] : fileLine),
         link ? { [full.length + 1]: TopoIncidents.infraLinkHtml(link) } : {});
     const mk = (b) => `mailto:${to.map(mailAddr).join(',')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(b)}`;
     let body = full.concat(mailTail).join('\n'), mailto = mk(body);
@@ -713,13 +717,15 @@ function composeVisitMessage({ incident, entry, site, link = '', file = '', seal
 // network is too big for a link or this page cannot lock one. Reports and
 // visits always go: they are what is sent back.
 // -> { ok, url, file, why: 'link'|'too-long'|'no-seal' } or { ok: false }
-async function buildVisitReturn(pass) {
+// tag: the reply tag of the link that was opened, sent back only with the
+// passphrase that opened it (D368): the client's Topo knows both.
+async function buildVisitReturn(pass, tag) {
     let url = null, file = '', why = 'link';
     if (!canSeal()) why = 'no-seal';
     else {
         try {
             if (String(pass || '').length < SEAL_MIN_PASSPHRASE) throw new Error('passphrase');
-            url = await buildShareLink('doc', true, pass, { incidents: true, max: _incHooks.urlMax() });
+            url = await buildShareLink('doc', true, pass, { incidents: true, max: _incHooks.urlMax(), tag: tag || null });
         } catch (e) { console.warn('Visit: could not make the link', e); return { ok: false }; }
         if (!url) why = 'too-long';
     }
@@ -936,7 +942,9 @@ async function enterReturnStage(entry) {
     }
     const held = _pm.pass.get(_pm.docId || state.docId || null);
     const hits = secretHitsFor('doc');
-    vd.ret = { pass: held || (canSeal() ? generatePassphrase() : ''), samePass: !!held, shown: false, hits, result: null, busy: false, copied: '' };
+    const docId = _pm.docId || state.docId || null;
+    vd.ret = { pass: held || (canSeal() ? generatePassphrase() : ''), samePass: !!held, tag: held ? _pm.tag.get(docId) || null : null,
+        shown: false, hits, result: null, busy: false, copied: '' };
     renderVisitDialog();
     if (!hits.length) makeVisitReturn();
 }
@@ -948,7 +956,7 @@ async function makeVisitReturn() {
     pmEl('visitError').textContent = '';
     renderVisitDialog();
     let res;
-    try { res = await buildVisitReturn(r.pass); } catch (e) { res = { ok: false }; }
+    try { res = await buildVisitReturn(r.pass, r.samePass ? r.tag : null); } catch (e) { res = { ok: false }; }
     if (_pm.vd !== vd) return;
     r.busy = false;
     if (!res.ok) { pmEl('visitError').textContent = t('The link could not be made in this browser. Download the file instead.'); r.result = { ok: true, url: null, file: '', why: 'failed' }; }

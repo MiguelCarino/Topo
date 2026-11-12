@@ -222,6 +222,7 @@ function closeSheetPreview() {
     const dialog = sheetPvEl('sheetPreviewDialog');
     if (!dialog || dialog.classList.contains('hidden')) return;
     _sheetPv.seq++;
+    const after = _sheetPv.cfg && typeof _sheetPv.cfg.onClose === 'function' ? _sheetPv.cfg.onClose : null;
     dialog.classList.add('hidden');
     const frame = sheetPvEl('sheetPreviewFrame');
     if (frame) { frame.onload = null; frame.removeAttribute('src'); frame.removeAttribute('srcdoc'); Object.assign(frame.style, { width: '', height: '', transform: '' }); }
@@ -234,6 +235,7 @@ function closeSheetPreview() {
     const back = _sheetPv.back;
     _sheetPv.back = null;
     try { if (back && back.isConnected && typeof back.focus === 'function') back.focus(); } catch (e) { /* gone */ }
+    if (after) after();
 }
 
 // Print: the frame printed as it shows (or saved as PDF from the print

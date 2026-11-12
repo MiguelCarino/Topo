@@ -1187,8 +1187,21 @@ const decodeBinderFragment = (frag) => decodeFragment(frag.slice(1));   // 'b~xx
 // even say which of the two it carries. The version byte is the additional
 // authenticated data, and it fixes the KDF parameters: raising the iteration
 // count later means a new version, never reinterpreting an old link.
+//
+// Version 2 (docs/SCOPE.md D368) is version 1 with a reply tag:
+//
+//   e~<base64url( 2 | tag[8] | salt[16] | iv[12] | ciphertext+tag )>
+//
+// Eight random bytes in the clear, and with the version byte the additional
+// authenticated data, so the tag cannot be swapped. A report sent to its
+// providers carries a new one; the copy sent back carries the same one, and
+// the client's Topo finds by it the passphrase it kept for that link
+// (js/share.js "Reply tags"): one key stretch, never one per kept passphrase.
+// It says nothing of the network. A link with no tag is still version 1.
 const SEAL_SCHEME = 'e~';
 const SEAL_VERSION = 1;
+const SEAL_VERSION_TAGGED = 2;
+const SEAL_TAG_BYTES = 8;
 const SEAL_ITERATIONS = 600000;      // PBKDF2-HMAC-SHA256, OWASP's 2023 figure
 const SEAL_KIND = { doc: 0, binder: 1 };
 const SEAL_MIN_PASSPHRASE = 8;
@@ -1202,8 +1215,32 @@ async function _sealKey(passphrase, salt, usage) {
         base, { name: 'AES-GCM', length: 256 }, false, [usage]);
 }
 
-// json string -> 'e~...' (no leading '#').
-async function sealFragment(json, kind, passphrase) {
+// A reply tag as it is kept and compared: 16 lower-case hex characters.
+const REPLY_TAG_RE = /^[0-9a-f]{16}$/;
+const validReplyTag = (tag) => (typeof tag === 'string' && REPLY_TAG_RE.test(tag) ? tag : null);
+function newReplyTag() {
+    return Array.from(crypto.getRandomValues(new Uint8Array(SEAL_TAG_BYTES)), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+const _tagBytes = (tag) => new Uint8Array(tag.match(/../g).map((h) => parseInt(h, 16)));
+const _tagHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+// What a sealed fragment is, read without a passphrase:
+//   { shape: 'ok', version, tag }   tag: the reply tag (version 2) or null
+//   { shape: 'newer' }              a version this build does not know
+//   { shape: 'damaged' }            not base64url, or too short to be one
+function sealedShape(frag) {
+    let bytes;
+    try { bytes = _bytesFromB64url(String(frag || '').slice(SEAL_SCHEME.length)); } catch (e) { return { shape: 'damaged' }; }
+    if (!bytes.length) return { shape: 'damaged' };
+    const v = bytes[0];
+    if (v !== SEAL_VERSION && v !== SEAL_VERSION_TAGGED) return { shape: v > SEAL_VERSION_TAGGED ? 'newer' : 'damaged' };
+    const head = v === SEAL_VERSION_TAGGED ? 1 + SEAL_TAG_BYTES : 1;
+    if (bytes.length < head + 16 + 12 + 16 + 2) return { shape: 'damaged' };
+    return { shape: 'ok', version: v, tag: v === SEAL_VERSION_TAGGED ? _tagHex(bytes.slice(1, head)) : null };
+}
+
+// json string -> 'e~...' (no leading '#'). tag: a reply tag (validReplyTag)
+// makes it a version 2 link; without one it is version 1, as it always was.
+async function sealFragment(json, kind, passphrase, tag) {
     if (!canSeal()) throw new Error('This browser cannot encrypt a link.');
     const raw = new TextEncoder().encode(json);
     const body = _canCompress ? await _pipeStream(new CompressionStream('deflate-raw'), raw) : raw;
@@ -1211,33 +1248,37 @@ async function sealFragment(json, kind, passphrase) {
     plain[0] = kind; plain[1] = _canCompress ? 1 : 0; plain.set(body, 2);
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const header = new Uint8Array([SEAL_VERSION]);
+    const tagged = validReplyTag(tag);
+    const header = tagged ? new Uint8Array([SEAL_VERSION_TAGGED, ..._tagBytes(tagged)]) : new Uint8Array([SEAL_VERSION]);
+    const h = header.length;
     const key = await _sealKey(passphrase, salt, 'encrypt');
     const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: header }, key, plain));
-    const out = new Uint8Array(1 + 16 + 12 + ct.length);
-    out.set(header, 0); out.set(salt, 1); out.set(iv, 17); out.set(ct, 29);
+    const out = new Uint8Array(h + 16 + 12 + ct.length);
+    out.set(header, 0); out.set(salt, h); out.set(iv, h + 16); out.set(ct, h + 28);
     return SEAL_SCHEME + _b64urlFromBytes(out);
 }
 
-// 'e~...' -> { kind, json }. Throws an Error whose .code is 'damaged' (not a
-// link this build can read), 'passphrase' (wrong passphrase — GCM cannot tell
-// that apart from tampering, and neither should the message) or 'unsupported'.
+// 'e~...' -> { kind, json, tag }. Throws an Error whose .code is 'damaged'
+// (not a link this build can read), 'newer' (a version made by a newer Topo),
+// 'passphrase' (wrong passphrase — GCM cannot tell that apart from
+// tampering, and neither should the message) or 'unsupported'.
 async function unsealFragment(frag, passphrase) {
     const fail = (code) => Object.assign(new Error(code), { code });
     if (!canSeal()) throw fail('unsupported');
-    let bytes;
-    try { bytes = _bytesFromB64url(frag.slice(SEAL_SCHEME.length)); } catch (e) { throw fail('damaged'); }
-    if (bytes.length < 1 + 16 + 12 + 16 + 2 || bytes[0] !== SEAL_VERSION) throw fail('damaged');
-    const key = await _sealKey(passphrase, bytes.slice(1, 17), 'decrypt');
+    const shape = sealedShape(frag);
+    if (shape.shape !== 'ok') throw fail(shape.shape);
+    const bytes = _bytesFromB64url(frag.slice(SEAL_SCHEME.length));
+    const h = shape.version === SEAL_VERSION_TAGGED ? 1 + SEAL_TAG_BYTES : 1;
+    const key = await _sealKey(passphrase, bytes.slice(h, h + 16), 'decrypt');
     let plain;
     try {
-        plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.slice(17, 29), additionalData: bytes.slice(0, 1) }, key, bytes.slice(29)));
+        plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.slice(h + 16, h + 28), additionalData: bytes.slice(0, h) }, key, bytes.slice(h + 28)));
     } catch (e) { throw fail('passphrase'); }
     const kind = plain[0], body = plain.slice(2);
     if (kind !== SEAL_KIND.doc && kind !== SEAL_KIND.binder) throw fail('damaged');
     if (plain[1] && !_canDecompress) throw fail('unsupported');
     const raw = plain[1] ? await _pipeStream(new DecompressionStream('deflate-raw'), body) : body;
-    return { kind, json: new TextDecoder().decode(raw) };
+    return { kind, json: new TextDecoder().decode(raw), tag: shape.tag };
 }
 
 // A passphrase worth sending: 16 characters from an alphabet with no i/l/o/0/1
@@ -3872,6 +3913,9 @@ document.getElementById('storageBackupBtn').onclick = exportJsonFile;
 document.getElementById('storageBackupAllBtn').onclick = exportBinder;
 document.getElementById('landingNewBtn').onclick = (e) => { e.stopPropagation(); startNewNetwork(); };
 document.getElementById('landingOpenFileBtn').onclick = (e) => { e.stopPropagation(); document.getElementById('importFileInput').click(); };
+// A link pasted in (js/share.js, D366): the menu's and the landing's.
+document.getElementById('openLinkBtn').onclick = () => openLinkDialog();
+document.getElementById('landingOpenLinkBtn').onclick = (e) => { e.stopPropagation(); openLinkDialog(); };
 document.getElementById('landingAddBtn').onclick = () => {
     // The dialog sits a layer below the landing, so the landing has to leave
     // first — and it leaves as a dismissal, since nothing has been built yet

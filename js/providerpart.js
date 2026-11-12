@@ -25,13 +25,25 @@
 //             included (the owner, 2026-11-10), even one a nearer provider of
 //             the same service covers; and every cable between two items.
 //             Items go in full.
-//   context   the devices up to two cable hops from the items (a VPN tunnel
-//             is not a hop; a radio association and a patch panel are), the
-//             hosts the kept devices run on, and the devices a kept problem
-//             report names. Context goes reduced: name, type, place, the
-//             ports facing the kept cables (every field of those), and the
-//             addresses of its other interfaces. Nothing else: no notes, no
-//             serial, no other provider.
+//   context   the path, not the neighbourhood (D363): for each item device
+//             the devices on its way to the network, as monitorChains
+//             (js/checks.js) walks it: to its nearest routing device, and
+//             for a routing device toward the Internet (a cloud node) or else
+//             its upstream router; the nearest two devices of that way that
+//             are not items (a VPN tunnel is not a way; a radio association
+//             and a patch panel are). The far end of a cable an item
+//             answers for comes too. The hosts the kept devices run on, and
+//             the devices a kept problem report names. Context goes reduced:
+//             name, type, place, the ports facing the kept cables (every
+//             field of those), and the addresses of its other interfaces.
+//             Nothing else: no notes, no serial, no other provider.
+//   left out  what hangs below an item and is not on a way (D364: the PCs
+//             on their switch, the phones on their PoE ports) is not sent,
+//             nor its cable; each port of an item such a cable used goes out
+//             marked portAttrs.pN.partUsed, "in use (not in your part)", a
+//             mark of the part only: the merge strips it (mergeInput,
+//             js/merge.js), so it is never written into the client's
+//             network.
 //   cables    every cable whose two ends are kept; one between two context
 //             devices goes reduced (its ends, ports and medium).
 //   groups    the items' groups and every group needed to place a kept
@@ -44,6 +56,7 @@
 //             devices use; custom columns the items use; expected lives.
 // Ids are the network's own everywhere: the merge back matches by them.
 
+// How many devices of each way are sent (D363).
 const PART_HOPS = 2;
 // What a context device keeps of itself (and its host, when that is kept).
 const PART_CONTEXT_KEYS = ['id', 'type', 'name', 'x', 'y', 'group', 'portCount', 'portScheme', 'portsFace'];
@@ -70,7 +83,7 @@ function providerPart(doc, providerIds, opts = {}) {
     if (!P.length) {
         return { whole: true, doc: src, providers: [], items: { nodes: new Set(byId.keys()), links: new Set(links.map((l) => l.id)), groups: new Set(groupOf.keys()) },
             context: new Map(), groups: new Set(groupOf.keys()), incidents: partRecs(src.incidents).map((x) => x.id),
-            counts: { items: byId.size, context: 0, links: links.length, groups: groupOf.size } };
+            counts: { items: byId.size, context: 0, links: links.length, groups: groupOf.size, leftOut: 0, busyPorts: 0 } };
     }
     const Pset = new Set(P);
 
@@ -93,7 +106,7 @@ function providerPart(doc, providerIds, opts = {}) {
     });
     links.forEach((l) => { if (items.nodes.has(l.source) && items.nodes.has(l.target)) items.links.add(l.id); });
 
-    // ---- Context: two hops in cables ----
+    // ---- Context: the way each item takes to the network (D363) ----
     const context = new Map();
     const ctxOf = (id) => {
         if (!context.has(id)) context.set(id, { hop: null, why: new Set(), facing: new Set() });
@@ -101,24 +114,53 @@ function providerPart(doc, providerIds, opts = {}) {
     };
     const dist = new Map();
     items.nodes.forEach((id) => dist.set(id, 0));
-    // The ends of their own cables that are not theirs: hop 1, whatever the medium.
+    const near = (id, d, why) => {
+        if (!byId.has(id) || items.nodes.has(id)) return;
+        if (!dist.has(id) || dist.get(id) > d) dist.set(id, d);
+        ctxOf(id).why.add(why);
+    };
+    // The far end of a cable they answer for: one, whatever the medium.
     links.forEach((l) => {
         if (!items.links.has(l.id)) return;
-        [l.source, l.target].forEach((id) => {
-            if (!byId.has(id) || items.nodes.has(id)) return;
-            if (!dist.has(id)) dist.set(id, 1);
-            ctxOf(id).why.add('cable-end');
-        });
+        [l.source, l.target].forEach((id) => near(id, 1, 'cable-end'));
     });
-    const hopLinks = links.filter((l) => l.source !== l.target && byId.has(l.source) && byId.has(l.target)
-        && effectiveMedium(l, byId.get(l.source), byId.get(l.target)) !== 'vpn');
-    for (let d = 1; d <= PART_HOPS; d++) {
-        hopLinks.forEach((l) => {
-            [[l.source, l.target], [l.target, l.source]].forEach(([a, b]) => {
-                if (dist.get(a) === d - 1 && !dist.has(b)) { dist.set(b, d); ctxOf(b).why.add('hop'); }
-            });
-        });
-    }
+    const adj = new Map();
+    const join = (a, b) => { if (!adj.has(a)) adj.set(a, []); adj.get(a).push(b); };
+    links.forEach((l) => {
+        if (l.source === l.target || !byId.has(l.source) || !byId.has(l.target)) return;
+        if (effectiveMedium(l, byId.get(l.source), byId.get(l.target)) === 'vpn') return;
+        join(l.source, l.target); join(l.target, l.source);
+    });
+    adj.forEach((list) => list.sort());
+    const live = (id) => { const n = byId.get(id); return !!n && !isRetired(n); };
+    const isGate = (id) => { const n = byId.get(id); return live(id) && n.type !== 'cloud' && isRoutingDevice(n.type); };
+    const isCloud = (id) => { const n = byId.get(id); return live(id) && n.type === 'cloud'; };
+    // The way from `from` to the first device `stop` takes, nearest first,
+    // `from` left out; [] when there is none. Breadth first, as monitorChains.
+    const wayTo = (from, stop) => {
+        const parent = new Map([[from, null]]);
+        const queue = [from];
+        while (queue.length) {
+            const id = queue.shift();
+            if (id !== from && stop(id)) {
+                const way = [];
+                for (let p = id; p && p !== from; p = parent.get(p)) way.unshift(p);
+                return way;
+            }
+            if (id !== from && !live(id)) continue;
+            (adj.get(id) || []).forEach((nx) => { if (!parent.has(nx)) { parent.set(nx, id); queue.push(nx); } });
+        }
+        return [];
+    };
+    [...items.nodes].sort().forEach((id) => {
+        if (!adj.has(id)) return;
+        let way;
+        if (isGate(id)) {
+            way = wayTo(id, isCloud);
+            if (!way.length) way = wayTo(id, isGate);
+        } else way = wayTo(id, isGate);
+        way.filter((x) => !items.nodes.has(x)).slice(0, PART_HOPS).forEach((x, i) => near(x, i + 1, 'path'));
+    });
     dist.forEach((d, id) => { if (d > 0) ctxOf(id).hop = d; });
     // The hosts of every device kept so far (a guest without its host would
     // lose it on load).
@@ -156,6 +198,21 @@ function providerPart(doc, providerIds, opts = {}) {
 
     const kept = new Set([...items.nodes, ...context.keys()]);
 
+    // ---- Left out below the items (D364) ----
+    const leftOut = new Set();
+    const busy = new Map();   // item id -> Set of its faceplate ports a cable left out used
+    links.forEach((l) => {
+        if (l.source === l.target || !byId.has(l.source) || !byId.has(l.target)) return;
+        [['source', 'sourceIface', 'target'], ['target', 'targetIface', 'source']].forEach(([end, port, far]) => {
+            if (!items.nodes.has(l[end]) || kept.has(l[far])) return;
+            leftOut.add(l[far]);
+            if (typeof l[port] === 'string' && PORT_ID_RE.test(l[port])) {
+                if (!busy.has(l[end])) busy.set(l[end], new Set());
+                busy.get(l[end]).add(l[port]);
+            }
+        });
+    });
+
     // ---- Groups: the items', and every one needed to place what is kept ----
     const keptGroups = new Set(items.groups);
     const addChain = (gid) => {
@@ -176,7 +233,15 @@ function providerPart(doc, providerIds, opts = {}) {
 
     // ---- The records ----
     const outNodes = nodes.filter((n) => kept.has(n.id) && byId.get(n.id) === n).map((n) => {
-        if (items.nodes.has(n.id)) return partClone(n);
+        if (items.nodes.has(n.id)) {
+            const whole = partClone(n);
+            if (busy.has(n.id)) {
+                const pa = Object.assign({}, whole.portAttrs && typeof whole.portAttrs === 'object' ? whole.portAttrs : {});
+                [...busy.get(n.id)].sort((x, y) => Number(x.slice(1)) - Number(y.slice(1))).forEach((p) => { pa[p] = Object.assign({}, pa[p] || {}, { partUsed: true }); });
+                whole.portAttrs = pa;
+            }
+            return whole;
+        }
         const c = context.get(n.id);
         const out = {};
         PART_CONTEXT_KEYS.forEach((k) => { if (n[k] !== undefined) out[k] = partClone(n[k]); });
@@ -301,7 +366,8 @@ function providerPart(doc, providerIds, opts = {}) {
     return {
         whole: false, doc: out, providers: P, items, context, via, groups: keptGroups, contextGroups: ctxGroups,
         incidents: outIncidents.map((x) => x.id),
-        counts: { items: items.nodes.size, context: context.size, links: outLinks.length, groups: keptGroups.size }
+        counts: { items: items.nodes.size, context: context.size, links: outLinks.length, groups: keptGroups.size,
+            leftOut: leftOut.size, busyPorts: [...busy.values()].reduce((s, x) => s + x.size, 0) }
     };
 }
 

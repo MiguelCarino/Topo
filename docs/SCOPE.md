@@ -4013,6 +4013,431 @@ monitor, retention, the welcome, the v18 → v19 migration with the suite count
 before and after, the idle lock, and the alarm card, the Check section and the
 reports in the browser at 360, 390 and 1280 in both themes and every language.
 
+## 8. The provider loop, links back, watched addresses and connections (step 8)
+
+Written 2026-11-12 from the owner's review of the provider workflow and
+their answers ("will follow your recommendations"). Phase 8.0 is this
+section; no code. Each later phase adds its own decisions under
+"Decisions made building step 8", numbered on from the last one here.
+
+### What the review found
+
+1. **A provider's part is a neighbourhood, not a path.** providerPart
+   (js/providerpart.js) keeps every device up to two cables from the
+   provider's items, in every direction, and every far end of their own
+   cables. A provider who looks after a switch receives every PC plugged
+   into it; one who looks after the router receives every device on the
+   core switch. The two hops were meant to show what the provider's
+   devices go through.
+2. **"Report for this provider" is a dead end beside Report a problem.**
+   The provider card's button prints the provider report on its own, while
+   Report a problem's send step already offers to attach that same report.
+3. **A link back cannot reach the desktop app.** The provider's copy back
+   is a link on topo.carino.systems (publicBase, js/state.js) locked with
+   the passphrase that opened it (D44). The desktop app has no way in for a
+   link: no deep link and no field to paste one, so the link opens the
+   website in a browser, which holds none of the app's networks; the visit
+   opens there as a new network and never merges. Only the file merges
+   (Open a file, three-way). On the website, in the browser that sent the
+   report, it works: a link pasted into an open tab is read through
+   popstate (js/app.js), the passphrase is asked, and Keep offers the merge.
+4. **The client is asked for a passphrase it made.** No passphrase is kept
+   anywhere (js/providermode.js "never stored"), so the client types back
+   the passphrase their own Topo generated.
+
+The owner then asked for two more things: a panel to check chosen addresses
+(ping, DICOM C-ECHO and the rest) whether or not they are on the map, each
+either raising the alarm or only going into the monitoring report; and
+knowing when a Topo client of the server has lost its connection.
+
+### What changes in Topo's promise
+
+D128 said a check goes only to an address and port already in the
+document. It becomes: **a check goes only to an address someone wrote
+down**, on a device or in the network's watched addresses. Still not a
+scanner: one address per entry, never a range, a subnet or a wildcard, and
+still one fixed request per check. The website and the offline zip still
+never probe (D127).
+
+The owner's rule (2026-11-12): **checking is an auxiliary, opt-in, manual
+tool, not an automatic scanner.** Nothing is checked unless someone asked
+for it, and **an item that is not checked is never said to be down,
+offline or unknown**: it has no state at all. A check answers for the item
+it asked, from the PC that asked, and for nothing else.
+
+### Decisions for step 8 (owner, 2026-11-12)
+
+**The provider's part (8b)**
+
+- **D363. The context is the path, not the neighbourhood.** For each item
+  device, the context is the devices on its way to the network: the chain
+  monitorChains (js/checks.js) walks from the device to its nearest routing
+  device, and for a routing device the chain toward the Internet (a cloud
+  node) or its upstream router, the nearest **two** devices of it. The
+  cables kept are the cables of those chains. The hosts of kept devices
+  and the devices a kept problem report names stay context as before (D92).
+  A group naming the provider still brings all its members (the owner,
+  2026-11-10): those are items, not context.
+- **D364. What hangs below an item is left out, its ports are not shown
+  free.** The far end of an item's own cable that is not on a chain (the
+  PCs on their switch, the phones on their PoE ports) is left out, with
+  its cable. Each port of an item that such a cable used goes out marked
+  **in use (not in your part)**: a part-only mark, never written into the
+  client's network, so the provider does not see a busy port as free. The
+  part's counts and the send step say "12 devices on their ports left
+  out". The merge back is three-way against the part as it left (D152), so
+  what was left out is never read as deleted.
+
+**Report for this provider (8c)**
+
+- **D365. The card's button opens Report a problem.** **Report for this
+  provider** becomes **Report a problem to them**: the Report a problem
+  sheet with this provider ticked as the recipient and no device picked
+  (the form asks for the device or group as usual; the routing may tick
+  others, which the client can untick), and, on the send step, **Attach
+  their report** ticked. The printable provider report stays on that send
+  step (**Print their report**) and in Export, next to Site report, as
+  **Provider report…** (pick the provider), for a report with no problem
+  attached. The card keeps Monitoring report and Share their part.
+
+**Links back (8a)**
+
+- **D366. Open a link… in the desktop app and on the website.** Export and
+  My networks get **Open a link…**: paste a Topo link (any origin: the
+  link's fragment is what counts, so a topo.carino.systems link opens in
+  the app, and a bare fragment is accepted), then the same route a link
+  takes at boot (sealed, binder, plain, the merge questions). In the
+  desktop app it is the only way a link comes in; a deep link that opens
+  the app on a click is not built (a Tauri plugin and installer changes on
+  three systems), a later update.
+- **D367. The client keeps the passphrase of what it sent (amends D44).**
+  A sealed link sent from Report a problem or Share their part keeps its
+  passphrase with the part revision it left as (js/revisions.js), in the
+  same storage as the network itself (this browser's, or the app's), which
+  already holds the network unencrypted, so nothing is weakened: the
+  passphrase protects the link while it travels, as before. It goes when
+  the part revision goes (its copy merged or its report closed, D152). A
+  whole-network report link keeps it the same way under its share
+  revision. The provider side does not change: memory only, as D44 says.
+- **D368. The reply tag.** A sealed link gets a new version (2): an
+  8-byte random **reply tag** in its header, outside the ciphertext and in
+  the AES-GCM additional data, so it cannot be swapped. The client's link
+  carries a new tag; the provider's Topo copies the tag of the link it
+  opened into the copy back. The client looks the tag up, takes the
+  passphrase, the report and the provider from it, and unlocks once. Not
+  "try every passphrase": each try costs 600,000 PBKDF2 rounds
+  (SEAL_ITERATIONS), about half a second, so twenty open reports would be
+  ten seconds per link. The tag says nothing about the network; it only
+  ties two links together, which anyone seeing both on one channel could
+  do anyway. Version 1 links still open; a version 2 link in a Topo from
+  before step 8 says it was made by a newer Topo (not "damaged").
+- **D369. Three answers, never "wrong network".** A link that is:
+  - **malformed** (bad characters, cut short, an unknown version): "This
+    is not a Topo link, or it was cut short." The only one called invalid:
+    AES-GCM cannot tell a wrong passphrase from tampering, so "invalid" can
+    only ever mean malformed;
+  - **tagged with a reply this app or browser knows:** no passphrase asked;
+    it opens straight at "Visit from {provider} on {problem}: Merge into
+    '{network}'" (the merge question of mergedoors, three-way against the
+    part revision);
+  - **untagged, or with a tag not known here:** the passphrase is asked,
+    then the usual questions. This covers a provider whose page reloaded
+    (D44 then locks the copy back with a new passphrase), a report sent from
+    the app and opened in a browser or the other way round, and any link
+    that is not a reply at all. It is never refused.
+
+  A known tag whose report is closed or whose network is gone says so and
+  still opens ("This visit answers a problem closed on {date}").
+- **D370. The provider's message says how to open it.** The copy back's
+  message (composeVisitMessage) adds: "Open it in Topo: in the app, Export,
+  Open a link…, and paste it; or click it in the browser you sent the
+  report from." With the same passphrase: "You already have the passphrase"
+  (the client's Topo will not ask). With a new one: "A new passphrase:
+  {how it is sent}".
+
+**Watched addresses (8d, 8e)**
+
+- **D371. Watched addresses, in the document (format v20).** A network
+  can list up to 64 **watched addresses**, beside its devices: a name, one
+  address (IPv4, IPv6 or a host name; never a range, a subnet or a
+  wildcard), notes, an optional provider (routing, availability targets and
+  the provider report work as for a device), an optional **reached
+  through** device on the map (for root cause: down because that device is
+  down), and up to 8 answer checks with the same settings as a device's
+  (D156). They live in the document, so the merge, the server, the site
+  monitors' groups (a watched address names its group, or none for the
+  whole site) and the reports all see them. Format v20 adds `watch`; a v19
+  document migrates with an empty list. Not a sheet; the CSV export gains a
+  watched-addresses sheet once the network has one.
+- **D372. The panel.** A **Watched** tab in the full editor's rail (and a
+  section in Simple's Problems view, read-only): one row per address, its
+  state dot by monitor, the last 24 h, **Add an address**, and on each row
+  Edit, Checks, **Add to the map** (it becomes a device with the same
+  checks, and leaves the list), Quiet and Delete. Editing works everywhere
+  the network is editable; checking happens only in the desktop app (D127).
+  The website and the zip show the state through a Topo server.
+- **D373. Alarm or record only, per item.** Each checked device and each
+  watched address says what an outage does: **Raise an issue** (as now: an
+  issue, the banner, the alarm on PCs with Show alarms on) or **Record
+  only**: no issue, no banner, no alarm; the outage still goes into the
+  statistics and the monitoring report's outage table, marked "recorded
+  only". The default stays Raise an issue for devices; a new watched
+  address starts at Record only. A recorded-only device that is upstream of
+  a raised one is still the root cause named.
+- **D374. Outages of a watched address.** An outage incident names
+  `watchIds` instead of (or beside) `nodeIds`; the Problems tab, the Simple
+  list, Report a problem (prefilled with the address and routed to its
+  provider) and the outage report read both. On the map there is no item to
+  mark: the issue shows in the rail's Watched tab and the banner.
+- **D375. The checks offered.** The 13 of D155, plus **TLS certificate**
+  on any port (the days until expiry, warned at 14; for LDAPS, RDP, a
+  PACS's DICOM TLS and the rest; one handshake, nothing sent after it).
+  Addresses outside the network (a public resolver, the ISP's gateway, a
+  cloud service) are allowed: the owner wrote them down, and the request
+  goes from the desktop app, never from a page. A **Check the Internet**
+  preset adds three watched addresses in one step: a ping to the ISP's
+  gateway (asked), a DNS question to a public resolver (asked) and an HTTPS
+  check to an address the owner gives. Still excluded (D128): SNMP,
+  anything that reads configuration, and port ranges.
+- **D380. Not checked is not down.** An item with no answer check has no
+  state: no dot on the map, no row in the availability tables, no
+  "unknown", and it is never counted in a figure ("12 of 40 devices
+  answering" is never written; "12 checked, 12 answering" is). The
+  monitoring report names its scope ("Checked: 12 devices and 3 watched
+  addresses"), and a device behind one that is down is said to be down
+  only when it is checked itself; an unchecked one behind it is named as
+  "behind it, not checked". The Watched tab and the Answer checks section
+  say once: "Topo checks only what you ask it to. Anything not checked has
+  no state." A test holds that a network with no checks shows no state
+  anywhere, and that the report's figures count checked items only.
+- **D381. Check now: one question, once.** Every device's Answer checks
+  and every watched address get **Check now** (desktop app only): it runs
+  the item's checks once from this PC, or a ping when it has none, and
+  shows the answer beside it ("Answered in 3 ms, from this PC, 10:42").
+  Nothing is kept: no sample, no state, no issue, no statistics, and the
+  item stays unchecked afterwards. It needs no monitor and no watch, so the
+  check is a manual tool first; watching (D371-D373) is the opt-in for
+  doing it on a schedule.
+
+**Connections (8f)**
+
+- **D376. Which clients are watched.** On a Topo server, a desktop app
+  can be marked **Watch this PC's connection** (Settings, Topo server; or
+  by an owner in Members, on that PC's device). A browser tab never is:
+  closing a tab is not an outage. A site monitor (D151) is always watched.
+  A watched PC's app sends a heartbeat every 60 s from Rust, with the
+  window closed too (the tray, as monitoring does).
+- **D377. "Lost connection".** The server sees each watched PC's last
+  heartbeat without decrypting anything (as D151). Three missed: every
+  signed-in page shows "{PC} lost its connection to the server at 10:42"
+  in the banner, PCs with Show alarms on get the notification (not the full
+  card: a PC going home is not a device down), and the gap is recorded.
+  When it is back: "{PC} connected again at 11:05 (23 min)". A PC whose
+  user signed out or that was turned off from Topo (the app sends "going
+  away" on quit and on sign-out) is not lost.
+- **D378. The other side: the server not answering.** A connected app that
+  cannot reach the server for 3 minutes shows "The Topo server is not
+  answering since 10:42" in its own window and, with Show alarms on, the
+  notification. A monitor goes on checking and keeps its records to send
+  later (D157's unknown time is the server's, not the devices'). When it
+  is back, the app sends its own gap, so a server that was down is
+  recorded by the clients that saw it.
+- **D379. Connections in the monitoring report.** The report gets a
+  **Connections** section (ticked by default on a server): per watched PC,
+  the time connected over the time watched, and each gap with its start,
+  length and who saw it (the server: lost; the PC: the server not
+  answering). These are server metadata (when a PC reported), not site
+  data: the server keeps them in the clear, for as long as the site's Keep
+  statistics, and docs/SERVER.md's "What the server can see" says so.
+
+**Trace to a target (8h, the owner, 2026-11-12)**
+
+- **D382. A second right-click asks "does it reach this?".** Today a
+  right-click on a device arms link mode (the next left click files a
+  cable), and a right-click on another device arms it again from there.
+  The second right-click changes: right-click A, then right-click B asks
+  **Does A reach B?** A left click on B still files the cable, as now. On a
+  touch screen, a long-press on A then a long-press on B. Without a mouse:
+  the selection's **Trace to…** (the command list and the device panel's
+  Trace section), then a click or a tap on the target. Esc, or a click on
+  empty map, clears it. Starting again from another device is Esc then a
+  right-click, or the link banner's **Start from here**.
+- **D383. It edits nothing, so it works everywhere a map is.** No undo
+  step, nothing stored, nothing in the URL. It works on a read-only
+  document and a shared link (where a long-press arms the trace target
+  instead of link mode, which a read-only document refuses), and in the
+  full editor. The simple views get it later, if at all (their long-press
+  is not link mode).
+- **D384. The answer comes from the trace's own walk.** The same
+  calculateReachability as Trace (js/diagnostics.js), the VLAN tick
+  honoured, so Trace and the target never disagree. It reaches: the map
+  lights one path, the shortest through the links the walk reached, and
+  the line says "PC-1 reaches NAS through SW1 · R1 · VLAN 10 → 20 at R1".
+  It does not: "PC-1 does not reach NAS", where the walk stops (the
+  reached device nearest the target, by cables), and the first reason the
+  register gives: no cable, a cable that does not carry the VLAN (in the
+  VLAN path finding's words), no gateway or a router with no subnet toward
+  it, the target's Allowed ports, a retired device on the way, or inbound
+  through NAT. Only what is recorded: with no recorded reason it says
+  "Nothing recorded explains it", never a guess.
+- **D385. A port, and the way back.** **On port** (empty: any) asks about
+  one service, through the Trace port filter and the target's Allowed
+  ports (DICOM on 104, HTTPS on 443). The answer is one way, A to B;
+  **And back?** asks B to A too, which differs behind NAT or one-way
+  rules, and both lines show.
+- **D386. From the map, not a live test.** The line says "From the map,
+  not a live test." Topo cannot ask anything from another device, so a
+  live answer is offered only when A is this PC (the desktop app, A
+  matched by This computer's MACs, D166): **Check now** on B (D381), its
+  answer beside the map's ("From the map: reaches. From this PC: answered
+  in 3 ms"). They can disagree, and both are shown as they are.
+- **D387. Tests.** A suite (tracetarget) over the samples: reach and not,
+  each reason, the port, the way back, a VLAN-crossing path, read-only,
+  the second right-click versus the left click's cable, and that
+  re-arming from another device now needs Esc; the mobile long-press pair
+  through Playwright.
+
+### Decisions made building step 8, for the owner
+
+**8a. Links back (2026-11-12)**
+
+- **D388. Where the passphrase is kept, and for how long (amends D367).**
+  Not with the part revision: in one small list of its own in this
+  browser's (or the app's) local storage, `topo_reply_tags`, a record per
+  reply tag: the passphrase, the card, the network's id, the report and the
+  names of the providers it went to. One list covers a part, the whole
+  network and Share their part alike, and a report sent from a network not
+  kept yet. It is kept while the network's card is kept (a card that is gone
+  takes its records with it, the next time a link is sent) and the newest
+  200; not dropped when the report closes, because a provider's second visit
+  can come back after that. With storage blocked nothing is kept and the
+  reply asks, as before.
+- **D389. Which links carry a tag.** A problem report's link (part or
+  whole) and Share their part when locked: a new tag per link made. The
+  share dialog's own links and binder links carry none and stay version 1,
+  so Topo 0.0.1 to 0.0.3 read them as before. A version 2 link in those
+  builds reads as "damaged", not "made by a newer Topo" as D368 hoped: they
+  were released before the word existed. From this build on, a version
+  above 2 says "This link was made by a newer Topo. Update Topo to open it."
+- **D390. The provider's side.** The tag is held in memory beside the
+  passphrase that opened the link (D44), and goes back only with that
+  passphrase. After a reload both are gone: the copy back is a version 1
+  link with a new passphrase, which the client's Topo asks for. A copy back
+  under a known tag that the kept passphrase does not open asks with "This
+  reply was locked with a new passphrase. Ask whoever sent it for it."
+- **D391. What "opens straight at the merge" is.** A reply that opens
+  unasked goes on exactly as a typed passphrase did: the visited banner
+  with **Review the visit**, Visits waiting, the three-way merge (D153). It
+  adds one line, "A reply from {provider}: opened with the passphrase you
+  sent it with." D369's note for a reply to a closed report is not built:
+  the review already shows the report's state.
+- **D392. Open a link… goes through the address.** The pasted link's
+  fragment is put in this page's address, as a paste into the address bar
+  would, so one reader (load, popstate) handles every kind of link and a
+  new history entry is made: Back returns to what was open. Offered in
+  the Export menu in every view and on the landing beside Open a file.
+  Text with no fragment, an entry word ("#simple") or a locked link too
+  short to be one: "This is not a Topo link, or it was cut short.", nothing
+  opened. A locked link that is malformed says it is damaged without
+  asking for a passphrase first (it asked, then said so).
+- **D393. The message.** One line is added to the provider's message,
+  after the passphrase line: "In the Topo app: Export, Open a link…, and
+  paste the link." The two passphrase lines are as they were.
+- **D394. Not done in 8a.** The link back was not opened in the running
+  desktop app (no GUI session here, as step 7's open items say): the app
+  runs the same page, and Open a link… was tested in the browser only.
+
+**8b. The part is the path (2026-11-12)**
+
+- **D395. "The nearest two" are the nearest two that are not theirs.**
+  Each item device's way is walked as monitorChains walks it (breadth
+  first, cables only, a VPN tunnel never, through any device in service),
+  and the two devices on it nearest the item that are not items are kept,
+  as Hop 1 and Hop 2 (the provider report's marks keep their names). So
+  their server behind their own core switch still shows the access switch
+  and the router past it. A way stops at the first routing device; a cloud
+  item's way is its router. A router's way goes to the nearest cloud, and
+  only with none drawn to the nearest other routing device. With no
+  routing device to reach, an item has no way and no context of its own.
+- **D396. The far end of a cable they answer for stays.** A cable named
+  on them (the fibre into the building, the NAS run) is an item, so its far
+  end comes as context at Hop 1, on a way or not. Only a cable of the
+  client's at an item, to something off every way, is left out.
+- **D397. The in-use mark is `portAttrs.pN.partUsed`.** It rides on the
+  item's own port record (the loader keeps it; it adds no dot and no
+  "noted" count), so the provider's Topo counts the port used everywhere
+  portUsedTest is read (the faceplate, Add devices, the capacity notes, Move
+  to switch) and the faceplate chip says "Port 5: in use (not in your
+  part)". Only an item's faceplate ports are marked; a context device shows
+  only its facing ports anyway. The merge strips the mark from every side
+  before planning (mergeInput, js/merge.js), so a two-way merge cannot
+  bring it in either. A copy opened as a network of its own (not merged)
+  keeps it: it is the provider's view. The table's Ports tab still lists
+  a marked port with no peer.
+- **D398. The count.** "12 devices on their ports left out" is every
+  device at the far end of an item's left-out cable, wireless clients of
+  their AP included (no port, no mark). It follows the other counts on the
+  send step and in brackets after Share their part's sentence. The
+  provider report's linked-devices list is now the way only.
+- **D399. A suite's fixture changed (loop, section 7).** The distribution
+  switch and the camera were "around" the provider's switch; they are now
+  on its way to the router (the direct cable to the router removed), so the
+  section still tests linked devices edited, removed and filled in.
+
+**8c. Report a problem to them (2026-11-12)**
+
+- **D400. The sheet.** The card's button opens the Report a problem sheet
+  with that provider ticked and listed first, nothing picked even when a
+  device is selected. The routing's own ticks are added after it while no
+  tick has been touched, as D365 allows. A provider the routing does not
+  list for the problem is listed all the same, "Chosen from their card".
+  Read-only refuses it, as Report a problem.
+- **D401. Attached unless they were unticked.** On the send step the
+  report is attached (as if Also attach the report were ticked) when the
+  link carries a part and the provider is still among the recipients; it
+  can be unticked. **Print their report** sits under it and opens the
+  recipients' report (one report of all their parts) in the preview. The
+  sheet steps aside while the preview is open (its focus trap would hold
+  the preview's controls) and comes back as it was, nothing in flight
+  dropped. The link and the report file are made one after the other,
+  the link first: the file borrows the page's document while it draws, and
+  a link made meanwhile carried a part of that part (found in the browser
+  pass, fixed, tested in providerreport).
+- **D402. Export's Provider report…** follows Monitoring report: with one
+  provider it opens at once, with several it asks "Whose report?", with
+  none it says so. Read-only prints too. The card has no report button now.
+
+### Phases
+
+Stop after each phase and report the counts and failures as they are.
+
+- **8.0** This section; no code.
+- **8a. Links back** (D366-D370): Open a link…; the passphrase kept with
+  the part revision; the sealed link's version 2 and its reply tag (tests
+  with vectors for both versions); the three answers; the provider's
+  message. First, because a client on the desktop app cannot get a visit
+  back at all today.
+- **8b. The part is the path** (D363, D364): providerPart's context from
+  the chains; the in-use marks; the counts; the part suites updated and a
+  switch-with-forty-PCs fixture.
+- **8c. Report a problem to them** (D365).
+- **8d. Watched addresses** (D371-D374): format v20 and schema, the
+  migration with the suite count before and after, the Watched tab, the
+  checks fed to the scheduler, alarm or record only, outages with
+  `watchIds`, the reports and the CSV sheet.
+- **8e. TLS certificate and Check the Internet** (D375), with a loopback
+  fake.
+- **8f. Connections** (D376-D379): the server's heartbeat route and
+  migration, the app's heartbeat and going-away, the banner and
+  notification, the server-not-answering side, the report section, and
+  docs/SERVER.md.
+- **8h. Trace to a target** (D382-D387): the second right-click, the
+  long-press pair, Trace to…, the answer and its reason, the port, the way
+  back, Check now from this PC.
+- **8g.** i18n (es, pt-BR, ja, ru), README, FEATURES, SERVER and FORMAT
+  (v20), the release note, and the browser pass at 360, 390 and 1280 in both
+  themes.
+
 ## Order
 
 1. Fix A and B, add restore points (no format change).
@@ -4023,6 +4448,8 @@ reports in the browser at 360, 390 and 1280 in both themes and every language.
 6. Importers and the published format spec.
 7. Answer checks, monitors, statistics, the idle lock and This computer
    (section 7: merge fixes first, the welcome last).
+8. The provider loop, links back, watched addresses and connections
+   (section 8: links back first).
 
 ## Status
 
@@ -4603,3 +5030,14 @@ reports in the browser at 360, 390 and 1280 in both themes and every language.
   - [x] 7o. Setup does the server set-up itself (D352-D357; review D358-D360).
   - [x] 7m. i18n review, docs and the release note.
   - [x] 7p. Settings in sections (D361; review D362).
+- [ ] 8. The provider loop, links back, watched addresses and connections
+  (section 8). 8.0 written 2026-11-12: D363-D387, the phase list.
+  - [x] 8.0 Scope.
+  - [x] 8a. Links back (2026-11-12, not yet committed; D388-D394).
+  - [x] 8b. The part is the path (2026-11-12, not yet committed; D395-D399).
+  - [x] 8c. Report a problem to them (2026-11-12, not yet committed; D400-D402).
+  - [ ] 8d. Watched addresses.
+  - [ ] 8e. TLS certificate and Check the Internet.
+  - [ ] 8f. Connections.
+  - [ ] 8h. Trace to a target.
+  - [ ] 8g. i18n, docs and the browser pass.

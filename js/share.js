@@ -85,6 +85,7 @@ function renderShareDialog() {
             : 'The link carries only what {name} look after: {items}, {context}, their reports and visits.',
             { name: partProviderNames(part.providerIds), items: tn(part.counts.items, '1 device of theirs', '{n} devices of theirs'),
                 context: tn(part.counts.context, '1 linked device around them', '{n} linked devices around them') })
+                + (part.counts.leftOut ? ` (${tn(part.counts.leftOut, '1 device on their ports left out', '{n} devices on their ports left out')})` : '')
             : t('The link carries the whole network: devices, addresses, names and notes.');
     _shareEl('sharePassRow').classList.toggle('hidden', !sealed);
     const hint = _shareEl('shareHint');
@@ -134,6 +135,7 @@ function resetShareResult() {
 // js/incidents.js); the share dialog's own network links have no cap.
 // opts.doc: the copy to carry instead of the open network, as it leaves
 // (partCopy, js/providerpart.js: a provider's part, with its identity).
+// opts.tag: a sealed network link's reply tag (D368; "Reply tags" below).
 async function buildShareLink(mode, sealed, passphrase, opts = {}) {
     const binder = mode === 'binder';
     if (!binder && state.readOnly) throw new Error('A read-only document is not shared as a link.');
@@ -152,7 +154,7 @@ async function buildShareLink(mode, sealed, passphrase, opts = {}) {
     else payload = withLinkLog(await relink(strip(identifiedDoc(serializeDoc(), 'link'))));
     const json = JSON.stringify(payload);
     const frag = sealed
-        ? await sealFragment(json, binder ? SEAL_KIND.binder : SEAL_KIND.doc, passphrase)
+        ? await sealFragment(json, binder ? SEAL_KIND.binder : SEAL_KIND.doc, passphrase, binder ? null : opts.tag)
         : binder ? await encodeBinderFragment(json) : await encodeShareFragment(json);
     if (binder && frag.length > BINDER_URL_MAX) return null;
     if (!binder && opts.max && frag.length + publicBase().length + publicQuery().length + 1 > opts.max) return null;
@@ -217,7 +219,13 @@ async function copyShareLink() {
             // Their part, recorded as a 'part' revision (its base when it
             // comes back, D93).
             const pc = await partCopy(_sharePart.providerIds, {});
-            url = pc ? await buildShareLink('doc', sealed, pass, { doc: pc.doc }) : undefined;
+            // Sealed, it carries a reply tag like a report's link (D367).
+            const tag = sealed ? newReplyTag() : null;
+            url = pc ? await buildShareLink('doc', sealed, pass, { doc: pc.doc, tag }) : undefined;
+            if (url && tag) {
+                rememberReplyTag(tag, { pass, cardId: state.libraryId || null, docId: state.docId || null,
+                    to: _sharePart.providerIds.map((p) => providerById(p)).filter(Boolean).map(providerLabel) });
+            }
         } else url = await buildShareLink(_shareMode, sealed, pass, { incidents: shareIncludesIncidents() });
     }
     catch (e) { console.warn('Share: could not build the link', e); url = undefined; }
@@ -262,6 +270,42 @@ _shareEl('sharePassCopyBtn').onclick = copySharePassphrase;
 _shareEl('shareCloseBtn').onclick = closeShareDialog;
 _shareEl('shareDialog').addEventListener('click', (e) => { if (e.target.id === 'shareDialog') closeShareDialog(); });
 _shareEl('shareDialog').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeShareDialog(); } });
+
+// ---- Open a link… (docs/SCOPE.md D366) ----
+// A Topo link pasted into the page instead of the address bar: the only
+// way a link comes into the desktop app, and the same door on the website.
+// The link's fragment is what counts, whatever address it was made on (a
+// topo.carino.systems link opens in the app), and a bare fragment is taken
+// too. What mail does to a long link (line breaks, spaces, angle brackets)
+// is taken off.
+// -> the fragment (no '#'), or null when the text holds none.
+function linkFragmentOf(text) {
+    let s = String(text || '').trim().replace(/^<+|>+$/g, '').replace(/\s+/g, '');
+    if (!s) return null;
+    const at = s.indexOf('#');
+    if (at >= 0) s = s.slice(at + 1);
+    else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) return null;   // an address with no fragment carries nothing
+    // An entry word ('simple', 'setup') is a way in, not a link someone sent.
+    if (!s || /^[a-z][a-z-]{0,23}$/i.test(s)) return null;
+    return s;
+}
+// Opens it as the address bar would: a new history entry whose fragment
+// load() reads (popstate, js/app.js), so a sealed link asks for its
+// passphrase (or knows it, "Reply tags" below), and a network already kept
+// here gets the merge questions.
+async function openLinkDialog() {
+    const text = await askPrompt(t('Paste the link you were sent. It opens here, in this Topo.'), { title: t('Open a link'), ok: t('Open') });
+    if (text === null || text === undefined) return false;
+    const frag = linkFragmentOf(text);
+    if (!frag) { await tell(t('This is not a Topo link, or it was cut short.')); return false; }
+    if (isSealedFragment(frag)) {
+        const shape = sealedShape(frag);
+        if (shape.shape === 'damaged') { await tell(t('This is not a Topo link, or it was cut short.')); return false; }
+    }
+    if (typeof flushAutosave === 'function') flushAutosave();
+    window.location.hash = '#' + frag;
+    return true;
+}
 
 // ---- Opening a sealed link ----
 // Resolves with the typed passphrase, or null when the visitor declines. The
@@ -308,16 +352,114 @@ _shareEl('unlockCancelBtn').onclick = () => _answerUnlock(null);
 _shareEl('unlockDialog').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); _answerUnlock(null); } });
 
 // The passphrase that opened the document arriving now, handed over once
-// (replaceDocument -> providerDocLoaded takes it), never stored.
-let _arrivalPass = null;
+// (replaceDocument -> providerDocLoaded takes it), never stored; and the
+// link's reply tag (D368), for the copy sent back.
+let _arrivalPass = null, _arrivalTag = null;
 function takeArrivalPassphrase() { const p = _arrivalPass; _arrivalPass = null; return p; }
+function takeArrivalTag() { const g = _arrivalTag; _arrivalTag = null; return g; }
+
+// ---- Reply tags (docs/SCOPE.md D367-D369) ----
+// The client keeps the passphrase of each sealed link it sends to a
+// provider (a problem report, Share their part), under the link's reply
+// tag, beside the networks themselves (this browser's storage, or the
+// app's), which already hold the network unencrypted: the passphrase
+// protects the link while it travels, as before. The copy the provider
+// sends back carries the same tag and, while their page still holds it, the
+// same passphrase, so it opens here without asking. The provider's side
+// keeps nothing (D44).
+//   { tag: { pass, cardId, docId, incidentId, to: [provider names], at } }
+// Kept while the network's card is here (pruned when another link is
+// kept), the newest REPLY_TAGS_MAX of them.
+const REPLY_TAGS_KEY = 'topo_reply_tags';
+const REPLY_TAGS_MAX = 200;
+function replyTagsRead() {
+    try {
+        const v = JSON.parse(localStorage.getItem(REPLY_TAGS_KEY) || '{}');
+        return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+    } catch (e) { return {}; }
+}
+function replyTagsWrite(all) {
+    try {
+        if (Object.keys(all).length) localStorage.setItem(REPLY_TAGS_KEY, JSON.stringify(all));
+        else localStorage.removeItem(REPLY_TAGS_KEY);
+        return true;
+    } catch (e) { return false; }   // storage blocked: the reply asks for the passphrase, as before
+}
+// rec: { pass, cardId, docId, incidentId, to }.
+function rememberReplyTag(tag, rec) {
+    if (!validReplyTag(tag) || !rec || typeof rec.pass !== 'string' || !rec.pass) return false;
+    const all = replyTagsRead();
+    // A network no longer kept here takes its passphrases with it.
+    if (typeof libraryEntry === 'function') Object.keys(all).forEach((k) => { const c = all[k] && all[k].cardId; if (c && !libraryEntry(c)) delete all[k]; });
+    all[tag] = { pass: rec.pass, cardId: rec.cardId || null, docId: rec.docId || null, incidentId: rec.incidentId || null,
+        to: Array.isArray(rec.to) ? rec.to.filter((x) => typeof x === 'string' && x).slice(0, 8) : [], at: Date.now() };
+    const keys = Object.keys(all).sort((a, b) => (all[b].at || 0) - (all[a].at || 0));
+    keys.slice(REPLY_TAGS_MAX).forEach((k) => delete all[k]);
+    return replyTagsWrite(all);
+}
+function replyTagLookup(tag) {
+    if (!validReplyTag(tag)) return null;
+    const r = replyTagsRead()[tag];
+    return r && typeof r === 'object' && typeof r.pass === 'string' && r.pass ? r : null;
+}
 
 async function openSealedLink(frag) {
     // A stale run returns without closing the dialog or saying why: a newer
     // run may have opened it again already, for the entry now current.
     const run = ++_unlockRun; const stale = () => run !== _unlockRun;
     const blocked = !canSeal();
-    let error = blocked ? t('This browser cannot open locked links. It needs a secure (https) page.') : '';
+    // Read before anything is asked (D369): a link that is no sealed link at
+    // all, or one a newer Topo made, is said so and no passphrase is asked.
+    const shape = sealedShape(frag);
+    if (shape.shape !== 'ok') {
+        closeUnlockDialog();
+        if (shape.shape === 'newer') {
+            tell(t('This link was made by a newer Topo. Update Topo to open it.'));
+            if (state.nodes.length) { keepNetworkInEntry(); return; }
+            window.history.replaceState(null, '', cleanUrl());
+            await load();
+            return;
+        }
+        arrivedUnreadable('');
+        return;
+    }
+    const opened = (kind, json, pass) => {
+        closeUnlockDialog();
+        if (kind === SEAL_KIND.binder) {
+            openBinderPayload(json);
+            window.history.replaceState(null, '', cleanUrl());
+        } else {
+            // The passphrase goes to provider mode for the copy sent back
+            // (js/providermode.js), in memory only, for this one arrival;
+            // the reply tag with it.
+            _arrivalPass = pass; _arrivalTag = shape.tag;
+            try { if (!openArrivedDocument(json)) arrivedUnreadable(''); }    // writes the document into the entry and clears the URL, or says the link is damaged
+            finally { _arrivalPass = null; _arrivalTag = null; }
+        }
+    };
+    // A reply to a link sent from here: the passphrase kept with its tag,
+    // tried once. A provider whose page forgot it locked the copy with a
+    // new one (D44): the try fails and the passphrase is asked, as for any
+    // link this browser does not know.
+    const known = !blocked ? replyTagLookup(shape.tag) : null;
+    if (known) {
+        try {
+            const { kind, json } = await unsealFragment(frag, known.pass);
+            if (stale()) return;
+            opened(kind, json, known.pass);
+            if (kind !== SEAL_KIND.binder) {
+                showToast(known.to.length
+                    ? t('A reply from {who}: opened with the passphrase you sent it with.', { who: known.to.join(', ') })
+                    : t('A reply to a link you sent: opened with the passphrase you sent it with.'), 'ok');
+            }
+            return;
+        } catch (e) {
+            if (stale()) return;
+            if (e.code !== 'passphrase') console.warn('Topo: a known reply did not open', e.code || e);
+        }
+    }
+    let error = blocked ? t('This browser cannot open locked links. It needs a secure (https) page.')
+        : known ? t('This reply was locked with a new passphrase. Ask whoever sent it for it.') : '';
     for (;;) {
         const pass = await askPassphrase(error, blocked);
         if (stale()) return;   // before the decline below: abandonUnlock answers null too
@@ -325,17 +467,7 @@ async function openSealedLink(frag) {
         try {
             const { kind, json } = await unsealFragment(frag, pass);
             if (stale()) return;
-            closeUnlockDialog();
-            if (kind === SEAL_KIND.binder) {
-                openBinderPayload(json);
-                window.history.replaceState(null, '', cleanUrl());
-            } else {
-                // The passphrase goes to provider mode for the copy sent back
-                // (js/providermode.js), in memory only, for this one arrival.
-                _arrivalPass = pass;
-                try { if (!openArrivedDocument(json)) arrivedUnreadable(''); }    // writes the document into the entry and clears the URL, or says the link is damaged
-                finally { _arrivalPass = null; }
-            }
+            opened(kind, json, pass);
             return;
         } catch (e) {
             if (stale()) return;
