@@ -1249,47 +1249,6 @@ function landingIsOpen() { return !document.getElementById('landing').classList.
 // the blank canvas its save(); here the document has already been saved.
 function landingHandledDocument() { _landingBoot = false; closeLanding(); }
 
-// ---- Topo to keep on this computer ----
-// The landing's "Get Topo for this computer" and the About window's line
-// link to the latest release (the installers and the offline zip). Offered on
-// the website only, on a computer: the desktop app and the offline zip are
-// that download already, a Topo server's page has its own, and a phone
-// installs none of them. -> null, or the computer's system ('windows', 'mac',
-// 'linux' or '' when it does not say), which names the file to pick.
-function offlineOffer(where) {
-    const w = where || {};
-    const host = w.host !== undefined ? w.host : location.hostname;
-    const ua = String(w.ua !== undefined ? w.ua : navigator.userAgent);
-    const desktopApp = w.desktopApp !== undefined ? w.desktopApp : !!window.__TAURI__;
-    if (host !== 'topo.carino.systems' || desktopApp) return null;
-    if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return null;
-    // An iPad asking for the desktop site says Macintosh, with a touch screen.
-    const touchMac = w.touch !== undefined ? w.touch : (navigator.maxTouchPoints || 0) > 1;
-    if (/Macintosh/.test(ua) && touchMac) return null;
-    if (/Windows/.test(ua)) return 'windows';
-    if (/Macintosh|Mac OS X/.test(ua)) return 'mac';
-    if (/Linux|X11/.test(ua) && !/CrOS/.test(ua)) return 'linux';
-    return '';
-}
-const OFFLINE_PICK = {
-    windows: 'On Windows, pick the file ending in -setup.exe (x64, or arm64 on Windows on Arm).',
-    mac: 'On a Mac, pick the .dmg (aarch64 for Apple silicon, x64 for Intel).',
-    linux: 'On Linux, pick the .rpm (Fedora), the .deb (Ubuntu, Debian) or the .AppImage.'
-};
-// Shows or hides the offer; run at start and with each language.
-function renderOfflineOffer(where) {
-    const os = offlineOffer(where);
-    const box = document.getElementById('landingOffline'), about = document.getElementById('aboutOffline');
-    if (box) box.hidden = os === null;
-    if (about) about.hidden = os === null;
-    const pick = document.getElementById('landingOfflinePick');
-    // A non-breaking hyphen keeps -setup.exe whole on a narrow screen.
-    if (pick) pick.textContent = os && OFFLINE_PICK[os] ? t(OFFLINE_PICK[os]).replace(/-(?=setup)/g, '\u2011') : '';
-    return os;
-}
-renderOfflineOffer();
-window.addEventListener('carino:langchange', () => setTimeout(() => renderOfflineOffer(), 0));
-
 function renderLanding() {
     const list = document.getElementById('landingCards');
     const tplList = document.getElementById('landingTemplateCards');

@@ -12,7 +12,7 @@
 # cannot do.
 #
 # --desktop patches the copied index.html and nothing else: the meta CSP's
-# connect-src gains Tauri's IPC origins (ipc: on macOS and Linux,
+# connect-src trades api.github.com (the website's download card) for Tauri's IPC origins (ipc: on macOS and Linux,
 # http://ipc.localhost on Windows). The zip never gets them, because
 # *.localhost is loopback in a browser. It also adds intro.html (from
 # desktop/), the app's intro animation, which the window opens first, and
@@ -58,7 +58,10 @@ done
 # Nothing hidden rides along inside the copied folders.
 find "$OUT" -mindepth 1 -name '.*' -exec rm -rf {} + 2>/dev/null || true
 
-CSP_FROM="connect-src 'self';"
+# The website's connect-src names api.github.com for the download card
+# (js/download.js, topo.carino.systems only). The app is that download, so its
+# copy swaps GitHub for Tauri's IPC origins rather than adding them.
+CSP_FROM="connect-src 'self' https://api.github.com;"
 CSP_TO="connect-src 'self' ipc: http://ipc.localhost;"
 if [ "$DESKTOP" = 1 ]; then
     sed "s|$CSP_FROM|$CSP_TO|" "$OUT/index.html" > "$OUT/index.html.tmp"
@@ -112,10 +115,11 @@ EOF_FILES
 
 # 4. The CSP patch: exactly once on --desktop, never otherwise.
 if [ "$DESKTOP" = 1 ]; then
-    n="$(grep -o "connect-src 'self' ipc: http://ipc.localhost;" "$OUT/index.html" | wc -l | tr -d ' ' || true)"
+    n="$(grep -o "$CSP_TO" "$OUT/index.html" | wc -l | tr -d ' ' || true)"
     [ "$n" = 1 ] || bad "the desktop CSP patch matched $n times, not once"
     m="$(grep -o "$CSP_FROM" "$SRC/index.html" | wc -l | tr -d ' ' || true)"
-    [ "$m" = 1 ] || bad "the source CSP has connect-src 'self'; $m times, not once"
+    [ "$m" = 1 ] || bad "the source CSP has $CSP_FROM $m times, not once"
+    grep -q 'api.github.com' "$OUT/index.html" && bad "the desktop index.html still names api.github.com" || true
     [ -e "$OUT/intro.html" ] || bad "the desktop intro was not staged"
     [ -e "$OUT/alarm.html" ] || bad "the alarm card was not staged"
     [ -s "$OUT/THIRD-PARTY.txt" ] || bad "the third-party licences were not staged"

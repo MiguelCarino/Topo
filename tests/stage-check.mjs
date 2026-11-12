@@ -52,7 +52,8 @@ try {
   const ddiff = df.filter((f) => !deskOnly.includes(f) && !readFileSync(join(desk, f)).equals(readFileSync(join(ROOT, f))));
   ok('the desktop copy differs only in index.html', ddiff.join() === 'index.html', ddiff.join(', '));
   const src = readFileSync(join(ROOT, 'index.html'), 'utf8'), dsk = readFileSync(join(desk, 'index.html'), 'utf8');
-  ok('by the IPC origins in connect-src', dsk === src.replace("connect-src 'self';", "connect-src 'self' ipc: http://ipc.localhost;") && dsk !== src);
+  ok('by connect-src: GitHub (the download card) traded for the IPC origins', dsk === src.replace("connect-src 'self' https://api.github.com;", "connect-src 'self' ipc: http://ipc.localhost;") && dsk !== src);
+  ok('so the app names no GitHub, and the website does', !dsk.includes('api.github.com') && src.includes("connect-src 'self' https://api.github.com;"));
   ok('which the website never gets', !src.includes('ipc.localhost') && !readFileSync(join(web, 'index.html'), 'utf8').includes('ipc:'));
   ok('the stage summary names the count', /staged \d+ files, \d+ KB \(web\)/.test(r1.stdout), r1.stdout.trim());
 
@@ -81,7 +82,7 @@ try {
     for (const f of drop) rmSync(join(dir, f), { recursive: true });
     return run(join(dir, 'desktop', 'stage.sh'), [join(dir, 'out')]);
   };
-  const head = `<meta http-equiv="Content-Security-Policy" content="connect-src 'self';">`;
+  const head = `<meta http-equiv="Content-Security-Policy" content="connect-src 'self' https://api.github.com;">`;
   const good = fake('good', `${head}<link rel="canonical" href="https://example.org/"><script src="js/x.txt"></script>`);
   ok('a sound tree stages (a canonical link to the site is an address, not a load)', good.status === 0, good.stderr.trim());
   const missing = fake('missing', `${head}<script src="js/nope.js"></script>`);
