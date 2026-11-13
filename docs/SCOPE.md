@@ -1461,7 +1461,8 @@ The owner's fixed decisions, not to be reopened:
   on it.
 - **D133. Statistics are collected automatically** whenever checks run.
   Reports cover response times and availability.
-- **D134. The interface locks after idle time:** 30 minutes by default; the
+- **D134. The interface locks after idle time:** *(as shipped, by where
+  Topo runs: D426)* 30 minutes by default; the
   user changes the time, or turns the lock off, in Settings. While locked, the
   alarm card still shows the item's name.
 - **D135. Statistics are kept 360 days by default.** The user changes this in
@@ -1487,7 +1488,8 @@ the PC only (D166), statistics Off saves nothing (D162), a visit monitor's
 outages stay on the provider's screen (D148), every visit waits for the owner
 (D139, D153), the merge fixes come first (D140).
 
-- **D141. The welcome: when it shows.** The desktop app: after the intro
+- **D141. The welcome: when it shows.** *Changed by D425: the desktop app
+  only; the website has none.* The desktop app: after the intro
   animation (desktop/intro.html) on the first start, and from Settings, "Run
   the welcome again". The website: a lighter version on the first visit,
   without the server, monitoring and This computer steps. It is skipped for
@@ -1760,7 +1762,8 @@ outages stay on the provider's screen (D148), every visit waits for the owner
     view and can be attached to a Report a problem.
   - **On an item:** its Check section shows the last 24 h (a small
     response-time chart and the state bar) and links to the full report.
-- **D165. The idle lock.** Settings: "Lock after: off / 5 / 15 / 30 / 60 min /
+- **D165. The idle lock.** *Changed by D426: 30 min as shipped only in the
+  app, with a server sign-in or with a PIN; Off elsewhere.* Settings: "Lock after: off / 5 / 15 / 30 / 60 min /
   custom", per PC (browser or app storage, never the document), 30 min by
   default, on the desktop app and the website alike. Locking saves first (the
   open document, and any open dialog's draft such as Record visit or Report a
@@ -3336,7 +3339,8 @@ later answers stand: the app is a server client (D144), and there is no
 status board, so a wall display turns the screen lock Off (D145); the
 welcome's lock step offers Off for that.
 
-- **D326. When the welcome shows.** On a plain start only: the page
+- **D326. When the welcome shows.** *Changed by D425: in the desktop app
+  only.* On a plain start only: the page
   arrived with no fragment at all (no share, binder, sealed or asset link,
   no `#setup`, `#provider`, `#simple`, `#imagenology` or `#advanced`, no
   server sign-in or invitation link) and no `?profile=` or `?simple`, and
@@ -4572,6 +4576,85 @@ it asked, from the PC that asked, and for nothing else.
   x64 apps (macOS, Linux, Windows) and the zip are built there; the Arm
   apps are built on an Arm Mac and uploaded to the same draft (`gh release
   upload v0.0.3 <files>`).
+
+**After step 8: one start per place Topo runs (2026-11-12)**
+
+The owner's review of how Topo starts on the website, the offline zip, a
+page a Topo server served and the desktop app: "web version should not run
+the setup, should not lock by default (unless loading a file that has lock
+or the user enables it)". Three decisions, each reversing an earlier one
+where it says so.
+
+- **D425. Setup is the desktop app's alone.** Reverses D141's "a lighter
+  version on the first visit" and D326's "once per PC or browser". On the
+  website, the zip and a server's page Setup asked nothing those places
+  could act on: "where networks are kept" had one fixed answer, the look is
+  the navbar's switch, and the last step repeated the landing's buttons
+  behind it; on a server's page it stood in front of the sign-in and
+  offered only networks kept in the browser. So a browser never shows it
+  (`atBoot` answers `web` and writes no mark), Settings has no Setup tab
+  there (Run the setup again is the app's; the tab hides with its
+  sections, D361), and the website's "On this browser" choice and its three
+  strings are removed. The app is unchanged: the same steps, the same
+  mark, D327's "an install in use is not welcomed". A page a Topo server
+  served starts on the server: **On this server** and its **Sign in** come
+  before the ways to start a network in this browser (the landing's
+  `served` class, set by js/serverui.js), and the hero's "It runs in this
+  tab — no server, no upload, no account" is not shown there, since it is
+  not true of that page. An app window connected to a server gets the same
+  order.
+- **D426. The screen lock as shipped depends on where Topo runs.** Reverses
+  D134's and D165's "30 min by default, on the desktop app and the website
+  alike". As shipped it is 30 minutes in the desktop app, on a page signed
+  in to a Topo server (the sign-in is a real way to unlock) and wherever a
+  PIN is set on this PC; Off on the website, the zip and a server's page
+  with nobody signed in. There D169's plain Unlock protected nothing, and
+  locking reloads the page (D214), which threw away the undo history every
+  30 idle minutes. "As shipped" is the absence of `topo-lock-after`; a time
+  chosen in Settings (Off and 30 included) is now always stored and wins
+  everywhere, so 30 chosen on the website stays 30. While it is Off as
+  shipped the page looks again each minute, so a sign-in or a PIN set in
+  another tab turns it on. For an install from before: a browser that
+  never chose a time goes from 30 to Off (unless it has a PIN); one that
+  had chosen 30 also reads as "never chose", since 30 was stored as no key.
+  The owner's "unless loading a file that has lock" is read as a network
+  opened from a Topo server by its signed-in member; no document carries a
+  lock, and adding one would be a new document version, not done here.
+  *Open for the owner:* whether the desktop app should keep 30 minutes as
+  shipped (kept).
+- **D427. The checks show wherever the network is edited.** The device
+  panel's Answer checks was hidden with no desktop app behind the page (on
+  a server's site: shown read only, and only for a device that had one,
+  step 7h), while the Watched tab showed and edited the same check cards
+  there; a file made in the app carried checks a website user could not
+  see or remove. Now the full editor shows the section on any page: the
+  rule (D380), the line "Only a Topo desktop app that monitors this
+  network runs these checks. This page never checks." (es, pt-BR, ja, ru),
+  the cards, ＋ Add a check, the availability target and the report link;
+  nothing that needs the app (no Check now, no link to Settings). On a
+  server's site each card also carries the site monitors' lines in place
+  of this PC's own state, and an owner's quiet window as before. A network
+  that cannot be edited shows the cards disabled, and no section for a
+  device with no check. The Watched tab and its sheet say the same line
+  where there is no app. Still not a scanner, and the promise is
+  unchanged: a page never checks.
+
+- **D428. These ship in 0.0.4.** 0.0.3 was published (2026-11-12, tag
+  v0.0.3 at 90e09f3) before them, so its files are left as they are and
+  the note gains "New in 0.0.4" above "New in 0.0.3", whose lines stay as
+  published (Setup on every first start, the lock at 30 minutes). The
+  website is the main branch, so it has them at once. Built as D424
+  builds: a dispatch with `tag` v0.0.4 and `platforms` x64 into a draft
+  the owner publishes; the Arm apps from the owner's Mac.
+
+Not changed by these, and still open from the same review: Report problems
+chosen in Setup does not last past the next plain start (D329); Setup's
+note names a mode button the full editor shows only in the keyboard help;
+Setup's last step and the landing name the same starts differently;
+Settings cannot be opened from the landing; the screen lock's text names a
+server sign-in on a page that has none; the landing's "this browser"
+wording in the desktop app; the back-up folder exists only where the
+browser has the folder picker.
 
 ### Phases
 

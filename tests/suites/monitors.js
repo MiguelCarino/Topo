@@ -131,7 +131,10 @@ window.addEventListener('load', () => { setTimeout(async () => {
     renderCheckSection(getNode('rt'));
     const grp = document.getElementById('checkGroup');
     grp.open = true; renderCheckSection(getNode('rt'));
-    ok('2.3 the device section says it, read only, by monitor', !grp.hidden && /FRONT-DESK/.test(grp.textContent) && /Not answering since/.test(grp.textContent) && !grp.querySelector('[data-f]'), grp.textContent.slice(0, 160));
+    ok('2.3 the device section says it by monitor', !grp.hidden && /FRONT-DESK/.test(grp.textContent) && /Not answering since/.test(grp.textContent) && /As the site's monitors see it/.test(grp.textContent), grp.textContent.slice(0, 160));
+    // The checks are the document's: a page with no app edits them, and says who runs them (D427).
+    ok('2.3b the checks can be edited there, and the page says only a monitoring app runs them', !!grp.querySelector('.ck-card [data-f="proto"]') && !!grp.querySelector('.ck-card .ck-dot.ck-down')
+      && /Only a Topo desktop app that monitors this network runs these checks/.test(grp.textContent) && !grp.querySelector('[data-ck="checknow"]'), grp.textContent.slice(0, 200));
 
     // ---- 3. An issue: folded, bannered, acted on ----
     const t0 = Date.now() - 4 * 60000;

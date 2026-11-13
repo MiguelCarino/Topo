@@ -1125,7 +1125,12 @@ function stubCard(name, line, cls, actions) {
 function renderServerSection() {
     const section = document.getElementById('landingServer');
     if (!section) return;
-    if (!on() || T().state.status === 'off' || T().state.status === 'checking' || T().state.status === 'unreachable') { section.hidden = true; return; }
+    const none = !on() || T().state.status === 'off' || T().state.status === 'checking' || T().state.status === 'unreachable';
+    // A server's page starts on the server: its section (and Sign in) comes
+    // before the ways to start a network in this browser (D425, css/app.css).
+    const landing = document.getElementById('landing');
+    if (landing) landing.classList.toggle('served', !none);
+    if (none) { section.hidden = true; return; }
     section.hidden = false;
     const st = T().state.status;
     const me = T().me();
@@ -1196,7 +1201,11 @@ function render() {
     });
 }
 window.serverLocale = () => { if (!on()) return; rerender(); render(); };
-window.renderServerSection = () => { if (on()) renderServerSection(); else { const s = document.getElementById('landingServer'); if (s) s.hidden = true; } };
+window.renderServerSection = () => {
+    if (on()) { renderServerSection(); return; }
+    const s = document.getElementById('landingServer'); if (s) s.hidden = true;
+    const l = document.getElementById('landing'); if (l) l.classList.remove('served');
+};
 window.serverSendRoute = (cardId, providerIds) => (on() && Y() ? Y().provider.sendRoute(cardId, providerIds) : null);
 window.serverMailRoute = (cardId) => (on() && Y() ? Y().provider.mailRoute(cardId) : null);
 window.serverReportMail = (siteId, body) => (on() && Y() ? Y().provider.reportMail(siteId, body) : Promise.reject(new Error('no server')));

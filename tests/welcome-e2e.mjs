@@ -1,5 +1,6 @@
 // Setup, the first-run welcome, with real page loads (docs/SCOPE.md
-// D141-D143, D170, D326-D336, D352-D357; js/welcome.js).
+// D141-D143, D170, D326-D336, D352-D357, D425; js/welcome.js). Setup is the
+// desktop app's alone: window.__TAURI__ is stubbed wherever it is to show.
 // tests/suites/welcome.js covers the steps with the way in set by hand; this
 // loads real addresses in Chromium:
 //
@@ -8,12 +9,14 @@
 // The page is served by Playwright (page.route on http://localhost:8399, a
 // secure context with no socket opened). Each load is a fresh browser
 // context: no done mark, nothing in the library. Covered:
-//   1. not shown, and no mark written, for a real '#setup', '#provider',
+//   1. in the app, not shown, and no mark written, for a real '#setup', '#provider',
 //      '#simple', '#imagenology', '?profile=imagenology', '?simple', a real
 //      share link (made by the page's own buildShareLink) and this test
 //      runner's '?lang=en#advanced';
-//   2. a plain start (index.html?lang=en, no fragment) at 360, 390 and 1280,
-//      in Gold and Colourful: shown over the landing; every step with no
+//   2. a plain start in a browser (index.html?lang=en, no fragment) at 360,
+//      390 and 1280, in Gold and Colourful: the landing, never Setup, no
+//      mark, the screen lock Off as shipped (D426), no Setup tab in Settings;
+//   2b. the same start in the app: shown over the landing; every step with no
 //      sideways scroll and the card on screen, 44px targets on a phone; Skip
 //      through to the end leaves the landing up and writes the mark; a reload
 //      does not show it again;
@@ -77,77 +80,7 @@ const measure = (page) => page.evaluate(() => {
 
 const browser = await chromium.launch();
 try {
-  // ---- 1. Links and entries never see it ----
-  // A real share link, made by the page itself.
-  let shareFrag = '';
-  {
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-    await route(ctx);
-    const p = await ctx.newPage();
-    watch(p, 'share-maker');
-    await p.goto(ORIGIN + '/index.html?lang=en#advanced');
-    await booted(p);
-    const link = await p.evaluate(async () => buildShareLink('network', false, ''));
-    shareFrag = String(link || '').split('#')[1] || '';
-    ok('a real share link made by the page', shareFrag.length > 20, String(link).slice(0, 80));
-    await ctx.close();
-  }
-  const ways = [
-    ['this runner\'s ?lang=en#advanced', '/index.html?lang=en#advanced'],
-    ['#setup (the intake)', '/index.html?lang=en#setup'],
-    ['#provider', '/index.html?lang=en#provider'],
-    ['#simple', '/index.html?lang=en#simple'],
-    ['#imagenology', '/index.html?lang=en#imagenology'],
-    ['?profile=imagenology', '/index.html?lang=en&profile=imagenology'],
-    ['?simple', '/index.html?lang=en&simple'],
-    ['a share link', '/index.html?lang=en#' + shareFrag],
-  ];
-  for (const [label, path] of ways) {
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-    await route(ctx);
-    const p = await ctx.newPage();
-    watch(p, label);
-    await p.goto(ORIGIN + path);
-    await booted(p);
-    const r = await p.evaluate(() => ({ open: TopoWelcome.isOpen(), hidden: document.getElementById('welcomeDialog').hidden }));
-    const m = await mark(p);
-    ok(`not shown for ${label}, no mark written`, !r.open && r.hidden && m === null, JSON.stringify(r) + ' ' + m);
-    await ctx.close();
-  }
-
-  // ---- 2. A plain start ----
-  for (const theme of ['gold', 'color']) {
-    for (const [w, h] of [[360, 780], [390, 844], [1280, 900]]) {
-      const phone = w < 500;
-      const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: phone, isMobile: phone, deviceScaleFactor: phone ? 2 : 1 });
-      await ctx.addInitScript((th) => { try { if (!localStorage.getItem('carino-theme')) localStorage.setItem('carino-theme', th); } catch (e) { /* none */ } }, theme);
-      await route(ctx);
-      const p = await ctx.newPage();
-      const tag = `${theme} ${w}`;
-      watch(p, tag);
-      await p.goto(ORIGIN + '/index.html?lang=en');
-      const shown = await p.waitForFunction(() => window.TopoWelcome && TopoWelcome.isOpen(), null, { timeout: 30000 }).then(() => true, () => false);
-      ok(`${tag}: a plain first start shows the welcome over the landing`, shown && await p.evaluate(() => landingIsOpen()));
-      ok(`${tag}: the theme as kept`, await p.evaluate((th) => window.CarinoTheme.current() === th, theme));
-      for (const s of ['theme', 'mode', 'where', 'lock', 'start']) {
-        await p.waitForTimeout(250);
-        const r = await measure(p);
-        ok(`${tag} ${s}: the step, no sideways scroll, the card on screen`, r.step === s && r.sx <= r.iw && r.left >= 0 && r.right <= r.iw, JSON.stringify(r));
-        if (phone) ok(`${tag} ${s}: 44px targets`, r.small.length === 0, JSON.stringify(r.small));
-        if (shotsAt) await p.screenshot({ path: join(shotsAt, `welcome-${theme}-${w}-${s}.png`) });
-        if (s === 'mode') await p.click('#wlModes [data-mode="simple"]');
-        await p.click('#wlSkip');
-      }
-      await p.waitForTimeout(200);
-      ok(`${tag}: ended, the landing up, the mark written`, await p.evaluate(() => !TopoWelcome.isOpen() && landingIsOpen() && !!localStorage.getItem('topo-welcome')));
-      await p.reload();
-      await booted(p);
-      ok(`${tag}: not shown again after a reload`, await p.evaluate(() => !TopoWelcome.isOpen()));
-      await ctx.close();
-    }
-  }
-
-  // ---- 3. The desktop app: the server, step by step (D353-D355) ----
+  // Setup is the desktop app's alone (D425).
   // window.__TAURI__ is a stand-in for the app's commands (as the suites
   // stub them), kept in this tab's sessionStorage so it survives the real
   // reload Connect makes; the server's requests go to the in-page fake
@@ -221,6 +154,107 @@ try {
     class Channel { constructor() { this.onmessage = null; } }
     window.__TAURI__ = { core: { invoke, Channel } };
   };
+
+  // ---- 1. Links and entries never see it ----
+  // A real share link, made by the page itself.
+  let shareFrag = '';
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    await route(ctx);
+    const p = await ctx.newPage();
+    watch(p, 'share-maker');
+    await p.goto(ORIGIN + '/index.html?lang=en#advanced');
+    await booted(p);
+    const link = await p.evaluate(async () => buildShareLink('network', false, ''));
+    shareFrag = String(link || '').split('#')[1] || '';
+    ok('a real share link made by the page', shareFrag.length > 20, String(link).slice(0, 80));
+    await ctx.close();
+  }
+  const ways = [
+    ['this runner\'s ?lang=en#advanced', '/index.html?lang=en#advanced'],
+    ['#setup (the intake)', '/index.html?lang=en#setup'],
+    ['#provider', '/index.html?lang=en#provider'],
+    ['#simple', '/index.html?lang=en#simple'],
+    ['#imagenology', '/index.html?lang=en#imagenology'],
+    ['?profile=imagenology', '/index.html?lang=en&profile=imagenology'],
+    ['?simple', '/index.html?lang=en&simple'],
+    ['a share link', '/index.html?lang=en#' + shareFrag],
+  ];
+  for (const [label, path] of ways) {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    await ctx.addInitScript(appStub);
+    await route(ctx);
+    const p = await ctx.newPage();
+    watch(p, label);
+    await p.goto(ORIGIN + path);
+    await booted(p);
+    const r = await p.evaluate(() => ({ open: TopoWelcome.isOpen(), hidden: document.getElementById('welcomeDialog').hidden, app: !!window.__TAURI__ }));
+    const m = await mark(p);
+    ok(`in the app, not shown for ${label}, no mark written`, r.app && !r.open && r.hidden && m === null, JSON.stringify(r) + ' ' + m);
+    await ctx.close();
+  }
+
+  // ---- 2. A plain start in a browser: the landing, never Setup (D425) ----
+  for (const theme of ['gold', 'color']) {
+    for (const [w, h] of [[360, 780], [390, 844], [1280, 900]]) {
+      const phone = w < 500;
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: phone, isMobile: phone, deviceScaleFactor: phone ? 2 : 1 });
+      await ctx.addInitScript((th) => { try { if (!localStorage.getItem('carino-theme')) localStorage.setItem('carino-theme', th); } catch (e) { /* none */ } }, theme);
+      await route(ctx);
+      const p = await ctx.newPage();
+      const tag = `${theme} ${w}`;
+      watch(p, tag);
+      await p.goto(ORIGIN + '/index.html?lang=en');
+      await booted(p);
+      const r = await p.evaluate(() => ({ open: TopoWelcome.isOpen(), hidden: document.getElementById('welcomeDialog').hidden, landing: landingIsOpen(),
+        sx: document.documentElement.scrollWidth, iw: innerWidth, lock: TopoLock.lockAfterMin() }));
+      ok(`${tag}: a plain first start in a browser shows the landing, not Setup`, !r.open && r.hidden && r.landing && r.sx <= r.iw, JSON.stringify(r));
+      ok(`${tag}: no mark written, and the screen lock is Off as shipped (D426)`, (await mark(p)) === null && r.lock === 0, String(r.lock));
+      if (shotsAt) await p.screenshot({ path: join(shotsAt, `web-${theme}-${w}-landing.png`) });
+      // Settings has no Setup tab there.
+      await p.click('#landingExampleBtn');
+      await p.waitForFunction(() => !landingIsOpen(), null, { timeout: 10000 }).catch(() => {});
+      const st = await p.evaluate(() => { openSettings('setup'); return { tab: document.getElementById('setTab-setup').hidden, sec: document.getElementById('setWelcomeSec').hidden,
+        lock: document.getElementById('setTab-lock').hidden, after: document.getElementById('setLockAfter').value }; });
+      ok(`${tag}: Settings has no Setup tab; Screen lock shows Off`, st.tab && st.sec && !st.lock && st.after === '0', JSON.stringify(st));
+      await ctx.close();
+    }
+  }
+
+  // ---- 2b. A plain start in the app: every step ----
+  for (const theme of ['gold', 'color']) {
+    for (const [w, h] of [[360, 780], [390, 844], [1280, 900]]) {
+      const phone = w < 500;
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: phone, isMobile: phone, deviceScaleFactor: phone ? 2 : 1 });
+      await ctx.addInitScript((th) => { try { if (!localStorage.getItem('carino-theme')) localStorage.setItem('carino-theme', th); } catch (e) { /* none */ } }, theme);
+      await ctx.addInitScript(appStub);
+      await route(ctx);
+      const p = await ctx.newPage();
+      const tag = `app ${theme} ${w}`;
+      watch(p, tag);
+      await p.goto(ORIGIN + '/index.html?lang=en');
+      const shown = await p.waitForFunction(() => window.TopoWelcome && TopoWelcome.isOpen(), null, { timeout: 30000 }).then(() => true, () => false);
+      ok(`${tag}: a plain first start shows Setup over the landing`, shown && await p.evaluate(() => landingIsOpen()));
+      ok(`${tag}: the theme as kept, the lock at 30 min as shipped`, await p.evaluate((th) => window.CarinoTheme.current() === th && TopoLock.lockAfterMin() === 30, theme));
+      for (const s of ['theme', 'mode', 'where', 'lock', 'pc', 'start']) {
+        await p.waitForTimeout(250);
+        const r = await measure(p);
+        ok(`${tag} ${s}: the step, no sideways scroll, the card on screen`, r.step === s && r.sx <= r.iw && r.left >= 0 && r.right <= r.iw, JSON.stringify(r));
+        if (phone) ok(`${tag} ${s}: 44px targets`, r.small.length === 0, JSON.stringify(r.small));
+        if (shotsAt) await p.screenshot({ path: join(shotsAt, `welcome-${theme}-${w}-${s}.png`) });
+        if (s === 'mode') await p.click('#wlModes [data-mode="simple"]');
+        await p.click('#wlSkip');
+      }
+      await p.waitForTimeout(200);
+      ok(`${tag}: ended, the landing up, the mark written`, await p.evaluate(() => !TopoWelcome.isOpen() && landingIsOpen() && !!localStorage.getItem('topo-welcome')));
+      await p.reload();
+      await booted(p);
+      ok(`${tag}: not shown again after a reload`, await p.evaluate(() => !TopoWelcome.isOpen()));
+      await ctx.close();
+    }
+  }
+
+  // ---- 3. The desktop app: the server, step by step (D353-D355) ----
   const stepOf = (p) => p.evaluate(() => (window.TopoWelcome ? TopoWelcome.step() : ''));
   const waitStep = (p, s, ms = 20000) => p.waitForFunction((x) => window.TopoWelcome && TopoWelcome.isOpen() && TopoWelcome.step() === x, s, { timeout: ms }).then(() => true, () => false);
   const look = async (p, tag, s, phone) => {

@@ -49,6 +49,9 @@ function render(force) {
     if (add) add.classList.toggle('hidden', ro);
     const net = el('checkInternetBtn');
     if (net) net.classList.toggle('hidden', ro);
+    // A page with no desktop app behind it says who runs the checks (D427).
+    const only = el('watchAppOnly');
+    if (only) only.hidden = TC().hasHost();
     list.innerHTML = all.length ? all.map((w) => rowHtml(w, ro)).join('')
         : `<p class="rail-none">${escapeHtml(t('No watched addresses. Add one to check an address that is not on the map: the internet provider\'s gateway, a public resolver, a cloud service.'))}</p>`;
 }
@@ -265,6 +268,7 @@ function renderSheet() {
     }
     h += `<div><label class="prop-lbl" for="watchNotes">${escapeHtml(t('Notes'))}</label><textarea id="watchNotes" class="input" rows="2" maxlength="${PROVIDER_NOTES_MAX}"${dis}>${escapeHtml(d.notes || '')}</textarea></div>`;
     h += `<h3 class="prop-lbl wt-checks-head">${escapeHtml(t('Answer checks'))}</h3><div id="watchChecks">`;
+    if (!TC().hasHost()) h += `<p class="rail-note ck-note ck-apponly">${escapeHtml(t(TC().APP_RUNS_CHECKS))}</p>`;
     const holder = TC().watchHolder(d);
     (d.checks || []).forEach((c) => { h += TC().checkCardHtml(holder, c, ro); });
     if (!(d.checks || []).length) h += `<p class="rail-none">${escapeHtml(t('No answer checks: it is not checked, and has no state.'))}</p>`;

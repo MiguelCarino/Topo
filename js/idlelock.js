@@ -1,15 +1,23 @@
-// ---- The idle lock (docs/SCOPE.md section 7: D134, D165, D169, D213-D226) ----
-// After a time without use (30 min unless changed; Off turns it off) Topo
-// saves, closes the open network and covers the screen until someone unlocks
-// it. Per PC: everything here lives in this browser's (or the desktop app's)
-// storage, never in a document.
+// ---- The idle lock (docs/SCOPE.md section 7: D134, D165, D169, D213-D226;
+// D426) ----
+// After a time without use Topo saves, closes the open network and covers
+// the screen until someone unlocks it. Per PC: everything here lives in this
+// browser's (or the desktop app's) storage, never in a document.
+//
+// As shipped (D426): 30 minutes in the desktop app, on a page signed in to
+// a Topo server (the sign-in is a real way to unlock), and wherever a PIN
+// is set on this PC; Off everywhere else (the website, the offline zip, a
+// server's page nobody is signed in to), where a lock with nothing to
+// unlock it only reloads the page and costs the undo history. A time chosen
+// in Settings (Off included) is kept and wins everywhere.
 //
 //   localStorage
 //     topo-lock        the lock itself: { at, why, user: { id, email } | null,
 //                      doc }: doc is the library card open when it locked.
 //                      Present = every tab of this browser is locked; a tab
 //                      that opens while it is there boots locked (D215).
-//     topo-lock-after  minutes before it locks; '0' is Off; absent is 30.
+//     topo-lock-after  minutes before it locks, as chosen; '0' is Off;
+//                      absent is "as shipped" (see above).
 //     topo-lock-pin    { v, iter, salt, hash, fails, lastFail }: the PIN as a
 //                      PBKDF2-SHA-256 hash (D217) and the wrong tries so far.
 //     topo-lock-seen   the last time any tab was used, so a tab left in the
@@ -73,6 +81,9 @@ const _hooks = {
     now: realNow,
     // Clearing the page: a reload. The suites put a stand-in here.
     reload: () => window.location.reload(),
+    // Tests: true/false stands for "this is the desktop app"; null asks
+    // window.__TAURI__.
+    app: null,
     iterations: 600000,
     saveWaitMs: 8000,
     // How long a sign-in's server must stay silent before the lock lets go
@@ -97,17 +108,35 @@ const current = () => marker() || _mem;
 if (marker()) document.documentElement.classList.add('topo-locked');
 
 // ---- The setting ----
-function lockAfterMin() {
+// As shipped (D426): 30 minutes where the lock has something behind it (the
+// desktop app, a Topo server sign-in, a PIN set here), Off anywhere else.
+const inApp = () => (_hooks.app !== null ? !!_hooks.app
+    : !!(window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function'));
+const signedInNow = () => {
+    const S = window.TopoServer;
+    let me = null;
+    try { me = S && typeof S.me === 'function' ? S.me() : null; } catch (e) { me = null; }
+    return !!(me && me.id && me.email);
+};
+const shippedMin = () => (inApp() || hasPin() || signedInNow() ? DEFAULT_MIN : 0);
+// The time someone chose (Off included), or null: as shipped.
+function chosenMin() {
     const raw = ls.get(AFTER_KEY);
-    if (raw === null || raw === '') return DEFAULT_MIN;
+    if (raw === null || raw === '') return null;
     const n = Math.round(Number(raw));
-    return Number.isFinite(n) && n >= 0 && n <= CUSTOM_MAX ? n : DEFAULT_MIN;
+    return Number.isFinite(n) && n >= 0 && n <= CUSTOM_MAX ? n : null;
+}
+function lockAfterMin() {
+    const n = chosenMin();
+    return n === null ? shippedMin() : n;
 }
 function setLockAfterMin(n) {
     n = Math.round(Number(n));
     if (!Number.isFinite(n) || n < 0) n = DEFAULT_MIN;
     n = Math.min(CUSTOM_MAX, n);
-    if (n === DEFAULT_MIN) ls.del(AFTER_KEY); else ls.set(AFTER_KEY, String(n));
+    // Kept as chosen, 30 too: a choice is not "as shipped", which differs by
+    // where Topo runs.
+    ls.set(AFTER_KEY, String(n));
     seen(true);
     schedule();
 }
@@ -130,9 +159,11 @@ async function setPin(pin) {
     const iter = _hooks.iterations;
     const hash = await pinHash(pin, salt, iter);
     if (!ls.set(PIN_KEY, JSON.stringify({ v: 1, iter, salt: b64(salt), hash, fails: 0, lastFail: 0 }))) throw new Error('storage');
+    // A PIN turns the lock on where it was Off as shipped (D426).
+    schedule();
     return true;
 }
-function removePin() { ls.del(PIN_KEY); }
+function removePin() { ls.del(PIN_KEY); schedule(); }
 async function pinMatches(pin) {
     const p = pinRec();
     if (!p || !PIN_RE.test(String(pin || ''))) return false;
@@ -184,7 +215,12 @@ function schedule() {
     clearTimeout(_timer); _timer = 0;
     if (!_watching || _locked || _locking) return;
     const min = lockAfterMin();
-    if (!min) return;
+    if (!min) {
+        // Off as shipped may turn on (a sign-in, a PIN set in another tab):
+        // looked at again each minute. Off as chosen stays off.
+        if (chosenMin() === null) _timer = setTimeout(schedule, 60000);
+        return;
+    }
     const left = lastSeen() + min * 60000 - _hooks.now();
     if (left <= 0) { lock('idle'); return; }
     // Looked at again at least each minute: a setting or another tab may change it.
@@ -724,7 +760,7 @@ window.TopoLock = {
         try { sessionStorage.removeItem(DRAFTS_KEY); } catch (e) { /* none */ }
         _locked = false; _locking = false; _gated = false; _inPlace = false; _unkept = false; _mem = null; _gateResolve = null; _ask = null;
         _server = { down: false, checked: false, challenge: null, busy: false };
-        _hooks.now = realNow; _seen = realNow(); _hooks.downGraceMs = 72 * 3600000;
+        _hooks.now = realNow; _seen = realNow(); _hooks.downGraceMs = 72 * 3600000; _hooks.app = null;
         const c = $('lockCover'); if (c) c.hidden = true;
         document.documentElement.classList.remove('topo-locked');
     },

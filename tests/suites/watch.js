@@ -161,6 +161,12 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const rows = () => [...el('watchList').querySelectorAll('.wt-card')];
     ok('the tab: a row each, the rule said once', rows().length === 3 && /Topo checks only what you ask it to\. Anything not checked has no state\./.test(el('cfgPanel-watch').textContent), String(rows().length));
     ok('no monitor here: no dot on any row', !el('watchList').querySelector('.ck-dot'));
+    // A page with no desktop app behind it says who runs the checks (D427).
+    ok('with no app: the tab says only a monitoring desktop app runs the checks', !CK.hasHost() && !el('watchAppOnly').hidden
+      && /Only a Topo desktop app that monitors this network runs these checks\. This page never checks\./.test(el('cfgPanel-watch').textContent));
+    TopoWatch.openSheet('wa1'); await tick();
+    ok('…and so does the sheet, above its checks', !!el('watchBody').querySelector('#watchChecks .ck-apponly') && !el('watchBody').querySelector('[data-ck="checknow"]'));
+    TopoWatch.closeSheet(); await tick();
     ok('a row: what an outage does and its checks', /Record only · DNS · Reached through RT/.test(rows()[0].textContent) && /Raises an issue · HTTPS/.test(rows()[1].textContent) && /Not checked/.test(rows()[2].textContent),
       rows().map((r) => r.querySelector('.net-line').textContent).join(' | '));
     ok('a host name cannot go on the map', rows()[1].querySelector('[data-wact="map"]').disabled && !rows()[0].querySelector('[data-wact="map"]').disabled);
@@ -169,6 +175,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     CK.state.info = { on: true, networkId: 'kw', networkName: 'HQ' };
     CK.onStatuses([{ key: 'w:wa1/c1', nodeId: 'w:wa1', state: 'down', since: Date.now() - 60000, status: '' }]);
     TopoWatch.render(true);
+    ok('in the app that line is gone', el('watchAppOnly').hidden);
     ok('with a monitor: the checked rows have a dot, the unchecked one none', rows()[0].querySelector('.ck-dot.ck-down') && rows()[1].querySelector('.ck-dot.ck-unknown') && !rows()[2].querySelector('.ck-dot'),
       rows().map((r) => (r.querySelector('.ck-dot') || {}).className).join(' | '));
     ok('…and says how it is now', /Not answering since/.test(rows()[0].textContent));
@@ -282,7 +289,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- 10. The strings ----
     const { has, locales } = window.CarinoI18N;
     const strs = ['Watched', '+ Address', 'Add an address', 'Edit the watched address', 'Record only', 'Raises an issue', 'Not checked', 'Add to the map', 'Recorded only',
-      'Topo checks only what you ask it to. Anything not checked has no state.', 'Reached through {name}', 'When it is not answering', 'Watched addresses',
+      'Topo checks only what you ask it to. Anything not checked has no state.', 'Only a Topo desktop app that monitors this network runs these checks. This page never checks.', 'Reached through {name}', 'When it is not answering', 'Watched addresses',
       'Record only: in the statistics and the monitoring report, no issue, no alarm', 'Raise an issue: the banner, and the alarm on PCs that show alarms',
       'One address: an IP address or a host name. Not a range, a subnet or a wildcard.', 'Checked: {what}. Anything not checked has no figures here.',
       'Recorded only: no issue was raised.', '{name} is on the map now, with its checks.', 'Rows of watched addresses: {n}', 'Watched address',

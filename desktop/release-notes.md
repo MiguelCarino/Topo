@@ -1,5 +1,13 @@
 Topo for working offline: the same editor as https://topo.carino.systems/, as a desktop app or as a folder to open in a browser.
 
+## New in 0.0.4
+
+- **Setup is the desktop app's.** The website, the offline zip and a Topo server's page open on the start page with no Setup, and a server's page puts **On this server** and its **Sign in** first. In the app nothing changes: the same questions on the first start, and Settings, **Run the setup again**.
+- **Screen lock, as shipped:** 30 minutes in the desktop app, on a page signed in to a Topo server, and wherever a PIN is set; Off on the website and the offline zip, where nothing would unlock it and locking only lost the undo history. A time chosen in Settings (Off included) is kept everywhere. A browser that never chose a time goes from 30 minutes to Off.
+- **Answer checks wherever the network is edited.** A device's answer checks now show and can be edited in the full editor on the website, the offline zip and a Topo server's page, under a line saying that only a Topo desktop app that monitors the network runs them. The Watched tab says the same there. A page still never checks anything.
+- Files stay document version 20.
+- Tested on Linux, the desktop app's side through a stand-in for its commands. The Windows and macOS builds were not run on those systems before this release.
+
 ## New in 0.0.3
 
 There was no 0.0.2: this release follows 0.0.1.

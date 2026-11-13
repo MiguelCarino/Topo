@@ -1,12 +1,15 @@
 // @realtime @touch 360x780
-// The idle lock (js/idlelock.js; docs/SCOPE.md D134, D165, D169, D213-D222).
+// The idle lock (js/idlelock.js; docs/SCOPE.md D134, D165, D169, D213-D222,
+// D426).
 // Web Crypto (the PIN's PBKDF2) needs the real clock, so this runs through
 // Playwright. The page is never really reloaded here (that would end the
 // suite): TopoLock._hooks.reload records the call, and the reload itself,
 // the network gone from a locked page and back after the unlock, is
 // tests/idlelock-e2e.mjs. Covered:
-//   - the setting: 30 min as shipped, Off, the choices, a custom time, kept
-//     in this browser's storage and never in the document;
+//   - the setting: as shipped Off on the website, 30 min in the desktop
+//     app, with a Topo server sign-in and with a PIN set here (D426); Off,
+//     the choices, a custom time, a chosen 30 min, kept in this browser's
+//     storage and never in the document;
 //   - it locks on time, saving first (the card, the tab's entry, the
 //     drafts of Report a problem and Record visit), and not before; Off
 //     never locks; use in another tab keeps it open; Lock now;
@@ -81,9 +84,28 @@ window.addEventListener('load', () => { setTimeout(async () => {
     fresh();
 
     // ---- The setting ----
-    ok('30 min as shipped', L.lockAfterMin() === 30 && localStorage.getItem('topo-lock-after') === null);
+    // As shipped (D426): Off on the website, where nothing unlocks it.
+    ok('the website: Off as shipped, nothing kept', !window.__TAURI__ && L.lockAfterMin() === 0 && localStorage.getItem('topo-lock-after') === null);
+    {
+      let base0 = Date.now();
+      L._hooks.now = () => base0;
+      L.startWatch();
+      base0 += 5 * 3600000; L.schedule(); await settle();
+      ok('…so the website never locks on its own', !L.isLocked() && reloads.length === 0);
+      L._hooks.now = Date.now.bind(Date);
+    }
+    L._hooks.app = true;
+    ok('the desktop app: 30 min as shipped', L.lockAfterMin() === 30 && localStorage.getItem('topo-lock-after') === null);
+    L._hooks.app = null;
+    {
+      const S = window.TopoServer, me0 = S && S.me;
+      if (S) S.me = () => ({ id: 'u1', email: 'ana@example.test' });
+      ok('signed in to a Topo server: 30 min as shipped', !!S && L.lockAfterMin() === 30);
+      if (S) S.me = me0;
+      ok('…and Off again once nobody is signed in', L.lockAfterMin() === 0);
+    }
     openSettings('lock'); await settle();
-    ok('Settings has Screen lock, showing 30 min', shown('setLockSec') && el('setLockAfter').value === '30');
+    ok('Settings has Screen lock, showing Off on the website', shown('setLockSec') && el('setLockAfter').value === '0');
     ok('the choices are Off, 5, 15, 30, 60 min and Custom', [...el('setLockAfter').options].map((o) => o.value).join(',') === '0,5,15,30,60,custom');
     ok('it says it is not encryption at rest', /not encryption/.test(el('setLockSec').textContent));
     ok('no PIN is said plainly', /No PIN: anyone at this PC can unlock it/.test(el('setLockPinState').textContent));
@@ -96,7 +118,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     el('setLockCustom').value = '99999'; el('setLockCustom').dispatchEvent(new Event('change', { bubbles: true }));
     ok('a custom time is at most 1440 min', L.lockAfterMin() === 1440);
     el('setLockAfter').value = '30'; el('setLockAfter').dispatchEvent(new Event('change', { bubbles: true })); await settle();
-    ok('back to 30 min, the key goes (the default)', L.lockAfterMin() === 30 && localStorage.getItem('topo-lock-after') === null && el('setLockCustomRow').hidden);
+    ok('30 min chosen is kept as chosen', L.lockAfterMin() === 30 && localStorage.getItem('topo-lock-after') === '30' && el('setLockCustomRow').hidden);
     // Set a PIN in Settings.
     el('setLockPinSet').click(); await settle();
     ok('Set a PIN… opens the two fields', shown('setLockPin1') && shown('setLockPin2'));
@@ -110,6 +132,12 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('kept as a PBKDF2 hash with its salt, never the PIN', rec.v === 1 && rec.iter === 1000 && rec.salt.length >= 20 && rec.hash.length >= 40 && !JSON.stringify(rec).includes('2468'));
     ok('the hash checks the PIN', await L.pinMatches('2468') && !(await L.pinMatches('2469')));
     await settle();
+    // With no time chosen, a PIN turns the lock on (D426); Off chosen stays Off.
+    localStorage.removeItem('topo-lock-after');
+    ok('a PIN set and no time chosen: 30 min', L.lockAfterMin() === 30);
+    L.setLockAfterMin(0);
+    ok('Off chosen stays Off with a PIN', L.lockAfterMin() === 0);
+    L.setLockAfterMin(30);
     ok('Settings says a PIN is set, and offers Change and Remove', /A PIN is set on this PC/.test(el('setLockPinState').textContent) && /Change the PIN/.test(el('setLockPinSet').textContent) && shown('setLockPinRemove'));
     await phones('Settings, Screen lock');
     await window.__viewport(360, 780);

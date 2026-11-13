@@ -480,9 +480,11 @@ let _sectionNode = null;
 function renderCheckSection(node) {
     const box = el('checkGroup');
     if (!box) return;
-    // On a server's site any signed-in page shows what its monitors say
-    // (read only, step 7h); the app shows the whole section.
-    const show = !!node && !isReduced() && (hasHost() || (serverMode() && Array.isArray(node.checks) && node.checks.length > 0));
+    // The full editor everywhere (D427): the checks are the document's, so
+    // a page with no app behind it shows and edits them too, and says that
+    // only a monitoring app runs them. A network that cannot be edited shows
+    // the section only when there is a check to read.
+    const show = !!node && !isReduced() && (hasHost() || !state.readOnly || (Array.isArray(node.checks) && node.checks.length > 0));
     box.hidden = !show;
     _sectionNode = show ? node.id : null;
     if (!show) { el('checkBody').innerHTML = ''; el('checkSummary').textContent = ''; return; }
@@ -493,29 +495,46 @@ function renderCheckSection(node) {
     drawSection(node);
 }
 
-// The website's (or an app's not monitoring it) read-only section: each
-// check as every site monitor sees it (D150: "down from A, up from B").
-function drawServerSection(node) {
+// A page with no desktop app behind it: the website, the offline zip, a
+// page a Topo server served (D427). The checks are the document's, so they
+// show and are edited here as on the Watched tab; nothing here runs them,
+// and the section says so. On a server's site each card also says how
+// every site monitor sees it (D150: "down from A, up from B").
+const APP_RUNS_CHECKS = 'Only a Topo desktop app that monitors this network runs these checks. This page never checks.';
+function drawPageSection(node) {
     const body = el('checkBody');
-    const all = window.TopoMonitors ? TopoMonitors.serverStatusesOf(node) : [];
-    let html = `<p class="rail-note ck-note ck-rule">${escapeHtml(t(NOT_CHECKED_RULE))}</p><p class="rail-note ck-note">${escapeHtml(t('As the site\'s monitors see it:'))}</p>`;
-    (node.checks || []).forEach((c) => {
-        const key = `${node.id}/${c.id}`;
-        const comb = serverStatus(node, key);
-        const lk = comb ? look(comb) : 'unknown';
-        html += `<div class="ck-card" data-key="${escapeHtml(key)}"><div class="ck-head"><span class="ck-dot ck-${lk}" aria-hidden="true"></span><b>${escapeHtml(protoLabel(c.proto))}</b>`
-            + `<span class="ck-port mono">${escapeHtml(checkHost(node, c) || '')}${c.proto !== 'ping' && checkPortOf(c) ? ':' + checkPortOf(c) : ''}</span></div>`;
-        if (comb && comb.split) html += `<p class="ck-now ck-now-split">${escapeHtml(TopoMonitors.splitText(comb.split))}</p>`;
-        const mine = all.filter((x) => x.s.key === key);
-        if (!mine.length) html += `<p class="ck-now">${escapeHtml(t('Not checked yet'))}</p>`;
-        mine.forEach((x) => {
-            html += `<p class="ck-now ck-now-${look(x.s)}"><b>${escapeHtml(x.name)}</b>: ${escapeHtml(x.stale ? t('Stopped reporting') : nowText(Object.assign({}, x.s, { split: null }), node))}</p>`;
-        });
-        html += '</div>';
-    });
-    if ((node.checks || []).length && ownerOfSite()) html += quietHtml(node);
+    const checks = Array.isArray(node.checks) ? node.checks : [];
+    const ro = !!state.readOnly;
+    const site = serverMode();
+    const all = site && window.TopoMonitors ? TopoMonitors.serverStatusesOf(node) : [];
+    let html = `<p class="rail-note ck-note ck-rule">${escapeHtml(t(NOT_CHECKED_RULE))}</p><p class="rail-note ck-note ck-apponly">${escapeHtml(t(APP_RUNS_CHECKS))}</p>`;
+    if (site && checks.length) html += `<p class="rail-note ck-note">${escapeHtml(t('As the site\'s monitors see it:'))}</p>`;
+    checks.forEach((c) => { html += checkCardHtml(node, c, ro, site ? siteSeen(node, c, all) : null); });
+    if (!checks.length) html += `<p class="rail-none">${escapeHtml(t('No answer checks. Add one to ask this device "are you answering?" from a PC that monitors.'))}</p>`;
+    if (!ro && checks.length < CHECKS_MAX) html += `<button type="button" class="btn ck-add" data-ck="add">${escapeHtml(t('＋ Add a check'))}</button>`;
+    html += targetRowHtml(node, ro);
+    if (checks.length && ownerOfSite()) html += quietHtml(node);
     html += reportLinkHtml(node);
     body.innerHTML = html;
+}
+// One check as the site's monitors see it: the dot's look and the lines
+// that stand where this PC's own "how it is now" would.
+function siteSeen(node, c, all) {
+    const key = `${node.id}/${c.id}`;
+    const comb = serverStatus(node, key);
+    let html = '';
+    if (comb && comb.split) html += `<p class="ck-now ck-now-split">${escapeHtml(TopoMonitors.splitText(comb.split))}</p>`;
+    const mine = all.filter((x) => x.s.key === key);
+    if (!mine.length) html += `<p class="ck-now">${escapeHtml(t('Not checked yet'))}</p>`;
+    mine.forEach((x) => {
+        html += `<p class="ck-now ck-now-${look(x.s)}"><b>${escapeHtml(x.name)}</b>: ${escapeHtml(x.stale ? t('Stopped reporting') : nowText(Object.assign({}, x.s, { split: null }), node))}</p>`;
+    });
+    return { lk: comb ? look(comb) : 'unknown', html };
+}
+// The availability target, wherever the section is edited.
+function targetRowHtml(node, ro) {
+    return `<div class="ck-row"><label class="prop-lbl" for="ckTarget">${escapeHtml(t('Availability target (%)'))}</label>`
+        + `<input type="text" id="ckTarget" class="input mono ck-target" inputmode="decimal" maxlength="7" autocomplete="off" placeholder="99.5" value="${escapeHtml(node.target != null ? String(node.target) : '')}"${ro ? ' disabled' : ''}></div>`;
 }
 // The device's full report: availability, response times and outages over a
 // period (js/reports.js, step 7j), wherever the section shows.
@@ -548,7 +567,7 @@ function sendQuiet(scope, id, until) {
 // checked has no state at all, never "down" or "unknown".
 const NOT_CHECKED_RULE = 'Topo checks only what you ask it to. Anything not checked has no state.';
 function drawSection(node) {
-    if (!hasHost()) { drawServerSection(node); return; }
+    if (!hasHost()) { drawPageSection(node); return; }
     const body = el('checkBody');
     const checks = Array.isArray(node.checks) ? node.checks : [];
     const ro = !!state.readOnly;
@@ -568,8 +587,7 @@ function drawSection(node) {
     html += `<div class="ck-row ck-checknow"><button type="button" class="btn" data-ck="checknow">${escapeHtml(t('Check now'))}</button>`
         + `<p class="rail-note ck-note" id="ckNowResult" aria-live="polite">${escapeHtml(t(checks.length ? 'Once, from this PC: nothing is kept.' : 'A ping, once, from this PC: nothing is kept.'))}</p></div>`;
     // The availability target and the quiet window.
-    html += `<div class="ck-row"><label class="prop-lbl" for="ckTarget">${escapeHtml(t('Availability target (%)'))}</label>`
-        + `<input type="text" id="ckTarget" class="input mono ck-target" inputmode="decimal" maxlength="7" autocomplete="off" placeholder="99.5" value="${escapeHtml(node.target != null ? String(node.target) : '')}"${ro ? ' disabled' : ''}></div>`;
+    html += targetRowHtml(node, ro);
     if (checks.length && (monitorOn() || ownerOfSite())) html += quietHtml(node);
     html += reportLinkHtml(node);
     body.innerHTML = html;
@@ -590,10 +608,12 @@ const CHECK_NOTES = {
     tls: 'One handshake on this port: the certificate\'s end date (a warning 14 days before). Nothing is sent after it.'
 };
 
-function checkCardHtml(node, c, ro) {
+// `seen` (a page with no app, on a server's site): { lk, html } from
+// siteSeen, in place of this PC's own state.
+function checkCardHtml(node, c, ro, seen) {
     const key = `${node.id}/${c.id}`;
-    const s = live() ? _ck.status.get(key) : null;
-    const lk = s ? look(s) : 'unknown';
+    const s = !seen && live() ? _ck.status.get(key) : null;
+    const lk = seen ? seen.lk : s ? look(s) : 'unknown';
     const id = (k) => `ck_${k}_${c.id}`;
     const dis = ro ? ' disabled' : '';
     const opt = (v, label, cur) => `<option value="${escapeHtml(String(v))}"${String(v) === String(cur) ? ' selected' : ''}>${escapeHtml(label)}</option>`;
@@ -602,7 +622,7 @@ function checkCardHtml(node, c, ro) {
     h += `<div class="ck-head"><span class="ck-dot ck-${lk}" aria-hidden="true"></span><b>${escapeHtml(protoLabel(c.proto))}</b>`
         + `<span class="ck-port mono">${escapeHtml(node.address || checkHost(node, c) || '')}${c.proto !== 'ping' && checkPortOf(c) ? ':' + checkPortOf(c) : ''}</span>`
         + (ro ? '' : `<button type="button" class="if-del ck-del" data-ck="del" title="${escapeHtml(t('Remove this check'))}" aria-label="${escapeHtml(t('Remove this check'))}">✕</button>`) + '</div>';
-    h += `<p class="ck-now ck-now-${lk}${warnOf(s) ? ' ck-warn' : ''}" aria-live="polite">${escapeHtml(live() ? nowText(s, node) : '')}</p>`;
+    h += seen ? seen.html : `<p class="ck-now ck-now-${lk}${warnOf(s) ? ' ck-warn' : ''}" aria-live="polite">${escapeHtml(live() ? nowText(s, node) : '')}</p>`;
     h += '<div class="prop-grid ck-grid">';
     h += `<div><label class="prop-lbl" for="${id('proto')}">${escapeHtml(t('Asks'))}</label><select id="${id('proto')}" class="select" data-f="proto"${dis}>`
         + CHECK_PROTOCOLS.filter((p) => p !== 'smtp' || c.proto === 'smtp' || !!node.address || smtpPortsOf(node).length)
@@ -1168,7 +1188,7 @@ function serverStatusChanged() {
     if (!live()) rerenderSelected();
 }
 window.TopoChecks = { state: _ck, hasHost, monitorPlan, monitorChains, refreshInfo, onStatuses, look, nodeLook, nowText,
-    readMacs, checkNowSpecs, runCheckNow, watchHolder, holderLook, checkCardHtml, applyCheckField, loadHistory, quietItem, quietNow, quietUntil, QUIET_FOR, QUIET_WORDS, LOOK_WORDS, NOT_CHECKED_RULE,
+    readMacs, checkNowSpecs, runCheckNow, watchHolder, holderLook, checkCardHtml, APP_RUNS_CHECKS, applyCheckField, loadHistory, quietItem, quietNow, quietUntil, QUIET_FOR, QUIET_WORDS, LOOK_WORDS, NOT_CHECKED_RULE,
     monitorOn, live, watching, serverMode, protoLabel, warnOf, ownerOfSite,
     dayBuckets, daySummary, quietUntil, pushPlan, firstCheckFor, labels, meOnMap, serverStatusChanged, statusesOf, redrawDots,
     pushPlanNow: () => { _ck.sent = ''; return pushPlan(true); } };

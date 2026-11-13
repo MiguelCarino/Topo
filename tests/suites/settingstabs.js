@@ -81,7 +81,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     openSettings(); await settle();
     ok('opens at the first tab with nothing kept', shownTab() === 'general' && shownPanels().join() === 'setPanel-general', shownTab() + ' ' + shownPanels().join());
     ok('the website hides Topo server and Monitoring (their sections are the app\'s)', tab('server').hidden && tab('monitor').hidden && el('setDcSec').hidden && el('setDsSec').hidden && el('setMonSec').hidden);
-    ok('Map and reports, Screen lock and Setup show', !tab('general').hidden && !tab('lock').hidden && !tab('setup').hidden);
+    ok('Map and reports and Screen lock show', !tab('general').hidden && !tab('lock').hidden);
+    ok('Setup is the desktop app\'s (D425): hidden on the website', tab('setup').hidden && el('setWelcomeSec').hidden);
     const api = typeof window.showDirectoryPicker === 'function';
     ok('Back-ups shows where the folder API exists (' + api + ')', tab('backup').hidden === !api && tab('backup').hidden === el('setBackupSec').hidden);
 
@@ -114,6 +115,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     closeSettings(); await settle();
 
     // ---- Deep links ----
+    // The Setup tab is the app's: a stand-in for it from here on.
+    TopoWelcome.state.invoke = async () => null;
     openSettings('setup'); await settle();
     ok('openSettings(tab) opens that tab', shownTab() === 'setup' && el('setWelcomeAgain').getClientRects().length > 0);
     closeSettings(); await settle();
@@ -239,6 +242,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
   } catch (e) {
     ok('the suite ran to the end', false, (e && e.stack) || String(e));
   } finally {
+    TopoWelcome.state.invoke = null;
     try { sessionStorage.removeItem(KEPT); localStorage.removeItem('topo-lock-note'); } catch (e) { /* none */ }
     const pre = document.createElement('pre'); pre.id = 'TESTOUT'; pre.textContent = out.join('\n');
     document.body.appendChild(pre);

@@ -2619,6 +2619,13 @@ body.profile-imagenology .palette-item[data-type="camera"] { display: none !impo
 #landing.has-saved .landing-section { order: 2; }
 #landing.has-saved .landing-ways { order: 3; }
 #landing.has-saved .landing-chips { order: 4; }
+/* A page a Topo server served (js/serverui.js): its networks, and Sign in,
+   come before the ways to start one in this browser (D425). The hero's
+   "no server, no upload, no account" is not true there, so it is not said. */
+#landing.served #landingServer { order: 2; }
+#landing.served .landing-ways { order: 3; }
+#landing.served .landing-chips { order: 4; }
+#landing.served .landing-local-only { display: none; }
 /* Everything in the hero steps down together, or a full-size mark ends up
    sitting over a headline a third its height. Same base + --tall × rate form,
    with gentler rates: this half of the page is no longer the point. */

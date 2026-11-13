@@ -797,9 +797,10 @@
                         <div id="historySimple" class="hist-simple" aria-live="polite"></div>
                         <!-- Answer checks (js/checks.js, D155-D157, step 7f): what a
                              PC that monitors asks this device, how it is now and
-                             its last 24 h. The desktop app only (hidden on the
-                             website and the zip, which never probe); Full editor
-                             only. -->
+                             its last 24 h. Full editor only. On the website and
+                             the zip, which never probe, the checks show and are
+                             edited, with a line saying only a monitoring desktop
+                             app runs them (D427). -->
                         <details id="checkGroup" class="asset-group check-group" data-adv hidden>
                             <summary class="asset-sum"><span data-i18n>Answer checks</span><span id="checkSummary" class="asset-sum-note"></span></summary>
                             <div id="checkBody" class="ck-body"></div>
@@ -953,6 +954,8 @@
                 <div id="cfgPanel-watch" data-adv class="cfg-panel hidden">
                     <div class="prop-headrow net-toolbar">
                         <p class="rail-note grp-intro" data-i18n>Topo checks only what you ask it to. Anything not checked has no state.</p>
+                        <!-- A page with no desktop app behind it (js/watch.js, D427). -->
+                        <p class="rail-note grp-intro" id="watchAppOnly" data-i18n hidden>Only a Topo desktop app that monitors this network runs these checks. This page never checks.</p>
                         <button id="addWatchBtn" type="button" class="link-btn" data-i18n>+ Address</button>
                         <!-- Three at once: the ISP's gateway, a resolver, an HTTPS address (D375). -->
                         <button id="checkInternetBtn" type="button" class="link-btn" data-i18n>Check the Internet…</button>
@@ -1316,7 +1319,7 @@
                         <h1><span data-i18n>Nobody ever wrote this network down.</span><br><span class="gold" data-i18n>Draw it once, and it checks itself.</span></h1>
                         <p class="landing-lede">
                             <span data-i18n>Every device, every subnet, every cable — with the address conflicts, loops and dead gateways found for you, and a report you can hand over.</span>
-                            <span data-i18n>It runs in this tab — no server, no upload, no account — which is why it still works in a comms room with no signal.</span>
+                            <span class="landing-local-only" data-i18n>It runs in this tab — no server, no upload, no account — which is why it still works in a comms room with no signal.</span>
                         </p>
                     </section>
 
@@ -1844,8 +1847,8 @@
                             </div>
                             <div class="set-panel" role="tabpanel" id="setPanel-setup" aria-labelledby="setTab-setup" tabindex="-1" hidden>
                                 <!-- Setup (js/welcome.js, D141-D143, D170, D353): its
-                                     questions again, on the website and in the app. -->
-                                <section class="set-sec" id="setWelcomeSec" aria-labelledby="setWelcomeHead">
+                                     questions again. The desktop app only (D425). -->
+                                <section class="set-sec" id="setWelcomeSec" aria-labelledby="setWelcomeHead" hidden>
                                     <h3 id="setWelcomeHead" class="set-head" data-i18n>Setup</h3>
                                     <p class="dlg-dim set-note" data-i18n>The questions Topo asks the first time: how it looks, the view, where networks are kept (in the app, connecting to a Topo server or making this PC the server), the screen lock and how to start.</p>
                                     <div class="set-acts">
@@ -1914,12 +1917,6 @@
                                 <button type="button" class="wl-choice" data-where="here" aria-pressed="false"><b data-i18n>On this PC only</b><span class="wl-blurb" data-i18n>Networks stay in Topo on this PC. Back them up as files.</span></button>
                                 <button type="button" class="wl-choice" data-where="connect" aria-pressed="false"><b data-i18n>Connect to a Topo server</b><span class="wl-blurb" data-i18n>Your organisation already has one: its address, then sign in with your email.</span></button>
                                 <button type="button" class="wl-choice" data-where="server" aria-pressed="false" hidden><b data-i18n>Make this PC the server</b><span class="wl-blurb" data-i18n>Other PCs on site sign in to Topo and sync with this one. It runs in the background from startup, even when Topo is closed.</span></button>
-                            </div>
-                            <div id="wlWhereWeb" hidden>
-                                <div class="wl-choices">
-                                    <div class="wl-choice wl-fixed" aria-pressed="true"><b data-i18n>On this browser</b><span class="wl-blurb" data-i18n>Networks stay in this browser on this PC. Back them up as files.</span></div>
-                                </div>
-                                <p class="dlg-dim wl-note" data-i18n>A Topo server opens at its own address: if your organisation has one, open that address in the browser and sign in there.</p>
                             </div>
                             <div id="wlWhereOn" hidden>
                                 <div class="wl-choices">

@@ -1,18 +1,19 @@
 // @realtime @touch 360x780
 // Setup, the first-run welcome (js/welcome.js; docs/SCOPE.md D141-D143,
-// D170, D326-D336, D352-D357), on the website and in the desktop app (a stub
-// of the app's commands, as tests/suites/desktopserver.js, desktopclient.js
-// and thiscomputer.js do; the server's requests go to the in-page fake
-// server, tests/fixtures/fakeserver.js).
+// D170, D326-D336, D352-D357, D425): the desktop app's alone (a stub of the
+// app's commands, as tests/suites/desktopserver.js, desktopclient.js and
+// thiscomputer.js do; the server's requests go to the in-page fake server,
+// tests/fixtures/fakeserver.js).
 // Real clock (the PIN is a PBKDF2 hash, js/idlelock.js). Covered:
-//   - not shown for this run's own way in (#advanced), nor for '#setup',
+//   - never on the website, the offline zip or a page a Topo server served
+//     (D425): a plain first start there shows the landing, keeps no mark,
+//     and Settings has no Setup tab;
+//   - in the app: not shown for this run's own way in (#advanced), nor for '#setup',
 //     '#provider', a share link, '#simple', '?profile=', or a start that is
 //     not the landing (a reload of an open network); shown on a plain first
-//     start with the landing behind it; a browser that already holds
+//     start with the landing behind it; an app that already holds
 //     networks counts as done (marked, not shown);
-//   - the website's steps: theme, mode, where (this browser, and the note
-//     that a Topo server opens at its own address), lock, start; no desktop
-//     step; a page a Topo server served skips "where";
+//   - an app with no This PC readers: theme, mode, where, lock, start;
 //   - every step skippable: skipping all of them leaves today's defaults
 //     (full editor, the theme, the lock at 30 min with no PIN, the landing
 //     still up) and marks it done; ✕ closes it and marks it too;
@@ -88,9 +89,15 @@ window.addEventListener('load', () => { setTimeout(async () => {
   // A file picker never opens in a test: the click is caught.
   let picked = 0;
   el('importFileInput').addEventListener('click', (e) => { picked++; e.preventDefault(); }, true);
-  // A plain first start: the landing up, no mark, nothing in the library.
-  const plain = (over = {}) => {
+  // The desktop app with nothing more to say: every command answers null
+  // (no server question, no service, no This PC readers).
+  const bare = async () => null;
+  // A plain first start in the app: the landing up, no mark, nothing in the
+  // library. `web`: the same start in a browser (no app behind the page).
+  const plain = (over = {}, web = false) => {
     W._reset();
+    W.state.invoke = web ? null : bare;
+    L._hooks.app = web ? null : true;
     Object.assign(W.ARRIVAL, { hash: '', profile: false }, over);
     persistLibrary({});
     if (!landingIsOpen()) openLanding(true);
@@ -102,8 +109,20 @@ window.addEventListener('load', () => { setTimeout(async () => {
     await window.__media('reduce');
     await loadScript('tests/fixtures/touchaudit.js');
 
-    // ---- When it shows ----
     ok('this run came in by #advanced: not shown, no mark', W.ARRIVAL.hash === 'advanced' && !shown() && !W.doneMark());
+
+    // ---- Never in a browser (D425) ----
+    plain({}, true);
+    {
+      const r = await W.atBoot(); await settle();
+      ok('the website: a plain first start shows the landing, not Setup, and keeps no mark', r === 'web' && !shown() && !W.doneMark() && landingIsOpen() && !window.__TAURI__, r);
+      ok('…and the screen lock is Off as shipped there (D426)', L.lockAfterMin() === 0);
+      openSettings('setup'); await settle();
+      ok('…and Settings has no Setup tab', el('setWelcomeSec').hidden && el('setTab-setup').hidden && settingsOpen());
+      closeSettings(); await settle();
+    }
+
+    // ---- When it shows ----
     for (const [label, over] of [['#setup', { hash: 'setup' }], ['#provider', { hash: 'provider' }], ['a share link', { hash: 'e~abc' }],
       ['#simple', { hash: 'simple' }], ['?profile=', { profile: true }]]) {
       plain(over);
@@ -114,7 +133,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('not shown when the start is not the landing (a reload of an open network)', (await W.atBoot()) === 'skipped' && !shown());
     plain();
     persistLibrary({ n1: { id: 'n1', name: 'Clinic', updated: 1, doc: { nodes: [], links: [] } } });
-    ok('a browser that already holds networks counts as done', (await W.atBoot()) === 'existing' && !shown() && W.doneMark() && W.doneMark().how === 'existing');
+    ok('an app that already holds networks counts as done', (await W.atBoot()) === 'existing' && !shown() && W.doneMark() && W.doneMark().how === 'existing');
     plain();
     ok('a plain first start shows it, over the landing', (await W.atBoot()) === 'shown' && shown() && landingIsOpen());
     ok('done once: marked as it closes, never before', !W.doneMark());
@@ -124,23 +143,19 @@ window.addEventListener('load', () => { setTimeout(async () => {
     if (!landingIsOpen()) openLanding(true);
     ok('a second plain start does not show it again', (await W.atBoot()) === 'done' && !shown());
 
-    // ---- The website's steps ----
+    // ---- The steps, with no This PC readers ----
     plain();
     await W.atBoot(); await settle();
-    ok('the website: theme, mode, where, lock, start', W.state.steps.join() === 'theme,mode,where,lock,start', W.state.steps.join());
+    ok('theme, mode, where, lock, start', W.state.steps.join() === 'theme,mode,where,lock,start', W.state.steps.join());
     ok('step 1 of 5, Back hidden, focus inside', step() === 'theme' && /Step 1 of 5/.test(el('wlCount').textContent) && el('wlBack').hidden
       && el('welcomeDialog').contains(document.activeElement));
     for (const wd of [360, 390]) { await window.__viewport(wd, wd === 360 ? 780 : 844); await audit('The welcome, theme'); }
     await window.__viewport(1280, 900); await settle();
     W.skip(); W.skip(); await settle();
-    ok('where, on the website: this browser and the note on a Topo server', step() === 'where' && el('wlWhereApp').hidden && !el('wlWhereWeb').hidden
-      && /opens at its own address/.test(el('wlWhereWeb').textContent));
-    for (const wd of [360, 390]) { await window.__viewport(wd, wd === 360 ? 780 : 844); await audit('The welcome, where (website)'); }
+    ok('where: this PC or a server, and no website choice left in the page', step() === 'where' && !el('wlWhereApp').hidden && el('wlWhereOn').hidden
+      && !el('wlWhereWeb') && !el('wlWhereApp').querySelector('[data-where="here"]').hidden);
+    for (const wd of [360, 390]) { await window.__viewport(wd, wd === 360 ? 780 : 844); await audit('The welcome, where'); }
     await window.__viewport(1280, 900); await settle();
-    await close();
-    plain(); W.state.served = true;
-    await W.atBoot(); await settle();
-    ok('a page a Topo server served skips where', W.state.steps.join() === 'theme,mode,lock,start', W.state.steps.join());
     await close();
 
     // ---- Skipping everything leaves today's defaults ----
@@ -213,7 +228,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('the time and the PIN kept (the screen lock\'s own)', await until(() => step() === 'start', 400) && L.lockAfterMin() === 15 && L.hasPin() && await L.pinMatches('2468'));
     await settle();
     ok('one step on, not two: the start step still up', shown() && step() === 'start');
-    ok('the website has no desktop step, and the start shows its three ways', !W.state.steps.includes('pc') && !el('wlStarts').hidden && el('wlHandoff').hidden
+    ok('no This PC step without its readers, and the start shows its three ways', !W.state.steps.includes('pc') && !el('wlStarts').hidden && el('wlHandoff').hidden
       && el('wlSkip').textContent === 'Not now' && el('wlNext').hidden);
     for (const wd of [360, 390]) { await window.__viewport(wd, wd === 360 ? 780 : 844); await audit('The welcome, start'); }
     await window.__viewport(1280, 900); await settle();
@@ -257,7 +272,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     W.skip(); W.skip(); await settle();
     const srv = el('wlWhereApp').querySelector('[data-where="server"]');
     ok('where in the app: this PC (chosen), connect, and make this PC the server (the app says to ask)',
-      step() === 'where' && !el('wlWhereApp').hidden && el('wlWhereWeb').hidden && !srv.hidden
+      step() === 'where' && !el('wlWhereApp').hidden && !srv.hidden
       && el('wlWhereApp').querySelector('[data-where="here"]').getAttribute('aria-pressed') === 'true');
     for (const wd of [360, 390]) { await window.__viewport(wd, wd === 360 ? 780 : 844); await audit('The welcome, where (app)'); }
     await window.__viewport(1280, 900); await settle();
@@ -673,7 +688,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     W._reset(); W.state.invoke = null; TC.state.invoke = null; CK.state.invoke = null; DS.state.invoke = null; DC.state.invoke = null; DC.state.info = null;
     W.finish('done'); localStorage.setItem(W.WL_KEY, JSON.stringify({ v: 1, at: 1, how: 'done' }));
     openSettings('setup'); await settle();
-    ok('Settings has Run the setup again (Setup, D356)', !el('setWelcomeSec').hidden && el('setWelcomeAgain').textContent === 'Run the setup again' && el('setWelcomeHead').textContent === 'Setup');
+    ok('on the website Settings has no Run the setup again (D425)', el('setWelcomeSec').hidden && el('setTab-setup').hidden);
+    closeSettings(); await settle();
+    W.state.invoke = bare;
+    openSettings('setup'); await settle();
+    ok('in the app Settings has Run the setup again (Setup, D356)', !el('setWelcomeSec').hidden && !el('setTab-setup').hidden && el('setWelcomeAgain').textContent === 'Run the setup again' && el('setWelcomeHead').textContent === 'Setup');
     el('setWelcomeAgain').click();
     ok('it runs again from step 1, Settings closed', await until(() => shown()) && !settingsOpen() && step() === 'theme');
     await close();

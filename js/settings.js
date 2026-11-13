@@ -24,7 +24,8 @@
 //            now. Kept in its own keys, not in state.settings.
 //   Problem reports  the name, phone and email Report a problem fills in
 //            (js/incidents.js): kept here only, carried by a report sent.
-//   Setup    Run the setup again (js/welcome.js wires the button; D356).
+//   Setup    Run the setup again (js/welcome.js wires the button; D356):
+//            the desktop app only (D425).
 //   About    what Topo is, what it keeps and sends (the same words as the
 //            navbar's About), the document version, and the licence,
 //            contact and legal page behind the navbar's About.
@@ -79,6 +80,8 @@ function renderSettings() {
     if (typeof renderDesktopClientSettings === 'function') renderDesktopClientSettings();
     // This PC as the server: the desktop app only (js/desktopserver.js).
     if (typeof renderDesktopServerSettings === 'function') renderDesktopServerSettings();
+    // Setup, Run the setup again: the desktop app only (js/welcome.js, D425).
+    if (typeof renderWelcomeSettings === 'function') renderWelcomeSettings();
     // This computer: the desktop app only (js/thiscomputer.js).
     if (typeof renderThisComputer === 'function') renderThisComputer();
     // Monitor from this PC: the desktop app only (js/checks.js).

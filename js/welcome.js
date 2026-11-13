@@ -1,9 +1,11 @@
 // ---- Setup, the first-run welcome (docs/SCOPE.md D138, D141-D143, D170,
 // D326-D336, D353-D359; steps 7l and 7o) ----
 // Called "Setup" on screen in every language (D356); the code keeps the
-// name welcome. The first time Topo starts on a PC or in a browser, a few
-// questions, each one skippable, each one handed to the piece that already
-// does it:
+// name welcome. The desktop app's alone (D425): the first time the app
+// starts on a PC, a few questions, each one skippable, each one handed to
+// the piece that already does it. The website, the offline zip and a page a
+// Topo server served never show it: they start on the landing, which
+// already has every way in (and, on a server's page, Sign in).
 //
 //   theme  Gold or Colourful: the navbar's theme switch (carino-theme.js),
 //          so the choice is kept as that switch keeps it.
@@ -30,12 +32,11 @@
 //                     (js/desktopserver.js dsSignInCode, D358), never
 //                     from a log other accounts could read.
 //          A reload in the middle (Connect reloads) resumes Setup at the
-//          step it left for (sessionStorage RESUME_KEY, D355). The website:
-//          on this browser, and a Topo server opens at its own address
-//          (D66). Not asked on a page a Topo server served, nor in an app
-//          window already connected to one (unless Setup connected it).
+//          step it left for (sessionStorage RESUME_KEY, D355). Not asked in
+//          an app window already connected to a server (unless Setup
+//          connected it).
 //   lock   The screen lock's time and PIN (js/idlelock.js, D134).
-//   pc     The desktop app only: Add this computer to the map (js/
+//   pc     Add this computer to the map (js/
 //          thiscomputer.js, through the Import… review) and Monitor from
 //          this PC (js/checks.js, off unless ticked). Both need an open
 //          network, so they wait until one is (D331).
@@ -44,15 +45,15 @@
 //          server Setup connected, what was done and Finish: the start page
 //          behind is the server's (D353).
 //
-// When it shows (D141, D326): on a plain start only (no link, no '#setup',
-// '?profile=' or mode entry, no reload of an open network: the landing is
-// what that start shows), once per PC or browser. The mark is localStorage
-// WL_KEY; a browser or app that already holds networks counts as done, so an
-// install from before the welcome never sees it (D327). Settings has "Run
-// the setup again". Skipping a step changes nothing; closing it (✕ or
-// Esc) skips the rest and marks it done; while a step is being applied
-// (an administrator prompt, a connect) it closes once that step is done
-// (D359). Nothing here is in the document.
+// When it shows (D141, D326, D425): in the desktop app, on a plain start
+// only (no link, no '#setup', '?profile=' or mode entry, no reload of an
+// open network: the landing is what that start shows), once per PC. The
+// mark is localStorage WL_KEY; an app that already holds networks counts as
+// done, so an install from before the welcome never sees it (D327). The
+// app's Settings has "Run the setup again". Skipping a step changes
+// nothing; closing it (✕ or Esc) skips the rest and marks it done; while a
+// step is being applied (an administrator prompt, a connect) it closes once
+// that step is done (D359). Nothing here is in the document.
 // Load order: ... -> reports -> welcome -> app -> settings
 
 (function () {
@@ -90,8 +91,6 @@ const _wl = {
     // Tests: (cmd, args) => Promise for the app's commands; null uses the
     // app's own window.__TAURI__.
     invoke: null,
-    // Tests: true/false forces "a page a Topo server served"; null asks js/server.js.
-    served: null,
     open: false,
     steps: [], i: 0,
     pick: {},              // the choices made on screen, applied on Next
@@ -157,11 +156,6 @@ function wlInvoke(cmd, args) {
 }
 // The desktop app (or a test's stand-in for it).
 const isApp = () => !!_wl.invoke || !!(window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function');
-// A page a Topo server served: the server marker, but not the desktop app's
-// own window pointed at a server (js/desktopclient.js forces the marker).
-const servedByServer = () => (_wl.served !== null ? !!_wl.served
-    : !!(window.TopoServer && typeof TopoServer.serverMarked === 'function' && TopoServer.serverMarked()
-        && !(window.CarinoDesktopClient && CarinoDesktopClient.state.url)));
 const DCl = () => window.CarinoDesktopClient || null;
 const DSv = () => window.CarinoDesktopServer || null;
 const TS = () => window.TopoServer || null;
@@ -192,6 +186,9 @@ async function atBoot() {
     const back = rs.get();
     if (back && isApp()) { await openWelcome(!!back.again, back); return 'resumed'; }
     if (back) rs.clear();
+    // The desktop app's alone (D425): a browser starts on the landing, and
+    // keeps no mark (nothing was asked).
+    if (!isApp()) return 'web';
     if (doneMark()) { fallbackQuestion(); return 'done'; }
     if (!plainStart()) { fallbackQuestion(); return 'skipped'; }
     if (holdsNetworks()) { markDone('existing'); fallbackQuestion(); return 'existing'; }
@@ -227,7 +224,7 @@ function serverSteps() {
 function stepsFor() {
     const app = isApp();
     const list = ['theme', 'mode'];
-    if (!servedByServer() && (!(app && appClient()) || _wl.srv.connected)) list.push('where', ...serverSteps());
+    if (!appClient() || _wl.srv.connected) list.push('where', ...serverSteps());
     list.push('lock');
     const pcOk = app && el('wlAddPc') && ((window.TopoThisComputer && TopoThisComputer.hasHost()) || (window.TopoChecks && TopoChecks.hasHost()));
     if (pcOk) list.push('pc');
@@ -386,10 +383,8 @@ function render() {
         if (m === 'simple') pressed(el('wlProfiles'), 'data-profile', _wl.pick.profile || state.settings.profile || 'simple');
     }
     if (name === 'where') {
-        const app = isApp();
-        const on = app && _wl.srv.connected;
-        el('wlWhereApp').hidden = !app || on;
-        el('wlWhereWeb').hidden = app;
+        const on = _wl.srv.connected;
+        el('wlWhereApp').hidden = on;
         el('wlWhereOn').hidden = !on;
         if (on) el('wlWhereOnUrl').textContent = (DCl() && DCl().connectedTo()) || _wl.srv.url;
         el('wlWhereApp').querySelector('[data-where="server"]').hidden = !_wl.serverOffer;
@@ -448,7 +443,7 @@ async function openWelcome(again, resume) {
         _wl.srv.signedIn = !!(S && S.me && S.me());
         if (!_wl.srv.connected) srvSay(t('This window is not connected to the server. Try again.'), true);
         else if (S && S.state.status === 'unreachable') srvSay(t('The server does not answer right now. Topo keeps trying.'), true);
-    } else if (isApp() && !servedByServer() && !appClient()) {
+    } else if (isApp() && !appClient()) {
         try { _wl.serverAsk = (await wlInvoke('server_question')) === true; } catch (e) { _wl.serverAsk = false; }
         // Offered whenever this PC can run the service and does not yet,
         // asked or not (D142, D336); only the question is once (D170).
@@ -981,6 +976,13 @@ function resumeNext() { if (ss.get().length) startPolling(); }
     });
 })();
 
+// Settings, Setup: Run the setup again, in the desktop app only (D425).
+function renderWelcomeSettings() {
+    const sec = el('setWelcomeSec');
+    if (sec) sec.hidden = !isApp();
+}
+window.renderWelcomeSettings = renderWelcomeSettings;
+
 window.TopoWelcome = {
     state: _wl, ARRIVAL, WL_KEY, NEXT_KEY, RESUME_KEY,
     atBoot, open: openWelcome, finish, dismiss, next, skip, back, runNext, idle, stepsFor, doneMark,
@@ -992,7 +994,7 @@ window.TopoWelcome = {
     _reset() {
         ls.del(WL_KEY); ss.set([]); rs.clear(); stopPolling(); stopWait();
         if (_wl.open) { _wl.keptTheme = null; closeDialog(); }
-        _wl.busy = false; _wl.closeWanted = ''; _wl.invoke = null; _wl.served = null; _wl.pick = {}; _wl.srv = freshSrv(); _wl.srvInfo = null;
+        _wl.busy = false; _wl.closeWanted = ''; _wl.invoke = null; _wl.pick = {}; _wl.srv = freshSrv(); _wl.srvInfo = null;
         _wl.waitMs = 1000; _wl.waitFor = 90000;
     },
 };

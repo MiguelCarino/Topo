@@ -190,7 +190,32 @@ window.addEventListener('load', () => { setTimeout(async () => {
     replaceDocument(libraryEntry('k1').doc, { libraryId: 'k1', origin: 'library' });
     select(prn.id, 'node'); await settle();
     ok('on the website: no host', !window.__TAURI__ && !CK.hasHost());
-    ok('…no Answer checks in the device panel', el('checkGroup').hidden === true);
+    // The checks are the document's: shown and edited on a page with no
+    // app, which says that only a monitoring app runs them (D427).
+    {
+      const had = (getNode(prn.id).checks || []).length;
+      ok('…the device panel shows Answer checks', el('checkGroup').hidden === false);
+      el('checkGroup').open = true; await settle(); await until(() => el('checkBody').children.length > 0);
+      const body = el('checkBody');
+      ok('…its checks as cards that can be edited', body.querySelectorAll('.ck-card').length === had && had > 0 && !!body.querySelector('.ck-card [data-f="proto"]:not([disabled])'), String(had));
+      ok('…the line that only a monitoring desktop app runs them', /Only a Topo desktop app that monitors this network runs these checks\. This page never checks\./.test(body.textContent) && !!body.querySelector('.ck-apponly'));
+      ok('…the rule, ＋ Add a check and the availability target', /Anything not checked has no state/.test(body.textContent) && !!body.querySelector('[data-ck="add"]') && !!body.querySelector('#ckTarget'));
+      ok('…nothing that needs the app: no Check now, no Settings…, no "Monitor from this PC is off"', !body.querySelector('[data-ck="checknow"]') && !body.querySelector('[data-ck="settings"]') && !/Monitor from this PC/.test(body.textContent));
+      body.querySelector('[data-ck="add"]').click(); await settle();
+      ok('…＋ Add a check adds one to the document', getNode(prn.id).checks.length === had + 1 && el('checkBody').querySelectorAll('.ck-card').length === had + 1);
+      undo(); flushAutosave(); await settle();
+      ok('…as one undo step', (getNode(prn.id).checks || []).length === had);
+      // A network that cannot be edited: read only, and no section for a device with no check.
+      state.readOnly = true;
+      select(prn.id, 'node'); await settle(); el('checkGroup').open = true; renderCheckSection(getNode(prn.id)); await settle();
+      ok('…read only: the cards disabled, no ＋ Add a check', !el('checkGroup').hidden && !el('checkBody').querySelector('[data-ck="add"]') && !el('checkBody').querySelector('[data-f]:not([disabled])'));
+      const bare = state.nodes.find((n) => !(n.checks || []).length);
+      if (bare) { select(bare.id, 'node'); await settle(); }
+      ok('…read only and no check: no section', !bare || el('checkGroup').hidden === true);
+      state.readOnly = false;
+      select(prn.id, 'node'); await settle();
+      el('checkGroup').open = false;
+    }
     ok('…no dot on the map', !document.querySelector('#layer-nodes .node-status') && checkMarkEl(getNode(prn.id)) === null);
     openSettings('monitor'); await settle();
     ok('…no Monitor from this PC in Settings', el('setMonSec').hidden === true);
