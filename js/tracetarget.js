@@ -1,6 +1,10 @@
 // ---- Trace to a target: "Does A reach B?" (docs/SCOPE.md D382-D387, step 8h) ----
 // Right-click A, then right-click B: Does A reach B? (A left click on B still
-// files a cable, as before.) On a touch screen a long-press on A then on B
+// files a cable, as before.) Right-click A twice: tracing (D432), drawn as
+// link mode is (D433): A in the trace's cyan with "TRACING TARGET..." over
+// it, and on a phone the bar as link mode's banner; a left click on B asks;
+// a third right-click on A ends it. When A reaches B the
+// path is lit in that colour and the rest of the map dimmed. On a touch screen a long-press on A then on B
 // (a long-press is the browser's contextmenu). Without a mouse: the
 // selection's Trace to… (the commands, the device panel), then a click or a
 // tap on the target. Esc, or a click on empty map, clears it. A read-only
@@ -241,6 +245,9 @@ function clear() {
 // read-only document arms the target instead of link mode (D382, D383).
 function onContext(id) {
     const src = state.linkSourceId;
+    // The same device right-clicked again: tracing from it; a third time: off (D432).
+    if (src === id && getNode(id)) { state.linkSourceId = null; armFrom(id); return true; }
+    if (_tt.arm === id) { clear(); return true; }
     if (src && src !== id && getNode(src) && !(typeof getAnnotation === 'function' && getAnnotation(src))) {
         state.linkSourceId = null;
         ask(src, id);
@@ -260,6 +267,10 @@ function onClick(id) {
 const onPath = (id) => !!(_tt.answer && _tt.answer.path && _tt.answer.path.nodes.includes(id));
 const linkOnPath = (id) => !!(_tt.answer && _tt.answer.path && _tt.answer.path.links.some((l) => l.id === id));
 const isEnd = (id) => !!_tt.answer && (id === _tt.from || id === _tt.to);
+// The device waiting for its target, and whether a found path is lit (the
+// rest of the map is dimmed then, D432).
+const armed = () => _tt.arm;
+const lit = () => !!(_tt.answer && _tt.answer.reaches && _tt.answer.path);
 
 // ---- Check now, when A is this PC (D381, D386) ----
 function liveOffered() {
@@ -293,6 +304,8 @@ async function checkNow() {
 }
 
 // ---- The bar ----
+// A phone's width, as js/mobile.js's link banner (900px and under).
+const phoneWide = () => !!(window.matchMedia && matchMedia('(max-width: 900px)').matches);
 function bar() {
     let b = el('traceTargetBar');
     if (b) return b;
@@ -332,6 +345,9 @@ function renderBar() {
     b.hidden = false;
     const x = `<button type="button" class="tt-x" data-tt="close" aria-label="${escapeHtml(t('Close'))}" title="${escapeHtml(t('Close'))}">✕</button>`;
     if (_tt.arm) {
+        // As link mode (D433): the map says it over the device; only a
+        // phone, whose finger hides it, has the line as a banner.
+        if (!phoneWide()) { b.hidden = true; b.innerHTML = ''; return; }
         b.innerHTML = `<div class="tt-head"><p class="tt-line">${escapeHtml(t('Click or tap the device to ask whether {name} reaches it.', { name: nameOf(_tt.arm) }))}</p>${x}</div>`;
         return;
     }
@@ -355,5 +371,5 @@ function renderBar() {
     });
 })();
 
-window.TopoTraceTarget = { state: _tt, answer, ask, armFrom, clear, onContext, onClick, onPath, linkOnPath, isEnd, checkNow, checkNowSpec, outcomeText, renderBar, pathThrough };
+window.TopoTraceTarget = { state: _tt, answer, ask, armFrom, clear, onContext, onClick, onPath, linkOnPath, isEnd, armed, lit, checkNow, checkNowSpec, outcomeText, renderBar, pathThrough };
 })();

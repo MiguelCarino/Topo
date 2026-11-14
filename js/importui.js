@@ -55,9 +55,11 @@ const NOTE_TEXT = {
     'dates-ambiguous': '{file}: the dates in "{column}" could be day-first or month-first, so they were left empty.'
 };
 // This computer's information lines (js/thiscomputer.js, D166): shown in
-// the review, never added.
+// the review, never added. The gateway written on the PC is in its facts
+// (D430); these are the others.
 const INFO_TEXT = {
     'tc-gateway': 'Default gateway {address} ({name}): shown here only, it is not added.',
+    'tc-no-serial-linux': 'Serial number: on Linux only an administrator can read it, so it is left blank.',
     'tc-no-gateway': 'This PC has no default gateway.',
     'tc-dns': 'DNS servers: {list}.',
     'tc-no-dns': 'This PC lists no DNS servers.',
@@ -117,8 +119,11 @@ async function openImport(files) {
 }
 // A result read some other way than from files (This computer,
 // js/thiscomputer.js): straight to "What was understood", with no Back.
-function openResult(res) {
-    _imp = { files: [], step: 2, results: [res], target: '', direct: true };
+// opts.setup (D429): asked for in Setup, so it goes into the open network
+// with no "Where it goes", and the merge review shows only when it asks
+// something.
+function openResult(res, opts = {}) {
+    _imp = { files: [], step: 2, results: [res], target: '', direct: true, setup: !!opts.setup };
     setTitle(true);
     openDialog();
     render();
@@ -191,6 +196,8 @@ function renderUnderstood() {
         const ticks = (res.parts || []).map((p) => `<label class="check imp-part"><input type="checkbox" data-imp-part="${ri}:${esc(p.key)}"${p.on ? ' checked' : ''}> <span>${esc(t(PART_LABELS[p.key] || p.key))} (${p.ids.length})</span></label>`);
         const ask = res.askName ? `<label class="imp-ask"><span class="prop-lbl">${esc(t('This switch\'s name'))}</span><input type="text" class="input" data-imp-name="${ri}" value="${esc(res.switchName || '')}" autocomplete="off" placeholder="${esc(t('As its prompt shows it'))}"></label>` : '';
         const info = (res.info || []).map((n) => `<li>${esc(issueText(n))}</li>`);
+        const facts = (res.facts || []).map((f) => `<dt>${esc(t(f.label))}</dt><dd>${esc(f.value)}</dd>`);
+        const acts = (res.actions || []).map((a) => `<button type="button" class="btn imp-act" data-imp-act="${ri}:${esc(a.key)}">${esc(t(a.label))}</button>`);
         const opts = (res.options || []).map((o) => `<label class="check imp-part"><input type="checkbox" data-imp-opt="${ri}:${esc(o.key)}"${o.on ? ' checked' : ''}> <span>${esc(t(o.label, { n: o.n }))}</span></label>`);
         return `<section class="imp-res" data-imp-res="${esc(res.importer)}"><h3 class="imp-res-head">${esc(res.label ? t(res.label) : resultLabel(res))}
             <span class="imp-res-files">${esc(res.files.join(', '))}</span></h3>
@@ -199,15 +206,30 @@ function renderUnderstood() {
             ${notes.length ? `<ul class="imp-notes">${notes.join('')}</ul>` : ''}
             ${ticks.length ? `<fieldset class="imp-parts"><legend class="prop-lbl">${esc(t('Include'))}</legend>${ticks.join('')}</fieldset>` : ''}${ask}
             ${opts.length ? `<fieldset class="imp-parts"><legend class="prop-lbl">${esc(t('Include'))}</legend>${opts.join('')}</fieldset>` : ''}
+            ${facts.length ? `<dl class="imp-facts">${facts.join('')}</dl>` : ''}
+            ${acts.length ? `<p class="imp-acts">${acts.join('')}</p>` : ''}
             ${info.length ? `<p class="imp-warn-head">${esc(t('For information, not added'))}</p><ul class="imp-notes imp-info">${info.join('')}</ul>` : ''}</section>`;
     });
-    const here = isKept() && !state.readOnly && state.libraryId && libraryEntry(state.libraryId);
+    const here = openCard();
+    if (_imp.setup && here) {
+        _imp.target = 'here';
+        return parts.join('') + `<p class="ask-msg imp-setup-into">${esc(t('It goes into the open network, "{name}". One undo takes it back.', { name: here.name }))}</p>`;
+    }
     const target = _imp.target || (here ? 'here' : 'new');
     _imp.target = target;
     const opt = (id, label) => `<label class="check imp-target"><input type="radio" name="impTarget" value="${id}"${target === id ? ' checked' : ''}> <span>${esc(label)}</span></label>`;
     const targets = [here ? opt('here', t('Merge into "{name}"', { name: here.name })) : '', opt('other', t('Merge into another network…')), opt('new', t('Open as its own network'))].join('');
     return parts.join('') + `<fieldset class="imp-targets"><legend class="prop-lbl">${esc(t('Where it goes'))}</legend>${targets}</fieldset>
         <p class="ask-msg imp-never">${esc(t('The merge shows every change before anything is kept. Importing adds and updates; it never deletes.'))}</p>`;
+}
+
+// The open network's card. A network started a moment ago (Setup's Add
+// devices, D429) is kept but its card is written by the autosave, so it is
+// written now, or the import would not offer it.
+function openCard() {
+    if (!isKept() || state.readOnly || !state.libraryId) return null;
+    if (!libraryEntry(state.libraryId) && docHasContent()) flushAutosave();
+    return libraryEntry(state.libraryId) || null;
 }
 
 function render() {
@@ -217,7 +239,7 @@ function render() {
     const next = el('importNextBtn'), back = el('importBackBtn');
     const usable = _imp.files.some((f) => f.choice);
     if (_imp.step === 2) {
-        next.textContent = t('Continue');
+        next.textContent = _imp.setup && _imp.target === 'here' ? t('Add this computer') : t('Continue');
         next.disabled = !_imp.results.some((r) => (r.doc.nodes || []).length || (r.doc.networks || []).length || (r.doc.groups || []).length);
         back.classList.toggle('hidden', !!_imp.direct);
     } else {
@@ -270,6 +292,17 @@ function render() {
         _imp.results[ri] = res;
         render();
     }));
+    // A result's own action (This computer's serial, D431): it answers a new result.
+    body.querySelectorAll('[data-imp-act]').forEach((b) => b.addEventListener('click', async () => {
+        const [ri, key] = b.dataset.impAct.split(':');
+        const old = _imp && _imp.results[Number(ri)];
+        if (!old || typeof old.act !== 'function') return;
+        b.disabled = true;
+        const res = await old.act(key);
+        if (!_imp || _imp.results[Number(ri)] !== old) return;
+        if (res) _imp.results[Number(ri)] = res;
+        render();
+    }));
     body.querySelectorAll('input[name="impTarget"]').forEach((r) => r.addEventListener('change', () => { if (r.checked) _imp.target = r.value; }));
 }
 
@@ -298,7 +331,8 @@ function readFiles() {
 // Step 2 -> the merge, one importer's result after another.
 async function continueImport() {
     if (!_imp || !_imp.results) return [];
-    const { results, target } = _imp;
+    const { results, target, setup } = _imp;
+    if (target === 'here') openCard();
     let targetId = target === 'here' ? state.libraryId : null;
     if (target === 'other') {
         targetId = await pickMergeTarget(null, t('Merge the import into which network?'));
@@ -317,7 +351,7 @@ async function continueImport() {
             const name = res.name || String(res.files[0] || '').replace(/\.[^.]+$/, '') || resultLabel(res);
             out.push(openImportedAsNewCard(TopoImporters.withoutTransientIds(res.doc), name, null));
         } else {
-            out.push(await mergeCopyInto(targetId, res.doc, { source: label, fileName, reason: 'Before importing {file}', name: label }));
+            out.push(await mergeCopyInto(targetId, res.doc, { source: label, fileName, reason: 'Before importing {file}', name: label, direct: !!setup && target === 'here' }));
         }
     }
     return out;

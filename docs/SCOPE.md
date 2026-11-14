@@ -4646,6 +4646,104 @@ where it says so.
   website is the main branch, so it has them at once. Built as D424
   builds: a dispatch with `tag` v0.0.4 and `platforms` x64 into a draft
   the owner publishes; the Arm apps from the owner's Mac.
+- **D429. Setup's Add this computer goes into the network Setup started.**
+  The owner, on a first start in the app with Add this computer ticked and
+  the network begun from Add devices: "it asks to merge, that should not
+  happen because is the same setup, it confuses the user. Also, the Merge
+  screen is too confusing." Setup's Add devices keeps the network at once,
+  but its card is written by the autosave (800 ms) and the queued Add this
+  computer could open before it, so the review offered only "Merge into
+  another network…" and "Open as its own network", and the person had to
+  find their own new network in a list and read a two-way merge. Now the
+  import writes the open network's card before it decides (any import, not
+  only Setup's), and Add this computer from Setup has no "Where it goes":
+  one line names the open network, the button says Add this computer, and
+  a merge that only adds and fills blanks is applied with no review (one
+  undo step, logged, the restore point taken as for any merge). One that
+  asks, or would remove, shows the review. The review itself, wherever it
+  opens, offers only the status chips that have something in them, the
+  kind filter only when the rows shown are of two kinds or more, Use mine
+  / theirs for all only when something asks, and a two-way merge that asks
+  nothing says so in one sentence ("Nothing is removed and nothing of yours
+  is changed…") in place of the rules for differences (es, pt-BR, ja, ru).
+- **D430. This computer carries the PC's gateway, maker, model and serial.**
+  The owner, looking at an added PC with only its address, DNS and a vendor
+  guessed from its MAC: "Topo should take more info the host when adding it
+  to the network. Also, add the gateway if detected, not only the DNS."
+  Reverses D166's and D207's "the gateway is not added" for the PC's own
+  field: `gw` is now its default gateway (an IPv4 one of a card that is
+  added first, else any IPv4 one, else a stable IPv6 one; a link-local
+  fe80:: one never). The router itself is still not added as a device,
+  and the other gateways are still shown as information. The app also reads
+  who made the PC, its model and its serial number, from this PC alone:
+  /sys/class/dmi/id on Linux (whose serials only an administrator can read,
+  so there it is blank and the review says why), `system_profiler
+  SPHardwareDataType` on macOS, and the SMBIOS table
+  (GetSystemFirmwareTable) on Windows, which also names the system from the
+  registry ("Windows 11 Pro 24H2", where it was "Windows"). The firmware's
+  placeholders ("To Be Filled By O.E.M.", "System Product Name") are never
+  written; a home-built PC with nothing in its system record is named by its
+  board's model; a Lenovo by its version field. They go in the fields the
+  device already has (vendor, model, serial: no format change), and the
+  review lists what the PC carries (maker, model, serial, system, gateway,
+  DNS servers) above the information lines. A second run fills blanks only,
+  as any two-way merge.
+- **D431. Linux's serial on request; drop-down menus drawn by Topo.** The
+  owner: "Add Serial Number too (if possible). Drop menus do not look good.
+  Their text disappears." On Linux nothing an ordinary user may read holds
+  the PC's serial (product_serial and board_serial are root's; udev and
+  hostnamed do not say it), so the review offers **Read the serial number as
+  administrator…**: the `this_computer_serial` command runs `pkexec cat` on
+  those two files, the system's password prompt asks, and the first serial
+  that is not a placeholder is written; cancelled says nothing, a refused
+  password or a firmware with none says so (es, pt-BR, ja, ru). Never run
+  without the click. The drop-downs: Gold said no `color-scheme`, so the
+  Linux app's engine (WebKitGTK) drew each select in the system's light
+  style under Topo's light text. Topo's css/app.css now says dark (Gold
+  always; Colourful when the system is dark) and draws its selects itself:
+  the field's colours, its own caret, the open list in the card's pair. In
+  Topo's own stylesheet, not the fleet's carino-ui.css: a fleet-wide fix is
+  Branding's to make.
+- **D432. Right-click a device twice: tracing.** The owner: "Trace to..
+  function should be active when clicking right click twice, shows a
+  different highlight color and says tracing target..., should highlight
+  the path if it connects." A right-click on A arms a cable, as before; a
+  second right-click on A itself (a second long-press on a touch screen)
+  turns that into Trace to… from A: A pulses in the trace's own colour
+  (`--tt-hl`: cyan on Gold, purple on Colourful, never the gold of a cable
+  or a selection), every device is a target, and the bar says "Tracing
+  target… Click or tap the device to ask whether A reaches it." (es, pt-BR,
+  ja, ru). A left click on B asks (no cable). When A reaches B the path,
+  its cables and both ends are lit in that colour and the rest of the map
+  is dimmed; when it does not, nothing is dimmed and the bar says where the
+  walk stops (D384). A third right-click on A, Esc, ✕ or a click on empty
+  map ends it. Right-click A then right-click B still asks at once (D382).
+- **D433. Tracing looks and acts as link mode.** The owner, with link
+  mode's "LINK TARGET..." beside tracing's bar: "Different UI behaviour.
+  should be the same as linking. Also, after tracing target is selected,
+  successful path should be highlighted too." So D432's bar while waiting
+  is gone at desktop width: A is drawn as a link source is, in cyan
+  (#0891b2, its glow `--tt-hl`), with "TRACING TARGET..." over it (es,
+  pt-BR, ja, ru), and no delete ✕ on it while tracing; a phone (900px and
+  under) keeps the line as a banner, as link mode's. And the target's click
+  was lost: a mouse press on B started a drag and selected B, whose redraw
+  took the click away, so nothing was asked and no path lit. While tracing,
+  a press on a device is the target's click (as in link mode), and the
+  answer, the lit path and the dimmed rest follow.
+- **D434. Renumber into a subnet already declared merges.** The owner, on
+  "192.168.1.0/24 was not renumbered: 192.168.0.0/24 is already declared":
+  "Allow subnet merge when moving to an already registered subnet". Exactly
+  another declared network's range is no longer refused: it is a merge
+  into that network, asked as "Merge 192.168.1.0/24 into 192.168.0.0/24?"
+  (title Merge subnets, button Merge). The members move as in any renumber
+  (host bits kept, gateway and DNS references rewritten, an address
+  somebody there already holds still refused); the moved network's record
+  goes; what it says that the other leaves blank fills the blank (its
+  gateway as renumbered, VLAN, purpose, DNS, DHCP and its pool); where both
+  say something the other's stays, and the question lists each ("Name:
+  Office (not Home)"); a Wi-Fi network on it moves to the other. One undo
+  step. Overlapping a declared range without being it is still refused
+  (es, pt-BR, ja, ru).
 
 Not changed by these, and still open from the same review: Report problems
 chosen in Setup does not last past the next plain start (D329); Setup's

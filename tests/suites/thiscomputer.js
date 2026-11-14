@@ -14,8 +14,11 @@
 //     a card not connected that has only link-local addresses, D209);
 //   - a DNS stub (127.0.0.53) or Windows' fec0:0:0:ffff:: placeholders are
 //     never written as the PC's DNS servers (D210);
-//   - the default gateway is never added (no device, no address, no gw
-//     field): the review shows it as information, with the DNS servers,
+//   - the maker, model and serial are written on the PC, a blank serial
+//     on Linux said (D430);
+//   - the default gateway is written as the PC's gateway (an IPv4 one of
+//     an added card first, D430) and never added as a device or address;
+//     the others are shown as information, with the DNS servers,
 //     the MTUs, the addresses not kept and what was left out;
 //   - the tick "Also add the virtual interfaces" adds them and their subnets;
 //   - the button opens the review at "What was understood", titled Add this
@@ -79,13 +82,15 @@ window.addEventListener('load', () => { setTimeout(async () => {
     gateways: [{ ip: '192.168.50.1', iface: 'enp3s0' }, { ip: 'fe80::1', iface: 'enp3s0' }],
     // A stub and Windows' placeholders are never written as the PC's DNS (D210).
     dns: ['192.168.50.1', '127.0.0.53', '1.1.1.1', 'fec0:0:0:ffff::1'],
+    platform: 'linux', vendor: 'ASUS', model: 'ROG STRIX B550-F GAMING (WI-FI)', serial: '',
   };
-  let answer = clone(PC), refuse = null;
+  let answer = clone(PC), refuse = null, serialAnswer = 'MB-7X91234';
   const calls = [];
   const others = [];
   const invoke = async (cmd, args) => {
     // The other desktop sections (the server, the client) ask too once
     // window.__TAURI__ is there: they get no answer, and are not counted.
+    if (cmd === 'this_computer_serial') { calls.push(cmd); await wait(5); if (serialAnswer instanceof Error) throw serialAnswer.message; return serialAnswer; }
     if (cmd !== 'this_computer') { others.push(cmd); return null; }
     calls.push(cmd);
     await wait(5);
@@ -112,8 +117,16 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('one device: this PC', d.nodes.length === 1 && n.type === 'pc', JSON.stringify(d.nodes.map((x) => x.name)));
     ok('named by its host name, without the domain', n.name === 'conta-pc03');
     ok('its system and its DNS servers', n.os === 'Fedora Linux 44 (Workstation Edition)' && n.dns === '192.168.50.1, 1.1.1.1', `${n.os} | ${n.dns}`);
-    ok('the default gateway is not added: no gw field, no device, no address', !n.gw && !JSON.stringify(d).includes('192.168.50.1"') && !JSON.stringify(d).includes('fe80::1"')
-      && !/"192\.168\.50\.1\//.test(JSON.stringify(d)), JSON.stringify(d).slice(0, 300));
+    ok('the default gateway is the PC\'s gateway, and nothing else: no device, no address', n.gw === '192.168.50.1' && !JSON.stringify(d).includes('fe80::1"')
+      && !/"192\.168\.50\.1\//.test(JSON.stringify(d)) && d.nodes.length === 1, JSON.stringify(d).slice(0, 300));
+    ok('its maker and model; a blank serial is not written', n.vendor === 'ASUS' && n.model === 'ROG STRIX B550-F GAMING (WI-FI)' && !('serial' in n), JSON.stringify([n.vendor, n.model, n.serial]));
+    ok('the review lists what the PC carries', JSON.stringify(r.facts) === JSON.stringify([{ label: 'Maker', value: 'ASUS' }, { label: 'Model', value: 'ROG STRIX B550-F GAMING (WI-FI)' },
+      { label: 'System', value: 'Fedora Linux 44 (Workstation Edition)' }, { label: 'Gateway', value: '192.168.50.1' }, { label: 'DNS servers', value: '192.168.50.1, 1.1.1.1' }]), JSON.stringify(r.facts));
+    const win = TC.toResult(Object.assign(clone(PC), { platform: 'windows', vendor: 'Dell Inc.', model: 'OptiPlex 7090', serial: '7XYZ123', os: 'Windows 11 Pro 24H2' }));
+    ok('Windows: the serial written, no Linux line', win.doc.nodes[0].serial === '7XYZ123' && win.doc.nodes[0].os === 'Windows 11 Pro 24H2' && !win.info.some((x) => x.code === 'tc-no-serial-linux'));
+    ok('Linux with no serial: said', r.info.some((x) => x.code === 'tc-no-serial-linux'));
+    const v4other = TC.toResult(Object.assign(clone(PC), { gateways: [{ ip: 'fe80::1', iface: 'enp3s0' }, { ip: '10.0.0.1', iface: 'wlp2s0' }] }));
+    ok('an IPv4 gateway before a link-local one', v4other.doc.nodes[0].gw === '10.0.0.1' && v4other.info[0].params.address === 'fe80::1');
     const ifs = n.interfaces;
     ok('the network cards that are connected: enp3s0 and wlp2s0', ifs.map((i) => i.name).join() === 'enp3s0,wlp2s0', ifs.map((i) => i.name).join());
     const e = ifs.find((i) => i.name === 'enp3s0'), w = ifs.find((i) => i.name === 'wlp2s0');
@@ -125,11 +138,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('only transient ids', d.nodes.every((x) => /^imp-/.test(x.id)) && d.networks.every((x) => /^imp-/.test(x.id)));
     ok('a document the editor reads', isDocShape(d) && canonicalDoc(d).nodes.length === 1);
     const info = r.info.map((x) => U.issueText(x));
-    ok('the gateway is shown as information', info.some((s) => s === 'Default gateway 192.168.50.1 (enp3s0): shown here only, it is not added.') && info.some((s) => /^Default gateway fe80::1 /.test(s)), info.join(' | '));
-    ok('the gateways come first, in the order the PC lists them', r.info[0].code === 'tc-gateway' && r.info[0].params.address === '192.168.50.1' && r.info[1].params.address === 'fe80::1');
+    ok('the other gateways are shown as information, the one written is not', info.some((s) => s === 'Default gateway fe80::1 (enp3s0): shown here only, it is not added.') && !info.some((s) => /^Default gateway 192\.168\.50\.1 /.test(s)), info.join(' | '));
+    ok('the gateways come first, in the order the PC lists them', r.info[0].code === 'tc-gateway' && r.info[0].params.address === 'fe80::1');
     const oneVirt = clone(PC); oneVirt.interfaces = oneVirt.interfaces.filter((i) => i.name !== 'wg0');
     ok('one virtual interface is said in the singular', TC.toResult(oneVirt).info.map((x) => U.issueText(x)).includes('A virtual interface left out: docker0.'));
-    ok('the DNS servers and the MTUs too', info.includes('DNS servers: 192.168.50.1, 1.1.1.1.') && info.includes('enp3s0: MTU 1500.'));
+    ok('the MTUs too, and the DNS servers only once (in the facts)', !info.some((x) => /^DNS servers:/.test(x)) && info.includes('enp3s0: MTU 1500.'));
     ok('the stable IPv6 not kept is said; the temporary and link-local ones are not', info.includes('enp3s0 also has 2001:db8:50::33/64: Topo keeps one address per interface, so these are not added.')
       && !info.some((s) => /a1b2|fe80::3ea9/.test(s)));
     ok('what was left out is said', info.includes('2 virtual interfaces left out: docker0, wg0.') && info.includes('Not connected, left out: enp4s0, enp5s0.'), info.join(' | '));
@@ -168,7 +181,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
       && el('importBackBtn').classList.contains('hidden') && el('importNextBtn').textContent === 'Continue' && !el('importNextBtn').disabled);
     const body = () => el('importBody').textContent;
     ok('the review says what, and the gateway only as information', /This computer/.test(body()) && /1\s*Devices/.test(body()) && /2\s*Interfaces/.test(body()) && /2\s*Subnets/.test(body())
-      && /For information, not added/.test(body()) && /Default gateway 192\.168\.50\.1 \(enp3s0\): shown here only/.test(body()), body().slice(0, 400));
+      && /For information, not added/.test(body()) && /Default gateway fe80::1 \(enp3s0\): shown here only/.test(body())
+      && /Maker\s*ASUS/.test(body()) && /Gateway\s*192\.168\.50\.1/.test(body()), body().slice(0, 400));
     ok('merge into the open network, chosen', el('importBody').querySelector('input[value="here"]').checked);
     for (const wd of [360, 390]) { await window.__viewport(wd, wd === 360 ? 740 : 844); await audit('Add this computer, the review'); }
     await window.__viewport(1280, 900); await settle();
@@ -178,6 +192,16 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('ticked: 4 interfaces and 4 subnets', /4\s*Interfaces/.test(body()) && /4\s*Subnets/.test(body()) && el('importBody').querySelector('[data-imp-opt]').checked);
     el('importBody').querySelector('[data-imp-opt]').click(); await settle();
     ok('unticked again: 2 and 2', /2\s*Interfaces/.test(body()) && /2\s*Subnets/.test(body()));
+    // Linux's serial, through the administrator prompt (D431).
+    const actBtn = () => el('importBody').querySelector('[data-imp-act]');
+    ok('Linux with no serial: the button to read it as administrator', !!actBtn() && actBtn().textContent === 'Read the serial number as administrator…');
+    serialAnswer = new Error('cancelled'); calls.length = 0;
+    actBtn().click();
+    ok('cancelled: nothing said, the button still there', await until(() => calls.join() === 'this_computer_serial') && (await settle(), !!actBtn() && !actBtn().disabled && !/Topo could not read the serial/.test(document.body.textContent)));
+    serialAnswer = 'MB-7X91234';
+    actBtn().click();
+    ok('read: the serial in the facts, the button and the blank line gone', await until(() => /Serial number\s*MB-7X91234/.test(body())) && !actBtn() && !/only an administrator can read it/.test(body())
+      && U._state().results[0].doc.nodes[0].serial === 'MB-7X91234', body().slice(0, 300));
 
     reviews.length = 0;
     el('importNextBtn').click();
@@ -223,6 +247,38 @@ window.addEventListener('load', () => { setTimeout(async () => {
     undo(); flushAutosave();
     ok('a second undo step takes back the first run', state.nodes.map((x) => x.name).sort().join() === beforeNames && !mine().length);
 
+    // ---- From Setup (D429) ----
+    // Setup's Add devices has just started a network: kept, its card not
+    // written yet (the autosave's 800 ms). Setup's Add this computer goes
+    // into it with no "Where it goes", and a merge that only adds is applied
+    // with no review.
+    replaceDocument(EMPTY_DOC, { origin: 'wizard', fit: false, claim: true });
+    const freshId = state.libraryId;
+    spawnNode('router'); spawnNode('switch');
+    ok('Setup case: a network just started, its card not written yet', !!freshId && !libraryEntry(freshId));
+    reviews.length = 0;
+    answer = clone(PC);
+    await TC.addThisComputer({ setup: true });
+    await settle();
+    ok('from Setup: no Where it goes, the open network named, the button Add this computer',
+      !el('importBody').querySelector('input[name="impTarget"]') && !!libraryEntry(freshId)
+      && /It goes into the open network, "/.test(body()) && el('importNextBtn').textContent === 'Add this computer', body().slice(-200));
+    const logsBefore = (state.log || []).length;
+    el('importNextBtn').click();
+    ok('…added with no merge review', await until(() => state.nodes.some((x) => x.name === 'conta-pc03')) && !reviews.length && el('mergeDialog').hidden, String(reviews.length));
+    await settle();
+    ok('…into that network, one PC, logged once', state.libraryId === freshId && mine().length === 1 && (state.log || []).length === logsBefore + 1);
+    undo(); await settle();
+    ok('…one undo takes it back', !mine().length && state.nodes.length === 2);
+    // The same with something to ask: the review shows.
+    state.nodes[0].name = 'conta-pc03'; state.nodes[0].type = 'switch';
+    await TC.addThisComputer({ setup: true });
+    await settle();
+    el('importNextBtn').click();
+    ok('from Setup, a merge that asks: the review shows', await until(() => reviews.length === 1));
+    await settle();
+    undo(); await settle();
+
     // ---- Settings ----
     openSettings('setup'); await settle();
     ok('Settings shows This computer in the app', el('setTcSec').hidden === false);
@@ -238,9 +294,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     refuse = null;
 
     // ---- Translated ----
-    const strings = Object.values(U.INFO_TEXT).concat(['This computer', 'Also add the virtual interfaces ({n})', 'For information, not added', 'Add this computer', 'Add this computer…',
+    const strings = Object.values(U.INFO_TEXT).concat(['Maker', 'Model', 'Serial number', 'System', 'Gateway', 'DNS servers', 'This computer', 'Also add the virtual interfaces ({n})', 'For information, not added', 'Add this computer', 'Add this computer…',
       '＋ Add this computer…', 'Topo could not read this computer: {error}',
-      'Adds this PC to the open network: its name, its network cards with their addresses, and their subnets, read from this PC alone. Nothing is sent onto the network, the default gateway is only shown, and the review shows everything before it is kept.']);
+      'Adds this PC to the open network: its name, maker, model and serial number, its network cards with their addresses, their subnets and its default gateway, read from this PC alone. Nothing is sent onto the network, the router itself is not added, and the review shows everything before it is kept.']);
     const missing = [];
     CarinoI18N.locales.filter((l) => l !== 'en').forEach((l) => strings.forEach((s) => { if (!CarinoI18N.has(l, s)) missing.push(`${l}: ${s.slice(0, 40)}`); }));
     ok('every sentence of This computer is translated', !missing.length, `${missing.length}: ${missing.slice(0, 3).join(' | ')}`);

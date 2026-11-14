@@ -3140,13 +3140,19 @@ function networkStats(net) {
 // would turn a member into the network or broadcast address, or would give a
 // member, or a gateway or DNS reference, an address another device already
 // holds.
+//
+// Exactly another declared network's range is a merge into it (D434):
+// plan.into is that network, the members move as in any renumber, this
+// network's record goes, what it says that the other leaves blank fills the
+// blank (plan.fill), where both say something the other's stays
+// (plan.kept), and a Wi-Fi network on this one moves to the other.
 function planRenumber(netId, cidrText) {
     const net = networkById(netId);
     const from = net && parseValidCIDR(net.cidr);
     const text = String(cidrText || '').trim();
     const to = text.includes('/') ? parseValidCIDR(text) : null;
     const errors = [];
-    const plan = { net, from, to, errors, ifaces: [], refs: [] };
+    const plan = { net, from, to, errors, ifaces: [], refs: [], into: null, fill: [], kept: [] };
     if (!from) { errors.push(t('That subnet no longer exists.')); return plan; }
     if (!to) { errors.push(t('{cidr} is not a subnet with a prefix, like 10.0.9.0/24.', { cidr: text || '—' })); return plan; }
     if (to.kind !== from.kind) { errors.push(t('{cidr} is not the same address family as {from}.', { cidr: to.networkStr, from: from.networkStr })); return plan; }
@@ -3160,7 +3166,7 @@ function planRenumber(netId, cidrText) {
         // Exactly another network's range is its own refusal: "overlaps
         // itself" read as nonsense, and a parent network containing both
         // ranges would otherwise let two networks share one cidr.
-        if (o.networkStr === to.networkStr) errors.push(t('{cidr} is already declared.', { cidr: to.networkStr }));
+        if (o.networkStr === to.networkStr) plan.into = other;
         else if (contains(from, o)) errors.push(t('{other} is declared inside this subnet and would be left behind.', { other: o.networkStr }));
         else if ((contains(o, to) || contains(to, o)) && !(contains(o, from) && contains(o, to))) {
             errors.push(t('{cidr} overlaps {other}, which is already declared.', { cidr: to.networkStr, other: o.networkStr }));
@@ -3259,6 +3265,21 @@ function planRenumber(netId, cidrText) {
         const clash = holders.get(ip);
         if (clash) errors.push(t('{ip} is already used by {name}.', { ip, name: clash.name || clash.id }));
     });
+
+    // A merge: this network's details, as the renumber leaves them, against
+    // the other's. Only a blank is filled; the id and the range are the
+    // other's own.
+    if (plan.into) {
+        const after = (key) => { const r = plan.refs.find((x) => x.obj === net && x.key === key); return r ? r.value : net[key]; };
+        const blank = (v) => v === undefined || v === null || v === false || isBlank(String(v));
+        NETWORK_FIELDS.forEach(({ key, label }) => {
+            if (key === 'id' || key === 'cidr') return;
+            const mine = after(key), theirs = plan.into[key];
+            if (blank(mine)) return;
+            if (blank(theirs)) plan.fill.push({ key, value: mine });
+            else if (String(mine).trim() !== String(theirs).trim()) plan.kept.push({ key, label, value: theirs, dropped: mine });
+        });
+    }
 
     // One reason once: two members that both do not fit say so twice.
     plan.errors = [...new Set(errors)];

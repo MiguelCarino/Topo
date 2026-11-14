@@ -324,8 +324,14 @@ function renumberFindingsDelta(plan) {
         const target = ni > -1 ? scratch.nodes[ni] : wi > -1 ? scratch.networks[wi] : null;
         if (target) target[r.key] = r.value;
     });
-    const net = scratch.networks[state.networks.indexOf(plan.net)];
-    if (net) net.cidr = plan.to.networkStr;
+    const at = state.networks.indexOf(plan.net);
+    const net = scratch.networks[at];
+    if (plan.into) {
+        // A merge (D434): the other network gains the blanks, this one goes.
+        const into = scratch.networks[state.networks.indexOf(plan.into)];
+        if (into) plan.fill.forEach((f) => { into[f.key] = f.value; });
+        if (net) scratch.networks.splice(at, 1);
+    } else if (net) net.cidr = plan.to.networkStr;
     return findingsDelta(topologyFindings(), diagnoseDoc(scratch).findings);
 }
 
@@ -346,22 +352,35 @@ async function renumberNetwork(id) {
             { title: t('Renumber subnet') });
         return;
     }
-    const ok = await askConfirm(`${t('Renumber {from} to {to}?\nAddresses moved: {n}\nGateway and DNS entries rewritten: {m}\nOne step, which Undo takes back.',
-        { from: first.from.networkStr, to: first.to.networkStr, n: first.ifaces.length, m: first.refs.length })}\n\n${findingsDeltaText(renumberFindingsDelta(first))}`,
-        { title: t('Renumber subnet'), ok: t('Renumber') });
+    // Into a subnet already declared: a merge (D434), said as one.
+    const nums = { from: first.from.networkStr, to: first.to.networkStr, n: first.ifaces.length, m: first.refs.length };
+    const kept = first.kept.map((k) => `• ${t(k.label)}: ${k.value} (${t('not {value}', { value: k.dropped })})`);
+    const question = first.into
+        ? [t('Merge {from} into {to}?\nAddresses moved: {n}\nGateway and DNS entries rewritten: {m}\n{from} is removed; what it says that {to} leaves blank is kept.\nOne step, which Undo takes back.', nums),
+            kept.length ? [t('Where the two differ, {to} keeps its own:', nums), ...kept].join('\n') : ''].filter(Boolean).join('\n\n')
+        : t('Renumber {from} to {to}?\nAddresses moved: {n}\nGateway and DNS entries rewritten: {m}\nOne step, which Undo takes back.', nums);
+    const ok = await askConfirm(`${question}\n\n${findingsDeltaText(renumberFindingsDelta(first))}`,
+        { title: first.into ? t('Merge subnets') : t('Renumber subnet'), ok: first.into ? t('Merge') : t('Renumber') });
     if (!ok) return;
     const plan = planRenumber(id, text);
     if (plan.errors.length) { showToast(plan.errors[0]); return; }
+    if (!plan.into !== !first.into) { showToast(t('The network changed: renumber it again.')); return; }
     batch(() => {
         plan.ifaces.forEach((c) => { c.iface.ip = c.ip; });
         plan.refs.forEach((r) => { r.obj[r.key] = r.value; });
-        plan.net.cidr = plan.to.networkStr;
+        if (plan.into) {
+            plan.fill.forEach((f) => { plan.into[f.key] = f.value; });
+            (state.wifi || []).forEach((w) => { if (w.network === plan.net.id) w.network = plan.into.id; });
+            state.networks.splice(state.networks.indexOf(plan.net), 1);
+            _netEditOpen.delete(plan.net.id);
+            normalizeWifiRefs();
+        } else plan.net.cidr = plan.to.networkStr;
         save(); renderCanvasOnly();
     });
     refreshSelectedNodeDiagnostics();
     if (state.selectedType === 'node' && getNode(state.selectedId)) select(state.selectedId, 'node');
     renderNetworksPanel(true);
-    showToast(t('Renumbered to {cidr}.', { cidr: plan.to.networkStr }), 'ok');
+    showToast(plan.into ? t('Merged into {cidr}.', { cidr: plan.to.networkStr }) : t('Renumbered to {cidr}.', { cidr: plan.to.networkStr }), 'ok');
 }
 
 // ---- Select members ----

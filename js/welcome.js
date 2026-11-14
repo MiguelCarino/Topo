@@ -900,7 +900,7 @@ function runNext() {
     if (!idle()) return false;
     const task = list.shift();
     ss.set(list);
-    if (task === 'pc' && window.TopoThisComputer && TopoThisComputer.hasHost()) TopoThisComputer.addThisComputer();
+    if (task === 'pc' && window.TopoThisComputer && TopoThisComputer.hasHost()) TopoThisComputer.addThisComputer({ setup: true });
     else if (task === 'monitor' && window.TopoChecks && TopoChecks.hasHost()) openMonitorOffer();
     if (!list.length) stopPolling();
     return true;

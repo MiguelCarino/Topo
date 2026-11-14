@@ -2,7 +2,11 @@
 // computer" (js/thiscomputer.js) reads about the PC the app runs on, and
 // nothing else:
 //
-//   this_computer   -> { hostname, os, platform, interfaces, gateways, dns }
+//   this_computer   -> { hostname, os, platform, interfaces, gateways, dns,
+//                        vendor, model, serial }
+//   this_computer_serial -> the serial number, Linux only, through the
+//                        administrator prompt (pkexec), when the person asks
+//                        (D431); "cancelled", "not-authorized", "none".
 //
 // Everything comes from this PC's own tables: its interfaces (names, MACs,
 // IPv4 and IPv6 addresses with their prefixes, MTU), its default gateways
@@ -22,6 +26,22 @@
 //            that read this PC's own tables (D209).
 //   Windows  GetAdaptersAddresses (iphlpapi), declared here: adapters,
 //            addresses, prefixes, DNS servers and gateways in one call.
+//
+// Who made the PC, its model and its serial number (D430):
+//
+//   Linux    /sys/class/dmi/id (sys_vendor, product_name, product_version,
+//            board_vendor, board_name; product_serial and board_serial,
+//            which only an administrator may read, so as a rule blank).
+//   macOS    `system_profiler SPHardwareDataType` (Model Name, Model
+//            Identifier, Serial Number).
+//   Windows  GetSystemFirmwareTable('RSMB'): the SMBIOS table, its system
+//            (type 1) and board (type 2) records; and the registry's
+//            ProductName, DisplayVersion and CurrentBuild for the system's
+//            name ("Windows 11 Pro 24H2").
+//
+// The firmware's placeholders ("To Be Filled By O.E.M.", "System Product
+// Name", "Default string") are never written; a home-built PC whose system
+// record says nothing has its board's model instead.
 //
 // The parsers are plain functions over text, tested below on samples; the
 // Windows and macOS readers are built only there (D204).
@@ -81,6 +101,189 @@ pub struct ThisComputer {
     pub interfaces: Vec<Iface>,
     pub gateways: Vec<Gateway>,
     pub dns: Vec<String>,
+    /// Who made it, its model and its serial number ("" when unknown, D430).
+    pub vendor: String,
+    pub model: String,
+    pub serial: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Hardware {
+    pub vendor: String,
+    pub model: String,
+    pub serial: String,
+}
+
+/// A firmware string worth writing, or "": the placeholders boards ship
+/// with, and serials of zeros, ones or Fs, are nothing.
+pub fn clean_hw(s: &str) -> String {
+    let v = s.trim().trim_matches(char::from(0)).trim();
+    let low = v.to_ascii_lowercase();
+    const NOTHING: &[&str] = &[
+        "to be filled by o.e.m.", "to be filled by oem", "default string", "system product name", "system version",
+        "system manufacturer", "system serial number", "base board product name", "base board serial number",
+        "chassis serial number", "not specified", "not applicable", "not available", "none", "n/a", "na", "o.e.m.", "oem",
+        "invalid", "default", "unknown", "x.x", "type1productconfigid", "type2 - board product name1",
+        "0123456789", "123456789", "1234567890", "serial", "manufacturer", "product name",
+    ];
+    if v.is_empty() || NOTHING.contains(&low.as_str()) {
+        return String::new();
+    }
+    if v.chars().all(|c| matches!(c, '0' | '1' | 'f' | 'F' | ' ' | '.' | '-' | '_' | 'x' | 'X')) && v.chars().filter(|c| c.is_ascii_hexdigit()).count() > 0
+        && v.chars().filter(|c| c.is_ascii_hexdigit()).collect::<std::collections::BTreeSet<_>>().len() <= 1
+    {
+        return String::new();
+    }
+    v.chars().take(120).collect()
+}
+
+/// The firmware's system and board records -> who, what and which one.
+/// Lenovo names the model in the version ("ThinkPad T14 Gen 3"), its product
+/// name being a type number; a PC whose system record is empty is named by
+/// its board.
+pub fn pick_hardware(sys_vendor: &str, product: &str, version: &str, board_vendor: &str, board: &str, serials: &[&str]) -> Hardware {
+    let vendor = match clean_hw(sys_vendor) {
+        v if !v.is_empty() => v,
+        _ => clean_hw(board_vendor),
+    };
+    let (p, ver) = (clean_hw(product), clean_hw(version));
+    let model = if vendor.to_ascii_lowercase().contains("lenovo") && !ver.is_empty() && ver.chars().any(|c| c.is_ascii_alphabetic()) {
+        ver
+    } else if !p.is_empty() {
+        p
+    } else {
+        clean_hw(board)
+    };
+    let serial = serials.iter().map(|s| clean_hw(s)).find(|s| !s.is_empty()).unwrap_or_default();
+    Hardware { vendor, model, serial }
+}
+
+/// The SMBIOS structure table (Windows' RSMB data after its 8-byte header,
+/// or Linux's /sys/firmware/dmi/tables/DMI): the system (type 1) and board
+/// (type 2) records' manufacturer, product, version and serial.
+pub fn parse_smbios(t: &[u8]) -> Hardware {
+    let mut sys: [String; 4] = Default::default();
+    let mut board: [String; 4] = Default::default();
+    let mut i = 0usize;
+    while i + 4 <= t.len() {
+        let (kind, len) = (t[i], t[i + 1] as usize);
+        if len < 4 || i + len > t.len() {
+            break;
+        }
+        // The strings follow the formatted part, each NUL-ended, the set
+        // ended by a second NUL.
+        let mut strings: Vec<String> = Vec::new();
+        let mut j = i + len;
+        if j + 1 < t.len() && t[j] == 0 && t[j + 1] == 0 {
+            j += 2;
+        } else {
+            while j < t.len() && t[j] != 0 {
+                let start = j;
+                while j < t.len() && t[j] != 0 {
+                    j += 1;
+                }
+                strings.push(String::from_utf8_lossy(&t[start..j]).into_owned());
+                j += 1;
+            }
+            j += 1;
+        }
+        let at = |off: usize| -> String {
+            if off >= len {
+                return String::new();
+            }
+            let n = t[i + off] as usize;
+            if n == 0 { String::new() } else { strings.get(n - 1).cloned().unwrap_or_default() }
+        };
+        if kind == 1 && sys[0].is_empty() && sys[1].is_empty() {
+            sys = [at(4), at(5), at(6), at(7)];
+        } else if kind == 2 && board[0].is_empty() && board[1].is_empty() {
+            board = [at(4), at(5), at(6), at(7)];
+        } else if kind == 127 {
+            break;
+        }
+        i = j;
+    }
+    pick_hardware(&sys[0], &sys[1], &sys[2], &board[0], &board[1], &[&sys[3], &board[3]])
+}
+
+/// `system_profiler SPHardwareDataType` -> Apple, "MacBook Pro
+/// (MacBookPro18,3)", its serial.
+pub fn parse_system_profiler(text: &str) -> Hardware {
+    let field = |name: &str| -> String {
+        text.lines()
+            .filter_map(|l| l.trim().strip_prefix(name))
+            .filter_map(|r| r.trim_start().strip_prefix(':'))
+            .map(|v| v.trim().to_string())
+            .next()
+            .unwrap_or_default()
+    };
+    let (name, id) = (clean_hw(&field("Model Name")), clean_hw(&field("Model Identifier")));
+    let model = match (name.is_empty(), id.is_empty()) {
+        (false, false) => format!("{name} ({id})"),
+        (false, true) => name,
+        _ => id,
+    };
+    let serial = clean_hw(&field("Serial Number (system)"));
+    let serial = if serial.is_empty() { clean_hw(&field("Serial Number")) } else { serial };
+    let vendor = if model.is_empty() && serial.is_empty() { String::new() } else { "Apple".to_string() };
+    Hardware { vendor, model, serial }
+}
+
+/// The registry's ProductName, DisplayVersion and CurrentBuild -> the name
+/// Windows shows. ProductName still says "Windows 10" on Windows 11 (build
+/// 22000 and later).
+pub fn windows_os_name(product: &str, display: &str, build: &str) -> String {
+    let mut name = product.trim().to_string();
+    if name.is_empty() {
+        name = "Windows".to_string();
+    }
+    if build.trim().parse::<u32>().map(|b| b >= 22000).unwrap_or(false) && name.starts_with("Windows 10") {
+        name = name.replacen("Windows 10", "Windows 11", 1);
+    }
+    let d = display.trim();
+    if d.is_empty() { name } else { format!("{name} {d}") }
+}
+
+/// The first serial worth writing in what `cat product_serial
+/// board_serial` printed, or "".
+pub fn first_serial(text: &str) -> String {
+    text.lines().map(clean_hw).find(|s| !s.is_empty()).unwrap_or_default()
+}
+
+/// Linux: the system's and the board's serials, which only an administrator
+/// may read, through pkexec's prompt, asked for by the person in the review
+/// (D431). Elsewhere the serial is read with the rest.
+#[tauri::command]
+pub async fn this_computer_serial() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(elevated_serial).await.map_err(|e| e.to_string())?
+}
+
+#[cfg(target_os = "linux")]
+fn elevated_serial() -> Result<String, String> {
+    use std::process::{Command, Stdio};
+    if !std::path::Path::new("/usr/bin/pkexec").exists() {
+        return Err("no-pkexec".into());
+    }
+    let o = Command::new("/usr/bin/pkexec")
+        .args(["/usr/bin/cat", "/sys/class/dmi/id/product_serial", "/sys/class/dmi/id/board_serial"])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    match o.status.code() {
+        Some(126) => return Err("cancelled".into()),
+        Some(127) => return Err("not-authorized".into()),
+        _ => {}
+    }
+    // cat says 1 when one of the two is missing, and prints the other.
+    match first_serial(&String::from_utf8_lossy(&o.stdout)) {
+        s if !s.is_empty() => Ok(s),
+        _ => Err("none".into()),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn elevated_serial() -> Result<String, String> {
+    Err("not-needed".into())
 }
 
 /// The page's "Add this computer": this PC's own interfaces, gateways and
@@ -93,6 +296,10 @@ pub fn this_computer() -> Result<ThisComputer, String> {
 pub fn read() -> Result<ThisComputer, String> {
     let mut out = platform::read()?;
     out.platform = std::env::consts::OS.to_string();
+    let hw = platform::hardware();
+    out.vendor = hw.vendor;
+    out.model = hw.model;
+    out.serial = hw.serial;
     for i in out.interfaces.iter_mut() {
         i.addresses.sort_by_key(|a| (a.ip.contains(':'), a.temporary));
         i.addresses.dedup();
@@ -585,7 +792,15 @@ mod platform {
             .ok()
             .and_then(|t| parse_os_release(&t))
             .unwrap_or_else(|| "Linux".to_string());
-        Ok(ThisComputer { hostname: ifaddrs::hostname(), os, platform: String::new(), interfaces, gateways, dns })
+        Ok(ThisComputer { hostname: ifaddrs::hostname(), os, platform: String::new(), interfaces, gateways, dns, ..Default::default() })
+    }
+
+    /// /sys/class/dmi/id; the serials need an administrator, so are as a
+    /// rule unreadable and left blank.
+    pub fn hardware() -> Hardware {
+        let dmi = |f: &str| fs::read_to_string(Path::new("/sys/class/dmi/id").join(f)).unwrap_or_default();
+        pick_hardware(&dmi("sys_vendor"), &dmi("product_name"), &dmi("product_version"), &dmi("board_vendor"), &dmi("board_name"),
+            &[&dmi("product_serial"), &dmi("board_serial")])
     }
 }
 
@@ -639,7 +854,11 @@ mod platform {
         let dns = parse_scutil_dns(&run("/usr/sbin/scutil", &["--dns"]));
         let ver = run("/usr/bin/sw_vers", &["-productVersion"]);
         let os = if ver.trim().is_empty() { "macOS".to_string() } else { format!("macOS {}", ver.trim()) };
-        Ok(ThisComputer { hostname: ifaddrs::hostname(), os, platform: String::new(), interfaces, gateways, dns })
+        Ok(ThisComputer { hostname: ifaddrs::hostname(), os, platform: String::new(), interfaces, gateways, dns, ..Default::default() })
+    }
+
+    pub fn hardware() -> Hardware {
+        parse_system_profiler(&run("/usr/sbin/system_profiler", &["SPHardwareDataType"]))
     }
 }
 
@@ -707,6 +926,56 @@ mod platform {
     #[link(name = "iphlpapi")]
     extern "system" {
         fn GetAdaptersAddresses(family: u32, flags: u32, reserved: *const c_void, addresses: *mut Adapter, size: *mut u32) -> u32;
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetSystemFirmwareTable(provider: u32, id: u32, buffer: *mut c_void, size: u32) -> u32;
+    }
+    #[link(name = "advapi32")]
+    extern "system" {
+        fn RegGetValueW(key: isize, subkey: *const u16, value: *const u16, flags: u32, kind: *mut u32, data: *mut c_void, size: *mut u32) -> i32;
+    }
+    const HKEY_LOCAL_MACHINE: isize = 0x8000_0002u32 as i32 as isize;
+    const RRF_RT_REG_SZ: u32 = 0x2;
+    const RSMB: u32 = 0x5253_4D42;
+
+    fn wz(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+    /// A string value under HKEY_LOCAL_MACHINE, "" when it is not there.
+    fn reg_text(subkey: &str, value: &str) -> String {
+        let (k, v) = (wz(subkey), wz(value));
+        let mut buf = vec![0u16; 256];
+        let mut size = (buf.len() * 2) as u32;
+        // SAFETY: the buffer and its size in bytes, as RegGetValueW takes them.
+        let r = unsafe { RegGetValueW(HKEY_LOCAL_MACHINE, k.as_ptr(), v.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), buf.as_mut_ptr() as *mut c_void, &mut size) };
+        if r != 0 {
+            return String::new();
+        }
+        let n = (size as usize / 2).min(buf.len());
+        let end = buf[..n].iter().position(|&c| c == 0).unwrap_or(n);
+        String::from_utf16_lossy(&buf[..end])
+    }
+    fn os_name() -> String {
+        let k = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+        windows_os_name(&reg_text(k, "ProductName"), &reg_text(k, "DisplayVersion"), &reg_text(k, "CurrentBuild"))
+    }
+
+    /// The SMBIOS table: RawSMBIOSData's 8-byte header, then the records.
+    pub fn hardware() -> Hardware {
+        // SAFETY: a null buffer asks for the size.
+        let size = unsafe { GetSystemFirmwareTable(RSMB, 0, std::ptr::null_mut(), 0) };
+        if size < 8 {
+            return Hardware::default();
+        }
+        let mut buf = vec![0u8; size as usize];
+        let got = unsafe { GetSystemFirmwareTable(RSMB, 0, buf.as_mut_ptr() as *mut c_void, size) };
+        if got < 8 || got > size {
+            return Hardware::default();
+        }
+        let len = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
+        let end = (8 + len).min(got as usize);
+        parse_smbios(&buf[8..end])
     }
 
     const AF_UNSPEC: u32 = 0;
@@ -840,7 +1109,7 @@ mod platform {
         // A card's DNS servers, else (a VPN only, say) the other adapters'.
         let dns = if dns_cards.is_empty() { dns } else { dns_cards };
         let host = std::env::var("COMPUTERNAME").unwrap_or_default();
-        Ok(ThisComputer { hostname: host, os: "Windows".to_string(), platform: String::new(), interfaces, gateways, dns })
+        Ok(ThisComputer { hostname: host, os: os_name(), platform: String::new(), interfaces, gateways, dns, ..Default::default() })
     }
 }
 
@@ -849,6 +1118,9 @@ mod platform {
     use super::*;
     pub fn read() -> Result<ThisComputer, String> {
         Err("unsupported".into())
+    }
+    pub fn hardware() -> Hardware {
+        Hardware::default()
     }
 }
 
@@ -1001,6 +1273,60 @@ mod tests {
         let route = "   route to: default\ndestination: default\n       mask: default\n    gateway: 10.0.0.1\n  interface: en0\n      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING>\n";
         assert_eq!(parse_route_get(route), Some(Gateway { ip: "10.0.0.1".into(), iface: "en0".into() }));
         assert_eq!(parse_route_get("route: writing to routing socket: not in table\n"), None);
+    }
+
+    #[test]
+    fn hardware_names() {
+        assert_eq!(clean_hw("To Be Filled By O.E.M."), "");
+        assert_eq!(clean_hw("System Product Name\n"), "");
+        assert_eq!(clean_hw("0000000000"), "");
+        assert_eq!(clean_hw("FFFFFFFF"), "");
+        assert_eq!(clean_hw(" PF3ABC12 \n"), "PF3ABC12");
+        // A home-built PC: the board names it.
+        let h = pick_hardware("ASUS\n", "System Product Name\n", "System Version\n", "ASUSTeK COMPUTER INC.\n", "ROG STRIX B550-F GAMING (WI-FI)\n", &["", ""]);
+        assert_eq!(h, Hardware { vendor: "ASUS".into(), model: "ROG STRIX B550-F GAMING (WI-FI)".into(), serial: "".into() });
+        // Lenovo: the model is in the version.
+        let h = pick_hardware("LENOVO", "21AH00BQUS", "ThinkPad T14 Gen 3", "LENOVO", "21AH00BQUS", &["PF3ABC12", ""]);
+        assert_eq!((h.model.as_str(), h.serial.as_str()), ("ThinkPad T14 Gen 3", "PF3ABC12"));
+        let h = pick_hardware("Dell Inc.", "OptiPlex 7090", "", "Dell Inc.", "0K6D2T", &["Default string", "7XYZ123"]);
+        assert_eq!(h, Hardware { vendor: "Dell Inc.".into(), model: "OptiPlex 7090".into(), serial: "7XYZ123".into() });
+    }
+
+    #[test]
+    fn serial_lines() {
+        assert_eq!(first_serial("System Serial Number\nMB-7X91234\n"), "MB-7X91234");
+        assert_eq!(first_serial("Default string\nDefault string\n"), "");
+        assert_eq!(first_serial(""), "");
+    }
+
+    #[test]
+    fn smbios_table() {
+        // Type 0 (BIOS), type 1 (system), type 2 (board), type 127 (end).
+        let mut t: Vec<u8> = vec![0, 4, 0, 0];
+        t.extend(b"\0\0");
+        t.extend([1u8, 8, 1, 0, 1, 2, 0, 3]);
+        t.extend(b"HP\0HP EliteDesk 800 G6\0CZC1234XYZ\0\0");
+        t.extend([2u8, 8, 2, 0, 1, 2, 0, 0]);
+        t.extend(b"HP\08767\0\0");
+        t.extend([127u8, 4, 3, 0]);
+        t.extend(b"\0\0");
+        assert_eq!(parse_smbios(&t), Hardware { vendor: "HP".into(), model: "HP EliteDesk 800 G6".into(), serial: "CZC1234XYZ".into() });
+        assert_eq!(parse_smbios(&[]), Hardware::default());
+        assert_eq!(parse_smbios(&[1, 200, 0]), Hardware::default());
+    }
+
+    #[test]
+    fn mac_hardware() {
+        let text = "Hardware:\n\n    Hardware Overview:\n\n      Model Name: MacBook Pro\n      Model Identifier: MacBookPro18,3\n      Chip: Apple M1 Pro\n      Serial Number (system): C02XL0ABCD12\n      Hardware UUID: 1234\n";
+        assert_eq!(parse_system_profiler(text), Hardware { vendor: "Apple".into(), model: "MacBook Pro (MacBookPro18,3)".into(), serial: "C02XL0ABCD12".into() });
+        assert_eq!(parse_system_profiler(""), Hardware::default());
+    }
+
+    #[test]
+    fn windows_names() {
+        assert_eq!(windows_os_name("Windows 10 Pro", "24H2", "26100"), "Windows 11 Pro 24H2");
+        assert_eq!(windows_os_name("Windows 10 Pro", "22H2", "19045"), "Windows 10 Pro 22H2");
+        assert_eq!(windows_os_name("", "", ""), "Windows");
     }
 
     #[test]

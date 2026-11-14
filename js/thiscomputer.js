@@ -5,14 +5,16 @@
 // command; nothing goes onto the network) and hands what it read to the
 // Import… review (js/importui.js, openResult), so nothing is kept before the
 // merge review:
-//   - the PC as one device (type PC, its name, its system, its DNS servers);
+//   - the PC as one device (type PC, its name, its system, its DNS servers,
+//     its maker, model and serial number, and its default gateway, D430);
 //   - its network cards as interfaces, each with one address (IPv4 first,
 //     else a stable IPv6; Topo keeps one address per interface), its MAC and
 //     Wi-Fi when the system says so;
 //   - the subnet of each of those addresses, from the address and prefix.
-// Nothing else (the owner's decision): the default gateway is not added,
-// the review shows it as information, with the DNS servers, the MTUs, the
-// addresses not kept and the interfaces left out. Virtual interfaces
+// Nothing else: the router behind the gateway is not added as a device;
+// the review lists what the PC carries, then the other gateways, the DNS
+// servers, the MTUs, the addresses not kept and the interfaces left out as
+// information. Virtual interfaces
 // (bridges, containers' links, tunnels) are left out unless ticked.
 // A second run is the same review again: the merge finds the PC by its MAC
 // (else its name) and its interfaces by name, MAC or address, so it updates
@@ -91,8 +93,19 @@ function toResult(info, opts = {}) {
     const mac = (used.find((i) => i.physical && i.mac) || used.find((i) => i.mac) || {}).mac || '';
     const init = { type: 'pc', name: hostname || 'PC' };
     if (info.os) init.os = String(info.os).slice(0, 120);
+    // Who made it, its model, its serial (D430): what the firmware says.
+    ['vendor', 'model', 'serial'].forEach((k) => { const v = String(info[k] || '').trim().slice(0, 120); if (v) init[k] = v; });
     const dns = (info.dns || []).filter(realDns);
     if (dns.length) init.dns = dns.join(', ');
+    // The default gateway is written as this PC's gateway (D430): an IPv4
+    // one of a card that is added first, else any IPv4 one, else a stable
+    // IPv6 one. The router itself is not added.
+    const usedNames = new Set(used.flatMap((i) => [i.name, i.label].filter(Boolean)));
+    const gwKind = (g) => addrKind({ ip: g.ip, prefix: g.ip.includes(':') ? 128 : 32 });
+    const gwAll = (info.gateways || []).filter((g) => g && g.ip);
+    const gw = gwAll.find((g) => gwKind(g) === 'v4' && usedNames.has(g.iface)) || gwAll.find((g) => gwKind(g) === 'v4')
+        || gwAll.find((g) => gwKind(g) === 'v6' && usedNames.has(g.iface)) || gwAll.find((g) => gwKind(g) === 'v6') || null;
+    if (gw) init.gw = gw.ip;
     const lines = [];
     let n = null;
     if (used.length || hostname) {
@@ -112,9 +125,11 @@ function toResult(info, opts = {}) {
             if (extra.length) lines.push({ code: 'tc-extra', params: { name: ifaceName(i), list: extra.map(cidrOf).join(', ') } });
         });
     }
-    const gws = (info.gateways || []).map((g) => ({ code: 'tc-gateway', params: { address: g.ip, name: g.iface || '' } }));
-    lines.unshift(...(gws.length ? gws : [{ code: 'tc-no-gateway', params: {} }]));
-    lines.push({ code: dns.length ? 'tc-dns' : 'tc-no-dns', params: { list: dns.join(', ') } });
+    const gws = gwAll.filter((g) => g !== gw).map((g) => ({ code: 'tc-gateway', params: { address: g.ip, name: g.iface || '' } }));
+    lines.unshift(...(gw ? gws : gws.length ? gws : [{ code: 'tc-no-gateway', params: {} }]));
+    if (!init.serial && info.platform === 'linux') lines.push({ code: 'tc-no-serial-linux', params: {} });
+    // The DNS servers written on the PC are in its facts (D430).
+    if (!dns.length) lines.push({ code: 'tc-no-dns', params: {} });
     used.filter((i) => i.mtu).forEach((i) => lines.push({ code: 'tc-mtu', params: { name: ifaceName(i), mtu: i.mtu } }));
     if (virt.length && !virtualOn) lines.push({ code: virt.length === 1 ? 'tc-virtual-1' : 'tc-virtual', params: { n: virt.length, list: virt.map(ifaceName).join(', ') } });
     if (down.length) lines.push({ code: 'tc-down', params: { list: down.map(ifaceName).join(', ') } });
@@ -122,22 +137,42 @@ function toResult(info, opts = {}) {
     const res = {
         importer: 'thiscomputer', label: 'This computer', files: [hostname || 'PC'], name: hostname || 'PC',
         doc, full: doc, counts: C.countDoc(doc), extraCounts: {}, warnings: [], notes: [], parts: [], info: lines,
+        // What the device carries, shown above the information lines.
+        facts: n ? [['Maker', init.vendor], ['Model', init.model], ['Serial number', init.serial], ['System', init.os], ['Gateway', init.gw], ['DNS servers', init.dns]]
+            .filter(([, v]) => v).map(([label, value]) => ({ label, value })) : [],
         options: virt.length ? [{ key: 'virtual', label: 'Also add the virtual interfaces ({n})', n: virt.length, on: virtualOn }] : [],
         rebuild: (o) => toResult(info, Object.assign({}, opts, o)),
+        // Linux's serial, through the administrator prompt, when asked (D431).
+        actions: !init.serial && info.platform === 'linux' && n ? [{ key: 'serial', label: 'Read the serial number as administrator…' }] : [],
+        act: async (key) => {
+            if (key !== 'serial') return null;
+            try {
+                const serial = await tcInvoke('this_computer_serial');
+                return toResult(Object.assign({}, info, { serial: String(serial || '') }), opts);
+            } catch (e) {
+                const why = String((e && e.message) || e || '');
+                if (why === 'cancelled') return null;
+                showToast(why === 'none' ? t('This PC\'s firmware gives no serial number.')
+                    : why === 'not-authorized' ? t('The serial number was not read: the password was not accepted.')
+                    : t('Topo could not read the serial number: {error}', { error: why }), why === 'none' ? '' : 'err');
+                return null;
+            }
+        },
         thisComputer: info
     };
     return res;
 }
 
 // Read this PC and open the review. -> the result, or null.
-async function addThisComputer() {
+// opts.setup: asked for in Setup (js/welcome.js), into the open network.
+async function addThisComputer(opts = {}) {
     if (_tc.busy || !hasHost()) return null;
     _tc.busy = true;
     try {
         const info = await tcInvoke('this_computer');
         const res = toResult(info || {});
         if (typeof closeSettings === 'function' && typeof settingsOpen === 'function' && settingsOpen()) closeSettings();
-        window.TopoImportUI.openResult(res);
+        window.TopoImportUI.openResult(res, { setup: !!opts.setup });
         return res;
     } catch (e) {
         showToast(t('Topo could not read this computer: {error}', { error: String((e && e.message) || e || '') }), 'err');

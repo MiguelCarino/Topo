@@ -167,7 +167,7 @@ async function mergeCopyInto(targetId, theirs, opts = {}) {
         return { ok: false, reason: 'ancestor' };
     }
     return openMergeReview({ targetId, theirs, base: ctx.base, theirsRev: ident.rev, source: opts.source, fileName: opts.fileName,
-        reason: opts.reason, name: opts.name, replaceAsked: opts.replaceAsked, open: opts.open, part: ctx.part || null, note: opts.note || '', ident });
+        reason: opts.reason, name: opts.name, replaceAsked: opts.replaceAsked, open: opts.open, part: ctx.part || null, note: opts.note || '', ident, direct: !!opts.direct });
 }
 
 // ---- The landing card's ⇄ Merge… ----

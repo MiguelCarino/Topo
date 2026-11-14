@@ -159,10 +159,35 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // Trace to… then a click.
     select('pc1', 'node'); await tick();
     el('traceToBtn').click(); await tick();
-    ok('Trace to… waits for the target, says so', TT.state.arm === 'pc1' && /Click or tap the device to ask whether PC1 reaches it\./.test(el('traceTargetBar').textContent));
+    ok('Trace to… waits for the target, says so over the device as link mode does (D433)', TT.state.arm === 'pc1' && node('pc1').querySelector('.tt-hint')
+      && node('pc1').querySelector('.tt-hint').textContent === 'TRACING TARGET...' && (matchMedia('(max-width: 900px)').matches ? !el('traceTargetBar').hidden && /Click or tap the device to ask whether PC1 reaches it\./.test(el('traceTargetBar').textContent) : el('traceTargetBar').hidden));
     click('pacs'); await tick();
     ok('…a click on it asks, files no cable', TT.state.from === 'pc1' && TT.state.to === 'pacs' && state.links.length === links0);
     TT.clear();
+    // Right-click twice on the same device: tracing (D432).
+    ctx('pc1'); await tick(); ctx('pc1'); await tick();
+    ok('right-click twice: tracing, not link mode, TRACING TARGET... over it, no LINK TARGET..., no bar at this width', !state.linkSourceId && TT.state.arm === 'pc1'
+      && node('pc1').querySelector('.tt-hint').textContent === 'TRACING TARGET...' && !/LINK TARGET/.test(node('pc1').textContent) && (matchMedia('(max-width: 900px)').matches ? !el('traceTargetBar').hidden && /Click or tap the device to ask whether PC1 reaches it\./.test(el('traceTargetBar').textContent) : el('traceTargetBar').hidden)
+      && node('pc1').querySelector('rect').getAttribute('stroke') === '#0891b2', node('pc1').textContent);
+    ok('…the device rings in the trace\'s own colour, the map is all targets', node('pc1').classList.contains('tt-arm') && !node('pc1').classList.contains('linking-glow')
+      && node('nas').classList.contains('cursor-crosshair') && el('networkCanvas').classList.contains('tracing')
+      && getComputedStyle(document.documentElement).getPropertyValue('--tt-hl').trim() !== getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());
+    // A real press: mousedown first. It neither drags nor selects (whose
+    // redraw used to swallow the click, D433).
+    const sel0 = JSON.stringify([...state.selection]);
+    node('nas').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, clientX: 10, clientY: 10 }));
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, clientX: 10, clientY: 10 }));
+    await tick();
+    ok('…the target\'s press selects nothing, moves nothing', JSON.stringify([...state.selection]) === sel0 && TT.state.arm === 'pc1');
+    click('nas'); await tick();
+    ok('…a left click asks, files no cable, lights the path and dims the rest', TT.state.from === 'pc1' && TT.state.to === 'nas' && state.links.length === links0
+      && node('sw1').classList.contains('tt-path') && node('cam').classList.contains('tt-off') && !node('sw1').classList.contains('tt-off')
+      && document.querySelectorAll('.tt-off-link').length > 0 && !el('networkCanvas').classList.contains('tracing'));
+    TT.ask('web', 'pc1'); await tick();
+    ok('…a path not found dims nothing', !TT.state.answer.reaches && !document.querySelector('#layer-nodes .tt-off') && !document.querySelector('.tt-off-link'));
+    TT.clear();
+    ctx('pc1'); await tick(); ctx('pc1'); await tick(); ctx('pc1'); await tick();
+    ok('a third right-click ends tracing', !TT.state.arm && !state.linkSourceId && el('traceTargetBar').hidden && !node('pc1').classList.contains('tt-arm'));
     // Read only: the target, never link mode.
     state.readOnly = { doc: cloneData(serializeDoc()), loaded: JSON.stringify(serializeDoc()) };
     renderCanvasOnly(); await tick();

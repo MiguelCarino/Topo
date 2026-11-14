@@ -155,6 +155,9 @@ function pressNode(event, node) {
     event.stopPropagation();
     noteCardPress(event, node.id);
     if (state.linkSourceId) return;
+    // Tracing (D432): the press is the target's click, never a drag or a
+    // selection, whose redraw would take the click away (D433).
+    if (window.TopoTraceTarget && TopoTraceTarget.armed()) return;
     // Shift/Ctrl/Cmd edits the set and arms no drag: the press was
     // about what is selected, not about where it is.
     if (addsToSelection(event)) { toggleSelected('node', node.id); return; }
@@ -1003,7 +1006,7 @@ function drawCanvas() {
     // out again what lies over it: with the table over the map, 150 ms of
     // every edit at 400 devices. The selection bar heard every redraw through
     // this write (js/mobile.js), so a redraw that leaves it says so instead.
-    const svgEl = document.getElementById('networkCanvas'), svgClass = `topo-svg${state.linkSourceId ? ' linking' : ''}`;
+    const svgEl = document.getElementById('networkCanvas'), svgClass = `topo-svg${state.linkSourceId ? ' linking' : ''}${window.TopoTraceTarget && TopoTraceTarget.armed() ? ' tracing' : ''}`;
     if (svgEl.getAttribute('class') !== svgClass) svgEl.setAttribute('class', svgClass);
     else queueMicrotask(() => document.dispatchEvent(new Event('topo:redrawn')));
 
@@ -1198,6 +1201,7 @@ function drawCanvas() {
         });
         if (qm && !qm.links.has(link.id)) line.classList.add('q-dim');
         if (window.TopoTraceTarget && TopoTraceTarget.linkOnPath(link.id)) line.classList.add('tt-path-link');
+        else if (window.TopoTraceTarget && TopoTraceTarget.lit()) line.classList.add('tt-off-link');
         const flow = reach && reach.reachableLinks.has(link.id) ? drawTraceFlow(line, link.id, medium) : null;
         // Who is responsible for the run, on hover, when Settings says so.
         if (state.settings.providerHover === true && linkProviders(link).length) {
@@ -1418,6 +1422,10 @@ function drawCanvas() {
         }
         const isSelected = inSelection('node', node.id);
         const isLinkSource = state.linkSourceId === node.id;
+        // Tracing from it (D432, D433): drawn as the link source is, in the
+        // trace's cyan.
+        const tracingFrom = window.TopoTraceTarget ? TopoTraceTarget.armed() : null;
+        const isTraceSource = !isLinkSource && tracingFrom === node.id;
         const isReachable = reach && (reach.reachableNodes.has(node.id) || (!!inFold && inFold.some((x) => reach.reachableNodes.has(x.id))));
         const foldPicked = !isSelected && !!inFold && inFold.some((x) => inSelection('node', x.id));
         const foldHit = !!qm && !!inFold && inFold.some((x) => qm.nodes.has(x.id));
@@ -1434,6 +1442,11 @@ function drawCanvas() {
         if (window.TopoTraceTarget) {
             if (TopoTraceTarget.isEnd(node.id)) classes += ' tt-end';
             else if (TopoTraceTarget.onPath(node.id)) classes += ' tt-path';
+            else if (TopoTraceTarget.lit()) classes += ' tt-off';
+            // Tracing (D432): the device it starts from pulses in the
+            // trace's colour, and every device is a target to click.
+            const tracing = TopoTraceTarget.armed();
+            if (tracing) classes = classes.replace('cursor-grab active:cursor-grabbing', 'cursor-crosshair') + (tracing === node.id ? ' tt-arm' : '');
         }
         g.setAttribute('class', classes);
         // Retired (js/assets.js): still in the register, no longer on the
@@ -1456,14 +1469,15 @@ function drawCanvas() {
             : ['#ffffff', '#cbd5e1', '1.5'];
         const restDash = isVirtualType(node.type) ? '4 3' : null;
         const [fill, stroke, width] = isLinkSource ? ['#fefce8', '#ca8a04', '2']
+            : isTraceSource ? ['#ecfeff', '#0891b2', '2']
             : isSelected ? ['#fefce8', '#eab308', '2']
             : [restFill, restStroke, restWidth];
         rect.setAttribute('fill', fill); rect.setAttribute('stroke', stroke); rect.setAttribute('stroke-width', width);
         if (restDash) rect.setAttribute('stroke-dasharray', restDash);
         // Some of what is folded into it is selected (a table row, a finding).
-        const foldLook = foldPicked && !isLinkSource;
+        const foldLook = foldPicked && !isLinkSource && !isTraceSource;
         if (foldLook) { rect.setAttribute('stroke', '#eab308'); rect.setAttribute('stroke-width', '2'); rect.setAttribute('stroke-dasharray', '5 3'); }
-        if (isLinkSource || isSelected || foldLook) restLook(rect, { fill: restFill, stroke: restStroke, 'stroke-width': restWidth, 'stroke-dasharray': restDash });
+        if (isLinkSource || isTraceSource || isSelected || foldLook) restLook(rect, { fill: restFill, stroke: restStroke, 'stroke-width': restWidth, 'stroke-dasharray': restDash });
         rect.style.transition = 'all 0.1s ease'; g.appendChild(rect);
 
         const iconG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -1567,7 +1581,7 @@ function drawCanvas() {
         // node someone is aiming a cable at. One device selected only: the ✕
         // deletes the selection, and on one device of a set it would take
         // them all (the rail's Delete and the Del key say so plainly).
-        if (isSelected && state.selection.size === 1 && !state.linkSourceId) {
+        if (isSelected && state.selection.size === 1 && !state.linkSourceId && !tracingFrom) {
             g.appendChild(canvasDeleteMark(t('Delete node'), { x: -19, y: -19 }));
         }
 
@@ -1576,6 +1590,13 @@ function drawCanvas() {
             hint.setAttribute('text-anchor', 'middle'); hint.setAttribute('y', '-34'); hint.setAttribute('font-size', '9');
             hint.setAttribute('font-family', 'sans-serif'); hint.setAttribute('data-sel-only', '');
             hint.setAttribute('font-weight', '700'); hint.setAttribute('fill', '#ca8a04'); hint.textContent = t('LINK TARGET...'); hint.style.pointerEvents = 'none';
+            g.appendChild(hint);
+        }
+        if (isTraceSource) {
+            const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            hint.setAttribute('text-anchor', 'middle'); hint.setAttribute('y', '-34'); hint.setAttribute('font-size', '9');
+            hint.setAttribute('font-family', 'sans-serif'); hint.setAttribute('data-sel-only', ''); hint.setAttribute('class', 'tt-hint');
+            hint.setAttribute('font-weight', '700'); hint.setAttribute('fill', '#0891b2'); hint.textContent = t('TRACING TARGET...'); hint.style.pointerEvents = 'none';
             g.appendChild(hint);
         }
 

@@ -440,6 +440,8 @@ function renderMergeCounts() {
         b.type = 'button';
         b.className = `toggle-btn merge-chip merge-chip-${c.status}${counts[c.status] ? '' : ' zero'}`;
         b.dataset.status = c.status;
+        // A status with nothing in it is not offered as a filter (D429).
+        b.hidden = !counts[c.status];
         b.setAttribute('aria-pressed', ctx.statuses.has(c.status) ? 'true' : 'false');
         // On looks on: the fleet's toggle style (carino-ui.css .toggle-btn.active).
         b.classList.toggle('active', ctx.statuses.has(c.status));
@@ -466,6 +468,9 @@ function renderMergeCounts() {
     });
     if (ctx.kind && !kinds.includes(ctx.kind)) ctx.kind = '';
     sel.value = ctx.kind;
+    // One kind among the rows shown: nothing to filter by.
+    const shownKinds = new Set(ctx.items.filter((it) => ctx.statuses.has(it.status)).map((it) => it.kind));
+    sel.hidden = !ctx.kind && shownKinds.size < 2;
     const work = counts.added + counts.changed + counts.removed + counts.conflict;
     const apply = mrEl('mergeApplyBtn');
     const v = ctx.visit;
@@ -474,6 +479,7 @@ function renderMergeCounts() {
     const anyAsk = ctx.shown.items.some(function asks(it) { return (it.fields || []).some((f) => f.conflict) || (it.children || []).some(asks); });
     mrEl('mergeAllMine').disabled = !anyAsk;
     mrEl('mergeAllTheirs').disabled = !anyAsk;
+    mrEl('mergeAllMine').hidden = mrEl('mergeAllTheirs').hidden = !anyAsk;
 }
 function renderMergeList() {
     const ctx = _mr;
@@ -628,7 +634,9 @@ function showMergeReview(req) {
         // signature could not be checked, js/backupfile.js).
         mrEl('mergeMode').textContent = joinSentences([req.note || '', req.plan.mode === 'three-way'
             ? t('Three-way: compared with the copy both started from. An edit made on one side only is taken; an edit made on both sides to the same thing asks.')
-            : t('Two-way: no copy both started from was found, so nothing is removed. Where the two differ, yours is kept unless you choose theirs; a blank of yours is filled from theirs.')]);
+            : mergePlanAsks(req.plan)
+                ? t('Two-way: no copy both started from was found, so nothing is removed. Where the two differ, yours is kept unless you choose theirs; a blank of yours is filled from theirs.')
+                : t('Nothing is removed and nothing of yours is changed: what is new is added, and a blank of yours is filled in.')]);
         try { _mr.before = mergeFindingsOf(req.mine); } catch (e) { _mr.before = []; }
         renderMergeList();
         renderMergeVisit();
@@ -662,6 +670,14 @@ function mergeMineNow(targetId) {
     }
     const card = libraryEntry(targetId);
     return card && card.doc ? JSON.parse(JSON.stringify(card.doc)) : null;
+}
+
+// Does the plan ask anything or take anything away? A conflict, a removal,
+// or a field where the two differ.
+function mergePlanAsks(plan) {
+    const asks = (it) => it.status === 'conflict' || it.status === 'removed' || !!it.conflict
+        || (it.fields || []).some((f) => f.conflict) || (it.children || []).some(asks);
+    return (plan.items || []).some(asks) || !(plan.items || []).some(function works(it) { return it.status === 'added' || it.status === 'changed' || (it.children || []).some(works); });
 }
 
 // ---- The door every merge goes through ----
@@ -700,7 +716,11 @@ async function openMergeReview(opts = {}) {
             if (e.reason === 'newer') showToast(t('This copy was made by a newer version of Topo, so it cannot be merged. Open it as a copy to read it.'));
             return { ok: false, reason: e.reason };
         }
-        const answer = await showMergeReview({ plan, mine, targetId: opts.targetId, name: card.name, source: opts.source, sourceText, choices, note: opts.note || '', visit });
+        // opts.direct (D429): the person already said where it goes (Setup's
+        // Add this computer), so a merge that only adds and fills blanks is
+        // applied with no review; one that asks or removes is reviewed.
+        const answer = opts.direct && !visit && round === 0 && !mergePlanAsks(plan) ? {}
+            : await showMergeReview({ plan, mine, targetId: opts.targetId, name: card.name, source: opts.source, sourceText, choices, note: opts.note || '', visit });
         if (!answer) {
             // A visit by link or file not decided on stays in Visits waiting.
             if (visit && !visit.serverId && typeof visitKeepWaiting === 'function') await visitKeepWaiting({ targetId: opts.targetId, theirs: opts.theirs, ident: opts.ident, source: opts.source, fileName: opts.fileName }, visit);

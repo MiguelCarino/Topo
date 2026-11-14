@@ -298,6 +298,7 @@ fn main() {
             clientcmd::client_events,
             clientcmd::client_events_close,
             thiscomputer::this_computer,
+            thiscomputer::this_computer_serial,
             monitorcmd::monitor_info,
             monitorcmd::monitor_set,
             monitorcmd::monitor_plan,

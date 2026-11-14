@@ -331,8 +331,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('Renumber refuses what is not a subnet', /not a subnet/.test(why('10.30.0.1')));
     ok('another address family', /same address family/.test(why('2001:db8::/64')));
     ok('the address it already has', /already this subnet/.test(why('10.10.0.0/24')));
-    ok('a range another network holds is refused as already declared, not as overlapping itself',
-       /10\.20\.0\.0\/24 is already declared/.test(why('10.20.0.0/24')) && !/overlaps/.test(why('10.20.0.0/24')), why('10.20.0.0/24'));
+    ok('a range another network holds is a merge into it, not a refusal (D434)',
+       !why('10.20.0.0/24') && planRenumber(lanId(), '10.20.0.0/24').into === state.networks.find((n) => n.cidr === '10.20.0.0/24'), why('10.20.0.0/24'));
     ok('a range overlapping another network', /overlaps 10\.20\.0\.0\/24/.test(why('10.20.0.0/23')), why('10.20.0.0/23'));
     ok('a range too small for its host bits', /10\.10\.0\.254 does not fit/.test(why('10.30.0.0/25')), why('10.30.0.0/25'));
     batch(() => { state.nodes.push(normalizeLoadedNode({ id: 'stray', type: 'pc', name: 'Stray', x: 0, y: 600, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.30.0.21/24' }] })); save(); });
@@ -363,6 +363,38 @@ window.addEventListener('load', () => { setTimeout(async () => {
     answers.push(() => '10.30.0.0/25', (req) => { ok('a refused renumber says why', req.kind === 'tell' && /does not fit/.test(req.message), req.message); });
     await renumberNetwork(lanId());
     ok('and changes nothing', JSON.stringify(serializeDoc()) === bytesBefore);
+
+    // ---- 6b: Renumber into a declared subnet merges (D434) ----
+    {
+      const lan = () => state.networks.find((n) => n.cidr === '10.10.0.0/24');
+      const cams = () => state.networks.find((n) => n.cidr === '10.20.0.0/24');
+      batch(() => {
+        Object.assign(lan(), { name: 'LAN', vlan: 10, gateway: '10.10.0.1' });
+        Object.assign(cams(), { name: 'Cameras', gateway: '' }); delete cams().vlan;
+        state.wifi.push({ id: 'wf1', ssid: 'Office', network: lan().id });
+        save();
+      });
+      const lanOld = lan().id, camsId = cams().id, nets0 = state.networks.length;
+      const before2 = JSON.stringify(serializeDoc()), steps2 = steps();
+      const mp = planRenumber(lanOld, '10.20.0.0/24');
+      ok('the merge plan: its blanks filled from the moved one, its own name kept', mp.into === cams() && !mp.errors.length
+        && mp.fill.some((f) => f.key === 'gateway' && f.value === '10.20.0.1') && mp.fill.some((f) => f.key === 'vlan' && f.value === 10)
+        && mp.kept.some((k) => k.key === 'name' && k.value === 'Cameras' && k.dropped === 'LAN'), JSON.stringify({ fill: mp.fill, kept: mp.kept.map((k) => [k.key, k.value, k.dropped]) }));
+      let asked = null;
+      answers.push(() => '10.20.0.0/24', (req) => { asked = req; return true; });
+      await renumberNetwork(lanOld);
+      ok('the question says merge, what goes and what stays', !!asked && asked.kind === 'confirm' && /^Merge 10\.10\.0\.0\/24 into 10\.20\.0\.0\/24\?/.test(asked.message)
+        && /10\.10\.0\.0\/24 is removed/.test(asked.message) && /Where the two differ, 10\.20\.0\.0\/24 keeps its own:\n• Name: Cameras \(not LAN\)/.test(asked.message), asked && asked.message);
+      ok('one subnet less; the members moved into it, keeping their host part', state.networks.length === nets0 - 1 && !lan() && cams().id === camsId
+        && getNode('pc1').interfaces[0].ip === '10.20.0.21/24' && getNode('rtr').interfaces[1].ip === '10.20.0.1/24' && getNode('cam1').interfaces[0].ip === '10.20.0.5/24');
+      ok('its blanks filled, its own name kept', cams().gateway === '10.20.0.1' && cams().vlan === 10 && cams().name === 'Cameras', JSON.stringify(cams()));
+      ok('a Wi-Fi network on the moved subnet is on the merged one', state.wifi.find((w) => w.id === 'wf1').network === camsId);
+      ok('the references moved too', getNode('pc3').gw === '10.20.0.254');
+      ok('merged in one undo step', steps() === steps2 + 1, `${steps2} -> ${steps()}`);
+      undo();
+      ok('which Undo takes back whole', JSON.stringify(serializeDoc()) === before2);
+      undo();
+    }
 
     // ---- 7: construction ----
     const spawned = spawnNode('pc', { connectTo: 'sw' });

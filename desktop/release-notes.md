@@ -5,6 +5,11 @@ Topo for working offline: the same editor as https://topo.carino.systems/, as a 
 - **Setup is the desktop app's.** The website, the offline zip and a Topo server's page open on the start page with no Setup, and a server's page puts **On this server** and its **Sign in** first. In the app nothing changes: the same questions on the first start, and Settings, **Run the setup again**.
 - **Screen lock, as shipped:** 30 minutes in the desktop app, on a page signed in to a Topo server, and wherever a PIN is set; Off on the website and the offline zip, where nothing would unlock it and locking only lost the undo history. A time chosen in Settings (Off included) is kept everywhere. A browser that never chose a time goes from 30 minutes to Off.
 - **Answer checks wherever the network is edited.** A device's answer checks now show and can be edited in the full editor on the website, the offline zip and a Topo server's page, under a line saying that only a Topo desktop app that monitors the network runs them. The Watched tab says the same there. A page still never checks anything.
+- **Add this computer takes more of the PC:** who made it, its model and its serial number (on Linux the review asks for the administrator password first, only if you click to read it), the full Windows name ("Windows 11 Pro 24H2"), and its default gateway in the Gateway field. From Setup it goes straight into the network Setup started, with no merge question when nothing needs a choice.
+- **A clearer merge review:** only the filters that have something in them, and one plain sentence when nothing needs a choice.
+- **Renumber a subnet into one already declared** and the two merge: the devices move, the other subnet keeps its own details and takes the moved one's where it had none, in one undo step.
+- **Right-click a device twice to trace** from it, as link mode looks; a path found is lit and the rest of the map dimmed.
+- **Drop-down menus are readable in the Linux app**: drawn dark with their own arrow, instead of the system's light style under light text.
 - Files stay document version 20.
 - Tested on Linux, the desktop app's side through a stand-in for its commands. The Windows and macOS builds were not run on those systems before this release.
 
