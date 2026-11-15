@@ -4744,6 +4744,42 @@ where it says so.
   Office (not Home)"); a Wi-Fi network on it moves to the other. One undo
   step. Overlapping a declared range without being it is still refused
   (es, pt-BR, ja, ru).
+- **D435. Copy, paste and duplicate.** The owner: "Allow copying elements
+  and groups in topo." Ctrl+C copies the selected devices and the cables
+  between them, Ctrl+V pastes them (again pastes another, a step further
+  on), Ctrl+D duplicates at once and leaves the clipboard alone; the rail
+  of a set has Copy and Duplicate, and one selected device carries a
+  duplicate mark beside its delete mark, for a finger. A copy is another
+  device like the first, not the same one twice: it takes the next free
+  name ("PC" to "PC 2") and the next free address of its subnet (none
+  when the subnet is full, and the toast says how many), and leaves MAC,
+  serial number and asset tag blank; it keeps type, vendor, model, group
+  and providers, and loses its rack place. A VM stays on its host unless
+  the host was copied too. A group card has Duplicate and Copy: the group,
+  the groups inside it and every device in them, as a new group beside it
+  under the next free name and the same parent; inside a copied rack the
+  devices keep their units. Each paste is one undo step. The clipboard is
+  the tab's own and is never written to the system clipboard. Pasted into
+  another network, a copy goes in as a block does (js/add.js: no group,
+  subnets moved to free ones); groups do not cross networks. Ctrl+C stays
+  the browser's while text is selected, and Ctrl+V while nothing was
+  copied here; none acts under the table or the rack view. `js/copy.js`,
+  `tests/suites/copy.js` (es, pt-BR, ja, ru).
+- **D436. A tile from the node grid goes straight into a group.** The
+  owner: "Allow to add nodes straight into groups from the node grid." A
+  tile dragged from the grid and let go inside a group's frame, or on a
+  collapsed group's node, adds the device in that group, where it was
+  dropped: the innermost frame under the pointer wins, as for a device
+  dragged there. While the tile is over it the frame is lit and a label at
+  the pointer says "Into Office", the cue a dragged device has. Into a rack
+  it arrives with no units, and the toast says Open rack places it. A
+  click on a tile with a device selected adds the new one connected to it,
+  as before, and now in that device's group too. Outside every frame, and
+  with nothing selected, a new device is in no group, as before. The
+  device and its group are one undo step. Not in the reduced views, which
+  draw no frames, and not in a read-only network. `paletteGroupAt` and the
+  cue in `js/groupmap.js`, `spawnNode` and the canvas's drop in
+  `js/app.js`, `tests/suites/griddrop.js` (es, pt-BR, ja, ru).
 
 Not changed by these, and still open from the same review: Report problems
 chosen in Setup does not last past the next plain start (D329); Setup's

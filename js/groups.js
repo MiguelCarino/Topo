@@ -131,6 +131,10 @@ function groupCardHtml({ group: g, depth }, counts, tree = groupTree()) {
             <button type="button" class="link-btn" data-act="edit" data-grp="${id}" aria-expanded="${open}">${escapeHtml(t(open ? 'Close' : 'Edit'))}</button>
             <button type="button" class="link-btn" data-act="inside" data-grp="${id}"
                 title="${escapeHtml(t('Add a group inside this one'))}">${escapeHtml(t('+ Inside'))}</button>
+            <button type="button" class="link-btn" data-act="duplicate" data-grp="${id}"
+                title="${escapeHtml(t('Make a copy of this group beside it, with the groups and devices inside it'))}">${escapeHtml(t('Duplicate'))}</button>
+            <button type="button" class="link-btn" data-act="copy" data-grp="${id}"
+                title="${escapeHtml(t('Copy this group, with the groups and devices inside it; Ctrl+V pastes it'))}">${escapeHtml(t('Copy'))}</button>
             <button type="button" class="link-btn quiet" data-act="delete" data-grp="${id}">${escapeHtml(t('Delete'))}</button>
         </div>
         <div class="net-edit prop-grid"${open ? '' : ' hidden'}>
@@ -380,9 +384,12 @@ async function onGroupAction(e) {
     if (act === 'collapse') { toggleGroupCollapsed(id); return; }
     // And so is the rack view (js/rackview.js), which refuses edits itself.
     if (act === 'rack') { openRackView(id); return; }
+    // Onto this tab's clipboard (js/copy.js): not an edit either.
+    if (act === 'copy') { copyGroup(id); return; }
     if (readOnlyRefuses()) return;
     if (act === 'from-locations') { await makeGroupsFromLocations(); return; }
     if (act === 'inside') { await addGroup(id); return; }
+    if (act === 'duplicate') { duplicateGroup(id); return; }
     if (act === 'delete') { await deleteGroup(id); }
 }
 

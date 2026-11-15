@@ -688,6 +688,50 @@ function groupDropTargetAt(pt, drop = _gmDrop) {
     return best ? { gid: best.group.id, fold: false } : null;
 }
 
+// ---- A tile from the node grid (D436) ----
+// The group a new device goes into when a tile is let go at a workspace
+// point: the innermost frame under it, or a collapsed group's node, as for a
+// device dragged there. -> { gid, fold } or null (no group there, no frames
+// drawn, a reduced view).
+function paletteGroupAt(pt) {
+    if (!pt || !hostFoldShown() || !groupMapShown()) return null;
+    const start = groupMapNow();
+    if (!start || !(start.frames.length || start.folds.length)) return null;
+    return groupDropTargetAt(pt, { start, cargo: new Set(), movers: [true] });
+}
+// While a tile is dragged over the map: the frame (or collapsed node) it
+// would go into is lit and a label at the pointer names it, the same cue a
+// dragged device has. null clears it.
+let _gmTileCue = '';
+function clearPaletteDropCue() {
+    if (!_gmTileCue) return;
+    _gmTileCue = '';
+    document.querySelectorAll('#layer-groups .grp-drop, #layer-nodes .grp-drop').forEach((el) => el.classList.remove('grp-drop'));
+    document.querySelectorAll('#layer-nodes > .tile-drop-cue, #layer-nodes .tile-drop-ring').forEach((el) => el.remove());
+}
+function showPaletteDropCue(pt) {
+    const target = paletteGroupAt(pt), g = target ? groupById(target.gid) : null;
+    const key = g ? `${g.id}|${Math.round(pt.x / 4)}|${Math.round(pt.y / 4)}` : '';
+    if (key === _gmTileCue) return target;
+    clearPaletteDropCue();
+    if (!g) return null;
+    _gmTileCue = key;
+    const lit = target.fold ? document.getElementById(`ui-group-${g.id}`)
+        : document.getElementById('layer-groups').querySelector(`.grp-frame[data-grp="${CSS.escape(g.id)}"]`);
+    if (lit) lit.classList.add('grp-drop');
+    if (lit && target.fold) lit.insertBefore(gmEl('rect', { class: 'grp-drop-ring tile-drop-ring', x: -36, y: -38, width: 76, height: 92, rx: 12 }), lit.firstChild);
+    gmDropLabel(pt, t('Into {group}', { group: groupLabel(g) }), 'grp-drop-cue tile-drop-cue');
+    return target;
+}
+// What the toast says of a device that was added straight into a group.
+function addedToGroupSaid(node, g) {
+    const lines = [t('{name} is in {group} now.', { name: node.name || node.id, group: groupLabel(g) })];
+    if (isRackGroup(g)) lines.push(isVirtualType(node.type)
+        ? t('A VM or a container takes no units: it is where the device it runs on is. Set that in its Runs on.')
+        : t('It has no units in the rack yet: Open rack places it.'));
+    return lines.join(' ');
+}
+
 // The devices a drop on `target` would change: the guests not already on
 // that host, every device of a new group, or the devices whose group it
 // would change.

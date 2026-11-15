@@ -59,6 +59,12 @@ function spawnNodeNow(type, opts) {
         }
     }
 
+    // Straight into a group (D436): the one its tile was dropped on, or, added
+    // by a click beside the selected device, the group that device is in. No
+    // rack units: Open rack places it.
+    const intoGroup = groupById(opts.group) || (!opts.at && connectTo && connectTo.group ? groupById(connectTo.group) : null);
+    if (intoGroup && !isReduced()) node.group = intoGroup.id;
+
     state.nodes.push(node);
     if (connectTo && connectTo.id !== node.id) {
         const isVirtual = isVirtualType(connectTo.type) || isVirtualType(type);
@@ -69,6 +75,10 @@ function spawnNodeNow(type, opts) {
     // A printer or server that found no address outside the pool: said, as
     // the Add devices preview says it (there is no preview here).
     if (pooledNote) showToast(pooledNote, 'warn');
+    // Dropped on a group: said, as a device dragged in is. (Beside a selected
+    // device it simply joins that device's group, and the frame shows it.)
+    else if (node.group && opts.group && typeof addedToGroupSaid === 'function') showToast(addedToGroupSaid(node, groupById(node.group)), 'ok');
+    if (node.group && typeof refreshGroupViews === 'function') refreshGroupViews(true);
     return node;   // as spawnAnnotation does, so a caller can go on to configure it
 }
 
@@ -2889,6 +2899,16 @@ const SHORTCUTS = [
       run: () => deleteSelected() },
     { keys: ['Ctrl', 'A'], label: 'Select every device and cable', mod: true, test: (e) => e.key.toLowerCase() === 'a',
       run: () => selectAll() },
+    // Copy, paste and duplicate (js/copy.js). Ctrl+C is the browser's while
+    // text on the page is selected, and Ctrl+V while nothing was copied here.
+    // Like Delete, none acts under the table or the rack view.
+    { keys: ['Ctrl', 'C'], label: 'Copy the selected devices', mod: true,
+      test: (e) => e.key.toLowerCase() === 'c' && selectedOf('node').length > 0 && !String(window.getSelection && window.getSelection()) && !tableShown() && !rackShown(),
+      run: () => copySelection() },
+    { keys: ['Ctrl', 'V'], label: 'Paste what was copied', mod: true, test: (e) => e.key.toLowerCase() === 'v' && hasCopied() && !tableShown() && !rackShown(),
+      run: () => pasteCopied() },
+    { keys: ['Ctrl', 'D'], label: 'Duplicate the selected devices', mod: true, test: (e) => e.key.toLowerCase() === 'd' && selectedOf('node').length > 0 && !tableShown() && !rackShown(),
+      run: () => duplicateSelection() },
     { keys: ['Esc'], label: 'Cancel link mode / deselect', test: (e) => e.key === 'Escape',
       // Over the landing or a dialog, Esc closes that instead (closeTopoOverlay).
       // It ends Select more too (js/ui.js): only an Esc that reached the map,
@@ -3334,12 +3354,24 @@ document.getElementById('redoBtn').onclick = redo;
 // Drag a palette item and drop it onto the canvas at the cursor
 (function () {
     const cc = document.getElementById('canvasContainer');
-    cc.addEventListener('dragover', (e) => { const t = [...e.dataTransfer.types]; if (t.includes('text/carino-node') || t.includes('text/carino-annotation')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+    cc.addEventListener('dragover', (e) => {
+        const t = [...e.dataTransfer.types];
+        if (!(t.includes('text/carino-node') || t.includes('text/carino-annotation'))) return;
+        e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+        // A device's tile over a group: its frame is lit and named (js/groupmap.js).
+        if (t.includes('text/carino-node') && !state.readOnly) showPaletteDropCue(getWorkspacePoint(e.clientX, e.clientY));
+    });
+    cc.addEventListener('dragleave', (e) => { if (!cc.contains(e.relatedTarget)) clearPaletteDropCue(); });
+    document.addEventListener('dragend', () => clearPaletteDropCue());
     cc.addEventListener('drop', (e) => {
         const annStyle = e.dataTransfer.getData('text/carino-annotation');
         if (annStyle) { e.preventDefault(); spawnAnnotation({ at: getWorkspacePoint(e.clientX, e.clientY), style: annStyle, edit: true }); return; }
         const type = e.dataTransfer.getData('text/carino-node'); if (!type) return;
-        e.preventDefault(); spawnNode(type, { at: getWorkspacePoint(e.clientX, e.clientY) });
+        e.preventDefault();
+        clearPaletteDropCue();
+        // Let go on a group's frame, or on a collapsed group: it goes straight in.
+        const at = getWorkspacePoint(e.clientX, e.clientY), into = paletteGroupAt(at);
+        spawnNode(type, { at, group: into ? into.gid : null });
     });
 })();
 

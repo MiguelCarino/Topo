@@ -189,7 +189,7 @@ paletteDefs.forEach((d) => {
     if (!d.simple) btn.setAttribute('data-adv', ''); // hidden in reduced profiles (the one data-adv rule, css/app.css)
     btn.dataset.type = d.type; // profile CSS overrides + purpose renames key off this
     btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">${iconPaths[d.type]}</svg><span>${d.name}</span>`;
-    btn.title = 'Click to add (connects to the selected node) — or drag onto the canvas';
+    btn.title = 'Click to add (connects to the selected node, in its group) — or drag onto the canvas, or onto a group to add it there';
     btn.setAttribute('data-i18n-title', ''); // translated by applyLocale(), which runs after the locale is known
     // Click: add connected to the current selection (fast tree building)
     // On a phone js/mobile.js takes it: the drawer stays open at the new
@@ -1583,6 +1583,8 @@ function drawCanvas() {
         // them all (the rail's Delete and the Del key say so plainly).
         if (isSelected && state.selection.size === 1 && !state.linkSourceId && !tracingFrom) {
             g.appendChild(canvasDeleteMark(t('Delete node'), { x: -19, y: -19 }));
+            // Beside it, the touch twin of Ctrl+D (duplicateSelection, js/copy.js).
+            if (!state.readOnly) g.appendChild(canvasDiscButton({ glyph: '⧉', tip: t('Duplicate (Ctrl+D)'), at: { x: -37, y: -19 }, fill: '#334155', onClick: () => duplicateSelection() }));
         }
 
         if (isLinkSource) {
@@ -3159,6 +3161,9 @@ function renderSelection() {
     // Mixed: what applies to a device does not apply to a cable, so a set of
     // both offers only Delete and the way to make it one kind.
     document.getElementById('selOnlyRow').classList.toggle('hidden', !(nodes && links));
+    // Copy and Duplicate (js/copy.js) are for devices: a set of cables alone has nothing to copy.
+    const copyRow = document.getElementById('selCopyRow');
+    if (copyRow) copyRow.classList.toggle('hidden', !nodes || !!state.readOnly);
     // The Locate print sheet (js/locate.js) needs devices in the set.
     const printLocateBtn = document.getElementById('printLocateBtn');
     if (printLocateBtn) printLocateBtn.classList.toggle('hidden', !nodes);

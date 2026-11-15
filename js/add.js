@@ -857,8 +857,9 @@ function dropBlockPlace(n) { delete n.group; RACK_KEYS.forEach((k) => { delete n
 // them (the allowlist, as for any card) less their place (dropBlockPlace),
 // placed around their middle; the cables with both ends inside; the networks
 // they are on or inherit from.
-function blockFromSelection() {
-    const nodes = selectedOf('node').map((id) => getNode(id)).filter(Boolean);
+function blockFromSelection() { return blockFromNodes(selectedOf('node').map((id) => getNode(id)).filter(Boolean)); }
+// The same for any list of the map's devices (a copy bound for another network, js/copy.js).
+function blockFromNodes(nodes) {
     if (!nodes.length) return null;
     const ids = new Set(nodes.map((n) => n.id));
     const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);

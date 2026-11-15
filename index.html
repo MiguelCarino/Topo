@@ -333,6 +333,12 @@
                     <!-- A finger has no Shift: on touch the second line shows
                          instead (css/app.css, pointer: coarse), for the selection
                          bar's Select more (js/mobile.js, Mobile batch 2). -->
+                    <!-- Copy and Duplicate (js/copy.js): the selected devices and
+                         the cables between them. Hidden for a set of cables only. -->
+                    <div id="selCopyRow" class="sel-only">
+                        <button id="selCopyBtn" type="button" class="rail-btn" data-i18n data-i18n-title title="Copy the selected devices and the cables between them (Ctrl+C); Ctrl+V pastes them">Copy</button>
+                        <button id="selDuplicateBtn" type="button" class="rail-btn" data-i18n data-i18n-title title="Make a copy of the selected devices beside them (Ctrl+D)">Duplicate</button>
+                    </div>
                     <p class="rail-note hint-fine" data-i18n>Shift-click adds or removes one. Esc clears the selection.</p>
                     <p class="rail-note hint-coarse" data-i18n>Tap devices to add or remove them.</p>
                     <!-- The bulk panel (plan 3.4, js/bulk.js): two or more
@@ -3031,6 +3037,7 @@
     <script src="js/searches.js"></script>
     <script src="js/bulk.js"></script>
     <script src="js/add.js"></script>
+    <script src="js/copy.js"></script>
     <script src="js/csv.js"></script>
     <script src="js/merge.js"></script>
     <script src="js/mergeapply.js"></script>
