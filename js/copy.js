@@ -16,8 +16,13 @@
 // originals and are not copied.
 //
 // A group is copied with the groups inside it and every device in them, as a
-// new group beside the original: same kind and settings, the next free name,
-// the same parent. Inside a copied rack the devices keep their units.
+// new group beside the original, in the same parent. Its name and kind are
+// asked when the copy is made: the next free name and the original's kind are
+// offered, and either can be changed. Inside a copied rack the devices keep
+// their units; a copy made something other than a rack has none. A group is
+// copied from its card (Duplicate, Copy) or from the map: a click on its tab
+// selects its devices, and Copy or Duplicate of exactly a group's devices is
+// that group (two devices or more: one device is always just a device).
 //
 // The clipboard is this tab's own: nothing is written to the system
 // clipboard, where a network's addresses would sit for any app to read.
@@ -69,8 +74,44 @@ function clipOf(nodeIds, groupId = null) {
 // Is the clip from the network that is open? Its devices (or its group) are still here.
 const clipIsFromHere = (clip) => (clip.src.length ? clip.src.every((id) => !!getNode(id)) : !!groupById(clip.root));
 
+// The group whose devices, at any depth, are exactly the ones selected, or
+// null: a click on a group's tab on the map selects just that, so Copy and
+// Duplicate then mean the group, not its devices loose. Of a group and the
+// one group inside it holding the same devices, the outer one.
+function wholeGroupSelected() {
+    const ids = new Set(selectedOf('node'));
+    // One device is a device, even when it is all its group holds.
+    if (ids.size < 2 || !(state.groups || []).length) return null;
+    const hits = state.groups.filter((g) => { const m = groupMembers(g.id, true); return m.length === ids.size && m.every((n) => ids.has(n.id)); });
+    if (!hits.length) return null;
+    return hits.find((g) => !hits.some((h) => h !== g && groupDescendantIds(h.id).has(g.id))) || hits[0];
+}
+// The selection as a clip: a whole group when that is what is selected.
+function clipOfSelection() {
+    const g = wholeGroupSelected();
+    return g ? clipOf(groupMembers(g.id, true).map((n) => n.id), g.id) : clipOf(selectedOf('node'));
+}
+
+// What the copy of a group is to be called, and its kind: asked when the
+// copy is made. The name offered is the next free one and the kind is the
+// original's, so Enter makes a plain copy; either can be changed.
+// -> { name, kind } or null (dismissed, or the group went meanwhile).
+async function askGroupCopy(clip) {
+    const root = groupById(clip.root);
+    if (!root) return null;
+    const taken = new Set(state.groups.map((g) => nameKey(groupLabel(g))));
+    const answer = await askPromptPick(t('Name of the copy of {group}:', { group: groupLabel(root) }), {
+        title: t('Copy group'), ok: t('Make copy'), value: nextCopyName(groupLabel(root), taken), keys: 'name',
+        pick: { label: t('Kind'), value: asGroupKind(root.kind), options: GROUP_KINDS.map((k) => ({ id: k, label: groupKindName(k) })) }
+    });
+    if (!answer || !groupById(clip.root) || state.readOnly) return null;
+    return { name: groupName(answer.value), kind: asGroupKind(answer.pick) };
+}
+
 // -> { nodeIds, groupId, moved, blank, block } or null. Inside a batch.
-function pasteClipNow(clip) {
+// as: { name, kind } for the copy of a group (askGroupCopy); without it the
+// next free name and the original's kind.
+function pasteClipNow(clip, as = null) {
     if (!clip || readOnlyRefuses()) return null;
     if (!clipIsFromHere(clip)) {
         // Another network: a block's rules (no group, free subnets).
@@ -93,6 +134,9 @@ function pasteClipNow(clip) {
         const taken = new Set(state.groups.map((g) => nameKey(groupLabel(g))));
         const made = clip.groups.map((g) => {
             const fields = Object.assign({}, g); delete fields.id;
+            // Another kind, when one was chosen: a rack's own fields go with
+            // the kind (GROUP_FIELDS reads them for a rack only).
+            if (g.id === clip.root && as && as.kind) fields.kind = as.kind;
             const copy = makeGroup(fields);
             gMap[g.id] = copy.id;
             return [g, copy];
@@ -100,7 +144,7 @@ function pasteClipNow(clip) {
         made.forEach(([g, copy]) => {
             if (g.id === clip.root) {
                 copy.parent = g.parent && groupById(g.parent) ? g.parent : null;
-                copy.name = nextCopyName(groupLabel(g), taken);
+                copy.name = (as && as.name) || nextCopyName(groupLabel(g), taken);
                 rootCopy = copy;
             } else copy.parent = gMap[g.parent] || null;
         });
@@ -114,7 +158,11 @@ function pasteClipNow(clip) {
         idMap[rec.id] = nid; newIds.push(nid);
         const node = normalizeLoadedNode(Object.assign(cloneData(rec), { id: nid, x: snap((Number(rec.x) || 0) + dx), y: snap((Number(rec.y) || 0) + dy), name: nextCopyName(rec.name, names) }));
         COPY_UNIT_FIELDS.forEach((k) => { delete node[k]; });
-        if (clip.root) node.group = gMap[rec.group] || undefined;
+        if (clip.root) {
+            node.group = gMap[rec.group] || undefined;
+            // The copy was made something other than a rack: no units in it.
+            if (!isRackGroup(groupById(node.group))) RACK_KEYS.forEach((k) => { delete node[k]; });
+        }
         else {
             if (node.group && !groupById(node.group)) delete node.group;
             RACK_KEYS.forEach((k) => { delete node[k]; });
@@ -166,34 +214,39 @@ function afterPaste(done, verb) {
 
 // Ctrl+C: the selected devices, and the cables between them, onto the clipboard.
 function copySelection() {
-    const clip = clipOf(selectedOf('node'));
+    const clip = clipOfSelection();
     if (!clip) { showToast(t('Select the devices to copy first.')); return null; }
     _clip = clip;
     const n = clip.nodes.length;
-    showToast(t(n === 1 ? 'Copied 1 device. Ctrl+V pastes it.' : 'Copied {n} devices. Ctrl+V pastes them.', { n }), 'ok');
+    showToast(clip.root ? t('Copied {group}. Ctrl+V pastes it.', { group: groupLabel(groupById(clip.root)) })
+        : t(n === 1 ? 'Copied 1 device. Ctrl+V pastes it.' : 'Copied {n} devices. Ctrl+V pastes them.', { n }), 'ok');
     return clip;
+}
+// A clip onto the map. Loose devices go in at once; the copy of a group asks
+// its name and kind first (askGroupCopy), so that one answers with a Promise.
+function runPaste(clip, verb) {
+    if (!clip || readOnlyRefuses()) return null;
+    if (!clip.root || !clipIsFromHere(clip)) return afterPaste(batch(() => pasteClipNow(clip)), verb);
+    return askGroupCopy(clip).then((as) => (as ? afterPaste(batch(() => pasteClipNow(clip, as)), verb) : null));
 }
 const hasCopied = () => !!_clip;
 // Ctrl+V: what was copied, as one step. Again pastes another, a step further on.
 function pasteCopied() {
     if (!_clip) { showToast(t('Nothing is copied yet. Select devices and press Ctrl+C.')); return null; }
-    if (readOnlyRefuses()) return null;
-    return afterPaste(batch(() => pasteClipNow(_clip)), 'paste');
+    return runPaste(_clip, 'paste');
 }
 // Ctrl+D: a copy of the selection at once. The clipboard is left as it was.
 function duplicateSelection() {
-    const clip = clipOf(selectedOf('node'));
+    const clip = clipOfSelection();
     if (!clip) { showToast(t('Select the devices to copy first.')); return null; }
-    if (readOnlyRefuses()) return null;
-    return afterPaste(batch(() => pasteClipNow(clip)), 'duplicate');
+    return runPaste(clip, 'duplicate');
 }
 // A group, the groups inside it and every device in them, as a new group
 // beside it. One step.
 function duplicateGroup(id) {
     const g = groupById(id);
-    if (!g || readOnlyRefuses()) return null;
-    const clip = clipOf(groupMembers(id, true).map((n) => n.id), id);
-    return afterPaste(batch(() => pasteClipNow(clip)), 'duplicate');
+    if (!g) return null;
+    return runPaste(clipOf(groupMembers(id, true).map((n) => n.id), id), 'duplicate');
 }
 // The same group onto the clipboard, for Ctrl+V.
 function copyGroup(id) {

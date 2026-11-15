@@ -18,7 +18,12 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
   const el = (id) => document.getElementById(id);
   const json = (v) => JSON.stringify(v);
-  const heldResponder = setDialogResponder((req) => (req.kind === 'confirm' ? false : null));
+  // The copy of a group asks its name and kind: each question takes the next
+  // answer queued here, and with none queued it is dismissed.
+  const answers = [], asked = [];
+  const accept = (req) => ({ value: req.value, pick: req.pick.value });
+  const heldResponder = setDialogResponder((req) => { if (req.kind !== 'prompt') return false; asked.push(req); return answers.length ? answers.shift()(req) : null; });
+  const tick = () => new Promise((r) => setTimeout(r, 0));
   const N = (id, type, extra = {}) => Object.assign({ id, type, name: id.toUpperCase(), x: 0, y: 0, gw: '', dns: '', os: '', notes: '', nat: false,
     interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] }, extra);
   const site = () => ({ v: DOC_VERSION,
@@ -28,6 +33,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
         interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.0.10/24', mac: 'AA:BB:CC:00:00:01' }] }),
       N('ap', 'ap', { name: 'AP 3', x: 400, y: 0, interfaces: [{ id: 'i1', name: 'eth0', ip: '' }] }),
       N('s1', 'server', { name: 'Host', x: 0, y: 400, group: 'rk', rackU: 10, rackHeight: 2, interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.1.1/30' }] }),
+      N('s3', 'server', { name: 'Spare', x: 200, y: 400, group: 'rk', rackU: 20 }),
       N('vm', 'vm', { name: 'VM', x: 100, y: 400, group: 'rk', host: 's1', interfaces: [{ id: 'i1', name: 'eth0', ip: '10.0.1.2/30' }] })
     ],
     links: [
@@ -71,7 +77,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('one undo step', _undoStack.length === undoAt + 1);
     ok('a toast says so, and what became of the address', /Duplicated 1 device\./.test(toast()) && /next free one/.test(toast()), toast());
     undo();
-    ok('undone, it is gone', state.nodes.length === 5);
+    ok('undone, it is gone', state.nodes.length === 6);
 
     before = idsNow();
     pick('ap'); duplicateSelection();
@@ -113,7 +119,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     before = idsNow(); undoAt = _undoStack.length;
     pick('pc');
     key('c');
-    ok('Ctrl+C copies and changes nothing', state.nodes.length === 5 && hasCopied() && _undoStack.length === undoAt && /Copied 1 device/.test(toast()), toast());
+    ok('Ctrl+C copies and changes nothing', state.nodes.length === 6 && hasCopied() && _undoStack.length === undoAt && /Copied 1 device/.test(toast()), toast());
     key('v');
     ok('Ctrl+V pastes it', fresh(before).length === 1 && /Pasted 1 device\./.test(toast()), toast());
     key('v');
@@ -140,42 +146,81 @@ window.addEventListener('load', () => { setTimeout(async () => {
     _clip = null;
     const evPaste = new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true, cancelable: true });
     window.dispatchEvent(evPaste);
-    ok('with nothing copied, Ctrl+V is left to the browser', !evPaste.defaultPrevented && state.nodes.length === 5);
+    ok('with nothing copied, Ctrl+V is left to the browser', !evPaste.defaultPrevented && state.nodes.length === 6);
     select(null, null);
     ok('nothing selected: Copy asks for a selection', copySelection() === null && /Select the devices to copy first/.test(toast()));
 
     // ---- 5: groups ----
     before = idsNow(); undoAt = _undoStack.length;
     const groupsBefore = state.groups.length;
-    const dup = duplicateGroup('srv');
+    asked.length = 0; answers.push(accept);
+    const dup = await duplicateGroup('srv');
     made = fresh(before);
     const room = groupById(dup.groupId), rack = state.groups.find((g) => g.parent === room.id);
+    ok('making the copy asks for its name, offering the next free one', asked.length === 1 && asked[0].value === 'Server room 2' && /copy of Server room/.test(asked[0].message), asked[0] && asked[0].value);
+    ok('and offers the kinds, with the original\'s chosen', asked[0].pick.value === 'room' && json(asked[0].pick.options.map((o) => o.id)) === json(GROUP_KINDS));
     ok('a group is duplicated with the group inside it', state.groups.length === groupsBefore + 2 && !!room && !!rack);
-    ok('under the next free name, the same kind, the same parent', room.name === 'Server room 2' && room.kind === 'room' && !room.parent, json(room));
+    ok('accepted as offered: the next free name, the same kind, the same parent', room.name === 'Server room 2' && room.kind === 'room' && !room.parent, json(room));
     ok('the rack inside keeps its name and its size', rack.name === 'Rack 1' && rack.kind === 'rack' && rack.uHeight === 42);
-    ok('with every device in it, in the copied groups', made.length === 2 && made.every((n) => n.group === rack.id));
+    ok('with every device in it, in the copied groups', made.length === 3 && made.every((n) => n.group === rack.id));
     ok('which keep their units in the copied rack', made.find((n) => n.name === 'Host 2').rackU === 10 && made.find((n) => n.name === 'Host 2').rackHeight === 2);
-    ok('standing clear of the original', Math.min(...made.map((n) => n.x)) > 100);
+    ok('standing clear of the original', Math.min(...made.map((n) => n.x)) > 200);
     ok('one undo step for the lot', _undoStack.length === undoAt + 1);
-    ok('a toast names the new group', /Duplicated as Server room 2, with 2 devices\./.test(toast()), toast());
+    ok('a toast names the new group', /Duplicated as Server room 2, with 3 devices\./.test(toast()), toast());
     undo();
-    ok('undone, groups and devices are gone', state.groups.length === groupsBefore && state.nodes.length === 5);
+    ok('undone, groups and devices are gone', state.groups.length === groupsBefore && state.nodes.length === 6);
+
+    // a name of its own, and another kind
     before = idsNow();
-    const inner = duplicateGroup('rk');
-    ok('a group inside another is copied beside it, in the same parent', groupById(inner.groupId).parent === 'srv' && groupById(inner.groupId).name === 'Rack 2');
+    answers.push(() => ({ value: 'Lab', pick: 'floor' }));
+    const named = await duplicateGroup('srv');
+    ok('a name typed there is the copy\'s name, and a kind picked there its kind', groupById(named.groupId).name === 'Lab' && groupById(named.groupId).kind === 'floor' && groupById('srv').kind === 'room');
     undo();
-    const empty = duplicateGroup('off') && null;
+    before = idsNow();
+    answers.push(() => ({ value: 'Shelf', pick: 'custom' }));
+    const shelf = await duplicateGroup('rk');
+    made = fresh(before);
+    ok('a rack copied as something else is that, in the same parent', groupById(shelf.groupId).kind === 'custom' && groupById(shelf.groupId).parent === 'srv' && groupById(shelf.groupId).uHeight === undefined, json(groupById(shelf.groupId)));
+    ok('and its devices have no rack units there', made.length === 3 && made.every((n) => n.group === shelf.groupId && n.rackU === undefined && n.rackHeight === undefined));
     undo();
+    answers.push(() => ({ value: '   ', pick: 'rack' }));
+    const blankName = await duplicateGroup('rk');
+    ok('a name left blank is the next free one', groupById(blankName.groupId).name === 'Rack 2' && groupById(blankName.groupId).parent === 'srv', groupById(blankName.groupId).name);
+    undo();
+    undoAt = _undoStack.length; before = idsNow();
+    const dismissed = await duplicateGroup('srv');
+    ok('the question dismissed, nothing is made and nothing is filed', dismissed === null && fresh(before).length === 0 && state.groups.length === groupsBefore && _undoStack.length === undoAt);
+
+    // from the card, and Ctrl+V
     showConfigTab('groups'); renderGroupsPanel(true);
     const card = document.querySelector('[data-grp="srv"][data-act="duplicate"]'), copyBtn = document.querySelector('[data-grp="srv"][data-act="copy"]');
     ok('the group card has Duplicate and Copy', !!card && !!copyBtn);
-    if (copyBtn) {
-      copyBtn.click();
-      before = idsNow();
-      key('v');
-      ok('Copy on the card, then Ctrl+V, pastes the group', state.groups.some((g) => g.name === 'Server room 2') && fresh(before).length === 2 && /Pasted Server room 2 with 2 devices\./.test(toast()), toast());
-      undo();
-    }
+    asked.length = 0;
+    copyBtn.click();
+    ok('Copy on the card asks nothing yet', asked.length === 0 && /Copied Server room/.test(toast()), toast());
+    before = idsNow();
+    answers.push(() => ({ value: 'Server room B', pick: 'room' }));
+    key('v'); await tick(); await tick();
+    ok('Ctrl+V asks, then pastes the group under the name given', asked.length === 1 && state.groups.some((g) => g.name === 'Server room B') && fresh(before).length === 3 && /Pasted Server room B with 3 devices\./.test(toast()), toast());
+    undo();
+
+    // from the map: a group's devices selected (a click on its tab) are the group
+    selectGroupMembers('srv');
+    ok('every device of a group selected is that group', wholeGroupSelected() && wholeGroupSelected().id === 'srv');
+    before = idsNow(); asked.length = 0;
+    answers.push(accept);
+    key('d'); await tick(); await tick();
+    ok('Ctrl+D then duplicates the group, asking its name', asked.length === 1 && state.groups.some((g) => g.name === 'Server room 2') && fresh(before).length === 3);
+    undo();
+    selectGroupMembers('srv');
+    asked.length = 0;
+    key('c');
+    ok('and Ctrl+C copies the group', asked.length === 0 && /Copied Server room\. Ctrl\+V pastes it\./.test(toast()), toast());
+    pick('s1', 'vm');
+    ok('some of a group\'s devices are just devices', wholeGroupSelected() === null);
+    pick('pc');
+    ok('and so is one device, even alone in its group', wholeGroupSelected() === null);
+    _clip = null;
 
     // ---- 6: into another network ----
     pick('sw', 'pc');

@@ -4765,6 +4765,20 @@ where it says so.
   the browser's while text is selected, and Ctrl+V while nothing was
   copied here; none acts under the table or the rack view. `js/copy.js`,
   `tests/suites/copy.js` (es, pt-BR, ja, ru).
+- **D437. The copy of a group asks its name and kind; a group is copied
+  from the map too.** The owner: "allow copying groups too, ask for the
+  rename when creating the group copy, user can change the group type too
+  but is not required, it automatically copies the type." Changes D435's
+  "under the next free name": when the copy of a group is made (Duplicate,
+  or Ctrl+V of a copied group) one question asks its name, with the next
+  free name offered, and its kind, with the original's chosen. Enter makes
+  a plain copy; a blank name is the next free one; dismissed, nothing is
+  made. A rack copied as another kind loses the rack's own fields and its
+  devices their units. Copy itself asks nothing. On the map, a group's
+  devices selected (a click on its tab, a box round them, two or more) are
+  that group to Copy and Duplicate: Ctrl+C, Ctrl+D and the rail's buttons
+  copy the group, not its devices loose; some of them, or one device even
+  alone in its group, are just devices (es, pt-BR, ja, ru).
 - **D436. A tile from the node grid goes straight into a group.** The
   owner: "Allow to add nodes straight into groups from the node grid." A
   tile dragged from the grid and let go inside a group's frame, or on a
