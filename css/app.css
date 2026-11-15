@@ -24,8 +24,8 @@
 }
 
 /* The map's background (the ◐ button, js/app.js setMapInk): light, dark
-   (black with the drawing in white outlines) or blueprint (white on blue,
-   on a ruled grid), whatever the site's theme. The drawing writes its
+   (black with the drawing in white outlines), blueprint (white on blue,
+   on a ruled grid) or circuit (the same in green), whatever the site's theme. The drawing writes its
    colours as attributes, for the exports, so this repaints them by value:
    a rule beats an attribute, and an export, which carries no stylesheet,
    stays on paper. Cable media, findings and the selection keep their
@@ -41,6 +41,15 @@
     background-image:
         linear-gradient(rgba(255, 255, 255, 0.2) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.2) 1px, transparent 1px),
         linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+    background-size: var(--grid-major, 100px) var(--grid-major, 100px), var(--grid-major, 100px) var(--grid-major, 100px),
+        var(--grid, 20px) var(--grid, 20px), var(--grid, 20px) var(--grid, 20px);
+}
+/* Circuit green: the blueprint's ruled paper in another colour. */
+#canvasContainer.map-ink.map-pcb {
+    --mi-bg: #0b3b2a; --mi-fg: #ecfdf3; --mi-muted: rgba(236, 253, 243, 0.7); --mi-line: rgba(190, 242, 210, 0.9);
+    background-image:
+        linear-gradient(rgba(134, 239, 172, 0.22) 1px, transparent 1px), linear-gradient(90deg, rgba(134, 239, 172, 0.22) 1px, transparent 1px),
+        linear-gradient(rgba(134, 239, 172, 0.09) 1px, transparent 1px), linear-gradient(90deg, rgba(134, 239, 172, 0.09) 1px, transparent 1px);
     background-size: var(--grid-major, 100px) var(--grid-major, 100px), var(--grid-major, 100px) var(--grid-major, 100px),
         var(--grid, 20px) var(--grid, 20px), var(--grid, 20px) var(--grid, 20px);
 }
@@ -82,6 +91,7 @@
 .map-ink .topo-svg .port-label[fill="#dc2626"] { fill: #fecaca; }
 .zoom-ctl .map-ink-btn[aria-pressed="true"] { color: var(--accent); background: var(--accent-faint); }
 .zoom-ctl .map-ink-btn[data-ink="blue"] { color: #93c5fd; background: rgba(27, 79, 140, 0.45); }
+.zoom-ctl .map-ink-btn[data-ink="pcb"] { color: #86efac; background: rgba(22, 101, 52, 0.45); }
 
 /* Trace flow. Each medium moves signal differently, so each animates differently:
    fibre sprints in long streaks, copper walks, powerline crawls over a noisy

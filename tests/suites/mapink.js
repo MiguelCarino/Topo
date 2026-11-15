@@ -50,23 +50,36 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('the next press is the blueprint: white writing on blue, titled for light', el('canvasContainer').classList.contains('map-blue')
       && getComputedStyle(el('canvasContainer')).backgroundColor === 'rgb(27, 79, 140)'
       && getComputedStyle(card()).fill === 'rgb(27, 79, 140)'
-      && getComputedStyle(el('ui-node-a').querySelector('text')).fill === 'rgb(255, 255, 255)' && el('mapInkBtn').title === 'Light background',
+      && getComputedStyle(el('ui-node-a').querySelector('text')).fill === 'rgb(255, 255, 255)' && el('mapInkBtn').title === 'Circuit background',
       getComputedStyle(el('canvasContainer')).backgroundColor);
     ok('kept too', JSON.parse(localStorage.getItem(SETTINGS_KEY)).mapInk === 'blue');
+    const blueGrid = [getComputedStyle(el('canvasContainer')).backgroundSize, (getComputedStyle(el('canvasContainer')).backgroundImage.match(/linear-gradient/g) || []).length];
+    el('mapInkBtn').click(); settle();
+    ok('the next press is the circuit: the blueprint\'s ruled paper in green, light writing, titled for light', el('canvasContainer').classList.contains('map-pcb')
+      && el('canvasContainer').classList.contains('map-ink') && !el('canvasContainer').classList.contains('map-blue')
+      && getComputedStyle(el('canvasContainer')).backgroundColor === 'rgb(11, 59, 42)'
+      && getComputedStyle(card()).fill === 'rgb(11, 59, 42)'
+      && getComputedStyle(el('ui-node-a').querySelector('text')).fill === 'rgb(236, 253, 243)'
+      && el('mapInkBtn').dataset.ink === 'pcb' && el('mapInkBtn').title === 'Light background',
+      getComputedStyle(el('canvasContainer')).backgroundColor + ' | ' + el('mapInkBtn').title);
+    const img = getComputedStyle(el('canvasContainer')).backgroundImage;
+    ok('the same grid as the blueprint, and no dots', getComputedStyle(el('canvasContainer')).backgroundSize === blueGrid[0]
+      && (img.match(/linear-gradient/g) || []).length === blueGrid[1] && !/radial-gradient/.test(img), img.slice(0, 80));
+    ok('kept as well', JSON.parse(localStorage.getItem(SETTINGS_KEY)).mapInk === 'pcb');
     const drawn = canvasSvgMarkup().markup;
-    ok('an export stays on paper', !/map-ink|map-blue|#0a0a0a|#1b4f8c/.test(drawn) && /fill="#ffffff"/.test(drawn));
+    ok('an export stays on paper', !/map-ink|map-blue|map-pcb|#0a0a0a|#1b4f8c|#0b3b2a/.test(drawn) && /fill="#ffffff"/.test(drawn));
     setLocale('es'); applyLocale();
     ok('es: its title', el('mapInkBtn').title === 'Fondo claro', el('mapInkBtn').title);
     setLocale('en'); applyLocale();
     el('mapInkBtn').click(); settle();
-    ok('and back to light', !el('canvasContainer').classList.contains('map-ink') && !el('canvasContainer').classList.contains('map-blue')
+    ok('and back to light', !el('canvasContainer').classList.contains('map-ink') && !el('canvasContainer').classList.contains('map-blue') && !el('canvasContainer').classList.contains('map-pcb')
       && el('mapInkBtn').getAttribute('aria-pressed') === 'false' && getComputedStyle(card()).fill === paper && el('mapInkBtn').title === 'Dark background');
     // A selected note's A− / A+ (and ✕) keep a dark disc, white ring and
     // white glyph on every background, so they never vanish.
     {
       const note = spawnAnnotation({ text: 'Rack note', style: 'note', at: { x: 40, y: 40 } });
       renderCanvasOnly();
-      for (const ink of [false, 'dark', 'blue']) {
+      for (const ink of [false, 'dark', 'blue', 'pcb']) {
         setMapInk(ink); settle();
         const discs = [...document.querySelectorAll(`#ui-ann-${note.id} .node-delete`)];
         const look = discs.map((d) => { const c = getComputedStyle(d.querySelector('circle')), tx = getComputedStyle(d.querySelector('text')); return [d.querySelector('text').textContent, c.fill, c.stroke, tx.fill]; });

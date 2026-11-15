@@ -712,7 +712,7 @@ function tidyPositionsGrouped(nodes, links) {
 // with nothing selected is confusing, and a port is one session's question.
 const SETTINGS_KEY = 'nettopo_settings';
 // The map's backgrounds besides light (setMapInk, below).
-const MAP_INKS = ['dark', 'blue'];
+const MAP_INKS = ['dark', 'blue', 'pcb'];
 
 function loadSettings() {
     try {
@@ -730,7 +730,7 @@ function loadSettings() {
         // Map, Table or Rack, once chosen (js/table.js); until then the width
         // decides. Rack stands only while the document has a rack.
         if (saved.view === 'map' || saved.view === 'table' || saved.view === 'rack') state.settings.view = saved.view;
-        // '' (light), 'dark' or 'blue'; true, from before the blueprint was a
+        // '' (light), 'dark', 'blue' or 'pcb'; true, from before the blueprint was a
         // choice of its own, was the dark map.
         state.settings.mapInk = saved.mapInk === true ? 'dark' : (MAP_INKS.includes(saved.mapInk) ? saved.mapInk : '');
         // Settings (js/settings.js): the provider on hover is an opt-in, the
@@ -3426,7 +3426,8 @@ document.getElementById('zoomResetBtn').onclick = () => {
     state.camera.x = 0; state.camera.y = 0; state.camera.zoom = 1; applyCamera();
 };
 // The map's background (css/app.css .map-ink): '' light, 'dark' (white
-// outlines on black) or 'blue' (a blueprint). The button steps through them
+// outlines on black), 'blue' (a blueprint) or 'pcb' (the blueprint's ruled
+// paper in circuit green). The button steps through them
 // and is titled for the next one. A preference of this browser, like the
 // view; the drawing and its exports are unchanged.
 function setMapInk(mode) {
@@ -3435,14 +3436,15 @@ function setMapInk(mode) {
     const box = document.getElementById('canvasContainer');
     box.classList.toggle('map-ink', !!m);
     box.classList.toggle('map-blue', m === 'blue');
+    box.classList.toggle('map-pcb', m === 'pcb');
     const btn = document.getElementById('mapInkBtn');
     btn.setAttribute('aria-pressed', String(!!m));
     btn.dataset.ink = m || 'light';
     btn.title = t(MAP_INK_NEXT_TITLE[m]);
     btn.setAttribute('aria-label', btn.title);
 }
-const MAP_INK_NEXT = { '': 'dark', dark: 'blue', blue: '' };
-const MAP_INK_NEXT_TITLE = { '': 'Dark background', dark: 'Blueprint background', blue: 'Light background' };
+const MAP_INK_NEXT = { '': 'dark', dark: 'blue', blue: 'pcb', pcb: '' };
+const MAP_INK_NEXT_TITLE = { '': 'Dark background', dark: 'Blueprint background', blue: 'Circuit background', pcb: 'Light background' };
 document.getElementById('mapInkBtn').onclick = () => { setMapInk(MAP_INK_NEXT[state.settings.mapInk || '']); saveSettings(); if (typeof renderSettings === 'function') renderSettings(); };
 // New network, in the File menu, replaced the toolbar's Clear. Clear emptied
 // the nodes and cables and nothing else — the card stayed attached (so the
