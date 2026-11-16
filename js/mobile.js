@@ -543,7 +543,9 @@
         if (showBanner) {
             var src = state.linkSourceId;
             var srcNode = getNode(src);
+            var srcs = getAnnotation(src) ? [src] : withSelectedNodes(src);
             linkText.textContent = getAnnotation(src) ? tr('Tap a device to link this note')
+                : srcs.length > 1 ? tr('Tap the device to connect the {n} selected devices to', { n: srcs.length })
                 : tr('Tap the device to connect to {name}', { name: (srcNode && srcNode.name) || tr('Unnamed device') });
         }
         // Each written only when it changes: this runs on every redraw, and

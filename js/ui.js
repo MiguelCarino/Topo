@@ -158,6 +158,10 @@ function pressNode(event, node) {
     // Tracing (D432): the press is the target's click, never a drag or a
     // selection, whose redraw would take the click away (D433).
     if (window.TopoTraceTarget && TopoTraceTarget.armed()) return;
+    // A right press on one of a set: link mode and tracing are the whole
+    // set's (withSelectedNodes, js/state.js), so it keeps the set: no drag,
+    // and no release that would select this one alone.
+    if (event.button === 2 && state.selection.size > 1 && inSelection('node', node.id)) return;
     // Shift/Ctrl/Cmd edits the set and arms no drag: the press was
     // about what is selected, not about where it is.
     if (addsToSelection(event)) { toggleSelected('node', node.id); return; }
@@ -1421,11 +1425,16 @@ function drawCanvas() {
             }
         }
         const isSelected = inSelection('node', node.id);
-        const isLinkSource = state.linkSourceId === node.id;
+        // Link mode armed on one of several selected: every selected device
+        // is a source and is drawn as one; the words stay over the one it
+        // was armed on (withSelectedNodes, js/state.js).
+        const isLinkFirst = state.linkSourceId === node.id;
+        const isLinkSource = isLinkFirst || (!!state.linkSourceId && isSelected && state.selection.size > 1 && inSelection('node', state.linkSourceId));
         // Tracing from it (D432, D433): drawn as the link source is, in the
         // trace's cyan.
         const tracingFrom = window.TopoTraceTarget ? TopoTraceTarget.armed() : null;
-        const isTraceSource = !isLinkSource && tracingFrom === node.id;
+        const isTraceFirst = !isLinkSource && tracingFrom === node.id;
+        const isTraceSource = !isLinkSource && !!tracingFrom && TopoTraceTarget.isArmed(node.id);
         const isReachable = reach && (reach.reachableNodes.has(node.id) || (!!inFold && inFold.some((x) => reach.reachableNodes.has(x.id))));
         const foldPicked = !isSelected && !!inFold && inFold.some((x) => inSelection('node', x.id));
         const foldHit = !!qm && !!inFold && inFold.some((x) => qm.nodes.has(x.id));
@@ -1446,7 +1455,7 @@ function drawCanvas() {
             // Tracing (D432): the device it starts from pulses in the
             // trace's colour, and every device is a target to click.
             const tracing = TopoTraceTarget.armed();
-            if (tracing) classes = classes.replace('cursor-grab active:cursor-grabbing', 'cursor-crosshair') + (tracing === node.id ? ' tt-arm' : '');
+            if (tracing) classes = classes.replace('cursor-grab active:cursor-grabbing', 'cursor-crosshair') + (TopoTraceTarget.isArmed(node.id) ? ' tt-arm' : '');
         }
         g.setAttribute('class', classes);
         // Retired (js/assets.js): still in the register, no longer on the
@@ -1587,14 +1596,14 @@ function drawCanvas() {
             if (!state.readOnly) g.appendChild(canvasDiscButton({ glyph: '⧉', tip: t('Duplicate (Ctrl+D)'), at: { x: -37, y: -19 }, fill: '#334155', onClick: () => duplicateSelection() }));
         }
 
-        if (isLinkSource) {
+        if (isLinkFirst) {
             const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             hint.setAttribute('text-anchor', 'middle'); hint.setAttribute('y', '-34'); hint.setAttribute('font-size', '9');
             hint.setAttribute('font-family', 'sans-serif'); hint.setAttribute('data-sel-only', '');
             hint.setAttribute('font-weight', '700'); hint.setAttribute('fill', '#ca8a04'); hint.textContent = t('LINK TARGET...'); hint.style.pointerEvents = 'none';
             g.appendChild(hint);
         }
-        if (isTraceSource) {
+        if (isTraceFirst) {
             const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             hint.setAttribute('text-anchor', 'middle'); hint.setAttribute('y', '-34'); hint.setAttribute('font-size', '9');
             hint.setAttribute('font-family', 'sans-serif'); hint.setAttribute('data-sel-only', ''); hint.setAttribute('class', 'tt-hint');
@@ -1635,17 +1644,22 @@ function drawCanvas() {
                 // The armed node can be gone by now — loading a shared URL swaps
                 // state.nodes out from under link mode without disarming it — and
                 // a null here would throw and leave the canvas stuck in crosshair.
-                if (state.linkSourceId !== node.id && getNode(state.linkSourceId)) {
-                    const sNode = getNode(state.linkSourceId);
+                // Armed on one of several selected: each of them gets its cable
+                // to this one (withSelectedNodes, js/state.js), one undo step.
+                // A click on the armed device itself files nothing, as before.
+                const sources = state.linkSourceId === node.id ? [] : withSelectedNodes(state.linkSourceId).filter((id) => id !== node.id);
+                sources.forEach((sourceId) => {
+                    const sNode = getNode(sourceId);
+                    if (!sNode) return;
                     // A second cable between the same pair is legitimate (redundant
                     // NICs, LAG), so only an identical port-to-port run is a duplicate.
-                    const link = { id: nextId('l'), source: state.linkSourceId, target: node.id, attachment: (isVirtualType(sNode.type) || isVirtualType(node.type)) ? 'bridged' : null };
+                    const link = { id: nextId('l'), source: sourceId, target: node.id, attachment: (isVirtualType(sNode.type) || isVirtualType(node.type)) ? 'bridged' : null };
                     bindLink(link);
                     const duplicate = state.links.some((l) =>
                         (l.source === link.source && l.target === link.target && l.sourceIface === link.sourceIface && l.targetIface === link.targetIface) ||
                         (l.source === link.target && l.target === link.source && l.sourceIface === link.targetIface && l.targetIface === link.sourceIface));
                     if (!duplicate) state.links.push(link);
-                }
+                });
                 state.linkSourceId = null; save();
                 renderCanvasOnly();
                 // Show the diagnostics for whatever is actually selected. Link

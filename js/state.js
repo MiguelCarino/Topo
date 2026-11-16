@@ -108,6 +108,13 @@ function soleSelected(set) { if (set.size !== 1) return null; for (const e of se
 function inSelection(type, id) { for (const e of state.selection) if (e.type === type && e.id === id) return true; return false; }
 // The ids of one type, in the order they were selected.
 function selectedOf(type) { const out = []; state.selection.forEach((e) => { if (e.type === type) out.push(e.id); }); return out; }
+// A gesture started on one device (link mode, tracing): when that device is
+// one of several selected, the gesture is all of theirs. -> its ids, the one
+// it started on first.
+function withSelectedNodes(id) {
+    const ids = selectedOf('node');
+    return ids.length > 1 && ids.includes(id) ? [id].concat(ids.filter((x) => x !== id)) : [id];
+}
 // Replaces the whole set. Duplicates are folded, and only devices and cables
 // can share it: a note or a leader in a list of several is left out.
 function setSelectionEntries(entries) {

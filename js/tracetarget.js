@@ -33,7 +33,10 @@
 'use strict';
 const _tt = {
     arm: null,        // a device waiting for its target (Trace to…, read only)
+    arms: [],         // armed on one of several selected: all of them, arm first
     from: null, to: null,
+    froms: [],        // every device asked from, from first
+    more: [],         // the others' answers: { from, answer, backAnswer }
     port: '',
     back: false,
     answer: null, backAnswer: null,
@@ -212,30 +215,36 @@ function answer(aId, bId, port) {
 }
 
 // ---- Asking ----
-function ask(aId, bId) {
+// `all`: asked from several at once (armed on one of several selected), each
+// with its own line and its own path; the target is never one of them.
+function ask(aId, bId, all) {
     if (!getNode(aId) || !getNode(bId) || aId === bId) return null;
-    Object.assign(_tt, { arm: null, from: aId, to: bId, live: null });
+    const froms = [aId].concat((all || []).filter((id) => id !== aId && id !== bId && getNode(id)));
+    Object.assign(_tt, { arm: null, arms: [], from: aId, froms, to: bId, live: null });
     recompute();
     if (typeof renderCanvasOnly === 'function') renderCanvasOnly();
     if (hasHost() && window.TopoChecks && TopoChecks.readMacs) TopoChecks.readMacs().then(renderBar).catch(() => {});
     return _tt.answer;
 }
 function recompute() {
-    if (!_tt.from || !_tt.to || !getNode(_tt.from) || !getNode(_tt.to)) { _tt.answer = _tt.backAnswer = null; renderBar(); return; }
+    if (!_tt.from || !_tt.to || !getNode(_tt.from) || !getNode(_tt.to)) { _tt.answer = _tt.backAnswer = null; _tt.more = []; renderBar(); return; }
     _tt.answer = answer(_tt.from, _tt.to, _tt.port);
     _tt.backAnswer = _tt.back ? answer(_tt.to, _tt.from, _tt.port) : null;
+    _tt.more = _tt.froms.filter((id) => id !== _tt.from && id !== _tt.to && getNode(id)).map((id) => (
+        { from: id, answer: answer(id, _tt.to, _tt.port), backAnswer: _tt.back ? answer(_tt.to, id, _tt.port) : null }));
     renderBar();
 }
 function armFrom(id) {
     if (!getNode(id)) return false;
-    Object.assign(_tt, { arm: id, from: null, to: null, answer: null, backAnswer: null, live: null, back: false });
+    // One of several selected: tracing from all of them (withSelectedNodes, js/state.js).
+    Object.assign(_tt, { arm: id, arms: withSelectedNodes(id).filter(getNode), from: null, froms: [], more: [], to: null, answer: null, backAnswer: null, live: null, back: false });
     if (typeof renderCanvasOnly === 'function') renderCanvasOnly();
     renderBar();
     return true;
 }
 function clear() {
     if (!_tt.arm && !_tt.from) return false;
-    Object.assign(_tt, { arm: null, from: null, to: null, answer: null, backAnswer: null, live: null, back: false, port: '' });
+    Object.assign(_tt, { arm: null, arms: [], from: null, froms: [], more: [], to: null, answer: null, backAnswer: null, live: null, back: false, port: '' });
     renderBar();
     if (typeof renderCanvasOnly === 'function') renderCanvasOnly();
     return true;
@@ -249,11 +258,12 @@ function onContext(id) {
     if (src === id && getNode(id)) { state.linkSourceId = null; armFrom(id); return true; }
     if (_tt.arm === id) { clear(); return true; }
     if (src && src !== id && getNode(src) && !(typeof getAnnotation === 'function' && getAnnotation(src))) {
+        const all = withSelectedNodes(src);
         state.linkSourceId = null;
-        ask(src, id);
+        ask(src, id, all);
         return true;
     }
-    if (_tt.arm && _tt.arm !== id) { ask(_tt.arm, id); return true; }
+    if (_tt.arm && _tt.arm !== id) { ask(_tt.arm, id, _tt.arms); return true; }
     if (state.readOnly) { armFrom(id); return true; }
     if (_tt.from) clear();
     return false;
@@ -261,16 +271,20 @@ function onContext(id) {
 // A left click on a device while a target is awaited (Trace to…, read only).
 function onClick(id) {
     if (!_tt.arm || _tt.arm === id) return false;
-    ask(_tt.arm, id);
+    ask(_tt.arm, id, _tt.arms);
     return true;
 }
-const onPath = (id) => !!(_tt.answer && _tt.answer.path && _tt.answer.path.nodes.includes(id));
-const linkOnPath = (id) => !!(_tt.answer && _tt.answer.path && _tt.answer.path.links.some((l) => l.id === id));
-const isEnd = (id) => !!_tt.answer && (id === _tt.from || id === _tt.to);
+// Every answer on show: the first device's, then the others'.
+const answers = () => (_tt.answer ? [_tt.answer].concat(_tt.more.map((m) => m.answer)) : []);
+const onPath = (id) => answers().some((a) => a.path && a.path.nodes.includes(id));
+const linkOnPath = (id) => answers().some((a) => a.path && a.path.links.some((l) => l.id === id));
+const isEnd = (id) => !!_tt.answer && (id === _tt.from || id === _tt.to || _tt.more.some((m) => m.from === id));
 // The device waiting for its target, and whether a found path is lit (the
 // rest of the map is dimmed then, D432).
 const armed = () => _tt.arm;
-const lit = () => !!(_tt.answer && _tt.answer.reaches && _tt.answer.path);
+// One of the devices it is armed on (several when armed on one of a set).
+const isArmed = (id) => !!_tt.arm && (_tt.arm === id || _tt.arms.includes(id));
+const lit = () => answers().some((a) => a.reaches && a.path);
 
 // ---- Check now, when A is this PC (D381, D386) ----
 function liveOffered() {
@@ -348,10 +362,12 @@ function renderBar() {
         // As link mode (D433): the map says it over the device; only a
         // phone, whose finger hides it, has the line as a banner.
         if (!phoneWide()) { b.hidden = true; b.innerHTML = ''; return; }
-        b.innerHTML = `<div class="tt-head"><p class="tt-line">${escapeHtml(t('Click or tap the device to ask whether {name} reaches it.', { name: nameOf(_tt.arm) }))}</p>${x}</div>`;
+        const say = _tt.arms.length > 1 ? t('Click or tap the device to ask whether the {n} selected devices reach it.', { n: _tt.arms.length })
+            : t('Click or tap the device to ask whether {name} reaches it.', { name: nameOf(_tt.arm) });
+        b.innerHTML = `<div class="tt-head"><p class="tt-line">${escapeHtml(say)}</p>${x}</div>`;
         return;
     }
-    let h = `<div class="tt-head"><div class="tt-lines">${lineHtml(_tt.answer)}${_tt.back ? lineHtml(_tt.backAnswer, 'tt-back') : ''}</div>${x}</div>`;
+    let h = `<div class="tt-head"><div class="tt-lines">${lineHtml(_tt.answer)}${_tt.back ? lineHtml(_tt.backAnswer, 'tt-back') : ''}${_tt.more.map((m) => lineHtml(m.answer, 'tt-more') + (_tt.back ? lineHtml(m.backAnswer, 'tt-back') : '')).join('')}</div>${x}</div>`;
     h += `<p class="tt-note">${escapeHtml(t('From the map, not a live test.'))}</p>`;
     if (_tt.live) h += `<p class="tt-live ${_tt.live.ok ? 'tt-ok' : _tt.live.ok === false ? 'tt-no' : ''}">${escapeHtml(_tt.live.text)}</p>`;
     h += '<div class="tt-acts">'
@@ -371,5 +387,5 @@ function renderBar() {
     });
 })();
 
-window.TopoTraceTarget = { state: _tt, answer, ask, armFrom, clear, onContext, onClick, onPath, linkOnPath, isEnd, armed, lit, checkNow, checkNowSpec, outcomeText, renderBar, pathThrough };
+window.TopoTraceTarget = { state: _tt, answer, ask, armFrom, clear, onContext, onClick, onPath, linkOnPath, isEnd, armed, isArmed, lit, checkNow, checkNowSpec, outcomeText, renderBar, pathThrough };
 })();

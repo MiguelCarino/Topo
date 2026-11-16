@@ -4048,7 +4048,8 @@ html.topo-locked body { overflow: hidden; }
 }
 .tt-bar[hidden] { display: none; }
 .tt-head { display: flex; align-items: flex-start; gap: 8px; }
-.tt-lines { flex: 1 1 auto; min-width: 0; }
+.tt-lines { flex: 1 1 auto; min-width: 0; max-height: min(40vh, 16rem); overflow-y: auto; }
+.tt-line.tt-more { margin-top: 4px; }
 .tt-line { margin: 0; font-weight: 700; font-size: var(--fs-sm); line-height: 1.35; overflow-wrap: anywhere; }
 .tt-line.tt-ok { color: var(--ok, #16a34a); }
 .tt-line.tt-no { color: var(--err, #dc2626); }

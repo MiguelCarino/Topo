@@ -14,6 +14,8 @@
 //      after the pair asks again, never re-arms; Trace to… then a click;
 //      Esc and a click on empty map clear it; a read-only document arms the
 //      target, never link mode; nothing is an undo step or stored;
+//      several selected and one of them right-clicked: link mode and
+//      tracing are all of theirs (a cable, or an answer, from each);
 //   5. Check now (D381): offered only when A is this PC, its answer beside
 //      the map's; a device's Answer checks and its ping spec;
 //   6. the strings in every locale.
@@ -188,6 +190,53 @@ window.addEventListener('load', () => { setTimeout(async () => {
     TT.clear();
     ctx('pc1'); await tick(); ctx('pc1'); await tick(); ctx('pc1'); await tick();
     ok('a third right-click ends tracing', !TT.state.arm && !state.linkSourceId && el('traceTargetBar').hidden && !node('pc1').classList.contains('tt-arm'));
+    // Several selected: link mode and tracing are all of theirs.
+    const set3 = () => { setSelectionEntries(['pc1', 'cam', 'lone'].map((id) => ({ type: 'node', id }))); renderCanvasOnly(); };
+    set3(); await tick();
+    node('pc1').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 2, clientX: 10, clientY: 10 }));
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 2, clientX: 10, clientY: 10 }));
+    await tick();
+    ok('several selected: a right press on one of them keeps the set', state.selection.size === 3, show([...state.selection]));
+    ctx('pc1'); await tick();
+    ok('…link mode is all of theirs, the words over the one right-clicked', ['pc1', 'cam', 'lone'].every((id) => node(id).classList.contains('linking-glow'))
+      && !node('nas').classList.contains('linking-glow') && /LINK TARGET/.test(node('pc1').textContent) && !/LINK TARGET/.test(node('cam').textContent));
+    click('nas'); await tick();
+    const toNas = (id) => state.links.some((l) => l.source === id && l.target === 'nas');
+    ok('…a left click files a cable from each of them', state.links.length === links0 + 3 && ['pc1', 'cam', 'lone'].every(toNas) && !state.linkSourceId, show(state.links.slice(links0)));
+    undo(); await tick();
+    ok('…as one undo step', state.links.length === links0);
+    set3(); await tick();
+    ctx('cam'); await tick(); click('lone'); await tick();
+    ok('…the target one of the set: the others to it, none to itself', state.links.length === links0 + 2 && !state.links.some((l) => l.source === l.target)
+      && ['pc1', 'cam'].every((id) => state.links.some((l) => l.source === id && l.target === 'lone')), show(state.links.slice(links0)));
+    undo(); await tick();
+    set3(); await tick();
+    ctx('pc1'); await tick(); click('pc1'); await tick();
+    ok('…a click on the one armed files nothing', state.links.length === links0 && !state.linkSourceId);
+    set3(); await tick();
+    ctx('pc1'); await tick(); ctx('pc1'); await tick();
+    ok('…right-click twice: tracing from all of them, the words over the one', TT.state.arm === 'pc1' && TT.state.arms.join() === 'pc1,cam,lone'
+      && ['pc1', 'cam', 'lone'].every((id) => node(id).classList.contains('tt-arm')) && !node('nas').classList.contains('tt-arm')
+      && !!node('pc1').querySelector('.tt-hint') && !node('cam').querySelector('.tt-hint'));
+    click('nas'); await tick();
+    const lines = () => [...el('traceTargetBar').querySelectorAll('.tt-line')].map((p) => p.textContent);
+    ok('…a left click asks from each, a line each, no cable', TT.state.from === 'pc1' && TT.state.to === 'nas' && TT.state.more.map((m) => m.from).join() === 'cam,lone'
+      && lines().length === 3 && /^PC1 reaches NAS/.test(lines()[0]) && /^CAM /.test(lines()[1]) && /^LONE /.test(lines()[2]) && state.links.length === links0, show(lines()));
+    ok('…each answer is the one asked alone', TT.state.more.every((m) => m.answer.line === TT.answer(m.from, 'nas', '').line));
+    ok('…every end ringed, every path found lit', ['pc1', 'cam', 'lone', 'nas'].every((id) => node(id).classList.contains('tt-end'))
+      && TT.state.more.every((m) => !m.answer.path || m.answer.path.links.every((l) => TT.linkOnPath(l.id))));
+    el('traceTargetBar').querySelector('[data-tt="back"]').click(); await tick();
+    ok('…And back? a line each way for each', lines().length === 6);
+    TT.clear();
+    set3(); await tick();
+    ctx('pc1'); await tick(); ctx('cam'); await tick();
+    ok('…right-click one, then another of the set: the others asked to it', TT.state.to === 'cam' && TT.state.from === 'pc1' && TT.state.more.map((m) => m.from).join() === 'lone' && state.links.length === links0);
+    TT.clear();
+    select('pc1', 'node'); await tick();
+    ctx('cam'); await tick(); click('nas'); await tick();
+    ok('a right-click on a device outside the selection: its cable alone', state.links.length === links0 + 1 && toNas('cam') && !toNas('pc1'));
+    undo(); await tick();
+    select(null, null); await tick();
     // Read only: the target, never link mode.
     state.readOnly = { doc: cloneData(serializeDoc()), loaded: JSON.stringify(serializeDoc()) };
     renderCanvasOnly(); await tick();
@@ -231,6 +280,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       'VLAN {vlan} stops at {cable}: it does not carry it.', '{a} has no gateway, and {b} is on another subnet.',
       '{name} does NAT: the map records nothing that lets traffic in from outside.', '{name} has no subnet toward {b}.', 'Nothing recorded explains it.',
       'From the map, not a live test.', 'On port', 'any', 'And back?', 'Check now', 'Click or tap the device to ask whether {name} reaches it.',
+      'Click or tap the device to ask whether the {n} selected devices reach it.', 'Tap the device to connect the {n} selected devices to',
       'From this PC: answered in {ms} ms, {time}', 'From this PC: no answer ({why}), {time}', 'From this PC: it cannot be asked ({why}).', 'From this PC: it could not be asked.',
       'From this PC: {name} has no address to ask.', 'Asking from this PC…', 'Trace to…', 'Select the device to start from first.', '+{n} more',
       'Once, from this PC: nothing is kept.', 'A ping, once, from this PC: nothing is kept.', 'Trace to… (does it reach a device?)',
