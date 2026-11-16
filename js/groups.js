@@ -554,6 +554,7 @@ function selectGroupMembers(id) {
     const members = groupMembers(id, true);
     if (!members.length) return [];
     selectEntries(members.map((n) => ({ type: 'node', id: n.id })));
+    if (typeof pickGroup === 'function') pickGroup(id, true);   // picked as a group (js/groupmap.js)
     centreOnNodes(members);
     return members.map((n) => n.id);
 }

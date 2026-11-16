@@ -3101,6 +3101,7 @@ const MESSAGES = {
         "Place": "Colocar",
         // Bringing devices into groups and racks by dragging (Round 2, item 2).
         "{name} is in {group} now.": "{name} está ahora en {group}.",
+        "{n} devices added.": "Se añadieron {n} dispositivos.",
         "{name} goes in at half depth: the other face of those units is taken.": "{name} va a media profundidad: la otra cara de esas unidades está ocupada.",
         "{n} devices are in {group} now.": "{n} dispositivos están ahora en {group}.",
         "{name} is in no group now.": "{name} ya no está en ningún grupo.",
@@ -6769,6 +6770,7 @@ const MESSAGES = {
         "Place": "Colocar",
         // Bringing devices into groups and racks by dragging (Round 2, item 2).
         "{name} is in {group} now.": "{name} agora está em {group}.",
+        "{n} devices added.": "{n} dispositivos adicionados.",
         "{name} goes in at half depth: the other face of those units is taken.": "{name} entra com meia profundidade: a outra face dessas unidades está ocupada.",
         "{n} devices are in {group} now.": "{n} dispositivos agora estão em {group}.",
         "{name} is in no group now.": "{name} agora não está em nenhum grupo.",
@@ -10437,6 +10439,7 @@ const MESSAGES = {
         "Place": "Разместить",
         // Bringing devices into groups and racks by dragging (Round 2, item 2).
         "{name} is in {group} now.": "{name} теперь в группе {group}.",
+        "{n} devices added.": "Добавлено устройств: {n}.",
         "{name} goes in at half depth: the other face of those units is taken.": "{name} ставится на полглубины: другая сторона этих юнитов занята.",
         "{n} devices are in {group} now.": "Устройств теперь в группе {group}: {n}.",
         "{name} is in no group now.": "{name} теперь не входит ни в одну группу.",
@@ -14093,6 +14096,7 @@ const MESSAGES = {
         "Place": "配置",
         // Bringing devices into groups and racks by dragging (Round 2, item 2).
         "{name} is in {group} now.": "{name} は {group} に入りました。",
+        "{n} devices added.": "{n} 台の機器を追加しました。",
         "{name} goes in at half depth: the other face of those units is taken.": "{name} はハーフ奥行きで入ります: それらのユニットの反対側は使用中です。",
         "{n} devices are in {group} now.": "{n} 台のデバイスが {group} に入りました。",
         "{name} is in no group now.": "{name} はどのグループにも属さなくなりました。",

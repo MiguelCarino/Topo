@@ -413,10 +413,32 @@ function gmToggle(gid, collapsed, extra) {
     return g;
 }
 
+// The groups picked as groups: by a press on a frame's tab (Shift adds one),
+// Shift on a collapsed node, or the Groups tab's Select members. The
+// selection itself is only their devices; this remembers that it was the
+// group that was asked for, which the palette's click reads (a device for
+// each selected group, spawnForSelection, js/app.js). A group counts while
+// every device in it is still selected; a single selection forgets them.
+let _gmPicked = new Set();
+function pickedGroups() {
+    const out = [];
+    _gmPicked.forEach((gid) => {
+        const members = groupById(gid) ? groupMembers(gid, true) : [];
+        if (members.length && members.every((n) => inSelection('node', n.id))) out.push(groupById(gid));
+        else _gmPicked.delete(gid);
+    });
+    return out;
+}
+function pickGroup(gid, alone) {
+    if (alone) _gmPicked = new Set(); else pickedGroups();   // the ones no longer whole go
+    if (gid) _gmPicked.add(gid);
+}
+const forgetPickedGroups = () => { _gmPicked = new Set(); };
+
 // Pressing a frame's tab (or Shift on a collapsed node): the group's devices
 // are the selection, and a drag moves them. Shift/Ctrl/Cmd adds them or takes
 // them out, as on one device.
-function pressGroup(event, members) {
+function pressGroup(event, members, gid) {
     event.stopPropagation();
     if (state.linkSourceId || !members.length) return;
     const entries = members.map((n) => ({ type: 'node', id: n.id }));
@@ -424,6 +446,7 @@ function pressGroup(event, members) {
     if (addsToSelection(event)) {
         const ids = new Set(members.map((n) => n.id));
         selectEntries(all ? [...state.selection].filter((e) => !(e.type === 'node' && ids.has(e.id))) : [...state.selection, ...entries]);
+        pickGroup(all ? null : gid, false);
         return;
     }
     // Select more (phones, js/ui.js): the set stays. A drag moves the group's
@@ -434,10 +457,12 @@ function pressGroup(event, members) {
         dragCollapse = null;
         startDrag(event, set, members[0]);
         armMoreToggle(event, entries);
+        if (gid) _gmPicked.add(gid);   // counted once the tap has added its devices (pickedGroups)
         return;
     }
     // Already the selection: leave it be, so the bulk panel's draft stays.
     if (!(all && state.selection.size === members.length)) selectEntries(entries);
+    pickGroup(gid, true);
     dragCollapse = null;
     startDrag(event, members, members[0]);
 }
@@ -457,7 +482,7 @@ function pressFold(event, group, members) {
     // Shift/Ctrl/Cmd: about the selection, as it is on a device.
     // So is Select more's tap, which gathers the group's devices instead of
     // expanding it (pressGroup).
-    if (addsToSelection(event) || (selectMoreOn() && !(event.button > 0))) { _gmFoldPress = null; pressGroup(event, members); return; }
+    if (addsToSelection(event) || (selectMoreOn() && !(event.button > 0))) { _gmFoldPress = null; pressGroup(event, members, group.id); return; }
     event.stopPropagation();
     _gmFoldPress = null;
     // Only the main button taps or drags. A right press is the rack's Open
@@ -1056,9 +1081,9 @@ function drawGroupFrames(view, reuse) {
         tip.textContent = tipOf(group);
         g._gmKey = gmFrameKey(group, text.textContent, tip.textContent);
         tab.appendChild(tip);
-        tab.addEventListener('mousedown', (e) => pressGroup(e, groupMembers(group.id, true)));
+        tab.addEventListener('mousedown', (e) => pressGroup(e, groupMembers(group.id, true), group.id));
         // A finger drags the frame as the mouse does (touchPress, js/app.js).
-        onMapTouch(tab, (e) => touchPress(e, (ev) => pressGroup(ev, groupMembers(group.id, true)), () => !!groupById(group.id)));
+        onMapTouch(tab, (e) => touchPress(e, (ev) => pressGroup(ev, groupMembers(group.id, true), group.id), () => !!groupById(group.id)));
         g.appendChild(tab);
         // Over the tab's left end, but not in it (see gmToggle).
         const toggle = gmToggle(group.id, false);

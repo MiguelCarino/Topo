@@ -199,6 +199,8 @@ paletteDefs.forEach((d) => {
     // On a phone js/mobile.js takes it: the drawer stays open at the new
     // device's fields, and it is panned into view when the drawer closes.
     btn.onclick = () => {
+        // Several devices selected, or a group picked: one for each (spawnForSelection, js/app.js).
+        if (spawnForSelection(d.type)) return;
         const connectTo = (state.selectedType === 'node' && state.selectedId) ? state.selectedId : null;
         if (typeof window.phonePaletteDevice === 'function' && window.phonePaletteDevice(d.type, connectTo)) return;
         spawnNode(d.type, { connectTo });
@@ -3259,6 +3261,7 @@ function select(id, type) {
 }
 function selectNow(id, type) {
     setSelectionEntries(id ? [{ type, id }] : []); state.linkSourceId = null;
+    if (typeof forgetPickedGroups === 'function') forgetPickedGroups();   // one thing, or nothing: no group is picked (js/groupmap.js)
     updateRailWrap();
     // The set has ended: what was typed into the bulk panel for it goes too.
     if (typeof resetBulkDraft === 'function') resetBulkDraft();

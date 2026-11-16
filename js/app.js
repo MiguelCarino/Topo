@@ -70,6 +70,8 @@ function spawnNodeNow(type, opts) {
         const isVirtual = isVirtualType(connectTo.type) || isVirtualType(type);
         state.links.push(bindLink({ id: nextId('l'), source: connectTo.id, target: node.id, attachment: isVirtual ? 'bridged' : null }));
     }
+    // One of several (spawnForSelection): it selects, saves, draws and says once for all.
+    if (opts.many) { if (pooledNote) opts.many.push(pooledNote); return node; }
     select(node.id, 'node'); save();
     renderNodeDiagnostics(node, drawnDiag(renderCanvasOnly()));
     // A printer or server that found no address outside the pool: said, as
@@ -80,6 +82,40 @@ function spawnNodeNow(type, opts) {
     else if (node.group && opts.group && typeof addedToGroupSaid === 'function') showToast(addedToGroupSaid(node, groupById(node.group)), 'ok');
     if (node.group && typeof refreshGroupViews === 'function') refreshGroupViews(true);
     return node;   // as spawnAnnotation does, so a caller can go on to configure it
+}
+// The palette's click with several devices selected, or a group picked: a
+// new device for each. A group picked as a group (pickedGroups, js/
+// groupmap.js: its tab, Shift for more, Select members) gets one inside it,
+// uncabled, beside its rightmost device; every other selected device gets
+// one cabled to it, as a click with it alone selected does. One undo step.
+// The selection stays what it was (the groups whole, their new device with
+// them), so the next click adds one more to each.
+// -> the new devices, or null when it is not that case (one device, or nothing).
+function spawnForSelection(type) {
+    const ids = selectedOf('node');
+    const groups = isReduced() || typeof pickedGroups !== 'function' ? [] : pickedGroups();
+    if (ids.length < 2 && !groups.length) return null;
+    if (readOnlyRefuses()) return [];
+    return batch(() => {
+        const made = [], kept = [], notes = [], grouped = new Set();
+        groups.forEach((g) => {
+            const members = groupMembers(g.id, true);
+            members.forEach((n) => grouped.add(n.id));
+            const last = members.reduce((a, b) => (b.x > a.x ? b : a));
+            const node = spawnNodeNow(type, { at: { x: last.x + 110, y: last.y }, group: g.id, many: notes });
+            if (node) { made.push(node); kept.push({ type: 'node', id: node.id }); }
+        });
+        ids.filter((id) => !grouped.has(id)).forEach((id) => {
+            const node = spawnNodeNow(type, { connectTo: id, many: notes });
+            if (node) made.push(node);
+        });
+        if (!made.length) return made;
+        selectEntries([...state.selection, ...kept]);
+        save(); renderCanvasOnly();
+        if (typeof refreshGroupViews === 'function') refreshGroupViews(true);
+        showToast(notes[0] || t('{n} devices added.', { n: made.length }), notes.length ? 'warn' : 'ok');
+        return made;
+    });
 }
 
 // A new device of `type` at (x, y), snapped to the grid, not yet on the map:
