@@ -272,6 +272,19 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('…Yes removes it, the data stays', await until(() => !host.svc.installed) && /Stop using this PC as the server\?/.test(asked.message) && asked.danger === true
       && await until(() => /Its data stays on this PC/.test(el('setDsStatus').textContent)) && !el('setDsService').hidden && !el('setDsEnabledRow').hidden);
 
+    // What a button said is not undone by the read the open dialog makes
+    // every two seconds (the cause of this suite failing one run in three).
+    ok('the removal is still said after the dialog\'s own next read', (await DS.dsRefresh(false, true), /Its data stays on this PC/.test(el('setDsStatus').textContent)), el('setDsStatus').textContent);
+    host.deny = true;
+    const late = DS.dsRefresh(false, true);        // asked before the action
+    el('setDsService').click();
+    await until(() => /administrator prompt was closed/.test(el('setDsStatus').textContent));
+    await late;
+    ok('a read asked before an action does not draw over what the action said', /administrator prompt was closed/.test(el('setDsStatus').textContent) && el('setDsStatus').classList.contains('ds-err'), el('setDsStatus').textContent);
+    host.deny = false;
+    await DS.dsRefresh(false);
+    ok('a read somebody asked for draws the plain state at once', !/administrator prompt|Its data stays/.test(el('setDsStatus').textContent) && !el('setDsStatus').classList.contains('ds-err'), el('setDsStatus').textContent);
+
     // ---- The first-run question ----
     closeSettings(); await settle();
     asked = null;

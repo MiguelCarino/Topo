@@ -1717,6 +1717,40 @@ const asIcon = (v) => (typeof v === 'string' && v.length <= ICON_MAX && ICON_RE.
 const ACCESS_KINDS = ['web', 'ssh', 'rdp', 'vnc', 'telnet'];
 const ACCESS_PORTS = { web: 80, ssh: 22, rdp: 3389, vnc: 5900, telnet: 23 };
 const ACCESS_MAX = 8;
+// The ways in as one cell of a sheet, and back (NODE_FIELDS access, below).
+// One way: its kind (a web page is http or https), ":port" when it is not
+// the kind's own, then a user name, or for a web page its path.
+function accessToText(v) {
+    const list = Array.isArray(v) ? v : [];
+    return list.map((a) => {
+        const kind = a.kind === 'web' ? (a.tls ? 'https' : 'http') : a.kind;
+        return [kind + (a.port ? `:${a.port}` : ''), a.kind === 'web' ? a.path : a.user].filter(Boolean).join(' ');
+    }).join('; ');
+}
+// -> the list, [] for "none", null when a way is not understood (the whole
+// cell is refused: half a list would lose the rest on the way back).
+function accessFromText(text) {
+    const cell = String(text == null ? '' : text).trim();
+    if (/^(none|-|—)$/i.test(cell)) return [];
+    const out = [];
+    for (const part of cell.split(';').map((p) => p.trim()).filter(Boolean)) {
+        const [head, ...rest] = part.split(/\s+/);
+        const hm = /^([a-z]+)(?::(\d{1,5}))?$/i.exec(head);
+        if (!hm || rest.length > 1) return null;
+        const word = hm[1].toLowerCase();
+        const kind = word === 'http' || word === 'https' || word === 'web' ? 'web' : word;
+        const a = { kind };
+        if (word === 'https') a.tls = true;
+        if (hm[2]) a.port = Number(hm[2]);
+        if (rest[0]) { if (kind === 'web') a.path = rest[0]; else a.user = rest[0]; }
+        const kept = asAccess([a]);
+        // What the format would change (a kind it does not know, a port out of range, a path with no slash) is refused, not mended.
+        if (!kept || accessToText(kept) !== accessToText([a])) return null;
+        out.push(kept[0]);
+    }
+    if (!out.length || out.length > ACCESS_MAX) return null;
+    return out;
+}
 function asAccess(v) {
     if (!Array.isArray(v)) return undefined;
     const out = [];
@@ -1943,7 +1977,9 @@ const NODE_FIELDS = [
     // serializes as before. Not in the spreadsheet: a picture is no cell,
     // and the ways in are edited on the device.
     { key: 'icon', kind: 'raw', label: 'Own icon', read: asIcon, write: asIcon },
-    { key: 'access', kind: 'raw', label: 'Reached by', read: asAccess, write: asAccess }
+    // In a sheet (js/csv.js) the ways in are one cell, "; " between them:
+    // "https:8443 /admin; ssh:2222 admin; rdp Admin; vnc". "none" clears them.
+    { key: 'access', kind: 'raw', label: 'Reached by', csv: 'reached_by', read: asAccess, write: asAccess, toText: accessToText, fromText: accessFromText }
 ];
 
 // A cable's own facts (link.cable, plan section 4): the label on both ends of
@@ -2058,7 +2094,7 @@ const LINK_FIELDS = [
     { key: 'providers', kind: 'raw', label: 'Providers', read: asProviderRefs, write: asProviderRefs, csv: 'provider', bulk: true,
       toText: (v) => providerRefsText(v) },
     // v21 (D443): its part in the way out, 'primary' or 'backup'.
-    { key: 'uplink', kind: 'raw', label: 'Way out', read: asUplink, write: asUplink }
+    { key: 'uplink', kind: 'raw', label: 'Way out', csv: 'way_out', read: asUplink, write: asUplink }
 ];
 
 const fieldRead = (f) => f.read || FIELD_KINDS[f.kind].read;
@@ -4475,7 +4511,11 @@ function nodePlaceText(node, groups = state.groups) {
 // a routing device, a radio-serving pair, a loop or the depth cap): one that
 // runs out at a dead end or a fork went down, not up, and is taken back.
 const LOCATE_HOPS_MAX = 4;
-const LOCATE_GAPS = ['noCable', 'noUplink', 'noPort', 'noJack', 'noVia', 'notGrouped', 'notPlaced', 'radioUnknown', 'apUpstream', 'retired'];
+// offNet (v21, D441) is no gap to fill: the device is joined by a link that
+// carries no IP (Thread, Zigbee, Z-Wave, Bluetooth, a serial line), so it has
+// no cable to a switch and none is expected. Its `far` is what it is joined
+// to and `medium` how.
+const LOCATE_GAPS = ['noCable', 'noUplink', 'offNet', 'noPort', 'noJack', 'noVia', 'notGrouped', 'notPlaced', 'radioUnknown', 'apUpstream', 'retired'];
 function locatePath(node, opts = {}) {
     // As uplinkOf: once any list is given, a missing one counts as empty,
     // never as the open document's.
@@ -4586,7 +4626,19 @@ function locatePathNow(node, nodes, links, groups, live, pass) {
             const far = l.source !== l.target && other(l, n);
             return !!far && !kin(n, far) && !isOffNetMedium(mediumOf(l));
         }));
-        gap(any ? 'noUplink' : 'noCable', -1, -1, root);
+        // Joined by a link that carries no IP, and by nothing else: that is
+        // where it is, and no cable is missing.
+        let joined = null;
+        if (!any) {
+            [node, ...hosts].some((n) => linksOf(n).some((l) => {
+                const far = l.source !== l.target && other(l, n);
+                if (!far || kin(n, far) || !isNonIpMedium(mediumOf(l))) return false;
+                joined = { link: l, far, medium: mediumOf(l) };
+                return true;
+            }));
+        }
+        if (joined) gap('offNet', -1, -1, root, joined);
+        else gap(any ? 'noUplink' : 'noCable', -1, -1, root);
     }
 
     starts.forEach((s, li) => {
@@ -4711,6 +4763,9 @@ function locatePathNow(node, nodes, links, groups, live, pass) {
 // said in plain words ("Which socket is not written down."), never guessed.
 // Names, port names and jack labels are data and are never translated.
 const locPlainName = (n) => (n && n.name && String(n.name).trim()) || (n ? n.id : '');
+// A link that carries no IP, by the name people use (names, not translated;
+// a serial line is a word).
+const offNetMediumName = (m) => ({ thread: 'Thread', zigbee: 'Zigbee', zwave: 'Z-Wave', bluetooth: 'Bluetooth' }[m] || t('a serial line'));
 function locatePlainSentence(path) {
     if (!path || !path.start) return '';
     const out = [];
@@ -4718,8 +4773,9 @@ function locatePlainSentence(path) {
     if (hosts.length) out.push(t('Runs on {host}.', { host: locPlainName(hosts[hosts.length - 1]) }));
     const leg = path.legs[0];
     if (!leg) {
-        const g = path.gaps.find((x) => x.code === 'noCable' || x.code === 'noUplink');
-        out.push(t(g && g.code === 'noUplink' ? 'What it is plugged into is not written down.' : 'Not plugged into anything yet.'));
+        const g = path.gaps.find((x) => x.code === 'noCable' || x.code === 'noUplink' || x.code === 'offNet');
+        if (g && g.code === 'offNet') out.push(t('Joined to {device} by {medium}. No cable is expected.', { device: locPlainName(g.far), medium: offNetMediumName(g.medium) }));
+        else out.push(t(g && g.code === 'noUplink' ? 'What it is plugged into is not written down.' : 'Not plugged into anything yet.'));
         return out.join(' ');
     }
     leg.hops.forEach((h, i) => {
@@ -5338,13 +5394,15 @@ function asListRefs(v) {
     v.forEach((r) => { const x = asGroupRef(r); if (x && !out.includes(x) && out.length < LIST_MAX) out.push(x); });
     return out.length ? out : undefined;
 }
+// csv: the column in lists.csv (js/csv.js): the addresses and the two rules
+// are "; " between entries, a rule naming a list by its name or its id.
 const LIST_FIELDS = [
-    { key: 'id', kind: 'raw', read: (v) => asGroupRef(v) || nextId('al'), label: 'ID' },
-    { key: 'name', kind: 'raw', read: providerLine(LIST_NAME_MAX), write: providerLine(LIST_NAME_MAX), label: 'Name' },
-    { key: 'members', kind: 'raw', read: asListMembers, write: asListMembers, label: 'Addresses' },
-    { key: 'blocked', kind: 'raw', read: asListRefs, write: asListRefs, label: 'May not reach' },
-    { key: 'allowed', kind: 'raw', read: asListRefs, write: asListRefs, label: 'May reach' },
-    { key: 'notes', kind: 'raw', read: providerNotes, write: providerNotes, label: 'Notes' }
+    { key: 'id', kind: 'raw', read: (v) => asGroupRef(v) || nextId('al'), label: 'ID', csv: 'list_id' },
+    { key: 'name', kind: 'raw', read: providerLine(LIST_NAME_MAX), write: providerLine(LIST_NAME_MAX), label: 'Name', csv: 'name' },
+    { key: 'members', kind: 'raw', read: asListMembers, write: asListMembers, label: 'Addresses', csv: 'addresses' },
+    { key: 'blocked', kind: 'raw', read: asListRefs, write: asListRefs, label: 'May not reach', csv: 'may_not_reach' },
+    { key: 'allowed', kind: 'raw', read: asListRefs, write: asListRefs, label: 'May reach', csv: 'may_reach' },
+    { key: 'notes', kind: 'raw', read: providerNotes, write: providerNotes, label: 'Notes', csv: 'notes' }
 ];
 // Load: coerced, one per id, a name required, at most LIST_MAX; a rule that
 // names a list the document lacks, or the list itself, is dropped.

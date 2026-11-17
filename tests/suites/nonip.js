@@ -55,6 +55,13 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('by Zigbee: nothing about ports from the sensors or their hub', ports() === '', ports());
     const said = evaluatePorts(getNode('s1'));
     ok('…the sensor\'s Ports line says why', said.level === 'ok' && /Joined without a network port/.test(said.text), JSON.stringify(said));
+    // Where is it plugged in? Joined to its hub, and no cable is missing.
+    const where = locatePath(getNode('s1'));
+    const off = where.gaps.find((g) => g.code === 'offNet');
+    ok('Locate: the sensor is joined to its hub, not missing a cable', !!off && off.far.id === 'hub' && off.medium === 'zigbee' && !where.gaps.some((g) => g.code === 'noCable' || g.code === 'noUplink'), JSON.stringify(where.gaps.map((g) => g.code)));
+    ok('…said in one plain sentence, in the Simple view\'s words', locatePlainSentence(where) === 'Joined to HUB by Zigbee. No cable is expected.', locatePlainSentence(where));
+    ok('…and in the full editor\'s', locateGapText(off) === 'Joined to HUB by Zigbee. No cable is expected.', locateGapText(off));
+    ok('a device with no link at all is still not plugged into anything', (() => { batch(() => { state.nodes.push(N('lonely', 'iot')); save(); }); const w = locatePath(getNode('lonely')); const r = w.gaps.some((g) => g.code === 'noCable') && locatePlainSentence(w) === 'Not plugged into anything yet.'; undo(); return r; })());
     replaceDocument(site('utp'), { origin: 'file', docId: 'doc-nonip' }); renderCanvasOnly(); await tick();
     ok('the same drawing by cable, unbound, is asked about every end', /hub/.test(ports()) && /s1/.test(ports()) && /s3/.test(ports()), ports());
     replaceDocument(site('zigbee'), { origin: 'file', docId: 'doc-nonip' }); renderCanvasOnly(); await tick();
@@ -87,7 +94,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
 
     // ---- 6. Names ----
     const { has, locales } = window.CarinoI18N;
-    const names = ['Thread (smart home)', 'Zigbee (smart home)', 'Z-Wave (smart home)', 'Bluetooth', 'Serial cable', 'Joined without a network port. No address is expected.'];
+    const names = ['Thread (smart home)', 'Zigbee (smart home)', 'Z-Wave (smart home)', 'Bluetooth', 'Serial cable', 'Joined without a network port. No address is expected.', 'Joined to {device} by {medium}. No cable is expected.', 'a serial line'];
     locales.forEach((loc) => ok(`${loc} carries the names`, names.every((s) => has(loc, s)), names.filter((s) => !has(loc, s)).join(' | ')));
     ok('each kind has a Simple name', [...pick.options].every((o) => !!o.dataset.simple));
     select(null, null);

@@ -374,13 +374,14 @@ function csvCablesSheet() {
     // cable's own facts: what the link is, then what is written on the cable.
     // As stored, not as inferred: a band nobody picked is blank, and comes
     // back as the default it was.
+    // way_out (v21): primary or backup, on a line out to the internet.
     const headers = ['cable_id', 'from_device', 'from_name', 'from_port', 'to_device', 'to_name', 'to_port', 'medium', 'attachment']
-        .concat(CSV_LINK_WIFI.map((w) => w.csv), CABLE_FIELDS.map((f) => f.csv), ['cable_provider']);
+        .concat(CSV_LINK_WIFI.map((w) => w.csv), CABLE_FIELDS.map((f) => f.csv), ['cable_provider', 'way_out']);
     const rows = state.links.filter((l) => getNode(l.source) && getNode(l.target)).map((l) => [
         l.id, l.source, name(l.source), port(l.source, l.sourceIface), l.target, name(l.target), port(l.target, l.targetIface),
         l.medium || '', l.attachment || ''].concat(
         CSV_LINK_WIFI.map((w) => { const v = linkWifiOf(l, w.key); return v === undefined ? '' : w.key === 'ssid' ? csvWifiRef(v) : String(v); }),
-        CABLE_FIELDS.map((f) => cableOf(l, f.key)), [providerRefsText(l.providers)]));
+        CABLE_FIELDS.map((f) => cableOf(l, f.key)), [providerRefsText(l.providers), l.uplink || '']));
     return { name: 'cables', headers, rows };
 }
 // The three facts of link.wifi, under the names cables.csv gives them.
@@ -480,6 +481,27 @@ function csvWatchCell(f, w) {
     if (f.key === 'outage') return watchRecordsOnly(w) ? 'false' : 'true';
     return csvValue(f, w[f.key]);
 }
+// The address lists (v21, js/model.js "Address lists"), in the document's
+// order: every LIST_FIELDS key under its csv name. The addresses and the two
+// rules are "; " between entries; a rule names the other list by its name,
+// or by its id when two lists share that name or the name holds a ";".
+const CSV_LIST_COLS = LIST_FIELDS.filter((f) => f.csv);
+function csvListRefText(id) {
+    const l = listById(id);
+    if (!l) return String(id);
+    const twins = (state.lists || []).filter((x) => csvLower(x.name) === csvLower(l.name)).length;
+    return twins > 1 || /;/.test(l.name) || listById(l.name) ? l.id : l.name;
+}
+function csvListCell(f, l) {
+    const v = l[f.key];
+    if (f.key === 'members') return (v || []).join('; ');
+    if (f.key === 'blocked' || f.key === 'allowed') return (v || []).map(csvListRefText).join('; ');
+    return v == null ? '' : String(v);
+}
+function csvListsSheet() {
+    return { name: 'lists', headers: CSV_LIST_COLS.map((f) => f.csv),
+        rows: (state.lists || []).map((l) => CSV_LIST_COLS.map((f) => csvListCell(f, l))) };
+}
 function csvWatchSheet() {
     return { name: 'watched', headers: CSV_WATCH_COLS.map((f) => f.csv),
         rows: (state.watch || []).map((w) => CSV_WATCH_COLS.map((f) => csvWatchCell(f, w))) };
@@ -552,6 +574,8 @@ const CSV_SHEETS = [
     { key: 'providers', label: 'Providers', plain: true, build: csvProvidersSheet, shown: () => (state.providers || []).length > 0 },
     // Only once there is a watched address (v20), likewise.
     { key: 'watched', label: 'Watched addresses', plain: true, build: csvWatchSheet, shown: () => (state.watch || []).length > 0 },
+    // Only once there is an address list (v21), likewise.
+    { key: 'lists', label: 'Address lists', plain: true, build: csvListsSheet, shown: () => (state.lists || []).length > 0 },
     // Only once there is a saved search, likewise.
     { key: 'searches', label: 'Saved searches', plain: true, build: csvSearchesSheet, shown: () => (state.searches || []).length > 0 },
     { key: 'findings', label: 'Findings', plain: true, build: csvFindingsSheet }
@@ -823,6 +847,12 @@ const csvProviderRefsParse = (text) => {
     const rank = new Map((state.providers || []).map((p, i) => [p.id, i]));
     return { value: list.map((p) => p.id).sort((a, b) => rank.get(a) - rank.get(b)) };
 };
+// A rule's lists as typed, "; " between them ("none" clears the rule).
+function csvListRefsParse(text) {
+    const parts = String(text).split(';').map((p) => p.trim()).filter(Boolean);
+    if (parts.length === 1 && /^(none|-|—)$/i.test(parts[0])) return { value: null };
+    return parts.length ? { value: { names: parts } } : { error: true };
+}
 const CSV_PARSERS = {
     type: csvTypeParse,
     providers: csvProviderRefsParse,
@@ -866,6 +896,17 @@ const CSV_PARSERS = {
     // characters and drops a prefix ending in a digit, so a 40-character
     // cell came back as "no scheme" and the review showed a change that
     // wiped the switch's port names instead of a conflict.
+    // The ways in (v21), one cell (accessFromText, js/model.js).
+    access: (text) => fromTextResult(accessFromText, text),
+    'lk:uplink': (text) => { const v = csvLower(text).replace(/[\s_-]+/g, ''); return v === 'primary' || v === 'backup' ? { value: v } : v === 'none' || v === 'notsaid' ? { value: null } : { error: true }; },
+    // lists.csv (v21): addresses and subnets, never a range or a name; a rule's lists are resolved once every row is read.
+    'al:members': (text) => {
+        const parts = String(text).split(/[;,\n]+/).map((p) => p.trim()).filter(Boolean);
+        if (parts.length === 1 && /^(none|-|—)$/i.test(parts[0])) return { value: null };
+        const kept = asListMembers(parts);
+        return kept && kept.length === new Set(parts).size ? { value: kept } : { error: true };
+    },
+    'al:blocked': csvListRefsParse, 'al:allowed': csvListRefsParse,
     portScheme: (text) => {
         const sc = NODE_FIELDS.find((f) => f.key === 'portScheme').fromText(text);
         if (!sc) return { error: true };
@@ -1053,7 +1094,7 @@ function csvBuildTargets() {
     add('cab:switch', 'cabling', null, 'Switch');
     add('cab:port', 'cabling', null, 'Switch port', true);
     add('cab:local', 'cabling', null, 'Port on the device', true);
-    ['id', 'source', 'target', 'sourceIface', 'targetIface', 'medium', 'attachment'].forEach((k) => add(`lk:${k}`, 'cable', LINK_FIELDS.find((f) => f.key === k), null, k === 'source' || k === 'target'));
+    ['id', 'source', 'target', 'sourceIface', 'targetIface', 'medium', 'attachment', 'uplink'].forEach((k) => add(`lk:${k}`, 'cable', LINK_FIELDS.find((f) => f.key === k), null, k === 'source' || k === 'target'));
     // The cable's provider under a name of its own (cable_provider): a bare
     // "provider" heading is a device's, and would make a cable sheet mixed.
     add('lk:providers', 'cable', Object.assign({}, LINK_FIELDS.find((f) => f.key === 'providers'), { csv: 'cable_provider', label: 'Cable provider' }), null, true);
@@ -1082,6 +1123,8 @@ function csvBuildTargets() {
     SEARCH_FIELDS.forEach((f) => add(`sq:${f.key}`, 'sqdef', f, f.key === 'id' ? 'Search ID' : null, f.key !== 'id'));
     // A watched address's own fields (WATCH_FIELDS, v20): watched.csv.
     CSV_WATCH_COLS.forEach((f) => add(`wa:${f.key}`, 'wadef', f, f.key === 'id' ? 'Watch ID' : null, f.key !== 'id'));
+    // An address list's own fields (LIST_FIELDS, v21): lists.csv.
+    CSV_LIST_COLS.forEach((f) => add(`al:${f.key}`, 'aldef', f, f.key === 'id' ? 'List ID' : null, f.key !== 'id'));
     return out;
 }
 let _csvTargets = null;
@@ -1203,7 +1246,10 @@ const csvIsSearchSheet = (sheet) => !!sheet.hasHeadings && !csvIsSubnetSheet(she
 // A sheet of watched addresses by its watch_id column (watched.csv, v20).
 const CSV_WATCH_HEADINGS = new Set(['watch id']);
 const csvIsWatchSheet = (sheet) => !!sheet.hasHeadings && sheet.headers.some((h) => CSV_WATCH_HEADINGS.has(csvNorm(h)));
-const csvSheetFamily = (sheet) => (csvIsWatchSheet(sheet) ? 'wadef' : csvIsSubnetSheet(sheet) ? 'network' : csvIsGroupSheet(sheet) ? 'grpdef' : csvIsSearchSheet(sheet) ? 'sqdef' : csvIsProviderSheet(sheet) ? 'pvdef' : csvIsWifiSheet(sheet) ? 'wifidef' : null);
+// A sheet of address lists by its list_id column (lists.csv, v21).
+const CSV_LIST_HEADINGS = new Set(['list id']);
+const csvIsListSheet = (sheet) => !!sheet.hasHeadings && sheet.headers.some((h) => CSV_LIST_HEADINGS.has(csvNorm(h)));
+const csvSheetFamily = (sheet) => (csvIsListSheet(sheet) ? 'aldef' : csvIsWatchSheet(sheet) ? 'wadef' : csvIsSubnetSheet(sheet) ? 'network' : csvIsGroupSheet(sheet) ? 'grpdef' : csvIsSearchSheet(sheet) ? 'sqdef' : csvIsProviderSheet(sheet) ? 'pvdef' : csvIsWifiSheet(sheet) ? 'wifidef' : null);
 // With no heading row: what a column's values look like (most of them).
 function csvGuessByValues(values) {
     const vals = values.map((v) => String(v).trim()).filter(Boolean);
@@ -1300,6 +1346,10 @@ function csvSheetKind(mapping) {
     if (keys.some((k) => csvTarget(k).group === 'pvdef')) {
         return keys.every((k) => csvTarget(k).group === 'pvdef') ? 'providers' : 'mixed-providers';
     }
+    // 'lists' likewise, when a column is an address list's own field (v21).
+    if (keys.some((k) => csvTarget(k).group === 'aldef')) {
+        return keys.every((k) => csvTarget(k).group === 'aldef') ? 'lists' : 'mixed-lists';
+    }
     // 'watch' likewise, when a column is a watched address's own field (v20).
     if (keys.some((k) => csvTarget(k).group === 'wadef')) {
         return keys.every((k) => csvTarget(k).group === 'wadef') ? 'watch' : 'mixed-watch';
@@ -1383,7 +1433,8 @@ function csvMatch(vals, matchers) {
 
 // Shown in the review as it would be on the map.
 function csvShow(key, v) {
-    if (key === 'portScheme' || key === 'if:bond') return csvTarget(key).field.toText(v);
+    if (key === 'portScheme' || key === 'if:bond' || key === 'access') return csvTarget(key).field.toText(v);
+    if (key === 'lk:uplink') return v === 'primary' ? t('Primary') : v === 'backup' ? t('Back-up') : '';
     // Nothing stored is full depth, not a blank.
     if (key === 'rackDepth') return t(v === 'half' ? 'half depth' : 'full depth');
     if (v === undefined || v === null) return '';
@@ -1403,7 +1454,7 @@ function csvShow(key, v) {
 // Equal as the field means it: two spellings of one MAC or one address are
 // the same value.
 function csvSame(key, a, b) {
-    if (key === 'portScheme' || key === 'if:bond') { const f = csvTarget(key).field; return f.toText(a) === f.toText(b); }
+    if (key === 'portScheme' || key === 'if:bond' || key === 'access') { const f = csvTarget(key).field; return f.toText(a) === f.toText(b); }
     if (key === 'if:mac') return normMac(a) === normMac(b);
     if (key === 'if:ip') {
         const x = parseValidCIDR(String(a || '').trim()), y = parseValidCIDR(String(b || '').trim());
@@ -1490,6 +1541,7 @@ function csvPlanMapped(sheet, mapping, opts = {}) {
     if (kind === 'mixed-providers') return Object.assign(empty, { errors: [t(CSV_MIXED_PROVIDERS)] });
     if (kind === 'mixed-searches') return Object.assign(empty, { errors: [t(CSV_MIXED_SEARCHES)] });
     if (kind === 'mixed-watch') return Object.assign(empty, { errors: [t(CSV_MIXED_WATCH)] });
+    if (kind === 'mixed-lists') return Object.assign(empty, { errors: [t(CSV_MIXED_LISTS)] });
     if (!mapping.some(Boolean)) return Object.assign(empty, { errors: [t('Pick what at least one column is.')] });
     // A depth column whose heading asks "half depth?" answers the opposite
     // question to rackDepth's parser, which reads a yes as full depth: its
@@ -1526,6 +1578,7 @@ function csvPlanMapped(sheet, mapping, opts = {}) {
     if (kind === 'wifi') return csvPlanWifi(rows, empty);
     if (kind === 'providers') return csvPlanProviders(rows, empty);
     if (kind === 'watch') return csvPlanWatch(rows, empty);
+    if (kind === 'lists') return csvPlanLists(rows, empty);
     if (kind === 'searches') return csvPlanSearches(rows, empty);
     return kind === 'cables' ? csvPlanCables(rows, empty) : csvPlanDevices(rows, empty);
 }
@@ -1545,6 +1598,7 @@ const CSV_MIXED_PORTS = 'A sheet of ports maps the device, the port and its labe
 const CSV_MIXED_SUBNETS = 'A sheet of subnets maps only what a subnet has: its CIDR, name, VLAN, gateway and so on. Leave the other columns unmapped.';
 const CSV_MIXED_GROUPS = 'A sheet of groups maps only what a group has: its id, name, kind, parent and height. Leave the other columns unmapped.';
 const CSV_MIXED_WATCH = 'A sheet of watched addresses maps only what a watched address has: its name, address, group, the device it is reached through, providers, raise_issue, target and notes. Leave the other columns unmapped.';
+const CSV_MIXED_LISTS = 'A sheet of address lists maps only what a list has: its name, addresses, the lists it may not reach, the lists it may reach and notes. Leave the other columns unmapped.';
 const CSV_MIXED_PROVIDERS = 'A sheet of providers maps only what a provider has: its name, service, contact, phone, email, account, support hours and notes. Leave the other columns unmapped.';
 const CSV_MIXED_SEARCHES = 'A sheet of saved searches maps only what a saved search has: its name, search, columns, sort, whether it is descending and whether the site report prints it. Leave the other columns unmapped.';
 const CSV_MIXED_WIFI ='A sheet of Wi-Fi networks maps only what a Wi-Fi network has: its SSID, security, bands, subnet and whether it is hidden. Leave the other columns unmapped.';
@@ -1554,7 +1608,7 @@ const CSV_MIXED_WIFI ='A sheet of Wi-Fi networks maps only what a Wi-Fi network 
 function csvFinish(plan, results) {
     plan.rows = results.sort((a, b) => a.index - b.index);
     const seen = { add: new Set(), change: new Set(), same: new Set(), conflict: new Set() };
-    plan.rows.forEach((r) => { seen[r.status].add(r.status === 'conflict' ? `row:${r.index}` : (r.newGroup || r.nodeId || r.linkId || (r.netId && `net:${r.netId}`) || (r.grpId && `grp:${r.grpId}`) || (r.wifiId && `wf:${r.wifiId}`) || (r.pvId && `pv:${r.pvId}`) || (r.sqId && `sq:${r.sqId}`) || (r.waId && `wa:${r.waId}`) || `row:${r.index}`)); });
+    plan.rows.forEach((r) => { seen[r.status].add(r.status === 'conflict' ? `row:${r.index}` : (r.newGroup || r.nodeId || r.linkId || (r.netId && `net:${r.netId}`) || (r.grpId && `grp:${r.grpId}`) || (r.wifiId && `wf:${r.wifiId}`) || (r.pvId && `pv:${r.pvId}`) || (r.sqId && `sq:${r.sqId}`) || (r.waId && `wa:${r.waId}`) || (r.alId && `al:${r.alId}`) || `row:${r.index}`)); });
     Object.keys(seen).forEach((k) => { plan.counts[k] = seen[k].size; });
     return plan;
 }
@@ -2490,6 +2544,14 @@ function csvPlanCables(rows, plan) {
                         draft.medium = values['lk:medium'];
                     }
                 }
+                if (values['lk:uplink'] !== undefined) {
+                    const want = values['lk:uplink'] || undefined;
+                    if (Object.prototype.hasOwnProperty.call(prev, 'uplink') && prev.uplink !== want) return conflict(t('Another row sets {field} to {value}.', { field: 'Way out', value: csvShow('lk:uplink', prev.uplink) || '—' }));
+                    if ((link.uplink || undefined) !== want) {
+                        out.changes.push({ field: 'Way out', before: csvShow('lk:uplink', link.uplink), after: csvShow('lk:uplink', want) });
+                        draft.uplink = want || null;
+                    }
+                }
                 if (values['lk:attachment'] !== undefined) {
                     if (prev.attachment !== undefined && prev.attachment !== values['lk:attachment']) return conflict(t('Another row sets {field} to {value}.', { field: 'Attachment', value: prev.attachment }));
                     if ((link.attachment || '') !== values['lk:attachment']) {
@@ -2585,6 +2647,7 @@ function csvPlanCables(rows, plan) {
             const l = { id, source: a.id, target: b.id, attachment: values['lk:attachment'] || (isVirtualType(a.type) || isVirtualType(b.type) ? 'bridged' : null),
                 sourceIface: sp.id, targetIface: tp.id };
             if (values['lk:medium'] !== undefined) l.medium = values['lk:medium'];
+            if (values['lk:uplink']) l.uplink = values['lk:uplink'];
             if (values['lk:providers'] !== undefined) l.providers = values['lk:providers'];
             const facts = {};
             CABLE_FIELDS.forEach((f) => { if (values[`lk:cable.${f.key}`] !== undefined) facts[f.key] = values[`lk:cable.${f.key}`]; });
@@ -3074,6 +3137,105 @@ function csvPlanWatch(rows, plan) {
     return csvFinish(plan, results);
 }
 
+// One row per address list (lists.csv, v21). Found by its list_id, then by
+// its name (any case); a name two lists share is a conflict until the row
+// gives the id. A row matching nothing is a new list, under the sheet's id
+// when no list here has it, and needs its name. Blank cells leave a field as
+// it is. A rule names lists by name or id, of the network or of this sheet:
+// they are resolved once every row is read, so a sheet may name a list a
+// later row makes; a list it cannot find refuses the row.
+function csvPlanLists(rows, plan) {
+    const results = [];
+    const claimed = new Set();
+    const label = (key) => csvTargetLabel(csvTarget(`al:${key}`));
+    const have = state.lists || [];
+    const same = (a, b) => JSON.stringify(a == null ? null : a) === JSON.stringify(b == null ? null : b);
+    let room = LIST_MAX - have.length;
+    const staged = [];   // { out, list (existing) or rec (new), values }
+    rows.forEach(({ index, vals }) => {
+        if (!Object.keys(vals).length) return;
+        const out = { index, name: '', status: 'same', changes: [], notes: [], why: '' };
+        const conflict = (why) => { results.push(Object.assign(out, { status: 'conflict', why })); };
+        const values = {}, errors = [];
+        Object.keys(vals).forEach((key) => {
+            const tg = csvTarget(key);
+            const res = tg.parse(vals[key]);
+            if (res.error) errors.push(t('{value} is not a valid {field}.', { value: String(vals[key]).trim() || '—', field: csvTargetLabel(tg) }));
+            else values[key.slice(3)] = res.value;
+        });
+        out.name = values.name || values.id || '';
+        if (errors.length) { conflict(errors.join(' ')); return; }
+        let l = values.id ? listById(values.id) : null;
+        if (!l && values.name) {
+            const named = have.filter((x) => csvLower(x.name) === csvLower(values.name));
+            if (named.length > 1) { conflict(t('Two address lists are named {name}. Give the row its list_id.', { name: values.name })); return; }
+            l = named[0] || null;
+        }
+        if (!l) {
+            if (!values.name) { conflict(t('A new address list needs its name.')); return; }
+            const key = `new:${csvLower(values.name)}`;
+            if (claimed.has(key) || (values.id && claimed.has(`id:${values.id}`))) { conflict(t('Another row is this address list.')); return; }
+            if (room <= 0) { conflict(t('A network holds at most {n} address lists.', { n: LIST_MAX })); return; }
+            room--;
+            claimed.add(key);
+            const id = values.id && asGroupRef(values.id) && !listById(values.id) ? values.id : nextId('al');
+            claimed.add(`id:${id}`);
+            staged.push({ out, rec: { id, name: values.name }, values });
+            return;
+        }
+        if (claimed.has(l.id)) { conflict(t('Another row is this address list.')); return; }
+        claimed.add(l.id);
+        staged.push({ out, list: l, values });
+    });
+    // Every list a rule may name: the network's and this sheet's new ones.
+    const all = have.map((l) => ({ id: l.id, name: l.name })).concat(staged.filter((s) => s.rec).map((s) => ({ id: s.rec.id, name: s.rec.name })));
+    const nameOf = (id) => { const x = all.find((y) => y.id === id); return x ? x.name : String(id); };
+    const resolve = (ref, own) => {
+        const byId = all.find((x) => x.id === ref);
+        if (byId) return byId.id === own ? null : byId.id;
+        const named = all.filter((x) => csvLower(x.name) === csvLower(ref) && x.id !== own);
+        return named.length === 1 ? named[0].id : null;
+    };
+    staged.forEach(({ out, list, rec, values }) => {
+        const own = list ? list.id : rec.id;
+        const next = {};
+        let bad = '';
+        ['name', 'members', 'blocked', 'allowed', 'notes'].forEach((k) => {
+            if (values[k] === undefined || bad) return;
+            if (k !== 'blocked' && k !== 'allowed') { next[k] = values[k] === null || values[k] === '' ? undefined : values[k]; return; }
+            if (values[k] === null) { next[k] = undefined; return; }
+            const ids = [];
+            for (const ref of values[k].names) {
+                const id = resolve(ref, own);
+                if (!id) { bad = t('{value} is not an address list of this network or of this sheet.', { value: ref }); return; }
+                if (!ids.includes(id)) ids.push(id);
+            }
+            next[k] = ids;
+        });
+        if (bad) { results.push(Object.assign(out, { status: 'conflict', why: bad })); return; }
+        const show = (k, v) => (v == null ? '' : k === 'members' ? v.join('; ') : k === 'blocked' || k === 'allowed' ? v.map(nameOf).join('; ') : String(v));
+        if (rec) {
+            Object.keys(next).forEach((k) => { if (next[k] !== undefined) rec[k] = next[k]; });
+            plan.ops.push({ al: { create: rec } });
+            Object.keys(next).forEach((k) => { if (next[k] !== undefined) out.changes.push({ field: label(k), before: '', after: show(k, next[k]) }); });
+            results.push(Object.assign(out, { status: 'add', alId: rec.id, name: rec.name }));
+            return;
+        }
+        out.alId = list.id;
+        out.name = listLabel(list);
+        const set = {};
+        Object.keys(next).forEach((k) => {
+            if (k === 'name' && next[k] === undefined) return;   // a list keeps a name
+            if (same(list[k], next[k])) return;
+            set[k] = next[k] === undefined ? null : next[k];
+            out.changes.push({ field: label(k), before: show(k, list[k]), after: show(k, next[k]) });
+        });
+        if (Object.keys(set).length) { plan.ops.push({ al: { id: list.id, set } }); out.status = 'change'; }
+        results.push(out);
+    });
+    return csvFinish(plan, results);
+}
+
 // One row per provider (providers.csv). Found by its id, then by its name
 // (any case); a name two providers share is a conflict until the row gives
 // the id. A row matching nothing is a new provider, under the sheet's id when
@@ -3419,6 +3581,15 @@ function csvWrite(plan, doc) {
                 if (op.wa.create) { doc.watch.push(read(cloneData(op.wa.create))); return; }
                 const at = doc.watch.findIndex((x) => x.id === op.wa.id);
                 if (at > -1) doc.watch[at] = read(Object.assign({}, doc.watch[at], op.wa.set));
+            });
+            // The address lists likewise, through LIST_FIELDS (v21).
+            plan.ops.forEach((op) => {
+                if (!op.al) return;
+                if (!Array.isArray(doc.lists)) doc.lists = cloneData(state.lists || []);
+                const read = (rec) => readFields(LIST_FIELDS, writeFields(LIST_FIELDS, rec));
+                if (op.al.create) { doc.lists.push(read(cloneData(op.al.create))); return; }
+                const at = doc.lists.findIndex((x) => x.id === op.al.id);
+                if (at > -1) doc.lists[at] = read(Object.assign({}, doc.lists[at], op.al.set));
             });
             // The saved searches likewise, through SEARCH_FIELDS. A field the
             // row clears is null in the set, which the fields read as none.
@@ -4022,9 +4193,10 @@ function renderCsvImport() {
         : kind === 'mixed-wifi' ? t(CSV_MIXED_WIFI)
         : kind === 'mixed-providers' ? t(CSV_MIXED_PROVIDERS)
         : kind === 'mixed-watch' ? t(CSV_MIXED_WATCH)
+        : kind === 'mixed-lists' ? t(CSV_MIXED_LISTS)
         : kind === 'mixed-searches' ? t(CSV_MIXED_SEARCHES)
             : sheet.observed && kind === 'devices' ? seenLine()
-                : t(kind === 'cables' ? 'Rows of cables: {n}' : kind === 'ports' ? 'Rows of ports: {n}' : kind === 'subnets' ? 'Rows of subnets: {n}' : kind === 'groups' ? 'Rows of groups: {n}' : kind === 'wifi' ? 'Rows of Wi-Fi networks: {n}' : kind === 'providers' ? 'Rows of providers: {n}' : kind === 'watch' ? 'Rows of watched addresses: {n}' : kind === 'searches' ? 'Rows of saved searches: {n}' : 'Rows of devices: {n}', { n: sheet.rows.length });
+                : t(kind === 'cables' ? 'Rows of cables: {n}' : kind === 'ports' ? 'Rows of ports: {n}' : kind === 'subnets' ? 'Rows of subnets: {n}' : kind === 'groups' ? 'Rows of groups: {n}' : kind === 'wifi' ? 'Rows of Wi-Fi networks: {n}' : kind === 'providers' ? 'Rows of providers: {n}' : kind === 'lists' ? 'Rows of address lists: {n}' : kind === 'watch' ? 'Rows of watched addresses: {n}' : kind === 'searches' ? 'Rows of saved searches: {n}' : 'Rows of devices: {n}', { n: sheet.rows.length });
     csvEl('csvKind').classList.toggle('csv-kind-bad', /^mixed/.test(kind));
     // 'Ports' stays English here, like 'Interface': the full editor's
     // technical vocabulary (see the header).

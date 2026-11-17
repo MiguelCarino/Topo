@@ -211,12 +211,24 @@ async function dsCopy(text) {
     catch (e) { showToast(text, 'warn'); }
 }
 
-async function dsRefresh(fill) {
+// follow: the read the open dialog makes every two seconds. It must not undo
+// what a button just did: an answer asked for before an action began, or
+// while one ran, is older than what the action drew and is dropped; and what
+// an action said ("Removed. Its data stays on this PC.", or why it failed)
+// stays on the line for DS_NOTE_MS instead of going at the next read, which
+// could be a few milliseconds later. A read somebody asked for (Settings
+// opening, a test) draws the plain state at once.
+const DS_NOTE_MS = 6000;
+async function dsRefresh(fill, follow) {
     if (!dsHasHost()) { dsRender(null); return null; }
+    const turn = _ds.turn || 0;
     try {
         const info = await dsInvoke('server_info');
+        if (follow && (_ds.busy || (_ds.turn || 0) !== turn)) return info;
         if (fill && info && info.settings) dsFill(info.settings);
-        dsRender(info);
+        const kept = follow && _ds.said && Date.now() < _ds.said.until ? _ds.said : null;
+        if (!kept) _ds.said = null;
+        dsRender(info, kept ? kept.text : '', kept ? kept.err : false);
         return info;
     } catch (e) {
         // An app without these commands (an older build): no section.
@@ -231,19 +243,23 @@ async function dsRefresh(fill) {
 async function dsAct(cmd, args) {
     if (_ds.busy) return null;
     _ds.busy = true;
+    _ds.turn = (_ds.turn || 0) + 1;
     const sec = dsEl('setDsSec');
     sec.setAttribute('aria-busy', 'true');
     try {
         const info = await dsInvoke(cmd, args);
         const done = { server_save: t('Saved.'), server_service_install: t('Set up. It starts with this PC from now on.'), server_service_remove: t('Removed. Its data stays on this PC.') };
+        _ds.said = info && done[cmd] ? { text: done[cmd], err: false, until: Date.now() + DS_NOTE_MS } : null;
         if (info) dsRender(info, done[cmd] || '');
         if (cmd === 'server_save' || cmd === 'server_service_install') dsEl('setDsSmtpPass').value = '';
         return { info: info || _ds.info };
     } catch (e) {
+        _ds.said = { text: dsErrText(e), err: true, until: Date.now() + DS_NOTE_MS };
         dsRender(_ds.info || { available: true, settings: dsFormSettings() }, dsErrText(e), true);
         return { error: String(e && e.message ? e.message : e || '') };
     } finally {
         _ds.busy = false;
+        _ds.turn = (_ds.turn || 0) + 1;
         sec.removeAttribute('aria-busy');
     }
 }
@@ -295,7 +311,7 @@ function renderDesktopServerSettings() {
     _ds.timer = setInterval(() => {
         const scrim = dsEl('settingsDialog');
         if (!scrim || scrim.hidden || sec.hidden) { clearInterval(_ds.timer); _ds.timer = 0; return; }
-        if (!_ds.busy) dsRefresh(false);
+        if (!_ds.busy) dsRefresh(false, true);
     }, 2000);
 }
 

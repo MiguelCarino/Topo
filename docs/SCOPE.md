@@ -5770,6 +5770,32 @@ records.
     with a long broken line, not an arrow. The advice about a single way
     out is given only once that line is marked: unmarked, it fired on
     every sample network and on any home with one line, which is most.
+  - [x] Gaps closed after the phases (2026-11-17):
+    - **The spreadsheets carry the v21 facts.** devices.csv gains
+      `reached_by` (a device's ways in as one cell, "https:8443 /admin;
+      ssh:2222 admin", "none" clears), cables.csv gains `way_out` (primary
+      or backup), and a new sheet, lists.csv, holds the address lists
+      (`list_id`, `name`, `addresses`, `may_not_reach`, `may_reach`,
+      `notes`; a rule names a list by name, or by id when two share one),
+      with its import. A device's picture is in no sheet: a picture is not
+      a cell. Its answer checks are still not either, as before.
+      `tests/suites/csv21.js`.
+    - **Where is it plugged in? for a device with no address.** A sensor
+      joined only by Thread, Zigbee, Z-Wave, Bluetooth or a serial line was
+      answered "Not plugged into anything yet." It is now "Joined to
+      {device} by {medium}. No cable is expected." in the Simple view's
+      sentence and the full editor's (`offNet` among Locate's gaps, which is
+      no gap to fill). `tests/suites/nonip.js`.
+    - **History against a real server.** Step 7h of `tests/server-e2e.mjs`
+      now opens the dialog in a browser on the real server: the versions
+      are listed beside the local points, and one is read, opened and
+      drawn.
+    - **The catalogue's install ids** were checked against the public
+      indexes: Homebrew, Flathub, winget's manifests, Debian stable, and
+      Fedora's repositories on this machine. One was wrong and is fixed
+      (the TigerVNC cask is `tigervnc`). openSUSE's site refused the check
+      and RHEL was not checked.
+    - Still open: the importers' address lists have met no real export.
   - [x] 9g. Open a device (2026-11-17; D446), the website. `js/reach.js`.
     The desktop half is 9m, below. `tests/suites/reach.js` covers 9e to
     9g, 9l and 9m's page side.

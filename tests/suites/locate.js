@@ -392,7 +392,8 @@ window.addEventListener('load', async () => {
       ok('a retired start: retired on the device itself, still located', o.start.retired && has(o, 'retired', 'old', -1) && o.legs[0].hops[0].farPort === 'Gi1/0/7', json(codes(o)));
       const every = new Set();
       state.nodes.forEach((n) => locatePath(n).gaps.forEach((x) => every.add(x.code)));
-      ok('every gap code is raised somewhere on this site, and no other', LOCATE_GAPS.every((c) => every.has(c)) && [...every].every((c) => LOCATE_GAPS.includes(c)), [...every].sort().join());
+      // offNet (a link that carries no IP, v21) is raised in tests/suites/nonip.js: this site has no such link.
+      ok('every gap code is raised somewhere on this site, and no other', LOCATE_GAPS.every((c) => c === 'offNet' || every.has(c)) && [...every].every((c) => LOCATE_GAPS.includes(c)), [...every].sort().join());
       const sw = loc('sw1');
       ok('a switch\'s cables down to its devices are not where it is plugged in: no legs, noUplink (not noCable) on itself',
         sw.legs.length === 0 && json(codes(sw)) === json(['noUplink']) && sw.gaps[0].leg === -1, sw.legs.length + ' ' + json(codes(sw)));

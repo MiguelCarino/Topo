@@ -29,6 +29,7 @@ function locateGapText(gap, hop) {
     switch (gap.code) {
         case 'noCable': return t('No cable recorded.');
         case 'noUplink': return t('Nothing recorded leads up from {device}.', { device: name });
+        case 'offNet': return t('Joined to {device} by {medium}. No cable is expected.', { device: locName(gap.far), medium: offNetMediumName(gap.medium) });
         case 'noPort': return t('No port picked at {switch}.', { switch: name });
         case 'noJack': return t('Port {port} has no jack label.', { port: hop ? hop.farPort : gap.portId || '' });
         case 'noVia': return t('No via written for this cable.');

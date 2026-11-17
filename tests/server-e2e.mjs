@@ -331,6 +331,26 @@ try {
     }, cardId);
     ok('7h. an earlier version on the server opens as a document', hist.one && hist.two && hist.differ, hist);
     ok('7h. a header that does not match, or a version that is not there, gives nothing', hist.bad && hist.gone, hist);
+    // The History dialog itself, in the browser that has the network open
+    // (B), against this server: the versions are listed with the local
+    // points, and looking at one reads it, opens it and draws it.
+    const dlg = await B.p.evaluate(async (id) => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        if (state.libraryId !== id) return { err: 'not open' };
+        await TopoHistory.open();
+        for (let i = 0; i < 100 && !TopoHistory.list().some((p) => /^s:/.test(p.key)); i++) await wait(50);
+        const keys = TopoHistory.list().map((p) => p.key);
+        const sel = document.getElementById('historyPoint');
+        sel.value = 's:1'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+        for (let i = 0; i < 100 && (document.getElementById('historyPic').hidden || !/Version 1 on the server/.test(sel.selectedOptions[0].textContent)); i++) await wait(50);
+        const pic = document.getElementById('historyPic');
+        for (let i = 0; i < 100 && !(pic.complete && pic.naturalWidth > 0); i++) await wait(50);
+        const out = { keys, label: sel.selectedOptions[0] && sel.selectedOptions[0].textContent, pic: !pic.hidden && pic.naturalWidth > 0, say: document.getElementById('historySay').textContent };
+        TopoHistory.close();
+        return out;
+    }, cardId);
+    ok('7h. the History dialog lists the server\'s versions beside the local points', !dlg.err && dlg.keys.includes('s:1') && dlg.keys.includes('s:2') && dlg.keys[dlg.keys.length - 1] === 'now', dlg);
+    ok('7h. looking at one reads it from the server, opens it and draws it', !dlg.err && /Version 1 on the server/.test(dlg.label || '') && dlg.pic === true && !!dlg.say, dlg);
     ok('7. A has not got B\'s note: it waits for a visit', await A.p.evaluate((id) => libraryEntry(id).doc.nodes[1].notes !== 'Note by B', cardId));
     const bRefused = await B.p.evaluate(async (id) => {
         const r = TopoServerSync.rec(id);

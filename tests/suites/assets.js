@@ -250,8 +250,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('devices.csv has serial, asset_tag, location and status columns', ['serial', 'asset_tag', 'location', 'status'].every((h) => devSheet.headers.includes(h)), devSheet.headers.join(','));
     const cabSheet = csvCablesSheet();
     // Then the cable's provider (document v15), last.
-    ok('cables.csv has the cable facts', cabSheet.headers.slice(-5, -1).join(',') === 'cable_label,cable_length,cable_color,cable_via'
-       && cabSheet.rows[0].slice(-5, -1).join('|') === 'UP-1|2 m|blue|PP-A:1' && cabSheet.headers[cabSheet.headers.length - 1] === 'cable_provider', cabSheet.rows[0].join('|'));
+    ok('cables.csv has the cable facts', cabSheet.headers.slice(-6, -2).join(',') === 'cable_label,cable_length,cable_color,cable_via'
+       && cabSheet.rows[0].slice(-6, -2).join('|') === 'UP-1|2 m|blue|PP-A:1' && cabSheet.headers.slice(-2).join(',') === 'cable_provider,way_out', cabSheet.rows[0].join('|'));
     const sheetOf = (built) => csvSheet(csvParse(csvText(built, ',')), true);
     const roundTrip = (built) => { const sh = sheetOf(built); return csvPlan(sh, csvAutoMap(sh)); };
     const devPlan = roundTrip(csvDevicesSheet());
