@@ -53,7 +53,8 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const live = () => [workspace.getAttribute('transform'), canvas.getAttribute('width'), canvas.getAttribute('height'),
       canvas.getAttribute('viewBox'), canvas.getAttribute('class')].join('|');
     const liveBefore = live();
-    const deleteMarks = () => canvas.querySelectorAll('.node-delete').length;
+    // A selected device carries two discs (duplicate and ✕), both .node-delete: the ✕ is the one counted.
+    const deleteMarks = () => [...canvas.querySelectorAll('.node-delete')].filter((g) => g.querySelector('text').textContent === '✕').length;
     const marksBefore = deleteMarks();
 
     // A click saves a file; the anchor's click is caught rather than followed.

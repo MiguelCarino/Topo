@@ -76,7 +76,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     try { canvasSvgMarkup(1); png = await captureCanvasImage('png', 1); canvasSvgFile(); } finally { window.renderCanvasOnly = realRender; }
     ok('the exports did not redraw the map', redraws === 0, String(redraws));
     ok('the map is still selected, its ✕ still there', attrs(liveRect(), ['stroke']) === '#eab308'
-      && el('networkCanvas').querySelectorAll('.node-delete').length === 1);
+      && [...el('networkCanvas').querySelectorAll('.node-delete')].filter((g) => g.querySelector('text').textContent === '✕').length === 1);
     const pngFull = png;
 
     // The link mode is the editor's too.

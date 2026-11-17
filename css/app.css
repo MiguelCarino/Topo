@@ -3376,14 +3376,14 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
     /* An interface: its name and its address on the first line, wide enough
        for wlp1s0 and the longest IPv4 CIDR (255.255.255.255/32), and the
        kind, the cable mark and the ✕ under the address, at the right. The
-       2px in the basis is the row's gap; 4.25em on both resolves against
-       their own 16px. */
+       2px in the basis is the row's gap; 4.5em on both resolves against
+       their own 16px ("wlp1s0" whole, with the box's own edges). */
     .if-row { flex-wrap: wrap; row-gap: 4px; }
-    .if-name { width: 4.25em; }
-    .if-row:not(.if-sub) > .if-ip { flex: 1 1 calc(100% - 4.25em - 2px); }
+    .if-name { width: 4.5em; }
+    .if-row:not(.if-sub) > .if-ip { flex: 1 1 calc(100% - 4.5em - 2px); }
     .if-row > .if-ip + * { margin-left: auto; }
     /* A port's VLAN box holds its "Untagged" hint whole. */
-    .port-attr { grid-template-columns: minmax(36px, auto) minmax(0, 1fr) 88px 24px; }
+    .port-attr { grid-template-columns: minmax(36px, auto) minmax(0, 1fr) 92px 24px; }
     /* A cell being edited is as tall as its row was: the 16px editor gives
        back the padding it does not need, so the row never jumps under the
        finger that opened it. */
@@ -3392,7 +3392,7 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
 }
 /* The phone's port row keeps its 44px ⋯ button (above, at 640px or less). */
 @media (max-width: 640px) and (pointer: coarse) {
-    .port-attr { grid-template-columns: minmax(36px, auto) minmax(0, 1fr) 88px 44px; }
+    .port-attr { grid-template-columns: minmax(36px, auto) minmax(0, 1fr) 92px 44px; }
 }
 
 /* ===== A dialog's card holding the focus (Mobile review M17) =====

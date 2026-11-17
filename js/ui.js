@@ -505,12 +505,17 @@ function openAnnotationEditor(a) {
     ed.style.lineHeight = '1.35';
     ed.style.whiteSpace = 'pre';
     ed.style.color = '#1e293b';
-    ed.style.padding = `${6 * s}px ${10 * s}px`;
+    // The border is drawn inside the card's box, not around it: the padding
+    // gives its width back, so the overlay is the card's size at any zoom
+    // (below 1 the border stays 1px while the card's own line thins).
+    const edge = Math.max(1, z) * up;
+    ed.style.padding = `${Math.max(0, 6 * s - edge)}px ${Math.max(0, 10 * s - edge)}px`;
+    ed.style.boxSizing = 'border-box';
     ed.style.minWidth = `${44 * s}px`;
     ed.style.minHeight = `${26 * s}px`;
     ed.style.borderRadius = `${4 * s}px`;
-    if (a.style === 'note') { ed.style.background = '#fef9c3'; ed.style.border = `${Math.max(1, z) * up}px solid #ca8a04`; }
-    else { ed.style.background = 'rgba(255,255,255,0.92)'; ed.style.border = `${Math.max(1, z) * up}px dashed #eab308`; }
+    if (a.style === 'note') { ed.style.background = '#fef9c3'; ed.style.border = `${edge}px solid #ca8a04`; }
+    else { ed.style.background = 'rgba(255,255,255,0.92)'; ed.style.border = `${edge}px dashed #eab308`; }
     if (up !== 1) { ed.style.transformOrigin = '0 0'; ed.style.transform = `scale(${1 / up})`; }
     ed.innerText = a.text;
 
