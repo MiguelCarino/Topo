@@ -12,7 +12,13 @@
 //   6. the notes go with their devices: a note on one keeps its offset, a
 //      note on two takes the mean of their steps, one on nothing stays;
 //   7. a rack is one column in unit order, its VMs and containers on their
-//      host's row; without groups, a VM cabled to a switch goes under its host.
+//      host's row; without groups, a VM cabled to a switch goes under its host;
+//   8. the ▾ menu: Tidy all, Tidy group;
+//   9. what fits 12 wide is drawn as a tree (a device over the middle of the
+//      row under it, a server with its workstation in its switch's row); the
+//      devices in no group that the groups hang off sit over them, centred;
+//      a note beside its device has room kept for it; a selection over
+//      several groups, none whole, is arranged group by group in place.
 window.addEventListener('load', () => { setTimeout(() => {
   const out = [];
   const ok = (n, c, e) => out.push(`${c ? 'PASS' : 'FAIL'} :: ${n}${e ? ' :: ' + e : ''}`);
@@ -234,6 +240,97 @@ window.addEventListener('load', () => { setTimeout(() => {
     setSelectionEntries([{ type: 'node', id: 'a' }, { type: 'node', id: 'b' }]);
     document.getElementById('tidyBtn').click();
     ok('Tidy with a selection still arranges only that', at(['x', 'y']) === before);
+
+    // ---- 9. A hub and its branches (the case this was studied on) ----
+    // One cloud in no group, five buildings on it, each a router, a switch,
+    // three modalities and a server with its workstation; a note on the
+    // first building's server; everything drawn in a heap.
+    const branches = ['b1', 'b2', 'b3', 'b4', 'b5'];
+    const hubDoc = () => {
+      const nodes = [D('net', 'cloud', { x: 900, y: 500 })], links = [], groups = [];
+      branches.forEach((b, i) => {
+        groups.push({ id: b, name: b.toUpperCase(), kind: 'building' });
+        const at = (k) => ({ group: b, x: 100 + i * 90 + k * 40, y: 600 + ((k * 7) % 3) * 60 });
+        nodes.push(D(`${b}r`, 'router', at(0)), D(`${b}s`, 'switch', Object.assign(at(1), { portCount: 8, interfaces: [] })),
+          D(`${b}pacs`, 'server', at(2)), D(`${b}rep`, 'pc', at(3)), D(`${b}m1`, 'dicom', at(4)), D(`${b}m2`, 'dicom', at(5)), D(`${b}m3`, 'dicom', at(6)));
+        links.push({ id: `${b}k0`, source: 'net', target: `${b}r` }, { id: `${b}k1`, source: `${b}r`, target: `${b}s`, targetIface: 'p1' },
+          { id: `${b}k2`, source: `${b}s`, target: `${b}pacs`, sourceIface: 'p2' }, { id: `${b}k3`, source: `${b}rep`, target: `${b}pacs` },
+          { id: `${b}k4`, source: `${b}s`, target: `${b}m1`, sourceIface: 'p3' }, { id: `${b}k5`, source: `${b}s`, target: `${b}m2`, sourceIface: 'p4' },
+          { id: `${b}k6`, source: `${b}s`, target: `${b}m3`, sourceIface: 'p5' });
+      });
+      const pacs = nodes.find((n) => n.id === 'b1pacs');
+      replaceDocument({ v: DOC_VERSION, nodes, links, groups,
+        annotations: [{ id: 'hn', x: pacs.x - 260, y: pacs.y - 40, text: 'The main server.\nBackups go here.', style: 'note', targets: ['b1pacs'] }] });
+      renderCanvasOnly();
+    };
+    const P = (id) => getNode(id);
+    const shape = (b) => {
+      const row = [`${b}pacs`, `${b}m1`, `${b}m2`, `${b}m3`].map(P);
+      const xs = row.map((n) => n.x);
+      return P(`${b}r`).y < P(`${b}s`).y && P(`${b}r`).x === P(`${b}s`).x
+        && row.every((n) => n.y === row[0].y) && row[0].y > P(`${b}s`).y && row.every((n, i) => !i || n.x > row[i - 1].x)
+        && Math.abs(P(`${b}s`).x - (Math.min(...xs) + Math.max(...xs)) / 2) <= GRID_SNAP
+        && P(`${b}rep`).x === P(`${b}pacs`).x && P(`${b}rep`).y > P(`${b}pacs`).y;
+    };
+    const where = () => JSON.stringify(state.nodes.map((n) => [n.id, n.x, n.y]));
+    hubDoc();
+    select(null, null); tidyLayout('all');
+    ok('each branch is a tree: the router over the switch, the switch over the middle of its row, in port order', branches.every(shape),
+      branches.filter((b) => !shape(b)).map((b) => [`${b}r`, `${b}s`, `${b}pacs`, `${b}m1`, `${b}rep`].map((id) => `${id}:${P(id).x},${P(id).y}`).join(' ')).join(' | '));
+    ok('a server with its workstation is in its switch\'s row, the workstation under it', branches.every((b) => P(`${b}pacs`).y === P(`${b}m1`).y && P(`${b}rep`).y > P(`${b}m1`).y));
+    const inGroups = state.nodes.filter((n) => n.group);
+    const gx = inGroups.map((n) => n.x);
+    ok('the hub the groups hang off is over them all', inGroups.every((n) => n.y > P('net').y), `${P('net').y}`);
+    ok('…over their middle, not in a corner', Math.abs(P('net').x - (Math.min(...gx) + Math.max(...gx)) / 2) <= 160, `${P('net').x} of ${Math.min(...gx)}..${Math.max(...gx)}`);
+    const boxOf = (b) => { const ns = inGroups.filter((n) => n.group === b); return { x0: Math.min(...ns.map((n) => n.x)) - 58, x1: Math.max(...ns.map((n) => n.x)) + 58, y0: Math.min(...ns.map((n) => n.y)) - 84, y1: Math.max(...ns.map((n) => n.y)) + 84 }; };
+    const apart = (a, b) => a.x1 <= b.x0 || b.x1 <= a.x0 || a.y1 <= b.y0 || b.y1 <= a.y0;
+    ok('no frame lands on another', branches.every((a, i) => branches.slice(i + 1).every((b) => apart(boxOf(a), boxOf(b)))));
+    const hn = getAnnotation('hn');
+    const noteBox = { x0: hn.x, y0: hn.y, x1: hn.x + (hn._w || 160), y1: hn.y + (hn._h || 60) };
+    ok('the note keeps its place beside its server', hn.x - P('b1pacs').x === -260 && hn.y - P('b1pacs').y === -40, `${hn.x - P('b1pacs').x},${hn.y - P('b1pacs').y}`);
+    ok('…and room is kept for it: it lies on no other group', branches.filter((b) => b !== 'b1').every((b) => apart(noteBox, boxOf(b))),
+      JSON.stringify([noteBox, branches.filter((b) => b !== 'b1' && !apart(noteBox, boxOf(b)))]));
+    const once = where();
+    tidyLayout('all');
+    ok('a second Tidy all changes nothing', where() === once, (() => { const a = JSON.parse(once), b = JSON.parse(where()); return a.filter((v, i) => v[1] !== b[i][1] || v[2] !== b[i][2]).slice(0, 8).map((v) => { const w = b.find((x) => x[0] === v[0]); return v[0] + ':' + v[1] + ',' + v[2] + '>' + w[1] + ',' + w[2]; }).join(' '); })());
+
+    // Tidy group: one branch, where it stands.
+    hubDoc();
+    const rest0 = JSON.stringify(state.nodes.filter((n) => n.group !== 'b3').map((n) => [n.id, n.x, n.y]));
+    const b3 = () => state.nodes.filter((n) => n.group === 'b3');
+    const corner = (list) => `${Math.min(...list.map((n) => n.x))},${Math.min(...list.map((n) => n.y))}`;
+    const b3at = corner(b3());
+    tidyLayout('b3');
+    ok('Tidy group: that branch as a tree, where it stood, the rest untouched', shape('b3') && Math.abs(Number(corner(b3()).split(',')[0]) - Number(b3at.split(',')[0])) <= GRID_SNAP
+      && JSON.stringify(state.nodes.filter((n) => n.group !== 'b3').map((n) => [n.id, n.x, n.y])) === rest0, `${corner(b3())} was ${b3at}`);
+
+    // Tidy with a selection over two groups, neither whole: each group's
+    // devices among themselves, where they stood.
+    hubDoc();
+    const part = (b) => [`${b}s`, `${b}m1`, `${b}m2`, `${b}m3`];
+    const picked = part('b1').concat(part('b2'));
+    const others0 = JSON.stringify(state.nodes.filter((n) => !picked.includes(n.id)).map((n) => [n.id, n.x, n.y]));
+    const c1 = corner(part('b1').map(P)), c2 = corner(part('b2').map(P));
+    setSelectionEntries(picked.map((id) => ({ type: 'node', id })));
+    const steps9 = _undoStack.length;
+    tidyLayout();
+    const near = (a, b) => a.split(',').every((v, i) => Math.abs(Number(v) - Number(b.split(',')[i])) <= GRID_SNAP);
+    const fan = (b) => part(b).slice(1).every((id) => P(id).y === P(`${b}m1`).y && P(id).y > P(`${b}s`).y) && Math.abs(P(`${b}s`).x - P(`${b}m2`).x) <= GRID_SNAP;
+    ok('a selection over two groups: each group\'s devices arranged among themselves', fan('b1') && fan('b2'), picked.map((id) => `${id}:${P(id).x},${P(id).y}`).join(' '));
+    ok('…each where it stood, nothing else moved, one undo step', near(corner(part('b1').map(P)), c1) && near(corner(part('b2').map(P)), c2)
+      && JSON.stringify(state.nodes.filter((n) => !picked.includes(n.id)).map((n) => [n.id, n.x, n.y])) === others0 && _undoStack.length === steps9 + 1,
+      `${corner(part('b1').map(P))} was ${c1}; ${corner(part('b2').map(P))} was ${c2}`);
+
+    // Two groups selected whole: set side by side, clear of each other.
+    hubDoc();
+    setSelectionEntries(state.nodes.filter((n) => n.group === 'b1' || n.group === 'b2').map((n) => ({ type: 'node', id: n.id })));
+    tidyLayout();
+    ok('two groups selected whole: both trees, side by side, no frame on the other', shape('b1') && shape('b2') && apart(boxOf('b1'), boxOf('b2')));
+
+    // Past TIDY_WRAP wide it is a site again: tiers and blocks.
+    replaceDocument(site(), { origin: 'file' });
+    select(null, null); tidyLayout();
+    ok('a site wider than 12 is still laid in tiers and blocks, 12 to a row', Math.max(...[...byY().values()].map((r) => r.length)) <= TIDY_WRAP);
   } catch (e) {
     ok('the suite ran to the end', false, String(e && e.stack || e).slice(0, 300));
   }

@@ -2,16 +2,23 @@
 // Load order: state -> model -> data -> diagnostics -> ui -> app
 
 // Create a node. opts.at = {x,y} drop point; opts.connectTo = node id to
-// link to (and inherit its subnet for auto-IP). A batch of its own, so a
+// link to (and inherit its subnet for auto-IP); opts.beside = node id it is
+// put next to, in the same row and the same group (paletteAnchor, below).
+// A batch of its own, so a
 // caller spawning many (a block, a bulk create) can wrap them all in
 // one batch and get one undo step and one redraw.
 function spawnNode(type, opts = {}) { return batch(() => spawnNodeNow(type, opts)); }
 function spawnNodeNow(type, opts) {
     if (readOnlyRefuses()) return null;
     const connectTo = opts.connectTo ? getNode(opts.connectTo) : null;
+    const beside = opts.beside ? getNode(opts.beside) : null;
     let x, y;
     if (opts.at) {
         x = opts.at.x; y = opts.at.y;
+    } else if (beside) {
+        // The next free place in its row, to the right.
+        x = beside.x; y = beside.y;
+        do { x += 110; } while (state.nodes.some((n) => Math.abs(n.x - x) < 60 && Math.abs(n.y - y) < 60));
     } else if (connectTo) {
         const degree = state.links.filter(l => l.source === connectTo.id || l.target === connectTo.id).length;
         x = connectTo.x + ((degree % 2 === 0 ? -1 : 1) * (70 + Math.floor(degree / 2) * 80));
@@ -62,7 +69,8 @@ function spawnNodeNow(type, opts) {
     // Straight into a group (D436): the one its tile was dropped on, or, added
     // by a click beside the selected device, the group that device is in. No
     // rack units: Open rack places it.
-    const intoGroup = groupById(opts.group) || (!opts.at && connectTo && connectTo.group ? groupById(connectTo.group) : null);
+    const near = beside || connectTo;
+    const intoGroup = groupById(opts.group) || (!opts.at && near && near.group ? groupById(near.group) : null);
     if (intoGroup && !isReduced()) node.group = intoGroup.id;
 
     state.nodes.push(node);
@@ -82,6 +90,26 @@ function spawnNodeNow(type, opts) {
     else if (node.group && opts.group && typeof addedToGroupSaid === 'function') showToast(addedToGroupSaid(node, groupById(node.group)), 'ok');
     if (node.group && typeof refreshGroupViews === 'function') refreshGroupViews(true);
     return node;   // as spawnAnnotation does, so a caller can go on to configure it
+}
+// The palette's click with one device selected: where the new device goes.
+// Onto the selected device when that is something others plug into (a
+// switch, an access point, anything that routes), when either is virtual (a
+// VM lives on its host), or when the selected device has no single uplink to
+// share. Otherwise the selected device is an end device hanging off one
+// switch or router, as the device added a click ago is: the new one is
+// cabled to that same switch or router and put beside the selected device,
+// in its group. So Router, Switch, PC, Printer by four clicks is a router, a
+// switch and two devices on the switch, not a printer cabled to a PC.
+// -> the options for spawnNode: { connectTo, beside? }.
+function paletteAnchor(id, type) {
+    const n = id ? getNode(id) : null;
+    if (!n) return { connectTo: null };
+    const carries = (d) => isL2Forwarder(d) || isRoutingDevice(d.type);
+    if (carries(n) || isVirtualType(type) || isVirtualType(n.type)) return { connectTo: n.id };
+    const ends = state.links.filter((l) => l.source === n.id || l.target === n.id);
+    if (ends.length !== 1) return { connectTo: n.id };
+    const up = getNode(ends[0].source === n.id ? ends[0].target : ends[0].source);
+    return up && carries(up) ? { connectTo: up.id, beside: n.id } : { connectTo: n.id };
 }
 // The palette's click with several devices selected, or a group picked: a
 // new device for each. A group picked as a group (pickedGroups, js/
@@ -309,11 +337,15 @@ function nextFreeHost(networkStr, prefix, type, said) {
 //     switch's in a block TIDY_WRAP wide, the blocks side by side under the
 //     backbone and wrapped the same way;
 //   * devices with no cable at all go last, in one block.
+// That is a site. What fits TIDY_WRAP wide as a tree is drawn as one
+// instead (asTree, in tidyPositions): each device over the middle of the
+// row that hangs off it.
 // With two or more devices selected, only those are arranged, by the same
 // rules among themselves, where they already were (the top-left of the
 // arrangement stays where the selection's was); nothing else moves, but for
 // the groups inside a group whose devices are all selected
-// (tidyWithInnerGroups).
+// (tidyWithInnerGroups). A selection over several groups, none of them
+// whole, is arranged group by group, each in place (tidySelectionParts).
 // One batch: every node moves, and that is one step and one redraw.
 const TIDY_WRAP = 12;
 // Played (js/motion.js): every device glides to its tidied place.
@@ -332,23 +364,56 @@ function tidyLayoutNow(scope) {
     const only = group ? picked.length > 0 : picked.length >= 2;
     if (group && !only) return;
     const nodes = group ? withGuests(picked) : only ? tidyWithInnerGroups(picked) : state.nodes;
-    const pos = tidyPositionsGrouped(nodes, state.links);
-    let dx = 0, dy = 0;
-    if (only) {
-        // Anchored: the arrangement starts where the selection started.
-        const minOf = (list, k) => Math.min(...list.map((p) => p[k]));
-        const placed = [...pos.values()];
-        dx = minOf(nodes, 'x') - minOf(placed, 'x');
-        dy = minOf(nodes, 'y') - minOf(placed, 'y');
-    }
     const snap = (v) => Math.round(v / GRID_SNAP) * GRID_SNAP;
     const was = new Map(nodes.map((n) => [n.id, { x: n.x, y: n.y }]));
-    nodes.forEach((n) => { const p = pos.get(n.id); if (p) { n.x = snap(p.x + dx); n.y = snap(p.y + dy); } });
+    // A selection is arranged in parts (tidySelectionParts), each where it
+    // stood; a group, or the map, is one part.
+    const parts = only && !group ? tidySelectionParts(nodes) : [{ nodes, grouped: true }];
+    const moves = [];
+    parts.forEach((part) => {
+        const pos = part.grouped ? tidyPositionsGrouped(part.nodes, state.links) : tidyPositions(part.nodes, state.links);
+        let dx = 0, dy = 0;
+        if (only) {
+            // Anchored: the arrangement starts where the part started.
+            const minOf = (list, k) => Math.min(...list.map((p) => p[k]));
+            const placed = [...pos.values()];
+            dx = minOf(part.nodes, 'x') - minOf(placed, 'x');
+            dy = minOf(part.nodes, 'y') - minOf(placed, 'y');
+        }
+        part.nodes.forEach((n) => { const p = pos.get(n.id); if (p) moves.push([n, snap(p.x + dx), snap(p.y + dy)]); });
+    });
+    moves.forEach(([n, x, y]) => { n.x = x; n.y = y; });
     tidyNotesAlong(was);
     save(); renderCanvasOnly();
     // A new layout is looked at like a new map: on a phone, at a zoom its
     // names can be read at, never the whole-map 0.1 an explicit fit allows.
     if (!only) fitToView(null, { initial: true });
+}
+
+// The parts a selection is tidied in. The devices in no group and the
+// groups selected whole (their own devices all selected) are one part,
+// set out together as blocks. A group only partly selected is a part of
+// its own: its selected devices are arranged among themselves, by their
+// cables, where they stood. Set out as a block beside the others, they
+// left their group for the far side of the map while the rest of it
+// stayed, and its frame was drawn from one to the other.
+// -> [{ nodes, grouped }], the parts with nothing to arrange (one device) left out.
+function tidySelectionParts(nodes) {
+    const groups = state.groups || [];
+    if (!groups.length || isReduced()) return [{ nodes, grouped: true }];
+    const ids = new Set(nodes.map((n) => n.id));
+    const whole = new Set(groups.filter((g) => groupMembers(g.id, false).every((n) => ids.has(n.id))).map((g) => g.id));
+    const main = [], partial = new Map();
+    nodes.forEach((n) => {
+        if (!n.group || !groupById(n.group) || whole.has(n.group)) { main.push(n); return; }
+        if (!partial.has(n.group)) partial.set(n.group, []);
+        partial.get(n.group).push(n);
+    });
+    // Only one group partly selected and nothing else: the plain case.
+    if (!main.length && partial.size === 1) return [{ nodes, grouped: true }];
+    const parts = main.length > 1 ? [{ nodes: main, grouped: true }] : [];
+    partial.forEach((list) => { if (list.length > 1) parts.push({ nodes: list, grouped: false }); });
+    return parts;
 }
 
 // A group's devices and what runs on them: a VM or container on a host in
@@ -429,6 +494,27 @@ function tidyPositions(nodes, links) {
     wired.forEach((l) => { adj.get(l.source).add(l.target); adj.get(l.target).add(l.source); });
     guestHost.forEach((host, g) => { adj.get(g).add(host); adj.get(host).add(g); });
     const nameOrder = (a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true });
+    // The order some devices were drawn in, where nothing else decides it:
+    // as they are read, row by row (a row: devices whose heights run on
+    // with no step of more than DRAWN_ROW between them), left to right.
+    // Left to right alone, a second Tidy shuffled what the first had set on
+    // two shelves: the second shelf's first block is left of the first
+    // shelf's second. -> Map(id -> place)
+    const DRAWN_ROW = 150;
+    // The order the devices are set down in, the top of the drawing first:
+    // what the groups' blocks are put in order by (tidyPositionsGrouped).
+    // Where a device ends up does not say it: a switch is moved over the
+    // middle of its devices afterwards, wherever their block was shelved.
+    // Handed back on the map itself, as `seq`.
+    const seq = new Map();
+    const withSeq = (map) => { nodes.forEach((n) => { if (!seq.has(n.id)) seq.set(n.id, seq.size); }); map.seq = seq; return map; };
+    const drawnOrder = (list) => {
+        const byY = list.slice().sort((a, b) => a.y - b.y);
+        const row = new Map();
+        byY.forEach((n, i) => row.set(n.id, i && n.y - byY[i - 1].y <= DRAWN_ROW ? row.get(byY[i - 1].id) : i));
+        const read = list.slice().sort((a, b) => (row.get(a.id) - row.get(b.id)) || (a.x - b.x));
+        return new Map(read.map((n, i) => [n.id, i]));
+    };
 
     // Depth from the top: the clouds, else a routing device, else the most
     // connected device, then again for every part of the drawing the first
@@ -457,14 +543,6 @@ function tidyPositions(nodes, links) {
         walk([topOf(rest.filter((n) => part.has(n.id))).id], base);
     }
 
-    // A leaf hangs off one device on the tier above, by its only cable.
-    const parentOf = new Map();
-    connected.forEach((n) => {
-        const nbs = [...adj.get(n.id)];
-        if (n.type === 'cloud' || nbs.length !== 1 || depth.get(n.id) === 0) return;
-        if (depth.get(nbs[0]) === depth.get(n.id) - 1) parentOf.set(n.id, nbs[0]);
-    });
-
     // The port a cable between two devices uses on the first one, by number
     // (Infinity for a named interface or no cable).
     const portOn = (headId, otherId) => {
@@ -472,6 +550,102 @@ function tidyPositions(nodes, links) {
         const m = l && /^p(\d+)$/.exec(ifaceIdOn(l, headId) || '');
         return m ? Number(m[1]) : Infinity;
     };
+    // The devices with no cable: one last block, by type then name.
+    const loose = nodes.filter((n) => !adj.get(n.id).size)
+        .sort((a, b) => String(a.type).localeCompare(String(b.type)) || nameOrder(a, b));
+
+    // ---- A small drawing: a tree ----
+    // What fits TIDY_WRAP wide as a tree is drawn as one: every device over
+    // the middle of what hangs off it, and what hangs off it on the row right
+    // under it, in the order of its ports. The devices on the end of a cable
+    // are a block (wrapped TIDY_WRAP wide); one with devices of its own (a
+    // server with its workstation, a switch behind a switch) takes its place
+    // in that row with them under it, a column clear of the next when it is
+    // wider than itself. The tiers below put such a device on a row of its
+    // own between its switch and the switch's other devices, and to one side.
+    // Parts that share no cable stand side by side; the devices with no cable
+    // go under them all. Wider than TIDY_WRAP, it is a site: the tiers below.
+    const asTree = (() => {
+        const kidsOf = new Map(), roots = [];
+        connected.forEach((n) => {
+            const d = depth.get(n.id);
+            const up = [...adj.get(n.id)].find((id) => depth.get(id) === d - 1);
+            if (up === undefined) { roots.push(n); return; }
+            if (!kidsOf.has(up)) kidsOf.set(up, []);
+            kidsOf.get(up).push(n);
+        });
+        const leaf = (n) => !kidsOf.has(n.id);
+        // What hangs off a device, left to right, in runs: its end devices
+        // together, each device with its own under it alone.
+        const runsOf = new Map();
+        const runs = (n) => {
+            if (runsOf.has(n.id)) return runsOf.get(n.id);
+            const drawn = drawnOrder(kidsOf.get(n.id) || []);
+            const kids = (kidsOf.get(n.id) || []).map((k) => ({ n: k, p: portOn(n.id, k.id), leaf: leaf(k) }))
+                .sort((a, b) => (a.p - b.p) || (Number(!a.leaf) - Number(!b.leaf)) || (a.leaf ? 0 : drawn.get(a.n.id) - drawn.get(b.n.id)) || nameOrder(a.n, b.n));
+            const out = [];
+            kids.forEach((k) => {
+                const last = out[out.length - 1];
+                if (k.leaf && last && last.leaves) last.leaves.push(k.n);
+                else out.push(k.leaf ? { leaves: [k.n] } : { tree: k.n });
+            });
+            runsOf.set(n.id, out);
+            return out;
+        };
+        const widths = new Map();
+        const runWidth = (r) => (r.leaves ? Math.min(TIDY_WRAP, r.leaves.length) : width(r.tree));
+        const gapAfter = (a, b) => ((a.tree && width(a.tree) > 1) || (b.tree && width(b.tree) > 1) ? 1 : 0);
+        function width(n) {
+            if (widths.has(n.id)) return widths.get(n.id);
+            widths.set(n.id, 1);   // a loop in the walk cannot hang it
+            const rs = runs(n);
+            const w = Math.max(1, rs.reduce((sum, r, i) => sum + runWidth(r) + (i ? gapAfter(rs[i - 1], r) : 0), 0));
+            widths.set(n.id, w);
+            return w;
+        }
+        const drawnRoots = drawnOrder(roots);
+        roots.sort((a, b) => (depth.get(a.id) - depth.get(b.id)) || (drawnRoots.get(a.id) - drawnRoots.get(b.id)) || nameOrder(a, b));
+        const total = roots.reduce((sum, r, i) => sum + width(r) + (i ? 1 : 0), 0);
+        if (total > TIDY_WRAP) return null;
+        const pos = new Map();
+        let bottom = startY - ROWH;
+        const put = (n, col, y) => { pos.set(n.id, { x: startX + col * COLW, y }); bottom = Math.max(bottom, y); };
+        const lay = (n, left, y) => {
+            seq.set(n.id, seq.size);
+            const first = [];
+            let col = left;
+            runs(n).forEach((r, i, rs) => {
+                if (i) col += gapAfter(rs[i - 1], r);
+                if (r.leaves) {
+                    r.leaves.forEach((k, q) => {
+                        seq.set(k.id, seq.size);
+                        put(k, col + (q % TIDY_WRAP), y + ROWH + Math.floor(q / TIDY_WRAP) * LEAF_ROWH);
+                        if (q < TIDY_WRAP) first.push(col + (q % TIDY_WRAP));
+                    });
+                } else {
+                    lay(r.tree, col, y + ROWH);
+                    first.push((pos.get(r.tree.id).x - startX) / COLW);
+                }
+                col += runWidth(r);
+            });
+            // Over the middle of the row under it.
+            put(n, first.length ? (Math.min(...first) + Math.max(...first)) / 2 : left, y);
+        };
+        let col = 0;
+        roots.forEach((r) => { lay(r, col, startY); col += width(r) + 1; });
+        const y = bottom + ROWH;
+        loose.forEach((n, i) => pos.set(n.id, { x: startX + (i % TIDY_WRAP) * COLW, y: y + Math.floor(i / TIDY_WRAP) * LEAF_ROWH }));
+        return pos;
+    })();
+    if (asTree) return withSeq(asTree);
+
+    // A leaf hangs off one device on the tier above, by its only cable.
+    const parentOf = new Map();
+    connected.forEach((n) => {
+        const nbs = [...adj.get(n.id)];
+        if (n.type === 'cloud' || nbs.length !== 1 || depth.get(n.id) === 0) return;
+        if (depth.get(nbs[0]) === depth.get(n.id) - 1) parentOf.set(n.id, nbs[0]);
+    });
 
     const pos = new Map();
     // The backbone, tier by tier, each ordered under the devices it hangs
@@ -492,9 +666,11 @@ function tidyPositions(nodes, links) {
         // switch's port 1 first), then as they were drawn, then by name.
         const upPort = (n) => Math.min(Infinity, ...wired.filter((l) => (l.source === n.id || l.target === n.id))
             .map((l) => { const up = l.source === n.id ? l.target : l.source; return depth.get(up) === d - 1 ? portOn(up, n.id) : Infinity; }));
+        const drawn = drawnOrder(tiers.get(d));
         const row = tiers.get(d).map((n) => ({ n, b: bary(n), p: upPort(n) }))
-            .sort((a, b) => (a.b - b.b) || (a.p - b.p) || (a.n.x - b.n.x) || nameOrder(a.n, b.n)).map((e) => e.n);
+            .sort((a, b) => (a.b - b.b) || (a.p - b.p) || (drawn.get(a.n.id) - drawn.get(b.n.id)) || nameOrder(a.n, b.n)).map((e) => e.n);
         row.forEach((n, i) => {
+            seq.set(n.id, seq.size);
             if (i && i % TIDY_WRAP === 0) y += ROWH;
             pos.set(n.id, { x: startX + (i % TIDY_WRAP) * COLW, y });
         });
@@ -509,9 +685,7 @@ function tidyPositions(nodes, links) {
     const heads = [...blocks.keys()].sort((a, b) => (pos.get(a).y - pos.get(b).y) || (pos.get(a).x - pos.get(b).x));
     const groups = heads.map((head) => blocks.get(head).map((n) => ({ n, p: portOn(head, n.id) }))
         .sort((a, b) => (a.p - b.p) || nameOrder(a.n, b.n)).map((e) => e.n));
-    // The devices with no cable: one last block, by type then name.
-    const loose = nodes.filter((n) => !adj.get(n.id).size)
-        .sort((a, b) => String(a.type).localeCompare(String(b.type)) || nameOrder(a, b));
+    // The devices with no cable: one last block.
     if (loose.length) groups.push(loose);
 
     let col = 0, shelfRows = 0;
@@ -523,7 +697,7 @@ function tidyPositions(nodes, links) {
         const isLoose = loose.length && gi === groups.length - 1;
         if (col && (isLoose || col + 1 + cols > TIDY_WRAP)) { y += shelfRows * LEAF_ROWH + (ROWH - LEAF_ROWH); col = 0; shelfRows = 0; }
         const left = col ? col + 1 : 0;
-        list.forEach((n, i) => pos.set(n.id, { x: startX + (left + (i % TIDY_WRAP)) * COLW, y: y + Math.floor(i / TIDY_WRAP) * LEAF_ROWH }));
+        list.forEach((n, i) => { seq.set(n.id, seq.size); pos.set(n.id, { x: startX + (left + (i % TIDY_WRAP)) * COLW, y: y + Math.floor(i / TIDY_WRAP) * LEAF_ROWH }); });
         col = left + cols;
         shelfRows = Math.max(shelfRows, rows);
     });
@@ -560,7 +734,7 @@ function tidyPositions(nodes, links) {
             last = x;
         });
     });
-    return pos;
+    return withSeq(pos);
 }
 
 // ---- Tidy with groups (Review-Packs/Topo-groups.md, step B) ----
@@ -575,9 +749,13 @@ function tidyPositions(nodes, links) {
 // on another, and an inner frame stays inside the one round it. The devices
 // in no group are one more block among them.
 //
-// What goes first is what the cables say: the blocks are ordered by where
-// their devices would sit in a Tidy without groups, so the block with the
-// internet and the core comes first and the access closets after it.
+// What goes first is what the cables say: the blocks are ordered as their
+// devices would be set down in a Tidy without groups (tidyPositions' seq),
+// so the block with the internet and the core comes first and the access
+// closets after it. A group's own devices, when they come first (and at
+// the top, the devices in no group: the internet every building hangs
+// off), take a shelf of their own over the groups, centred. A note beside
+// its devices has room kept for it in their block (roomForNotes).
 //
 // The reduced views draw no frames, so they tidy by cables alone, as before
 // groups existed; so does a set of devices in no group.
@@ -646,7 +824,7 @@ function tidyPositionsGrouped(nodes, links) {
     const keyOf = (n) => (n.group && byId.has(n.group) ? n.group : null);
     if (!groups.length || isReduced() || !nodes.some(keyOf)) return tidyPositions(nodes, links);
     const F = GROUP_FRAME, GAP = 60;
-    const order = tidyPositions(nodes, links);   // where cables alone would put them
+    const order = tidyPositions(nodes, links);   // the order cables alone would set them down in (its seq)
 
     // The tree of the groups holding these devices: each one's own devices,
     // and the groups directly inside it. null is the top, and its own
@@ -672,10 +850,34 @@ function tidyPositionsGrouped(nodes, links) {
     // included, both relative to the block's own top-left. Each item in it
     // (its own devices as one, each inner group as one) carries a rank for
     // the order, and they are shelved left to right, wrapping at MAXW.
-    const rankOf = (list) => list.reduce((r, n) => {
-        const p = order.get(n.id) || n;
-        return p.y < r[0] || (p.y === r[0] && p.x < r[1]) ? [p.y, p.x] : r;
-    }, [Infinity, Infinity]);
+    const rankOf = (list) => Math.min(Infinity, ...list.map((n) => (order.seq.has(n.id) ? order.seq.get(n.id) : Infinity)));
+    // Room for the notes that go with a block (tidyNotesAlong): a note whose
+    // devices are all in it keeps its place beside them, so the block's box
+    // grows to hold it, or the note landed on the block set beside this one.
+    // Only a note that is near its devices now: one a long way off is about
+    // the page, and would push the blocks apart for nothing.
+    const noted = (state.annotations || []).map((a) => ({ a, on: (a.targets || []).map(getNode).filter(Boolean) })).filter((e) => e.on.length);
+    const NOTE_PAD = 20, NOTE_NEAR = 400;
+    const roomForNotes = (item) => {
+        if (!noted.length) return item;
+        const rects = [];
+        noted.forEach(({ a, on }) => {
+            if (!on.every((n) => item.pos.has(n.id))) return;
+            const w = a._w || 160, h = a._h || 60;
+            const xs = on.map((n) => n.x), ys = on.map((n) => n.y);
+            const far = Math.max(Math.min(...xs) - (a.x + w), a.x - Math.max(...xs), Math.min(...ys) - (a.y + h), a.y - Math.max(...ys));
+            if (far > NOTE_NEAR) return;
+            const mean = (list) => list.reduce((s, v) => s + v, 0) / list.length;
+            const x = a.x + mean(on.map((n) => item.pos.get(n.id).x)) - mean(xs), y = a.y + mean(on.map((n) => item.pos.get(n.id).y)) - mean(ys);
+            rects.push({ x0: x - NOTE_PAD, y0: y - NOTE_PAD, x1: x + w + NOTE_PAD, y1: y + h + NOTE_PAD });
+        });
+        if (!rects.length) return item;
+        const left = Math.min(0, ...rects.map((r) => r.x0)), top = Math.min(0, ...rects.map((r) => r.y0));
+        if (left || top) item.pos = new Map([...item.pos].map(([id, v]) => [id, { x: v.x - left, y: v.y - top }]));
+        item.w = Math.max(item.w, ...rects.map((r) => r.x1)) - left;
+        item.h = Math.max(item.h, ...rects.map((r) => r.y1)) - top;
+        return item;
+    };
     const layout = (key, depth) => {
         if (depth > groups.length + 1) return { pos: new Map(), box: { w: 0, h: 0 }, all: [] };
         const items = [];
@@ -687,7 +889,7 @@ function tidyPositionsGrouped(nodes, links) {
             p.forEach((v) => { x0 = Math.min(x0, v.x); y0 = Math.min(y0, v.y); x1 = Math.max(x1, v.x); y1 = Math.max(y1, v.y); });
             // A device's share of a frame: as far round it as groupMapView pads it.
             const pos = new Map([...p].map(([id, v]) => [id, { x: v.x - x0 + F.SIDE, y: v.y - y0 + F.TOP }]));
-            items.push({ pos, w: x1 - x0 + 2 * F.SIDE, h: y1 - y0 + F.TOP + F.BOTTOM, all: mine, rank: rankOf(mine) });
+            items.push(roomForNotes({ pos, w: x1 - x0 + 2 * F.SIDE, h: y1 - y0 + F.TOP + F.BOTTOM, all: mine, rank: rankOf(mine), own: true }));
         }
         (kids.get(key) || new Set()).forEach((gid) => {
             const sub = layout(gid, depth + 1);
@@ -695,9 +897,14 @@ function tidyPositionsGrouped(nodes, links) {
             // An inner frame inside an outer one: the outer reaches this much
             // further round it (groupMapView's NEST_*).
             const pos = new Map([...sub.pos].map(([id, v]) => [id, { x: v.x + F.NEST_SIDE, y: v.y + F.NEST_TOP }]));
-            items.push({ pos, w: sub.box.w + 2 * F.NEST_SIDE, h: sub.box.h + F.NEST_TOP + F.NEST_SIDE, all: sub.all, rank: rankOf(sub.all) });
+            items.push(roomForNotes({ pos, w: sub.box.w + 2 * F.NEST_SIDE, h: sub.box.h + F.NEST_TOP + F.NEST_SIDE, all: sub.all, rank: rankOf(sub.all) }));
         });
-        items.sort((a, b) => (a.rank[0] - b.rank[0]) || (a.rank[1] - b.rank[1]));
+        items.sort((a, b) => a.rank - b.rank);
+        // Its own devices, when the cables put them first (the internet and
+        // the core the groups hang off): a shelf of their own over the
+        // groups, centred like every shelf. Shelved with them, a hub sat
+        // in the top-left corner and its cables ran across every group.
+        const head = items.length > 1 && items[0].own ? items.shift() : null;
         // Shelved, in order, wrapping at `wrap`: each shelf's place.
         const shelve = (wrap) => {
             const shelves = [];
@@ -708,6 +915,7 @@ function tidyPositionsGrouped(nodes, links) {
                 cur.h = Math.max(cur.h, it.h);
                 cur.items.push(it);
             });
+            if (head) shelves.unshift({ items: [head], w: head.w, h: head.h });
             const w = Math.max(0, ...shelves.map((s) => s.w));
             const h = shelves.reduce((sum, s) => sum + s.h, 0) + GAP * Math.max(0, shelves.length - 1);
             return { shelves, w, h };
@@ -737,7 +945,7 @@ function tidyPositionsGrouped(nodes, links) {
             });
             y += s.h + GAP;
         });
-        return { pos, box: { w: best.w, h: best.h }, all: items.flatMap((it) => it.all) };
+        return { pos, box: { w: best.w, h: best.h }, all: (head ? [head] : []).concat(items).flatMap((it) => it.all) };
     };
     const top = layout(null, 0);
     // Where a Tidy without groups starts, so the map is framed as before.
@@ -2909,7 +3117,7 @@ const SHORTCUTS = [
     { keys: ['L'], label: 'Link from the selected node', test: (e) => e.key.toLowerCase() === 'l',
       run: () => { if (state.selectedType === 'node' && state.selectedId) { state.linkSourceId = state.selectedId; renderCanvasOnly(); } } },
     { keys: ['1'], label: 'Nodes tab', simpleLabel: 'Devices tab', test: (e) => e.key === '1', run: () => showLibraryTab('nodes') },
-    { keys: ['2'], label: 'Networks tab', simpleLabel: 'Examples tab', test: (e) => e.key === '2', run: () => showLibraryTab('templates') },
+    { keys: ['2'], label: 'Templates tab', simpleLabel: 'Examples tab', test: (e) => e.key === '2', run: () => showLibraryTab('templates') },
     { keys: ['3'], label: 'Blocks tab', simpleHidden: true, test: (e) => e.key === '3', run: () => showLibraryTab('blocks') },
     { keys: ['/'], label: 'Search the map and table', simpleHidden: true, test: (e) => e.key === '/',
       run: () => { const f = document.getElementById('queryInput'); f.focus(); f.select(); } },
@@ -3371,7 +3579,7 @@ function renderLibrary() {
     renderUserTemplates();
 }
 
-document.getElementById('libWrapRow').onclick = () => setLibraryPinned(!libraryPinned());
+document.getElementById('libWrapRow').onclick = () => libraryRowClicked();
 updateRailWrap();
 document.getElementById('tidyBtn').onclick = () => tidyLayout();
 document.getElementById('tidyAllBtn').onclick = () => tidyLayout('all');

@@ -201,9 +201,15 @@ paletteDefs.forEach((d) => {
     btn.onclick = () => {
         // Several devices selected, or a group picked: one for each (spawnForSelection, js/app.js).
         if (spawnForSelection(d.type)) return;
-        const connectTo = (state.selectedType === 'node' && state.selectedId) ? state.selectedId : null;
-        if (typeof window.phonePaletteDevice === 'function' && window.phonePaletteDevice(d.type, connectTo)) return;
-        spawnNode(d.type, { connectTo });
+        const where = paletteAnchor((state.selectedType === 'node' && state.selectedId) ? state.selectedId : null, d.type);
+        if (typeof window.phonePaletteDevice === 'function' && window.phonePaletteDevice(d.type, where.connectTo, where.beside)) return;
+        const node = spawnNode(d.type, where);
+        if (!node) return;
+        // The palette stays where the pointer is for the next click (the new
+        // device is selected, which would fold it), and the map follows the
+        // new device when it lands outside the view.
+        holdLibraryFor(node.id);
+        if (typeof window.panIntoView === 'function' && !document.body.classList.contains('table-view')) window.panIntoView(node.id, 64);
     };
     // Drag: drop onto the canvas at the cursor
     btn.setAttribute('draggable', 'true');
@@ -3132,10 +3138,20 @@ function focusOnMap(target) {
 // settings, its diagnostics, the subnets. A click on empty map clears the
 // selection and so brings the library back. A click on the row keeps the
 // library open whatever is selected, until the row is clicked again; that
-// choice is kept in this browser.
+// choice is kept in this browser. A device just added by a click on the
+// palette holds the library open too, while it is the selection (one click
+// after another builds a network): a press on the map, another selection or
+// a click on the row lets it fold as usual. Not kept.
 const LIB_PIN_KEY = 'topo-lib-open';
 let _libPinned = (() => { try { return localStorage.getItem(LIB_PIN_KEY) === '1'; } catch (e) { return false; } })();
 const libraryPinned = () => _libPinned;
+let _libHeldFor = null;
+function holdLibraryFor(id) { _libHeldFor = id || null; updateRailWrap(); }
+function libraryRowClicked() {
+    if (_libHeldFor && !_libPinned) { holdLibraryFor(null); return; }
+    setLibraryPinned(!_libPinned);
+}
+document.getElementById('networkCanvas').addEventListener('pointerdown', () => { if (_libHeldFor) holdLibraryFor(null); }, true);
 function setLibraryPinned(on) {
     _libPinned = !!on;
     try { if (_libPinned) localStorage.setItem(LIB_PIN_KEY, '1'); else localStorage.removeItem(LIB_PIN_KEY); } catch (e) { /* private mode */ }
@@ -3147,18 +3163,25 @@ function updateRailWrap() {
     if (!rail || !row) return;
     // On a phone, js/mobile.js holds it open while the drawer stays open after
     // a palette add, so the next tap still finds the palette.
-    const held = typeof window.phoneLibraryHeld === 'function' && window.phoneLibraryHeld();
+    if (_libHeldFor && !(state.selection.size === 1 && state.selectedId === _libHeldFor)) _libHeldFor = null;
+    const held = !!_libHeldFor || (typeof window.phoneLibraryHeld === 'function' && window.phoneLibraryHeld());
     // A provider's drawer (js/providermode.js) opens on the report's tab:
     // the library folded there too, its row a tap away.
     const provider = document.body.classList.contains('provider-mode') && mqMatches(DRAWER_MQ);
     const wrapped = (state.selection.size > 0 || provider) && !_libPinned && !held;
     rail.classList.toggle('lib-wrapped', wrapped);
-    row.classList.toggle('hidden', !wrapped && !_libPinned);
+    row.classList.toggle('hidden', !wrapped && !_libPinned && !_libHeldFor);
     row.setAttribute('aria-expanded', wrapped ? 'false' : 'true');
     const caret = row.querySelector('.lw-caret'), hint = row.querySelector('.lw-hint');
     if (caret) caret.textContent = wrapped ? '▸' : '▾';
     if (hint) hint.textContent = t(wrapped ? 'Keep open' : 'Fold');
     row.title = t(wrapped ? 'Show the library and keep it open' : 'Fold the library while something is selected');
+    // "Something missing? Try another mode" (the reduced views' only way to
+    // another mode) lives under the palette; folded away with it, it waits
+    // at the foot of the selection's panel instead.
+    const mode = document.getElementById('modeSwitchBtn');
+    const to = wrapped ? rail.querySelector('.rail-props') : document.getElementById('tabPanel-nodes');
+    if (mode && to && mode.parentNode !== to) to.appendChild(mode);
 }
 
 function renderSelection() {

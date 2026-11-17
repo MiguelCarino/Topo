@@ -23,7 +23,7 @@ is right and this page is a bug.
   `-`, empty parts left out (`topo_acme_casa-roma_2026-11-09.json`). `network`
   stands in when there is nothing, `networks` for a binder naming no single
   organization. A browser's ` (1)` suffix is not part of the name.
-- The document carries its version in `v` (19 here). A reader migrates an
+- The document carries its version in `v` (20 here). A reader migrates an
   older one on opening (section 10). A document from a newer Topo is opened
   read-only and is never re-saved by an older build, because saving it would
   drop what the newer build added.
@@ -36,7 +36,7 @@ Three outer shapes, recognised by `kind`:
 
 ```json
 { "$schema": "https://topo.carino.systems/schema/topo-v20.json",
-  "kind": "nettopology", "version": 1, "name": "Casa Roma", "doc": { "v": 19, "nodes": [], "links": [] } }
+  "kind": "nettopology", "version": 1, "name": "Casa Roma", "doc": { "v": 20, "nodes": [], "links": [] } }
 ```
 
 `version` is the envelope's own version (1). `name` is the network's name in the
@@ -433,7 +433,7 @@ reviewed.
 
 ## 11. Writing files for Topo
 
-- Write `$schema` first and `v: 19`. Leave out what you do not know; do not
+- Write `$schema` first and `v: 20`. Leave out what you do not know; do not
   write empty strings for absent facts where the table says "omitted".
 - Give every record an id, and make references by id. If your records have
   stable keys of their own, use them (prefixed with your tool's name) so a

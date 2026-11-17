@@ -65,7 +65,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('a palette click adds one device', state.nodes.length === n0 + 1 && _undoStack.length === u0 + 1, `${state.nodes.length - n0} / ${_undoStack.length - u0}`);
     ok('connected to the selected one, below it', state.links.length === l0 + 1 && added.y >= sw.y + 120, `${added.y} vs ${sw.y}`);
     ok('and selected', state.selectedId === added.id);
-    ok('the library still folds after a palette click (the phone\'s hold is off)', rail.classList.contains('lib-wrapped'));
+    ok('the library stays open after a palette click, for the next one (paletteflow)', !rail.classList.contains('lib-wrapped'));
+    el('networkCanvas').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 5, clientY: 5 }));
+    ok('a press on the map folds it', rail.classList.contains('lib-wrapped') && state.selectedId === added.id);
     ok('the rail has no scroll padding for sticky rows', cs(rail).scrollPaddingTop === 'auto', cs(rail).scrollPaddingTop);
     const propsTop = props.scrollTop = 200;
     el('diagTabBtn').click();

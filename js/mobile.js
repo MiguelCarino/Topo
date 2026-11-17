@@ -389,11 +389,11 @@
         libHeld = false;
         if (typeof updateRailWrap === 'function') updateRailWrap();
     }
-    window.phonePaletteDevice = function (type, connectTo) {
+    window.phonePaletteDevice = function (type, connectTo, beside) {
         if (!MQ.matches || typeof spawnNode !== 'function') return false;
         var open = drawerOpen();
         if (open) libHeld = true;
-        var node = spawnNode(type, { connectTo: connectTo });
+        var node = spawnNode(type, { connectTo: connectTo, beside: beside });
         if (!node) return true;
         if (open) {
             revealOnClose = node.id;   // panned into view when the drawer closes
@@ -406,10 +406,10 @@
     };
     // The smallest pan that brings a device's card (and its name under it)
     // inside the uncovered map, with a margin.
-    function panIntoView(id) {
+    function panIntoView(id, margin) {
         var n = typeof getNode === 'function' ? getNode(id) : null;
         if (!n || typeof mapViewport !== 'function') return;
-        var v = mapViewport(), z = state.camera.zoom || 1, pad = 16;
+        var v = mapViewport(), z = state.camera.zoom || 1, pad = margin || 16;
         var sx = n.x * z + state.camera.x, sy = n.y * z + state.camera.y;
         var left = sx - 40 * z - pad, right = sx + 40 * z + pad;
         var top = sy - 28 * z - pad, bottom = sy + 44 * z + pad;
