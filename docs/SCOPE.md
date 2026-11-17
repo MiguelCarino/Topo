@@ -5072,10 +5072,27 @@ records.
   same way. It checks from where it stands and is not looked for on the
   map, so a device's chain starts at its router. It probes nothing it was
   not given: no scan, no discovery.
-- **D459. Running it.** `desktop/monitor/topo-monitor.service` is a
+- **D459. Running it.** `desktop/monitor/packaging/topo-monitor.user.service` is a
   systemd unit for one user, with no administrator. Not built: a Windows
   service, a macOS launch agent, a container image, packages, and its
   place in the release workflow.
+- **D461. Release packages for the box (2026-11-17).** For Linux, three
+  files per architecture, made by `desktop/monitor/packaging/build.sh`
+  (`make packages` in `desktop/monitor`) from the release binary:
+  `topo-monitor-V-linux-ARCH.tar.gz` (the binary, both units, a README),
+  an rpm and a deb. The packages install a system service that runs as its
+  own user, `topo-monitor`, with its files in `/var/lib/topo-monitor`,
+  hardened as the server's unit is and with no capability; it is not
+  enabled or started on install, and does not start until the box is
+  enrolled (the unit's condition). The program finds that folder by itself
+  for that user, so `sudo -u topo-monitor topo-monitor request` needs no
+  `--dir`. `topo-monitor --version` says the version it was built as.
+  Removing a package never deletes the folder (it holds the monitor's key).
+  The binary is not static: it needs the C library it was built against,
+  which the rpm finds itself and the deb states (so the release builds on
+  Ubuntu 22.04 for a low floor). The release workflow gains a job that
+  builds, checks and uploads them for x64 and Arm into the same draft.
+  Nothing is signed. Not built: Windows, macOS, a container image.
 - **D460. Until an owner opens the network, it checks nothing.** The first
   checks come from an owner's browser, and so does every change to them. A
   site nobody opens keeps its last checks. Having the box work them out
@@ -5826,7 +5843,11 @@ records.
     Proven with the real programs: step 15l of `tests/server-e2e.mjs`
     runs `topo-monitor request`, enrols it from a page, `enroll`, `run`,
     and sees it take sealed checks and report a device answering.
-    Not done: a release build (only debug was built), Windows and macOS
+    Release packages: D461, below the phases' notes (`make packages-test`
+    in `desktop/monitor`, `tests/monitor-packages.sh`: 47 checks on the
+    tar.gz, rpm and deb built here for x64, none installed, since that
+    needs an administrator; the workflow's job was written and not run).
+    Not done: Windows and macOS
     (not compiled), a run longer than the test's two minutes, ICMP itself
     (the test's check is TCP), a real device, and installing the unit.
     A revoked monitor's plan records stay on the server until the site's

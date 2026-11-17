@@ -1,7 +1,7 @@
 # topo-monitor as a service of one user (no administrator needed):
 #
 #   mkdir -p ~/.config/systemd/user
-#   cp topo-monitor.service ~/.config/systemd/user/
+#   cp topo-monitor.user.service ~/.config/systemd/user/topo-monitor.service
 #   systemctl --user enable --now topo-monitor
 #   loginctl enable-linger "$USER"     # keeps it running with nobody signed in
 #

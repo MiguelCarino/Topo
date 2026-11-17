@@ -1,0 +1,66 @@
+# topo-monitor as a system service (the rpm and deb install this as
+# /usr/lib/systemd/system/topo-monitor.service). It runs as its own user,
+# topo-monitor, and keeps its files in /var/lib/topo-monitor.
+#
+# Enrol the box first, as that user (docs/SERVER.md, "A monitor with no
+# screen"):
+#
+#   sudo -u topo-monitor topo-monitor request
+#   sudo -u topo-monitor topo-monitor enroll /path/to/topo-monitor-NAME.json
+#   sudo systemctl enable --now topo-monitor
+#
+# Until it is enrolled the service does not start (the condition below), so
+# enabling it early does no harm.
+#
+# Ping: a program without privileges sends ICMP echo only when its group is
+# inside net.ipv4.ping_group_range, which systemd sets wide open on current
+# distributions. Where it is refused, a ping check asks the device's
+# documented TCP port instead, as the desktop app does. No capability is
+# given to this service.
+[Unit]
+Description=Topo site monitor (no screen)
+Documentation=https://topo.carino.systems
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/var/lib/topo-monitor/link.json
+
+[Service]
+Type=simple
+User=topo-monitor
+Group=topo-monitor
+StateDirectory=topo-monitor
+StateDirectoryMode=0700
+Environment=TOPO_MONITOR_DIR=%S/topo-monitor
+ExecStart=/usr/bin/topo-monitor run
+Restart=on-failure
+RestartSec=30
+# 1: an owner revoked it, or its files are gone; 2: a wrong command line.
+# Starting again changes neither.
+RestartPreventExitStatus=1 2
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

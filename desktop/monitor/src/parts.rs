@@ -98,6 +98,7 @@ impl Parts {
         }
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.waiting.is_empty()
     }

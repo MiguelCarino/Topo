@@ -1323,6 +1323,39 @@ tests, the Settings section against a stub of the app's commands
 running desktop app, the bundled layout in a real installer (no tauri-cli
 here), and the Windows and macOS desktop builds.
 
+### A monitor with no screen (topo-monitor)
+
+`topo-monitor` is the desktop app's monitor with no window, for a box left
+at the site (docs/FEATURES.md, "A monitor with no screen"). Each release
+carries it for Linux x64 and Arm as a `.tar.gz`, an `.rpm` and a `.deb`.
+None is signed.
+
+From the rpm or deb it is a system service that runs as its own user,
+`topo-monitor`, with its files in `/var/lib/topo-monitor`. It is not started
+on install. Enrol the box as that user, then enable it:
+
+    sudo -u topo-monitor topo-monitor request
+    sudo -u topo-monitor topo-monitor enroll /tmp/topo-monitor-NAME.json
+    sudo systemctl enable --now topo-monitor
+
+The line `request` prints goes into Topo (Settings, Monitoring, **A monitor
+with no screen**), which downloads the file `enroll` takes; put the file
+where that user can read it. A server with a self-signed certificate:
+`enroll` prints the certificate's fingerprint to compare with the one
+Settings shows here, and takes it with `--pin`. Until it is enrolled the
+service does not start, so enabling it early does no harm.
+
+From the `.tar.gz`, one user can run it with no administrator: its README
+says how (`~/.local/bin`, a user unit, `loginctl enable-linger`).
+
+The unit gives the program no privilege. Ping is sent as an unprivileged
+ICMP echo, which Linux allows when the service's group is inside
+`net.ipv4.ping_group_range` (wide open on current systemd distributions);
+where it is refused, a ping check asks the device's documented TCP port.
+Removing the package keeps `/var/lib/topo-monitor`: it holds the monitor's
+key. `sudo -u topo-monitor topo-monitor forget` forgets it, and an owner
+revokes the monitor in the members list.
+
 ### Signing (later)
 
 Nothing is signed yet: rpm (`rpmsign` with a GPG key) and deb (a signed apt

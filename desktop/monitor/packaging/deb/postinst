@@ -1,0 +1,19 @@
+#!/bin/sh
+# topo-monitor postinst: the user, its folder, systemd.
+# Not enabled or started on install (the box is enrolled first).
+set -e
+if [ "$1" = configure ]; then
+    if ! getent passwd topo-monitor >/dev/null; then
+        adduser --system --group --home /var/lib/topo-monitor --no-create-home \
+            --shell /usr/sbin/nologin --gecos "Topo site monitor" topo-monitor >/dev/null
+    fi
+    install -d -o topo-monitor -g topo-monitor -m 0700 /var/lib/topo-monitor
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        # An upgrade restarts a running monitor on the new binary.
+        if [ -n "$2" ]; then
+            systemctl try-restart topo-monitor.service >/dev/null 2>&1 || true
+        fi
+    fi
+fi
+exit 0

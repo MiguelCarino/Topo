@@ -18,7 +18,12 @@
 //   topo-monitor status                  what is kept here, in words
 //   topo-monitor forget                  forgets the keys and the site here
 //
+//   topo-monitor --version               its version
+//
 //   --dir DIR (or TOPO_MONITOR_DIR)      where it keeps its files; else
+//                                        /var/lib/topo-monitor when this
+//                                        user may write there (the packaged
+//                                        service's user), else
 //                                        ~/.local/state/topo-monitor
 //
 // What it checks comes from the site: an owner's browser, with the network
@@ -71,6 +76,14 @@ use parts::{Kept, Parts};
 use servercrypto::{DeviceKeys, Roster};
 use stats::{Stats, RETENTION_DEFAULT_DAYS, RETENTION_MAX_DAYS};
 
+/// The version a release build is given (TOPO_MONITOR_VERSION, the
+/// Makefile); a plain `cargo build` is a development build.
+pub const VERSION: &str = match option_env!("TOPO_MONITOR_VERSION") {
+    Some(v) => v,
+    None => "0.0.0-dev",
+};
+/// Where the packaged service keeps its files (packaging/topo-monitor.service).
+pub const SERVICE_DIR: &str = "/var/lib/topo-monitor";
 pub const REQUEST_PREFIX: &str = "topo-monitor-request:";
 pub const ENROLMENT_KIND: &str = "topo-monitor-enrolment";
 
@@ -403,9 +416,29 @@ impl Api for ClientApi {
 
 // ---- The commands ----
 
-fn default_dir() -> PathBuf {
+/// May this user write in `dir`? (The packaged service's folder belongs to
+/// its own user alone, so this is true for that user and nobody else.)
+#[cfg(unix)]
+fn writable(dir: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else { return false };
+    dir.is_dir() && unsafe { libc::access(c.as_ptr(), libc::W_OK | libc::X_OK) } == 0
+}
+#[cfg(not(unix))]
+fn writable(_dir: &Path) -> bool {
+    false
+}
+
+/// The folder for one user's files, `service` being the packaged service's
+/// (given so the tests need no /var/lib).
+fn default_dir_with(service: &Path) -> PathBuf {
     if let Some(d) = std::env::var_os("TOPO_MONITOR_DIR").filter(|d| !d.is_empty()) {
         return PathBuf::from(d);
+    }
+    // The packaged service's user: `sudo -u topo-monitor topo-monitor request`
+    // lands where the service will look, with no --dir to remember.
+    if writable(service) {
+        return service.to_path_buf();
     }
     if let Some(d) = std::env::var_os("XDG_STATE_HOME").filter(|d| !d.is_empty()) {
         return PathBuf::from(d).join("topo-monitor");
@@ -417,6 +450,10 @@ fn default_dir() -> PathBuf {
         Some(h) => PathBuf::from(h).join(".local").join("state").join("topo-monitor"),
         None => PathBuf::from("topo-monitor-data"),
     }
+}
+
+fn default_dir() -> PathBuf {
+    default_dir_with(Path::new(SERVICE_DIR))
 }
 
 fn host_name() -> String {
@@ -560,11 +597,17 @@ const USAGE: &str = "topo-monitor: a Topo site's monitor with no screen
   topo-monitor run                     check and report until stopped
   topo-monitor status                  what is kept here
   topo-monitor forget                  forget the keys and the site here
+  topo-monitor --version
 
-  --dir DIR   where its files are kept (or TOPO_MONITOR_DIR; else ~/.local/state/topo-monitor)";
+  --dir DIR   where its files are kept (or TOPO_MONITOR_DIR; else /var/lib/topo-monitor
+              for the packaged service's user, else ~/.local/state/topo-monitor)";
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if args.len() == 1 && matches!(args[0].as_str(), "--version" | "-V" | "version") {
+        println!("topo-monitor {VERSION}");
+        return;
+    }
     let mut take = |flag: &str| -> Option<String> {
         let i = args.iter().position(|a| a == flag)?;
         if i + 1 >= args.len() {
@@ -706,6 +749,29 @@ mod tests {
         assert!(again.stats_day(0).is_none());
         again.stop();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_packaged_services_folder_is_used_only_by_who_may_write_there() {
+        use std::os::unix::fs::PermissionsExt;
+        // TOPO_MONITOR_DIR is not set under `cargo test`; if a caller set it, this says nothing.
+        if std::env::var_os("TOPO_MONITOR_DIR").is_some() {
+            return;
+        }
+        let mine = tmp("service-dir");
+        assert_eq!(default_dir_with(&mine), mine);
+        // One this user may not write in (root may write anywhere: nothing to learn then).
+        fs::set_permissions(&mine, fs::Permissions::from_mode(0o500)).unwrap();
+        if unsafe { libc::geteuid() } != 0 {
+            assert_ne!(default_dir_with(&mine), mine);
+        }
+        fs::set_permissions(&mine, fs::Permissions::from_mode(0o700)).unwrap();
+        let _ = fs::remove_dir_all(&mine);
+        // None there at all: the user's own folder.
+        let gone = std::env::temp_dir().join("topo-monitor-test-no-such-folder");
+        assert_ne!(default_dir_with(&gone), gone);
+        assert!(!VERSION.is_empty());
     }
 
     #[test]

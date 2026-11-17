@@ -299,6 +299,7 @@ Every page signed in to the server, the website included, sees the monitors' wor
 - **Its checks.** The box cannot read the network, so an owner's browser with the network open sends it the checks, sealed, and sends them again when the network changes. It keeps the last ones and goes on with no browser open. Until an owner has opened the network once, it reports that it is there and checks nothing.
 - **What it never does.** It asks for no device's password, scans nothing and discovers nothing: it asks the devices it was given whether they answer. It shows no alarm (nobody is there); outages reach people through the server.
 - **Its files** are in one folder only its user can read, its key among them, since a box with no session has no keychain. `topo-monitor forget` removes them; an owner revokes it in the members list like any monitor.
+- **Packages.** Each release carries it for Linux (x64 and Arm) as a `.tar.gz`, an `.rpm` and a `.deb`. The rpm and deb install a service that runs as its own user and starts only once the box is enrolled; the tar.gz is for one user with no administrator (docs/SERVER.md, "A monitor with no screen"). Not signed.
 - Built and run on Linux. Windows and macOS are not built.
 
 ## Monitoring report

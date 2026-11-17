@@ -1,0 +1,16 @@
+Package: topo-monitor
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: Carino Systems <miguel.carino1994@outlook.com>
+Section: net
+Priority: optional
+Depends: libc6 (>= @GLIBC@), systemd, adduser
+Homepage: https://topo.carino.systems
+Installed-Size: @SIZE@
+Description: Topo site monitor with no screen
+ The Topo desktop app's monitor as a service for a box with no desktop: it
+ asks the devices of one network whether they answer and reports through a
+ Topo server, sealed with the network's key. Its files are in
+ /var/lib/topo-monitor. The service is not started on install: enrol the box
+ first (sudo -u topo-monitor topo-monitor request), then
+ systemctl enable --now topo-monitor.

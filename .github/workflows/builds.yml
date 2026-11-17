@@ -289,3 +289,74 @@ jobs:
         run: |
           $setup = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           pwsh -File tests/desktop-installer-windows.ps1 -Setup $setup.FullName
+
+  # topo-monitor (desktop/monitor, docs/SCOPE.md D461): the site monitor with
+  # no screen, for Linux, as a tar.gz, an rpm and a deb into the same draft.
+  # It has no window system, so it needs none of the desktop job's packages.
+  # Each binary is built on its own architecture (a Rust binary is packed
+  # where it was built) and on 22.04, for the lowest glibc. A dispatch's
+  # x64 or Arm half builds only that one.
+  monitor:
+    name: Monitor ${{ matrix.name }}
+    needs: release
+    if: needs.release.outputs.skip != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON((inputs.platforms || 'all') == 'x64' && '[{"name":"linux-x64","arch":"amd64","os":"ubuntu-22.04"}]' || ((inputs.platforms || 'all') == 'arm64' && '[{"name":"linux-arm64","arch":"arm64","os":"ubuntu-22.04-arm"}]' || '[{"name":"linux-x64","arch":"amd64","os":"ubuntu-22.04"},{"name":"linux-arm64","arch":"arm64","os":"ubuntu-22.04-arm"}]')) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'desktop/monitor -> target'
+          key: monitor-${{ matrix.name }}
+
+      - name: Packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential rpm cpio binutils
+
+      # The crates are fetched here (the Makefile's own flags build offline).
+      - name: Tests
+        working-directory: desktop/monitor
+        run: make test CARGOFLAGS=-j4
+
+      - name: Packages, built and checked
+        working-directory: desktop/monitor
+        env:
+          V: ${{ needs.release.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: make packages-test VERSION="$V" ARCH="$ARCH" CARGOFLAGS=-j4
+
+      # Into the draft the first job made; a re-run replaces what it uploaded.
+      - name: Upload to the draft release
+        uses: actions/github-script@v9
+        env:
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const repo = { owner: context.repo.owner, repo: context.repo.repo };
+            const release_id = Number(process.env.RELEASE_ID);
+            const dir = 'desktop/monitor/dist';
+            const files = fs.readdirSync(dir).filter((f) => /^topo-monitor[-_].*\.(tar\.gz|rpm|deb)$/.test(f));
+            if (files.length !== 3) core.setFailed(`expected a tar.gz, an rpm and a deb in ${dir}, found: ${files.join(', ') || 'none'}`);
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, { ...repo, release_id, per_page: 100 });
+            for (const name of files) {
+              for (const a of assets.filter((x) => x.name === name)) {
+                await github.rest.repos.deleteReleaseAsset({ ...repo, asset_id: a.id });
+              }
+              await github.rest.repos.uploadReleaseAsset({
+                ...repo,
+                release_id,
+                name,
+                data: fs.readFileSync(path.join(dir, name)),
+                headers: { 'content-type': 'application/octet-stream' },
+              });
+              core.info(`uploaded ${name}`);
+            }
