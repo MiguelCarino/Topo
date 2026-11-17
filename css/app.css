@@ -3033,6 +3033,10 @@ body.doc-readonly #tidyMenuBtn { opacity: 0.5; }
 .lib-wrap-row .lw-hint { font-weight: 500; color: var(--text-muted); text-transform: none; letter-spacing: 0; }
 .topo-rail.lib-wrapped #libraryTabs, .topo-rail.lib-wrapped .rail-lib { display: none; }
 .topo-rail.lib-wrapped .rail-props { flex: 1; height: auto; }
+/* While the fold is played (railFoldPlay, js/motion.js) the library is still
+   drawn, closing up; never hit on its way out. */
+.topo-rail.lib-wrapped.lib-folding #libraryTabs { display: flex; pointer-events: none; }
+.topo-rail.lib-wrapped.lib-folding .rail-lib { display: block; pointer-events: none; }
 
 /* The large map's sheet count, under its tick. */
 .dlg-parts .dlg-sheets { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: -2px 0 8px 24px; }

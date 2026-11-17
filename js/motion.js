@@ -11,6 +11,8 @@
 //     new size, and the frame a drop went into pulses once.
 // In the rack view a box that moved, grew or shrank slides to its units, a
 // new one settles in, and the cables fade back in over them.
+// A network that is opened pops in, and so does what is added to one; the
+// rail's library closes and opens rather than vanishing (both further down).
 //
 // Only the picture moves. The Web Animations API animates a CSS transform and
 // opacity over the elements as drawn and leaves their attributes alone, so a
@@ -116,7 +118,8 @@ function mapMotionPlay(before, opts = {}) {
         if (!el) return;
         const delay = Math.min(i, 12) * 10;
         if (!was) {
-            motionAnimate(el, [{ transform: mxy(now, 0.6), opacity: 0 }, { transform: mxy(now), opacity: 1 }], { delay });
+            // A device that is new to the map already pops in (mapPopDrawn, below).
+            if (!el.getAnimations().length) motionAnimate(el, [{ transform: mxy(now, 0.6), opacity: 0 }, { transform: mxy(now), opacity: 1 }], { delay });
             moved++;
         } else if (was.folded) {
             motionAnimate(el, [{ transform: mxy(was, 0.35), opacity: 0 }, { transform: mxy(now), opacity: 1 }], { delay, fill: 'backwards' });
@@ -184,6 +187,161 @@ function mapMotion(fn, opts) {
     const out = fn();
     mapMotionPlay(before, opts);
     return out;
+}
+
+// ---- Things arriving on the map ----
+// A network opened (a file, a link, a template, a kept network, the page
+// itself) pops in: each device, group node and note grows from small past
+// its size and settles, one after another from the top of the map down, and
+// the cables, labels, frames and bubbles fade in behind them. Devices, notes
+// and cables added to a map already open pop in the same way, the rest left
+// still (mapPopDrawn).
+const POP_MS = 380;
+const POP_SPREAD_MS = 420;   // the last of a whole map starts this long after the first
+const POP_MAX = 2000;        // past this many, the map fades in as one
+const popFrames = (p) => [{ transform: mxy(p, 0.3), opacity: 0 }, { transform: mxy(p, 1.08), opacity: 1, offset: 0.65 }, { transform: mxy(p), opacity: 1 }];
+// What is drawn on the map, each with its place: devices not folded away,
+// the nodes of collapsed groups, notes and texts. `want` picks among them.
+function mapPopItems(want) {
+    const now = mapDrawnPoints(), items = [];
+    state.nodes.forEach((n) => {
+        const p = n && now.pts.get(n.id);
+        if (!p || p.folded || (want && !want('node', n.id))) return;
+        const el = document.getElementById(`ui-node-${n.id}`);
+        if (el) items.push({ el, p });
+    });
+    now.folds.forEach((p, gid) => {
+        if (want && !want('group', gid)) return;
+        const el = document.getElementById(`ui-group-${gid}`);
+        if (el) items.push({ el, p });
+    });
+    (state.annotations || []).forEach((a) => {
+        if (!a || (want && !want('annotation', a.id))) return;
+        const el = document.getElementById(`ui-ann-${a.id}`);
+        if (el) items.push({ el, p: { x: a.x, y: a.y } });
+    });
+    return items.sort((a, b) => (a.p.y - b.p.y) || (a.p.x - b.p.x));
+}
+function mapPop(items, spread) {
+    const last = items.length - 1, t0 = performance.now();
+    items.forEach((it, i) => {
+        const delay = last > 0 ? Math.round((i / last) * spread) : 0;
+        it.el.getAnimations().forEach((x) => x.cancel());   // one carried on from a moment ago: this one replaces it
+        motionAnimate(it.el, popFrames(it.p), { duration: POP_MS, easing: 'ease-out', fill: 'backwards', delay });
+        _popFlying.set(it.el.id, { t0, delay, p: it.p });
+    });
+}
+function mapFadeIn(el, delay) {
+    motionAnimate(el, [{ opacity: 0 }, { opacity: 1 }], { duration: POP_MS, easing: 'ease-in', fill: 'backwards', delay });
+    _popFlying.set(el.id, { t0: performance.now(), delay, p: null });
+}
+// The map is drawn afresh by every edit, and often twice in a row (a paste
+// selects what it made, the page's start-up fits and settles): the elements
+// that were popping in are thrown away with their animations. What is still
+// on its way is remembered by element id and carried on, from where it had
+// got to, over the new elements.
+const _popFlying = new Map();
+function mapPopCarryOn() {
+    if (!_popFlying.size) return;
+    const now = performance.now();
+    _popFlying.forEach((f, id) => {
+        const left = f.delay + POP_MS - (now - f.t0);
+        if (left <= 0) { _popFlying.delete(id); return; }
+        const el = document.getElementById(id);
+        if (!el || el.getAnimations().length) return;
+        const opts = { duration: POP_MS, fill: 'backwards', delay: Math.round(f.delay - (now - f.t0)) };
+        if (f.p) motionAnimate(el, popFrames(f.p), Object.assign(opts, { easing: 'ease-out' }));
+        else motionAnimate(el, [{ opacity: 0 }, { opacity: 1 }], Object.assign(opts, { easing: 'ease-in' }));
+    });
+}
+// A whole network just drawn (replaceDocument, js/app.js).
+function mapMotionArrive() {
+    if (!motionOn() || typeof lNodes === 'undefined' || !lNodes || document.body.classList.contains('table-view')) return;
+    const items = mapPopItems(null);
+    if (!items.length) return;
+    const whole = items.length > POP_MAX;
+    const spread = whole ? 0 : Math.min(POP_SPREAD_MS, items.length * 24);
+    if (!whole) mapPop(items, spread);
+    ['layer-links', 'layer-labels', 'layer-zones', 'layer-groups', 'traceWorkspace'].concat(whole ? ['layer-nodes', 'layer-annotations'] : []).forEach((id) => {
+        const layer = document.getElementById(id);
+        if (layer) motionAnimate(layer, [{ opacity: 0 }, { opacity: 1 }], { duration: POP_MS, easing: 'ease-in', fill: 'backwards', delay: Math.round(spread * 0.5) });
+    });
+}
+// Every drawing (renderCanvasOnly, js/ui.js): a device, note or cable the
+// map had not shown yet pops in, whatever put it there: the palette, a drop,
+// Add devices, a block, a paste, an import, a merge, an undo that brings one
+// back. What was already there stays still. The map remembers which ids it
+// has shown; a network being opened forgets them first (mapPopReset), since
+// that is mapMotionArrive's to play. The binder report's borrowed drawings
+// (canvasIsBorrowed, js/app.js) are not the map and are not remembered.
+let _popKnown = null;
+function mapPopReset() { _popKnown = null; _popFlying.clear(); }
+function mapPopDrawn() {
+    if (typeof canvasIsBorrowed === 'function' && canvasIsBorrowed()) return;
+    const known = _popKnown;
+    const now = { node: new Set(), annotation: new Set(), link: new Set() };
+    state.nodes.forEach((n) => { if (n) now.node.add(n.id); });
+    (state.annotations || []).forEach((x) => { if (x) now.annotation.add(x.id); });
+    state.links.forEach((l) => { if (l) now.link.add(l.id); });
+    _popKnown = now;
+    if (!motionOn() || typeof lNodes === 'undefined' || !lNodes || document.body.classList.contains('table-view')) { _popFlying.clear(); return; }
+    mapPopCarryOn();
+    if (!known) return;
+    if (now.node.size <= known.node.size && now.annotation.size <= known.annotation.size && now.link.size <= known.link.size
+        && [...now.node].every((id) => known.node.has(id)) && [...now.link].every((id) => known.link.has(id)) && [...now.annotation].every((id) => known.annotation.has(id))) return;
+    const items = mapPopItems((kind, id) => kind !== 'group' && !known[kind].has(id));
+    if (items.length > POP_MAX) return;
+    const spread = Math.min(POP_SPREAD_MS, Math.max(0, items.length - 1) * 24);
+    mapPop(items, spread);
+    state.links.forEach((l) => {
+        if (!l || known.link.has(l.id)) return;
+        const el = document.getElementById(`ui-link-${l.id}`);
+        if (el) mapFadeIn(el, Math.round(spread * 0.5));
+    });
+}
+
+// ---- The rail's library folding and unfolding ----
+// updateRailWrap (js/ui.js) folds the library to one row and gives the rail
+// to the panels, or brings it back. Played: the tabs and the library close
+// up (or open) and fade while the panels grow (or shrink) into the room. The
+// heights are animated over the elements as laid out and let go at the end;
+// while it folds, .lib-folding keeps the library drawn (css/app.css).
+const RAIL_FOLD_MS = 220;
+const railFoldParts = (rail) => [rail.querySelector('#libraryTabs'), rail.querySelector('.rail-lib'), rail.querySelector('.rail-props')].filter(Boolean);
+function railFoldEnd(rail) {
+    (rail._foldAnims || []).forEach((a) => { try { a.cancel(); } catch (e) { /* done */ } });
+    rail._foldAnims = null;
+    rail.classList.remove('lib-folding');
+}
+// Before the fold changes: how tall each part is.
+function railFoldStart(rail) {
+    if (!rail) return null;
+    railFoldEnd(rail);
+    if (!motionOn() || !rail.getClientRects().length) return null;
+    return railFoldParts(rail).map((el) => ({ el, h: el.getBoundingClientRect().height }));
+}
+// After it has changed: play it.
+function railFoldPlay(rail, before, wrapped) {
+    if (!before) return;
+    const after = before.map((b) => b.el.getBoundingClientRect().height);   // a folded part is 0
+    if (wrapped) rail.classList.add('lib-folding');
+    const anims = [];
+    before.forEach((b, i) => {
+        const from = b.h, to = after[i];
+        if (Math.abs(from - to) < 1) return;
+        const lib = !b.el.classList.contains('rail-props');
+        const cs = getComputedStyle(b.el);
+        const end = (h) => Object.assign({ height: `${h}px`, minHeight: '0px', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', overflow: 'hidden' },
+            lib ? { opacity: h < 1 ? 0 : 1, paddingTop: h < 1 ? '0px' : cs.paddingTop, paddingBottom: h < 1 ? '0px' : cs.paddingBottom } : {});
+        const a = motionAnimate(b.el, [end(from), end(to)], { duration: RAIL_FOLD_MS });
+        if (a) anims.push(a);
+    });
+    if (!anims.length) { rail.classList.remove('lib-folding'); return; }
+    rail._foldAnims = anims;
+    const done = () => { if (rail._foldAnims === anims) { rail._foldAnims = null; rail.classList.remove('lib-folding'); } };
+    // The promise, not the finish event: it settles with the animation, the
+    // event waits for a frame that a hidden tab never paints.
+    Promise.allSettled(anims.map((a) => a.finished)).then(done);
 }
 
 // ---- The rack view ----

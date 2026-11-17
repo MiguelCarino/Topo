@@ -228,8 +228,13 @@ window.addEventListener('load', () => { setTimeout(async () => {
       f.src = URL.createObjectURL(new Blob([html], { type: 'text/html' })) + '#advanced';
       const loaded = new Promise((r) => f.addEventListener('load', r));
       document.body.appendChild(f);
-      await loaded; await wait(400);
+      await loaded;
       const w = f.contentWindow, fd = f.contentDocument;
+      // Its boot awaits the browser's stores before load(), which clears the
+      // selection: a fixed wait sometimes ended first. body.chrome-pending
+      // comes off once boot has loaded and drawn (js/app.js).
+      for (let i = 0; i < 100 && fd.body.classList.contains('chrome-pending'); i++) await wait(50);
+      await wait(100);
       w.replaceDocument(lab(), { origin: 'file', docId: 'selbar-wide' });
       w.setView('map'); w.renderCanvasOnly();
       w.select('a', 'node'); await wait(50);

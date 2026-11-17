@@ -726,6 +726,7 @@ function renderCanvasOnly() {
     try {
         const seq = _docSeq;
         const { reach, diag } = withLookupPass(drawCanvas);
+        if (typeof mapPopDrawn === 'function') mapPopDrawn();   // js/motion.js: what is new to the map pops in
         const live = () => (_docSeq === seq ? diag : null);
         updateTraceStatus(reach);
         validateTopology(diag);
@@ -3145,7 +3146,7 @@ function focusOnMap(target) {
 const LIB_PIN_KEY = 'topo-lib-open';
 let _libPinned = (() => { try { return localStorage.getItem(LIB_PIN_KEY) === '1'; } catch (e) { return false; } })();
 const libraryPinned = () => _libPinned;
-let _libHeldFor = null;
+let _libHeldFor = null, _railWrapDrawn = false;
 function holdLibraryFor(id) { _libHeldFor = id || null; updateRailWrap(); }
 function libraryRowClicked() {
     if (_libHeldFor && !_libPinned) { holdLibraryFor(null); return; }
@@ -3169,6 +3170,9 @@ function updateRailWrap() {
     // the library folded there too, its row a tap away.
     const provider = document.body.classList.contains('provider-mode') && mqMatches(DRAWER_MQ);
     const wrapped = (state.selection.size > 0 || provider) && !_libPinned && !held;
+    // The change is played (railFoldStart, js/motion.js), not the first drawing.
+    const playing = _railWrapDrawn && wrapped !== rail.classList.contains('lib-wrapped') ? railFoldStart(rail) : null;
+    _railWrapDrawn = true;
     rail.classList.toggle('lib-wrapped', wrapped);
     row.classList.toggle('hidden', !wrapped && !_libPinned && !_libHeldFor);
     row.setAttribute('aria-expanded', wrapped ? 'false' : 'true');
@@ -3182,6 +3186,7 @@ function updateRailWrap() {
     const mode = document.getElementById('modeSwitchBtn');
     const to = wrapped ? rail.querySelector('.rail-props') : document.getElementById('tabPanel-nodes');
     if (mode && to && mode.parentNode !== to) to.appendChild(mode);
+    railFoldPlay(rail, playing, wrapped);
 }
 
 function renderSelection() {

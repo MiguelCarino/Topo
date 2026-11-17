@@ -2233,8 +2233,10 @@ function replaceDocument(doc, opts = {}) {
     if (!(origin === 'live' && now === _present)) initHistory(now);
     renderReadOnly();
     renderDocBar();
+    mapPopReset();   // a network arriving is played whole, below
     renderCanvasOnly();
     if (opts.fit !== false) fitToView(null, { initial: true });
+    mapMotionArrive();   // the network pops in (js/motion.js); only the picture
     if (window.TOPO_CHECKS && JSON.stringify(serializeDoc()) !== now) throw new Error('replaceDocument: the document changed while it was opened');
     // A copy with a problem report arriving, or the page's own network back
     // while this tab was in provider mode for it (js/providermode.js).
