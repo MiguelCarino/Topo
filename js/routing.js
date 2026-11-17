@@ -192,7 +192,7 @@ function routeGraph(c) {
     c.links.forEach((l) => {
         if (!l || l.source === l.target) return;
         const a = byId.get(l.source), b = byId.get(l.target);
-        if (!a || !b || effectiveMedium(l, a, b) === 'vpn' || kin(a, b)) return;
+        if (!a || !b || isOffNetMedium(effectiveMedium(l, a, b)) || kin(a, b)) return;
         [[a, b], [b, a]].forEach(([x, y]) => { if (!adj.has(x.id)) adj.set(x.id, []); adj.get(x.id).push({ node: y, link: l }); });
     });
     adj.forEach((list) => list.sort((p, q) => naturalCompare(locPlainName(p.node), locPlainName(q.node))

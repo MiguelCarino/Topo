@@ -490,6 +490,11 @@ func (s *Server) putRecord(w http.ResponseWriter, r *http.Request) {
 				return fail(http.StatusForbidden, ErrForbidden)
 			}
 			kinds = []string{"act", "quiet"}
+			// The checks for a monitor with no screen (docs/SCOPE.md D457):
+			// an owner's alone, as a quiet window is by the readers' rule.
+			if m.Role == "owner" {
+				kinds = append(kinds, "plan")
+			}
 		}
 		var err error
 		rec, err = s.checkRecord(ctx, tx, raw, site, sess.UserID, kinds...)

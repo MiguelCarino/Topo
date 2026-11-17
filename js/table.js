@@ -330,7 +330,7 @@ function cableColumn(key, opts) {
         show: (row) => (tvNoCable(row) ? shown('—', { muted: true }) : shown(row.data[key])) }, opts));
 }
 const tvLinkOf = (row) => getLink(row.ref.linkId);
-const tvNoCable = (row) => { const l = tvLinkOf(row); const m = l ? effectiveMedium(l) : ''; return m === 'wireless' || m === 'vpn'; };
+const tvNoCable = (row) => { const l = tvLinkOf(row); const m = l ? effectiveMedium(l) : ''; return m === 'wireless' || isOffNetMedium(m); };
 
 // ---- Wi-Fi (js/model.js "Wi-Fi", js/wifi.js) ----
 // A radio's standard and bands on the Interfaces tab, its channels read

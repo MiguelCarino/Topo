@@ -189,6 +189,16 @@ func TestSiteMonitor(t *testing.T) {
 	if r := o.b.post("/api/sites/"+site+"/records", o.record(site, "quiet", "q1", epoch, "{}")); r.Code != 200 {
 		t.Fatalf("owner quiet: %d %s", r.Code, r.Body.String())
 	}
+	// The checks for a monitor with no screen (D457): an owner's alone.
+	if r := o.b.post("/api/sites/"+site+"/records", o.record(site, "plan", m.id+"|"+o.id+"|0", epoch, `{"v":1}`)); r.Code != 200 {
+		t.Fatalf("owner plan: %d %s", r.Code, r.Body.String())
+	}
+	if r := p.b.post("/api/sites/"+site+"/records", p.record(site, "plan", m.id+"|"+p.id+"|0", epoch, `{"v":1}`)); r.Code != 403 {
+		t.Fatalf("provider plan: %d", r.Code)
+	}
+	if r := m.mdo(tok, "POST", "/api/sites/"+site+"/records", m.record(site, "plan", m.id+"|x|0", epoch, `{"v":1}`)); r.Code != 403 {
+		t.Fatalf("monitor plan: %d", r.Code)
+	}
 	o.shareKeys(site, v)
 	if r := v.b.post("/api/sites/"+site+"/records", v.record(site, "act", "in0000000001|ack|2", epoch, "{}")); r.Code != 403 {
 		t.Fatalf("viewer act: %d", r.Code)
@@ -199,7 +209,7 @@ func TestSiteMonitor(t *testing.T) {
 	}
 	// Every member reads them, the viewer too.
 	r := v.b.get("/api/sites/" + site + "/records?since=0")
-	if r.Code != 200 || len(r.json()["records"].([]any)) != 4 {
+	if r.Code != 200 || len(r.json()["records"].([]any)) != 5 { // status, issue, act, quiet and the plan
 		t.Fatalf("records: %d %s", r.Code, r.Body.String())
 	}
 	if e.count("SELECT count(*) FROM site_records WHERE record LIKE '%plaintext-marker%'") != 0 {

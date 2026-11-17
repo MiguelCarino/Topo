@@ -171,6 +171,10 @@
                     <button id="exportJsonBtn" data-adv class="cs-menu-item" role="menuitem">📄 Back up this network <span class="cs-menu-note">.json</span></button>
                     <!-- The open network's restore points (js/restore.js): shown once it has some. -->
                     <button id="restorePointsBtn" data-adv class="cs-menu-item hidden" role="menuitem">↺ Restore points…</button>
+                    <!-- The map at an earlier time (js/history.js). -->
+                    <button id="historyBtn" data-adv class="cs-menu-item" role="menuitem">🕘 History…</button>
+                    <!-- Address lists and what each may not reach (js/lists.js). -->
+                    <button id="listsBtn" data-adv class="cs-menu-item" role="menuitem">🛡 Address lists…</button>
                     <!-- The open network's log of merges (js/mergeapply.js): shown once it has one. -->
                     <button id="networkLogBtn" data-adv class="cs-menu-item hidden" role="menuitem">≡ Network log…</button>
                     <!-- Devices, interfaces, cables and findings as CSV / TSV, and a
@@ -493,7 +497,24 @@
                             <option value="wireless" data-simple="Wi-Fi">Wireless (Dashed Purple)</option>
                             <option value="powerline" data-simple="Through power outlets">Powerline (Dash-Dot Yellow)</option>
                             <option value="vpn" data-simple="VPN (internet tunnel)">VPN Tunnel (Overlay · Teal)</option>
+                            <!-- No IP travels over these (v21, D441). -->
+                            <option value="thread" data-simple="Thread (smart home)">Thread (Dotted Orange · no IP)</option>
+                            <option value="zigbee" data-simple="Zigbee (smart home)">Zigbee (Dotted Green · no IP)</option>
+                            <option value="zwave" data-simple="Z-Wave (smart home)">Z-Wave (Dotted Blue · no IP)</option>
+                            <option value="bluetooth" data-simple="Bluetooth">Bluetooth (Dotted Indigo · no IP)</option>
+                            <option value="serial" data-simple="Serial cable">Serial line (Dashed Brown · no IP)</option>
                         </select>
+                    </div>
+                    <!-- A way out to the internet: the primary one or a back-up
+                         (link.uplink, v21, D443). Offered on a link into a cloud. -->
+                    <div id="linkUplinkProps" class="hidden prop-sec">
+                        <label class="prop-lbl accent" for="propUplink" data-i18n>Way out</label>
+                        <select id="propUplink" class="select">
+                            <option value="" data-i18n>Not said</option>
+                            <option value="primary" data-i18n>Primary</option>
+                            <option value="backup" data-i18n>Back-up</option>
+                        </select>
+                        <p class="rail-note" data-i18n>What the router is set to do. Topo fails nothing over.</p>
                     </div>
 
                     <!-- Who is responsible for the run (link.provider,
@@ -608,6 +629,10 @@
                              own, document v16) and stays English with the other
                              technical labels; the plain words (Vendor, Model,
                              Serial number, Location, Status…) are translated. -->
+                        <!-- How this device is reached (js/reach.js, D446): a button
+                             for each way in. In every view; the list is edited in
+                             the full editor, below. -->
+                        <div id="reachRow" class="reach-row hidden"></div>
                         <details id="assetGroup" class="asset-group" data-adv open>
                             <summary class="asset-sum"><span data-i18n>Asset</span><span id="assetSummary" class="asset-sum-note"></span></summary>
                             <div class="prop-grid">
@@ -774,6 +799,21 @@
                             <summary class="asset-sum"><span data-i18n>Locate</span><span id="locateSummary" class="asset-sum-note"></span></summary>
                             <div id="locateBody" class="locate-body"></div>
                         </details>
+                        <!-- The ways in and the device's own picture (js/reach.js;
+                             docs/SCOPE.md D442, D446). Never a password or a key. -->
+                        <details id="reachGroup" class="asset-group reach-group" data-adv>
+                            <summary class="asset-sum"><span data-i18n>Reach it</span><span id="reachSummary" class="asset-sum-note"></span></summary>
+                            <div id="reachList" class="reach-list"></div>
+                            <button type="button" id="reachAddBtn" class="link-btn" data-i18n>+ Add a way in</button>
+                            <p class="rail-note" data-i18n>Opens your own program at this device's address. Topo keeps no password and no key.</p>
+                            <div id="ownIconBox" class="own-icon">
+                                <span class="prop-lbl" data-i18n>Own icon</span>
+                                <img id="ownIconPic" class="own-icon-pic" alt="" hidden>
+                                <button type="button" id="ownIconPick" class="link-btn">Choose a picture…</button>
+                                <button type="button" id="ownIconClear" class="link-btn hidden" data-i18n>Remove</button>
+                                <input type="file" id="ownIconFile" accept="image/svg+xml,image/png,image/jpeg,image/webp" hidden>
+                            </div>
+                        </details>
                         <!-- Whose it is, in plain words (docs/SCOPE.md step 4), before
                              the Locate sentence (History follows that one): the
                              reduced views' read-only line naming who looks after
@@ -851,6 +891,9 @@
                         <!-- Tag + QR for a device, the label for a cable
                              (printAssetLabels, js/assets.js). -->
                         <button id="printLabelBtn" type="button" data-adv class="rail-btn" data-i18n>Print label</button>
+                        <!-- What would go dark without it (js/whatif.js, D438):
+                             a device or a cable. Its words are set there. -->
+                        <button id="whatIfBtn" type="button" class="rail-btn hidden" aria-pressed="false">What if this fails?</button>
                         <button id="deleteElementBtn" data-i18n class="rail-btn danger">Delete Selected</button>
                     </div>
                 </div>
@@ -1833,6 +1876,25 @@
                                         </div>
                                     </div>
                                 </section>
+                                <!-- A monitor with no screen (js/monitors.js, desktop/monitor,
+                                     docs/SCOPE.md D455-D457, step 9k): an owner, signed in to a
+                                     Topo server, on a network kept there. The website too: the
+                                     page probes nothing, the box does. -->
+                                <section class="set-sec" id="setHeadlessSec" aria-labelledby="setHeadlessHead" hidden>
+                                    <h3 id="setHeadlessHead" class="set-head" data-i18n>A monitor with no screen</h3>
+                                    <p class="dlg-dim set-note" data-i18n>A small program, topo-monitor, checks this network from a box at the site with no desktop and reports through this server, as a monitoring PC does. The server still cannot read what it sends.</p>
+                                    <ol class="dlg-dim set-note hm-steps">
+                                        <li data-i18n>On the box, run: topo-monitor request</li>
+                                        <li data-i18n>Paste the line it prints here.</li>
+                                        <li data-i18n>Give the file Topo downloads to: topo-monitor enroll FILE</li>
+                                    </ol>
+                                    <label class="prop-lbl" for="setHeadlessLine" data-i18n>The line from the box</label>
+                                    <textarea id="setHeadlessLine" class="input hm-line" rows="3" data-keys="code" placeholder="topo-monitor-request:…"></textarea>
+                                    <div class="set-acts">
+                                        <button type="button" id="setHeadlessGo" class="btn btn-primary" data-i18n>Make its enrolment file</button>
+                                    </div>
+                                    <p class="set-note ds-status" id="setHeadlessStatus" role="status" aria-live="polite"></p>
+                                </section>
                             </div>
                             <div class="set-panel" role="tabpanel" id="setPanel-backup" aria-labelledby="setTab-backup" tabindex="-1" hidden>
                                 <!-- A back-up folder (js/backupdir.js, D108): Chrome and
@@ -2629,6 +2691,61 @@
                     </div>
                 </div>
             </div>
+            <!-- Address lists and who may reach whom (js/lists.js, D444): it
+                 documents a firewall; Topo reads and writes none. -->
+            <div id="listsDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-lists" role="dialog" aria-modal="true" aria-labelledby="listsTitle">
+                    <div class="modal-head">
+                        <h2 id="listsTitle" class="modal-title" data-i18n>Address lists</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="ask-msg paste-blurb" data-i18n>Names for sets of addresses, as a firewall has them, and what each may not reach. Does A reach B? stops at a blocked pair. It is a record: nothing here is read from a firewall or sent to one.</p>
+                        <p id="listsEmpty" class="dlg-dim hidden" data-i18n>No address lists yet.</p>
+                        <p id="listsStatus" class="restore-status hidden" role="status"></p>
+                        <div id="listsBody" class="al-body"></div>
+                        <button type="button" id="listsAddBtn" class="btn" data-i18n>+ Add a list</button>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" class="btn" data-close data-i18n>Close</button>
+                    </div>
+                </div>
+            </div>
+            <!-- The map at an earlier time (js/history.js, D439): the saved
+                 points of the open network, each drawn as it was with what
+                 changed marked on it. A picture, never the network swapped. -->
+            <div id="historyDialog" class="modal-scrim" hidden>
+                <div class="modal topo-paste topo-history" role="dialog" aria-modal="true" aria-labelledby="historyTitle">
+                    <div class="modal-head">
+                        <h2 id="historyTitle" class="modal-title" data-i18n>History</h2>
+                        <button type="button" class="modal-x" data-close data-i18n-aria-label aria-label="Close">✕</button>
+                    </div>
+                    <div class="modal-body" id="historyBody" aria-busy="false">
+                        <div class="hx-controls">
+                            <button type="button" id="historyOlder" class="btn" data-i18n>◂ Older</button>
+                            <select id="historyPoint" class="hx-pick" data-i18n-aria-label aria-label="Saved point"></select>
+                            <button type="button" id="historyNewer" class="btn" data-i18n>Newer ▸</button>
+                            <label class="hx-mode"><span data-i18n>Compare with</span>
+                                <select id="historyMode">
+                                    <option value="before" data-i18n>the point before</option>
+                                    <option value="now" data-i18n>the network now</option>
+                                </select>
+                            </label>
+                            <button type="button" id="historyFileBtn" class="btn" data-i18n>Compare with a file…</button>
+                            <input type="file" id="historyFile" accept=".json,application/json" hidden>
+                        </div>
+                        <p id="historyEmpty" class="dlg-dim hidden" data-i18n>No earlier point is kept in this browser yet. One is kept each time a file, a link or a sheet changes this network, and each time a copy leaves. A back-up file can be compared with here.</p>
+                        <p id="historyStatus" class="restore-status hidden" role="alert"></p>
+                        <p id="historySay" class="hx-say" role="status" aria-live="polite"></p>
+                        <p id="historyKey" class="hx-key hidden"><span class="hx-k hx-k-add" data-i18n>Added</span><span class="hx-k hx-k-chg" data-i18n>Changed</span><span class="hx-k hx-k-gone" data-i18n>Removed</span></p>
+                        <div class="hx-pic"><img id="historyPic" alt="" hidden><p id="historyNoPic" class="dlg-dim" hidden></p></div>
+                        <ul id="historyRows" class="hx-rows"></ul>
+                    </div>
+                    <div class="modal-foot">
+                        <button type="button" class="btn" data-close data-i18n>Close</button>
+                    </div>
+                </div>
+            </div>
             <!-- A Topo server's sheet (js/serverui.js): sign in, the recovery key,
                  the account, an invitation, a site's members. Its body is built
                  for each step; never opened on a page no server served. -->
@@ -3048,6 +3165,8 @@
     <script src="js/incidents.js"></script>
     <script src="js/providermode.js"></script>
     <script src="js/providerreport.js"></script>
+    <script src="js/history.js"></script>
+    <script src="js/lists.js"></script>
     <script src="js/visits.js"></script>
     <script src="js/servercrypto.js"></script>
     <script src="js/server.js"></script>
@@ -3071,6 +3190,8 @@
     <script src="js/checks.js"></script>
     <script src="js/watch.js"></script>
     <script src="js/tracetarget.js"></script>
+    <script src="js/whatif.js"></script>
+    <script src="js/reach.js"></script>
     <script src="js/issues.js"></script>
     <script src="js/monitors.js"></script>
     <script src="js/connections.js"></script>

@@ -241,11 +241,16 @@ function evaluateMultiHoming(node) {
 
 // Physical plausibility of what is plugged in where.
 function evaluatePorts(node) {
-    const adjacent = linksAtNode(node.id);
-    if (!adjacent.length) {
+    const every = linksAtNode(node.id);
+    if (!every.length) {
         return { level: 'info', text: t('No links attached.') };
     }
 
+    // A link that carries no IP takes no port (v21, D441): a device joined
+    // only by such links has nothing to plug in, and such links are none of
+    // the port rules' business on a device that has cables too (a hub).
+    if (isOffIpDevice(node)) return { level: 'ok', text: t('Joined without a network port. No address is expected.') };
+    const adjacent = every.filter((l) => !isNonIpMedium(l.medium));
     const unbound = adjacent.filter((l) => !ifaceIdOn(l, node.id));
     if (unbound.length) {
         return { level: 'warn', text: t(unbound.length === 1 ? '{n} link is not bound to an interface. Select the link and pick a port.'
@@ -347,7 +352,7 @@ function evaluateRadio(node) {
         const iface = ifaceOn(node, ifaceIdOn(link, node.id));
         if (!iface) return;
         const medium = effectiveMedium(link);
-        if (medium === 'vpn') return; // an overlay rides whatever is underneath
+        if (isOffNetMedium(medium)) return; // an overlay rides whatever is underneath; no radio of ours carries Zigbee
         const peer = getNode(link.source === node.id ? link.target : link.source);
         const name = peer?.name || 'peer';
         const wireless = ifaceIsWireless(iface);
@@ -867,7 +872,7 @@ function reachL2Domain(originId, vlan, ends) {
 
             // A VPN tunnel is a routed overlay (reachWalk's VPN block), never
             // L2 adjacency, even when it ends on a managed switch.
-            if (link.medium === 'vpn') continue;
+            if (isOffNetMedium(link.medium)) continue;
             if (!linkPassesVlan(link, currentId, nextId, vlan, ends)) continue;
 
             // Traverse a switch/AP, OR a passthrough link (treats the host like a switch for this path)
@@ -964,7 +969,7 @@ function traceStartVlans(node) {
         return out.length ? out : [null];
     }
     linksAtNode(node.id).forEach((l) => {
-        if (l.source === l.target || effectiveMedium(l) === 'vpn') return;
+        if (l.source === l.target || isOffNetMedium(effectiveMedium(l))) return;
         const farId = l.source === node.id ? l.target : l.source;
         const far = getNode(farId);
         if (!far || isRetired(far)) return;
@@ -1101,7 +1106,7 @@ function reachWalk(queue, acc, handedOn) {
                 linksAtNode(l2id).forEach((link) => {
                     const neighborId = link.source === l2id ? link.target : link.source, neighbor = getNode(neighborId);
                     if (!neighbor || isL2Forwarder(neighbor) || isRetired(neighbor)) return;
-                    if (link.medium === 'vpn') return; // overlay tunnels handled below, not as physical adjacency
+                    if (isOffNetMedium(link.medium)) return; // overlay tunnels handled below, not as physical adjacency; no-IP links never
                     if (vlans && !linkPassesVlan(link, l2id, neighborId, v, acc.ends)) return;
                     candidateDevices.add(neighborId); candidateLinks.set(neighborId, link);
                     if (vlans) {
@@ -1380,6 +1385,7 @@ function runDiagnosis() {
     hostFindings().forEach(add);
     wifiFindings().forEach(add);
     providerFindings().forEach(add);
+    uplinkFindings().forEach(add);
 
     // Each finding says whether it was accepted, and why: { reason, index }
     // (the entry's place in state.accepted, which the Findings tab's Reopen
@@ -1542,7 +1548,7 @@ function dropFindingNotes(kind, drop, refresh) {
 const FINDING_CHECK_NAMES = { 'ip-conflict': 'IP Conflict', 'mac-conflict': 'MAC Conflict', cabling: 'Cabling', loop: 'L2 loop',
     'cable-label': 'Cable label', 'asset-tag': 'Asset tag', group: 'Groups', rack: 'Rack', 'rack-tag': 'Cable tags', host: 'Runs on', age: 'Age', service: 'Service', 'service-due': 'Service due',
     'wifi-band': 'Wi-Fi band', 'wifi-ssid': 'SSID', 'wifi-subnet': 'Wi-Fi subnet', 'wifi-overlap': 'Channel overlap', 'wifi-plan': 'Channel plan',
-    'wifi-security': 'Wi-Fi security', 'wifi-signal': 'Signal', provider: 'Provider', 'port-capacity': 'Port capacity', 'address-capacity': 'Address capacity', 'dhcp-pool': 'DHCP pool', firmware: 'Firmware',
+    'wifi-security': 'Wi-Fi security', 'wifi-signal': 'Signal', provider: 'Provider', uplink: 'Way out', 'port-capacity': 'Port capacity', 'address-capacity': 'Address capacity', 'dhcp-pool': 'DHCP pool', firmware: 'Firmware',
     'poe-none': 'PoE power', 'poe-class': 'PoE power', 'poe-budget': 'PoE budget', 'poe-near': 'PoE budget',
     'vlan-path': 'VLAN path', 'vlan-subnet': 'VLAN subnet', 'vlan-mismatch': 'VLAN mismatch' };
 const findingCheckName = (key) => t(FINDING_CHECK_NAMES[key] || (NODE_CHECKS_BY_KEY[key] && NODE_CHECKS_BY_KEY[key].label) || key);
@@ -1803,7 +1809,7 @@ function cablingFindings() {
     const out = [];
     state.links.forEach((link) => {
         const src = getNode(link.source), tgt = getNode(link.target);
-        if (!src || !tgt || effectiveMedium(link) === 'vpn' || isRetired(src) || isRetired(tgt)) return;
+        if (!src || !tgt || isOffNetMedium(effectiveMedium(link)) || isRetired(src) || isRetired(tgt)) return;
         const a = parseValidCIDR(ifaceOn(src, link.sourceIface)?.ip);
         const b = parseValidCIDR(ifaceOn(tgt, link.targetIface)?.ip);
         if (!a || !b || a.networkStr === b.networkStr) return;
@@ -1824,7 +1830,7 @@ function loopFindings() {
     state.nodes.forEach((n) => { parent[n.id] = n.id; });
     state.links.forEach((link) => {
         const src = getNode(link.source), tgt = getNode(link.target);
-        if (!src || !tgt || effectiveMedium(link) === 'vpn') return;
+        if (!src || !tgt || isOffNetMedium(effectiveMedium(link))) return;
         // Only forwarding devices close a loop, and only unaddressed ones count:
         // a managed switch (one with an address) is where STP runs, so a ring
         // through one is taken as redundancy, not a storm (BACKLOG step 6).
@@ -2503,6 +2509,47 @@ function providerFindings() {
         out.push({ key: 'provider', level: 'info', check: t('Provider'), subject: name,
             detail: t('Nobody is named for {name}: when the line is down, whoever reads this will not know whom to call. Set its provider.', { name }),
             nodeIds: [node.id], linkIds: links.map((l) => l.id) });
+    });
+    return out;
+}
+
+// ---- The way out (link.uplink, document v21, docs/SCOPE.md D443) ----
+// A router with one way out to the internet: nothing takes over if that line
+// stops. Advice, never a fault (info: listed, not counted), and only once
+// somebody has marked that line as a way out: most homes and small offices
+// have one line on purpose, and a note on every one of them (each sample
+// network raised it) would be noise nobody asked for. Marking the line is
+// how the owner says the way out matters here. Said once per router, naming
+// the provider's cloud. A
+// cloud that stands for another site is not the internet; a retired router
+// or cloud is off the network; a VPN tunnel is no second line. And a way out
+// marked as the back-up with no primary beside it is said too: the marks are
+// only worth having when they are complete.
+function uplinkFindings() {
+    const out = [];
+    state.nodes.forEach((node) => {
+        if (node.type === 'cloud' || !isRoutingDevice(node.type) || isRetired(node)) return;
+        const ways = linksAtNode(node.id).filter((l) => {
+            if (l.source === l.target || isOffNetMedium(effectiveMedium(l))) return false;
+            const far = getNode(l.source === node.id ? l.target : l.source);
+            return !!far && far.type === 'cloud' && !far.siteRef && !isRetired(far);
+        });
+        if (!ways.length) return;
+        const name = node.name || node.id;
+        const farName = (l) => { const far = getNode(l.source === node.id ? l.target : l.source); return far.name || far.id; };
+        if (ways.length === 1) {
+            if (!ways[0].uplink) return;   // nobody has said the way out matters here
+            out.push({ key: 'uplink', level: 'info', check: t('Way out'), subject: name,
+                detail: t('One way out to the internet. Nothing takes over if {name} stops.', { name: farName(ways[0]) }),
+                nodeIds: [node.id], linkIds: [ways[0].id] });
+            return;
+        }
+        const marked = ways.filter((l) => l.uplink);
+        if (marked.length && !ways.some((l) => l.uplink === 'primary')) {
+            out.push({ key: 'uplink', level: 'info', check: t('Way out'), subject: name,
+                detail: t('A back-up way out is marked, but no primary one. Mark the line the router uses first.'),
+                nodeIds: [node.id], linkIds: ways.map((l) => l.id) });
+        }
     });
     return out;
 }

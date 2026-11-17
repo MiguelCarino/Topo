@@ -199,6 +199,15 @@ function reasonWhy(aId, bId, reach, port) {
 function answer(aId, bId, port) {
     const p = String(port || '').trim();
     const reach = calculateReachability(aId, { port: p, vlan: state.settings.traceVlan !== false });
+    // What the address lists say (js/model.js listBlockBetween, D444): the
+    // cables and addresses would carry it, and a rule somebody wrote down
+    // says it may not pass. Said as the reason, naming the two lists.
+    const barred = reach.reachableNodes.has(bId) ? listBlockBetween(getNode(aId), getNode(bId)) : null;
+    if (barred) {
+        const line = t('{a} does not reach {b}', { a: nameOf(aId), b: nameOf(bId) }) + (p ? ` · ${t('port {port}', { port: p })}` : '');
+        return { reaches: false, path: null, line, stop: null, stopLine: '',
+            why: { key: 'list', text: t('The address lists say {from} may not reach {to}.', { from: listLabel(barred.from), to: listLabel(barred.to) }), listIds: [barred.from.id, barred.to.id] } };
+    }
     if (reach.reachableNodes.has(bId)) {
         const path = pathThrough(aId, bId, reach.reachableLinks, state.settings.traceVlan !== false) || { nodes: [aId, bId], links: [], vlans: [] };
         const mid = path.nodes.slice(1, -1).map(nameOf);
@@ -387,5 +396,5 @@ function renderBar() {
     });
 })();
 
-window.TopoTraceTarget = { state: _tt, answer, ask, armFrom, clear, onContext, onClick, onPath, linkOnPath, isEnd, armed, isArmed, lit, checkNow, checkNowSpec, outcomeText, renderBar, pathThrough };
+window.TopoTraceTarget = { refresh: recompute, state: _tt, answer, ask, armFrom, clear, onContext, onClick, onPath, linkOnPath, isEnd, armed, isArmed, lit, checkNow, checkNowSpec, outcomeText, renderBar, pathThrough };
 })();

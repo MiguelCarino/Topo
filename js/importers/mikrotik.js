@@ -161,7 +161,7 @@ function vlanIds(text) {
 }
 const KNOWN = ['system identity', 'interface ethernet', 'interface bridge', 'interface bridge port', 'interface bridge vlan', 'interface vlan', 'interface bonding',
     'interface wireless', 'interface wifi', 'interface wireless security-profiles', 'interface wifi security', 'interface wifi configuration',
-    'ip address', 'ip pool', 'ip dhcp-server', 'ip dhcp-server network', 'ip dhcp-server lease'];
+    'ip address', 'ip pool', 'ip dhcp-server', 'ip dhcp-server network', 'ip dhcp-server lease', 'ip firewall address-list'];
 
 function parseOne(b, f, warnings, notes, counters) {
     const text = String(f.text || '');
@@ -377,6 +377,25 @@ function parseOne(b, f, warnings, notes, counters) {
             }
         });
     });
+    // The firewall's address lists (doc.lists, D444): each list by its name,
+    // and, from the forward chain, which list may not reach which. The
+    // filter section is not "read" for the note below: only its rules
+    // between two lists are, and the rest of a firewall is not Topo's.
+    const groups = new Map();
+    sec('ip firewall address-list').forEach((c) => {
+        if (c.verb !== 'add' || !c.args.list || lc(c.args.disabled) === 'yes') return;
+        if (!groups.has(c.args.list)) groups.set(c.args.list, { key: c.args.list, name: c.args.list, members: [] });
+        if (c.args.address) groups.get(c.args.list).members.push(c.args.address);
+    });
+    const rules = [];
+    sec('ip firewall filter').forEach((c) => {
+        const from = c.args['src-address-list'], to = c.args['dst-address-list'];
+        if (c.verb !== 'add' || !from || !to || /^!/.test(from) || /^!/.test(to) || lc(c.args.disabled) === 'yes' || (c.args.chain && c.args.chain !== 'forward')) return;
+        const action = lc(c.args.action);
+        if (action === 'drop' || action === 'reject') rules.push({ from, to, action: 'block' });
+        else if (action === 'accept') rules.push({ from, to, action: 'allow' });
+    });
+    if (groups.size) (b.addressGroups || (b.addressGroups = { groups: [], rules: [] })) && (b.addressGroups.groups.push(...groups.values()), b.addressGroups.rules.push(...rules));
     // Leases: clients, not cabled.
     sec('ip dhcp-server lease').forEach((c) => {
         const mac = C.macText(c.args['mac-address']);
@@ -428,6 +447,10 @@ function parse(files) {
     b.stats.secrets += counters.secrets;
     b.notes(notes);
     const doc = b.finish();
+    if (b.addressGroups) {
+        const al = C.addressLists(b.addressGroups.groups, b.addressGroups.rules);
+        if (al.lists.length) doc.lists = al.lists;
+    }
     return { doc, warnings, notes, name: files.length === 1 && doc.nodes[0] ? doc.nodes[0].name : '', parts: b.partList(), counts: { leases: counters.leases } };
 }
 

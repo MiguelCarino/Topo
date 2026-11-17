@@ -1,0 +1,34 @@
+# topo-monitor as a service of one user (no administrator needed):
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp topo-monitor.service ~/.config/systemd/user/
+#   systemctl --user enable --now topo-monitor
+#   loginctl enable-linger "$USER"     # keeps it running with nobody signed in
+#
+# Enrol the box first (topo-monitor request, then topo-monitor enroll FILE):
+# the service only runs what was enrolled. Its files are in
+# ~/.local/state/topo-monitor unless TOPO_MONITOR_DIR says otherwise.
+#
+# Ping: Linux lets a program without privileges send ICMP echo only when its
+# group is inside net.ipv4.ping_group_range (most desktop systems; many
+# servers ship "1 0", which is nobody). Where it is refused, a ping check
+# asks the device's documented TCP port instead, as the desktop app does.
+[Unit]
+Description=Topo site monitor (no screen)
+Documentation=https://github.com/MiguelCarino/Topo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/topo-monitor run
+Restart=on-failure
+RestartSec=30
+# An owner revoked it, or it was never enrolled: starting again changes nothing.
+RestartPreventExitStatus=1 2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/.local/state/topo-monitor
+
+[Install]
+WantedBy=default.target

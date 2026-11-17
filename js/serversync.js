@@ -1263,6 +1263,22 @@ async function history(siteId) {
     return { head: res.head, revs: (res.revs || []).slice().reverse() };
 }
 
+// One earlier version as a document, for History (js/history.js): `hd` is
+// its header from history() above. The body is opened with the site's key
+// of that version's epoch, which is what proves it is ours: a server cannot
+// make one up. A version whose body the server no longer keeps (TOPO_REV_CAP)
+// or that does not open gives null. Nothing is stored.
+async function revisionAt(siteId, hd) {
+    try {
+        const res = await T().api('GET', `/api/sites/${siteId}/revs/${hd.n}`);
+        if (!res || !res.rev || !res.body) return null;
+        const h = Object.assign({ site: siteId }, res.rev);
+        if (await C.chainHash(C.revSigned(h), res.rev.sig) !== hd.h) return null;
+        const env = await C.unpackDoc(await C.openRevision(h, res.body, await siteKey(siteId, res.rev.epoch)));
+        return env && env.doc && Array.isArray(env.doc.nodes) ? env.doc : null;
+    } catch (e) { return null; }
+}
+
 // Tests: back to nothing.
 function _reset() {
     _index = null; _docs.clear(); _keys.clear(); _members.clear();
@@ -1279,7 +1295,7 @@ window.TopoServerSync = {
     _hooks, _reset, open, index, rec, recBySite, putRec, dropRec, serverCardIds, cardSync, getDoc, putDoc,
     trust, walkRosters, siteKey, siteKeysRaw, siteDetail, pullHead, applyPull, pushCard, syncCard, syncAll, syncNow, afterSave, flushAll,
     onHead, onRoster, onGranted, onRemoved, signedOut, keysReset, putCard, openSite, reviewMerge, trustServerHistory, removeCard, unlinkCard,
-    grant, setRole, removeMember, rotate, invite, setShowName, leave, siteName, deriveEvents, provider, history, onDocLoaded,
+    grant, setRole, removeMember, rotate, invite, setShowName, leave, siteName, deriveEvents, provider, history, revisionAt, onDocLoaded,
     nameSlugOf, sendReadable, setReadable, deleteReadable, siteBackups, flushReadable,
     uploadVisit, providerDecisions, takeServerVersion, offerOwnCopy, siteVisits, openVisitCopy, queueDecision, flushDecisions, ownerVisits, onVisits, visitSlot,
     SERVER_REASON, dirty: (cardId) => { const r = rec(cardId); return !!r && dirty(r); }

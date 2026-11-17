@@ -128,7 +128,7 @@ function providerPart(doc, providerIds, opts = {}) {
     const join = (a, b) => { if (!adj.has(a)) adj.set(a, []); adj.get(a).push(b); };
     links.forEach((l) => {
         if (l.source === l.target || !byId.has(l.source) || !byId.has(l.target)) return;
-        if (effectiveMedium(l, byId.get(l.source), byId.get(l.target)) === 'vpn') return;
+        if (isOffNetMedium(effectiveMedium(l, byId.get(l.source), byId.get(l.target)))) return;
         join(l.source, l.target); join(l.target, l.source);
     });
     adj.forEach((list) => list.sort());

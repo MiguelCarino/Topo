@@ -567,7 +567,7 @@ It **can**:
   typed it), who turned it on and when, its reporting interval and when it
   last reported (the heartbeat, which is how it says "stopped reporting"
   without reading anything), and for each record its kind (status, issue,
-  act, quiet window), author, time and size, and for statistics which
+  act, quiet window, plan), author, time and size, and for statistics which
   monitor sent a blob for which day. A quiet window's record is named by
   the scope and the Topo id of what it quiets (an opaque id such as
   `node|n_…`, never a name or an address). So it can tell that a site had
@@ -1241,7 +1241,7 @@ section talks to the service instead and this way is not offered.
 | `POST /api/sites/{site}/monitors/{mid}/revoke` | owner | as `/remove`: a new epoch for everyone left, the token deleted |
 | `PATCH /api/sites/{site}/stats-days` | owner | Keep statistics (0 = Off); shortening needs `confirm` (409 `confirm` with `deletes`) |
 | `PUT /api/sites/{site}/status` | the monitor | its latest status, kept alone: the heartbeat |
-| `POST /api/sites/{site}/records` | monitor, owner, provider | an issue (monitors only), an act or a quiet window (people) |
+| `POST /api/sites/{site}/records` | monitor, owner, provider | an issue (monitors only), an act or a quiet window (people), a plan (owners only: the checks for a monitor with no screen, `topo-monitor`, in parts named `<monitor>\|<owner>\|<part>`; ciphertext like the rest, and left out of backups) |
 | `GET /api/sites/{site}/records?since=n` | member | every record after n |
 | `POST /api/sites/{site}/records/folded` | owner | the records now in the document (they leave the backups, and go after 30 days) |
 | `PUT /api/sites/{site}/stats/{day}` | the monitor | its hourly figures of one UTC day (refused while Off) |

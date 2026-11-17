@@ -1348,7 +1348,7 @@ function serializeDoc() {
     // (v16): the saved searches, through SEARCH_FIELDS, no key when none.
     // And `log` (v17): the network log, through LOG_FIELDS, last, no key
     // when it is empty (js/model.js "Network log").
-    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), providers: serializeProviders(state.providers), watch: serializeWatch(state.watch), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView), searches: serializeSearches(state.searches), incidents: serializeIncidents(state.incidents), log: serializeLog(state.log) };
+    return { v: DOC_VERSION, nodes: state.nodes.map(serializeNode), links: state.links.map(serializeLink), networks: serializeNetworks(state.networks), groups: serializeGroups(state.groups), wifi: serializeWifi(state.wifi), providers: serializeProviders(state.providers), watch: serializeWatch(state.watch), lists: serializeLists(state.lists), accepted: serializeAccepted(state.accepted), pinned: serializePinned(state.pinned), expectedLife: serializeExpectedLife(state.expectedLife), annotations: state.annotations.length ? state.annotations.map(serializeAnnotation) : undefined, report: serializeReportMeta(state.report), columns: serializeCustomColumns(state.columns), tableView: serializeTableView(state.tableView), searches: serializeSearches(state.searches), incidents: serializeIncidents(state.incidents), log: serializeLog(state.log) };
 }
 function encodeDoc(doc) { return btoa(encodeURIComponent(JSON.stringify(doc))); }
 
@@ -2104,6 +2104,8 @@ function loadDocState(doc) {
     normalizeProviderRefs(state.nodes, state.links, state.groups, state.providers);
     // The watched addresses (v20) after the devices, groups and providers they name.
     state.watch = normalizeWatch(d.watch, { nodes: state.nodes, groups: state.groups, providers: state.providers });
+    // The address lists (v21): they name addresses, not records, so nothing to resolve.
+    state.lists = normalizeLists(d.lists);
     state.accepted = normalizeAccepted(d.accepted);
     state.pinned = normalizePinned(d.pinned);
     // After the devices and cables they name: an id the file does not hold
@@ -2145,7 +2147,7 @@ function loadDocState(doc) {
 // list: a key one of them forgot (the log was the risk) would leave the
 // borrowed document's in the open one, and the next save would write it
 // into the open card.
-const DOC_STATE_KEYS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'watch', 'accepted', 'pinned', 'expectedLife', 'columns', 'tableView', 'searches', 'annotations', 'report', 'log', 'incidents'];
+const DOC_STATE_KEYS = ['nodes', 'links', 'networks', 'groups', 'wifi', 'providers', 'watch', 'lists', 'accepted', 'pinned', 'expectedLife', 'columns', 'tableView', 'searches', 'annotations', 'report', 'log', 'incidents'];
 function holdDocState() {
     const held = {};
     DOC_STATE_KEYS.forEach((k) => { held[k] = state[k]; });
@@ -3160,6 +3162,8 @@ const SHORTCUTS = [
       // It ends Select more too (js/ui.js): only an Esc that reached the map,
       // not one a dialog, an overlay or a field took.
       run: () => { setSelectMore(false); state.linkSourceId = null; if (window.TopoTraceTarget) TopoTraceTarget.clear(); select(null, null); renderCanvasOnly(); } },
+    { keys: ['X'], label: 'What if the selected device or cable fails', test: (e) => e.key.toLowerCase() === 'x' && !tableShown() && !rackShown(),
+      run: () => { if (window.TopoWhatIf) TopoWhatIf.toggle(); } },
     { keys: ['?'], label: 'Show this list', test: (e) => e.key === '?', run: () => toggleShortcutHelp() }
 ];
 
@@ -3411,6 +3415,8 @@ function applyLocale(lang) {
     document.getElementById('exportSvgBtn').innerHTML = `🖼️ ${t('SVG image')} <span class="cs-menu-note">${t('vector')}</span>`;
     document.getElementById('exportJsonBtn').innerHTML = `📄 ${t('Back up this network')} <span class="cs-menu-note">.json</span>`;
     document.getElementById('restorePointsBtn').textContent = `↺ ${t('Restore points…')}`;
+    document.getElementById('historyBtn').textContent = `🕘 ${t('History…')}`;
+    document.getElementById('listsBtn').textContent = `🛡 ${t('Address lists…')}`;
     document.getElementById('networkLogBtn').textContent = `≡ ${t('Network log…')}`;
     document.getElementById('csvMenuBtn').innerHTML = `📊 ${t('Spreadsheet')} <span class="cs-menu-note">CSV · TSV</span>`;
     document.getElementById('reportBtn').innerHTML = `📋 ${t('Site report')} <span class="cs-menu-note">${t('printable')}</span>`;

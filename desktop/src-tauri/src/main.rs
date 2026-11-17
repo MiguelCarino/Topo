@@ -37,6 +37,9 @@ mod issues;
 mod keystore;
 mod monitorlink;
 mod servercrypto;
+// "Open a device" (D452, step 9m): this computer's own SSH, Remote Desktop,
+// VNC and Telnet programs, looked for and started.
+mod reach;
 
 // The download handler (and its helpers) is not built on Windows; see main.
 #[cfg(not(target_os = "windows"))]
@@ -328,7 +331,9 @@ fn main() {
             visitcmd::visit_monitor_info,
             visitcmd::visit_monitor_figures,
             visitcmd::visit_monitor_stop,
-            visitcmd::visit_monitor_end
+            visitcmd::visit_monitor_end,
+            reach::reach_clients,
+            reach::reach_open
         ])
         .setup(|app| {
             // Off the main thread: starting waits a moment for a refusal.

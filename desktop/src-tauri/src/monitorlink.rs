@@ -120,6 +120,18 @@ pub trait Host {
     fn retention(&self, days: u32);
     fn notify_stale(&self, name: &str);
     fn revoked(&self);
+    /// More for the status. The monitor with no screen (desktop/monitor,
+    /// D457) says here that it takes its checks from the site and which it
+    /// has; the app says nothing more.
+    fn status_extra(&self) -> Option<Value> {
+        None
+    }
+    /// One part of the checks an owner's browser sent for a monitor with no
+    /// screen (a "plan" record, D457). The app takes its checks from its own
+    /// page and passes these over.
+    fn plan_part(&self, _v: &Value) -> bool {
+        false
+    }
 }
 
 /// One run of the link (in memory: the keys opened, the timers).
@@ -323,7 +335,12 @@ impl Link {
         if !due {
             return Ok(false);
         }
-        let plain = json!({ "v": 1, "monitor": self.file.name, "at": now, "intervalMs": HEARTBEAT_MS, "items": sts });
+        let mut plain = json!({ "v": 1, "monitor": self.file.name, "at": now, "intervalMs": HEARTBEAT_MS, "items": sts });
+        if let (Some(Value::Object(extra)), Some(map)) = (host.status_extra(), plain.as_object_mut()) {
+            for (k, v) in extra {
+                map.entry(k).or_insert(v);
+            }
+        }
         let id = self.file.monitor.clone();
         let rec = self.seal("status", &id, &plain, now)?;
         self.send(api, "PUT", &format!("/api/sites/{}/status?interval={HEARTBEAT_MS}", self.file.site), &rec)?;
@@ -403,7 +420,7 @@ impl Link {
             for x in got["records"].as_array().cloned().unwrap_or_default() {
                 let n = x["n"].as_i64().unwrap_or(0);
                 if let Ok(rec) = serde_json::from_value::<Record>(x["record"].clone()) {
-                    if rec.site == self.file.site && (rec.kind == "act" || rec.kind == "quiet") {
+                    if rec.site == self.file.site && (rec.kind == "act" || rec.kind == "quiet" || rec.kind == "plan") {
                         let readable = |l: &Link| l.trusted_member(&rec.author).is_some() && l.site_keys.contains_key(&rec.epoch);
                         if !readable(self) && !refreshed {
                             refreshed = true;
@@ -560,6 +577,7 @@ pub fn apply_record(host: &dyn Host, kind: &str, v: &Value) -> bool {
             host.quiet(scope, v["id"].as_str().unwrap_or(""), until);
             true
         }
+        "plan" => host.plan_part(v),
         _ => false,
     }
 }

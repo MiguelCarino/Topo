@@ -225,7 +225,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     showTableTab('cables');
     n0 = steps();
     ed = editCell('l:la', 'medium');
-    ok('a medium edits with a list of the five', ed && ed.el.tagName === 'SELECT' && ed.el.options.length === 5);
+    ok('a medium edits with a list of the ten (v21: five that carry no IP)', ed && ed.el.tagName === 'SELECT' && ed.el.options.length === 10);
     ed.el.value = 'fiber'; key(ed.el, 'Enter');
     ok('and is written to the cable', getLink('la').medium === 'fiber' && steps() === n0 + 1);
     ed = editCell('l:lr', 'medium'); ed.el.value = effectiveMedium(getLink('lr')); key(ed.el, 'Enter');

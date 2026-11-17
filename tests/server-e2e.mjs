@@ -29,7 +29,7 @@
 // The child server is spawned in its own process group, and only it is
 // stopped at the end (SIGTERM, then SIGKILL after 5 s).
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, existsSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, existsSync, rmSync, writeFileSync, chmodSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -315,6 +315,22 @@ try {
     ok('7. B\'s card says its changes go to the owner', await until(B.p, (id) => TopoServerSync.cardSync(id).state === 'proposed', cardId), await B.p.evaluate((id) => TopoServerSync.cardSync(id), cardId));
     ok('7. the quiet merge is one log entry from "the server"', await B.p.evaluate(() => (state.log || []).filter((e) => e.kind === 'merge' && e.source === 'server').length === 1));
     ok('7. B never pushed', bPosts === 0, bPosts);
+
+    // 7h. History (js/history.js, docs/SCOPE.md D439): an earlier version on
+    // the server is read as a document by its owner's browser, opened with
+    // the site key; a header that does not match what the server sends back
+    // gives nothing. (The dialog's own listing: tests/suites/maphistory.js.)
+    const hist = await A.p.evaluate(async (id) => {
+        const r = TopoServerSync.rec(id);
+        const res = await TopoServerSync.history(r.siteId);
+        const one = res.revs.find((h) => h.n === 1), two = res.revs.find((h) => h.n === 2);
+        const d1 = await TopoServerSync.revisionAt(r.siteId, one), d2 = await TopoServerSync.revisionAt(r.siteId, two);
+        const bad = await TopoServerSync.revisionAt(r.siteId, Object.assign({}, one, { h: '00' }));
+        const gone = await TopoServerSync.revisionAt(r.siteId, Object.assign({}, one, { n: 999 }));
+        return { one: !!d1 && Array.isArray(d1.nodes) && d1.nodes.length > 0, two: !!d2 && Array.isArray(d2.nodes), differ: !!d1 && !!d2 && JSON.stringify(d1) !== JSON.stringify(d2), bad: bad === null, gone: gone === null };
+    }, cardId);
+    ok('7h. an earlier version on the server opens as a document', hist.one && hist.two && hist.differ, hist);
+    ok('7h. a header that does not match, or a version that is not there, gives nothing', hist.bad && hist.gone, hist);
     ok('7. A has not got B\'s note: it waits for a visit', await A.p.evaluate((id) => libraryEntry(id).doc.nodes[1].notes !== 'Note by B', cardId));
     const bRefused = await B.p.evaluate(async (id) => {
         const r = TopoServerSync.rec(id);
@@ -920,6 +936,80 @@ try {
                 stats: stats.some((x) => x.monitor === mid && x.name === 'RUST-PC'), refused: [...st.refused.entries()].filter(([, v]) => v.author === mid) };
         }, [siteId, en.args && en.args.monitor, day]);
         ok('15k. the owner\'s page opens what Rust sealed and signed: status, issue and statistics, none refused', rd.status && rd.issue && rd.stats && rd.refused.length === 0, rd);
+    }
+
+    // 15l. The monitor with no screen (desktop/monitor, docs/SCOPE.md D455-D457,
+    //      step 9k), the program itself against this server: `request`
+    //      prints its line, A's page enrols it and makes the file, `enroll`
+    //      takes it, `run` reports that it is here and wants its checks, A's
+    //      page sends them sealed, and the program asks the device (a TCP
+    //      check of this server's own port) and reports it answering.
+    //      Skipped with --no-rust.
+    if (!args.includes('--no-rust')) {
+        const MON = join(ROOT, 'desktop/monitor');
+        const exe = join(MON, 'target/debug/topo-monitor');
+        const built = spawnSync('cargo', ['build', '--offline', '-j', '4'], { cwd: MON, stdio: ['ignore', 'ignore', 'inherit'] });
+        ok('15l. topo-monitor builds (cargo build in desktop/monitor)', built.status === 0 && existsSync(exe));
+        const mdir = join(data, 'headless');
+        const req = spawnSync(exe, ['request', '--dir', mdir, '--name', 'RACK-BOX'], { encoding: 'utf8' });
+        const line = (req.stdout || '').trim();
+        ok('15l. request prints one line and keeps its keys in a file only this user reads', /^topo-monitor-request:[A-Za-z0-9_-]+$/.test(line) && (statSync(join(mdir, 'secret.json')).mode & 0o777) === 0o600, { line: line.slice(0, 40), err: req.stderr });
+        const en = await A.p.evaluate(async ([s, line, port]) => {
+            const M = TopoMonitors;
+            try {
+                // A device this box can ask: this server's own port.
+                state.nodes.push({ id: 'hmnode', type: 'server', name: 'Loop server', x: 900, y: 900, gw: '', dns: '', os: '', notes: '', nat: false, ports: String(port),
+                    interfaces: [{ id: 'i1', name: 'eth0', ip: '127.0.0.1/8' }], checks: [{ id: 'hk', proto: 'tcp', port, interval: 30 }] });
+                save(); renderCanvasOnly();
+                const plan = TopoChecks.monitorPlan({ nodes: state.nodes, links: state.links, groups: state.groups, watch: state.watch }, {}).items.find((i) => i.key === 'hmnode/hk');
+                const file = await M.enrolHeadless(s, line);
+                return { file, spec: plan && plan.spec };
+            } catch (e) { return { err: String(e && e.message || e) }; }
+        }, [siteId, line, PORT]);
+        ok('15l. the page enrols the box from its line and plans a check it can ask', !!en.file && en.file.kind === 'topo-monitor-enrolment' && en.file.origin === ORIGIN && !!en.spec && en.spec.host === '127.0.0.1' && en.spec.port === PORT, en.err || en.spec);
+        const fpath = join(data, 'topo-monitor-RACK-BOX.json');
+        writeFileSync(fpath, JSON.stringify(en.file || {}));
+        const other = spawnSync(exe, ['request', '--dir', join(data, 'other-box')], { encoding: 'utf8' });
+        const wrong = spawnSync(exe, ['enroll', fpath, '--dir', join(data, 'other-box')], { encoding: 'utf8' });
+        ok('15l. another box refuses the file: it was made for the first one\'s keys', other.status === 0 && wrong.status === 1 && /another box/.test(wrong.stderr) && existsSync(fpath), wrong.stderr);
+        const enr = spawnSync(exe, ['enroll', fpath, '--dir', mdir], { encoding: 'utf8' });
+        ok('15l. enroll takes the file, asks the server once and deletes the file', enr.status === 0 && /now the monitor "RACK-BOX"/.test(enr.stderr) && !existsSync(fpath) && existsSync(join(mdir, 'link.json')), enr.stderr);
+        const run = spawn(exe, ['run', '--dir', mdir], { stdio: ['ignore', 'ignore', 'pipe'] });
+        let log = '';
+        run.stderr.on('data', (d) => { log += d; });
+        try {
+            const mid = en.file && en.file.monitor;
+            const seen = async (want) => {
+                for (let i = 0; i < 150; i++) {
+                    const r = await A.p.evaluate(async ([s, mid]) => {
+                        const M = TopoMonitors;
+                        await M.load(s);
+                        const st = M.siteState(s).status.get(mid);
+                        return st ? { wants: st.payload.wantsPlan, hash: st.payload.planHash, program: st.payload.program, items: (st.payload.items || []).map((i) => [i.key, i.state]),
+                            refused: [...M.siteState(s).refused.values()].filter((v) => v.author === mid).length } : null;
+                    }, [siteId, mid]);
+                    if (r && want(r)) return r;
+                    await new Promise((res) => setTimeout(res, 1000));
+                }
+                return null;
+            };
+            const first = await seen((r) => r.wants === true);
+            ok('15l. run reports that it is here and wants its checks; the page opens what it sealed', !!first && first.program === 'topo-monitor' && first.refused === 0, { first, log });
+            const got = await seen((r) => !!r.hash && r.items.some((i) => i[0] === 'hmnode/hk'));
+            ok('15l. the page sends the checks sealed and the box takes them', !!got && /checks from the site/.test(log), { got, log });
+            const up = await seen((r) => r.items.some((i) => i[0] === 'hmnode/hk' && i[1] === 'up'));
+            ok('15l. the box asks the device itself and reports it answering', !!up, { up, log });
+            const plain = await A.p.evaluate(async (s) => {
+                const got = await TopoServer.api('GET', `/api/sites/${s}/records?since=0`);
+                const plans = got.records.filter((x) => x.record.kind === 'plan');
+                return { n: plans.length, clear: plans.some((x) => /127\.0\.0\.1|hmnode/.test(JSON.stringify(x.record))) };
+            }, siteId);
+            ok('15l. the server holds the checks as ciphertext only', plain.n >= 1 && plain.clear === false, plain);
+            const st = spawnSync(exe, ['status', '--dir', mdir], { encoding: 'utf8' });
+            ok('15l. status says what is kept, in words', /Monitor "RACK-BOX"/.test(st.stdout) && /checks, from/.test(st.stdout), st.stdout);
+            const twice = spawnSync(exe, ['run', '--dir', mdir], { encoding: 'utf8', timeout: 5000 });
+            ok('15l. a second one with the same files refuses to start', twice.status === 1 && /already running/.test(twice.stderr), twice.stderr);
+        } finally { run.kill(); }
     }
 
     // 12. Sign out on both.

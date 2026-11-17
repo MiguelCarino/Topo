@@ -728,7 +728,7 @@ const CABLE_INPUTS = [
 function renderCableFields(link) {
     const panel = assetEl('linkCableProps');
     const medium = link ? effectiveMedium(link) : null;
-    panel.classList.toggle('hidden', !link || medium === 'wireless' || medium === 'vpn');
+    panel.classList.toggle('hidden', !link || medium === 'wireless' || isOffNetMedium(medium));
     CABLE_INPUTS.forEach(({ key, id }) => { if (key !== 'length') assetEl(id).value = link ? cableOf(link, key) : ''; });
     renderCableLength(link);
 }

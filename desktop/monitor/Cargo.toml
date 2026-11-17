@@ -1,0 +1,38 @@
+[package]
+name = "topo-monitor"
+version = "0.0.0"
+description = "Topo's site monitor with no screen: the desktop app's checks, run as a service"
+authors = ["Miguel Carino"]
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/MiguelCarino/Topo"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+
+# The monitor with no screen (docs/SCOPE.md D448, D455-D460, step 9k). Its
+# checks, schedule, issues, statistics, crypto and link to the server are the
+# desktop app's own files (../src-tauri/src), taken by path in src/main.rs:
+# one copy of the code, two programs. No Tauri and no window system: it
+# builds and runs on a box with no desktop. The crates and their versions are
+# the app's (Cargo.lock was copied from ../src-tauri).
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "0.26"
+sha2 = "0.10"
+url = "2"
+base64 = "0.22"
+ring = "0.17"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+p256 = { version = "0.13", default-features = false, features = ["ecdh", "ecdsa", "pkcs8", "std"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = "s"
+strip = true
+lto = true
+panic = "abort"

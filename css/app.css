@@ -431,6 +431,25 @@ select.select option, select.input option, select.select optgroup { background: 
 /* The Asset group (js/assets.js): a fold in the device's panel. Its summary
    is set like the panel's labels, with the tag and status beside it so a
    closed group still says the box is retired. */
+/* Reaching a device and its own picture (js/reach.js). */
+.reach-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.reach-row .reach-btn { text-decoration: none; display: inline-flex; align-items: center; min-height: 28px; }
+.reach-need { text-decoration: none; display: inline-flex; align-items: center; margin-top: 4px; }
+.reach-row .reach-missing { border-style: dashed; }
+.reach-list { display: grid; gap: 6px; margin-bottom: 6px; }
+.reach-way { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.reach-way .reach-kind { flex: 1 1 8rem; min-width: 0; width: auto; }
+.reach-way .reach-in { min-width: 0; }
+.reach-way .reach-port { flex: 0 0 4.5rem; width: 4.5rem; }
+.reach-way .reach-user, .reach-way .reach-path { flex: 1 1 6rem; }
+.reach-way .reach-tls { flex: 0 0 auto; }
+.reach-way .reach-x { flex: 0 0 auto; padding: 4px 6px; }
+.own-icon { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.own-icon-pic { width: 32px; height: 32px; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+@media (max-width: 900px) and (pointer: coarse) {
+    .reach-row .reach-btn, .reach-need, .reach-way .reach-x, .reach-way select, .reach-way .reach-in, #reachAddBtn, .own-icon .link-btn { min-height: 44px; }
+    .reach-way .reach-x { min-width: 44px; }
+}
 .asset-group { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .asset-sum { cursor: pointer; display: flex; align-items: baseline; gap: 8px; min-width: 0; font-family: var(--mono); font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-sec); }
 .asset-sum:hover, .asset-sum:focus-visible { color: var(--accent); }
@@ -891,6 +910,51 @@ select.select option, select.input option, select.select optgroup { background: 
 .life-types-link { margin-top: 3px; font-size: var(--fs-micro); }
 /* Restore points (js/restore.js): when, why and how many devices, then Restore and Download. */
 .restore-name { margin: 0 0 4px; font-weight: 700; overflow-wrap: anywhere; }
+/* Address lists (js/lists.js). */
+.al-body { display: grid; gap: 10px; margin: 10px 0; }
+.al-card { display: grid; gap: 6px; }
+.al-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.al-head .al-name { flex: 1 1 12rem; min-width: 0; font-weight: 600; }
+.al-count { font-size: var(--fs-micro); color: var(--text-sec); white-space: nowrap; }
+.al-members { width: 100%; font-family: var(--mono); resize: vertical; }
+.al-refs { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+.al-refs legend { float: left; margin-right: 6px; padding: 0; }
+.al-del { justify-self: start; }
+@media (max-width: 640px) {
+    .al-card .input, .al-card .al-ref, .al-del, #listsAddBtn, .topo-lists .modal-foot .btn { min-height: 44px; }
+    .al-card .al-ref { display: inline-flex; align-items: center; }
+    .topo-lists .modal-x { min-width: 44px; min-height: 44px; }
+}
+/* History (js/history.js): the map at a saved point, a picture with marks. */
+.modal.topo-paste.topo-history { width: min(62rem, calc(100vw - 24px)); max-width: min(62rem, calc(100vw - 24px)); }
+.hx-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hx-controls .hx-pick { flex: 1 1 14rem; min-width: 0; }
+.hx-controls select { min-height: 32px; max-width: 100%; background: var(--bg-input, var(--bg-card)); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font: inherit; }
+.hx-mode { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-small, 12px); color: var(--text-sec); }
+.hx-say { margin: 10px 0 4px; font-weight: 600; color: var(--text); }
+.hx-key { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 6px; font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-sec); }
+.hx-k::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-right: 5px; vertical-align: -2px; border-radius: 4px; border: 2px solid #16a34a; }
+.hx-k-chg::before { border: 2px dashed #d97706; }
+.hx-k-gone::before { border: 2px dashed #dc2626; }
+.hx-pic { border: 1px solid var(--border); border-radius: 8px; background: #f8fafc; overflow: auto; max-height: min(46vh, 30rem); text-align: center; }
+.hx-pic img { display: block; max-width: 100%; max-height: min(46vh, 30rem); width: auto; height: auto; margin: 0 auto; }
+.hx-pic .dlg-dim { margin: 0; padding: 24px 12px; }
+.hx-pic .dlg-dim:empty { display: none; }
+#historyBody[aria-busy="true"] .hx-pic { opacity: 0.55; }
+.hx-rows { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; }
+.hx-row { display: grid; grid-template-columns: 6rem minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: var(--fs-small, 12px); }
+.hx-row .hx-op { font-weight: 700; color: var(--text-sec); }
+.hx-row .hx-what, .hx-row .hx-detail { min-width: 0; overflow-wrap: anywhere; }
+.hx-row .hx-detail { color: var(--text-sec); }
+@media (max-width: 640px) {
+    .hx-row { grid-template-columns: 1fr; gap: 2px; }
+    .hx-controls .btn, .hx-controls select, .topo-history .modal-foot .btn { min-height: 44px; }
+    .topo-history .modal-x { min-width: 44px; min-height: 44px; }
+    .hx-controls { display: grid; grid-template-columns: 1fr 1fr; }
+    .hx-controls .hx-pick, .hx-controls .hx-mode, .hx-controls #historyFileBtn { grid-column: 1 / -1; }
+    .hx-controls .hx-pick { order: -1; }
+    .hx-mode select { flex: 1; min-width: 0; }
+}
 .restore-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
 .restore-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
 .restore-text { display: grid; gap: 2px; min-width: 0; flex: 1 1 12rem; }
@@ -3778,6 +3842,8 @@ body:not(.simple-mode) .inc-simple { display: none; }
 }
 /* Settings, Back-ups (js/backupdir.js). */
 .set-acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.hm-steps { margin: 6px 0 10px 18px; padding: 0; }
+.hm-line { width: 100%; box-sizing: border-box; font-family: var(--mono, monospace); font-size: 12px; overflow-wrap: anywhere; resize: vertical; }
 .set-folder { overflow-wrap: anywhere; }
 @media (pointer: coarse), (max-width: 640px) {
     .set-acts .btn { min-height: 44px; }
@@ -4082,6 +4148,14 @@ html.topo-locked body { overflow: hidden; }
 .tt-path-link { stroke: var(--tt-hl) !important; stroke-width: 4 !important; stroke-dasharray: none !important; }
 #layer-nodes .tt-off { opacity: 0.35; }
 .tt-off-link { opacity: 0.2; }
+/* What if this fails? (js/whatif.js): the thing asked about in red, what
+   would go dark without it dimmed and grey. */
+#layer-nodes .wi-failed { filter: drop-shadow(0 0 6px var(--danger, #dc2626)); }
+#layer-nodes .wi-failed rect { stroke: var(--danger, #dc2626) !important; stroke-width: 3px !important; stroke-dasharray: 5 4; }
+#layer-nodes .wi-dark { opacity: 0.3; filter: grayscale(100%); }
+#layer-links > path.wi-dark-link { opacity: 0.2; filter: grayscale(100%); }
+#layer-links > path.wi-failed-link { stroke: var(--danger, #dc2626) !important; stroke-dasharray: 5 4 !important; }
+.wi-bar { border-color: var(--danger, #dc2626); }
 @media (prefers-reduced-motion: reduce) { #layer-nodes .tt-arm { animation: none; filter: drop-shadow(0 0 8px var(--tt-hl)); } }
 @media (max-width: 900px), (max-height: 500px) and (max-width: 932px) and (pointer: coarse) {
     .tt-bar { left: 12px; right: 12px; top: calc(var(--nav-h, 0px) + 72px); transform: none; width: auto; max-width: none; }

@@ -793,6 +793,17 @@ function canvasIcon(type) {
     return _canvasIcons.get(key).cloneNode(true);
 }
 
+// A device's own picture (node.icon): an <image>, so whatever the file holds
+// is only ever drawn, and a little larger than a glyph, which is line art.
+function ownIconImage(dataUrl) {
+    const img = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+    img.setAttribute('href', dataUrl);
+    img.setAttribute('x', '-4'); img.setAttribute('y', '-4'); img.setAttribute('width', '32'); img.setAttribute('height', '32');
+    img.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    img.setAttribute('class', 'own-icon-img');
+    return img;
+}
+
 // ---- Text measured once ----
 // A label's box (a zone's tab, a group frame's tab, a note's card) was read
 // with getBBox() as each was drawn, between writes, so every one forced the
@@ -855,7 +866,13 @@ const LINK_INK = {
     fiber: { colour: '#06b6d4', dash: null, width: 2 },
     wireless: { colour: null, dash: '4 4', width: 2 },
     powerline: { colour: '#eab308', dash: '8 4 2 4', width: 2 },
-    vpn: { colour: '#14b8a6', dash: '10 6', width: 2.5 }   // secure overlay tunnel
+    vpn: { colour: '#14b8a6', dash: '10 6', width: 2.5 },   // secure overlay tunnel
+    // The links no IP travels over (v21, D441): dotted, a colour each.
+    thread: { colour: '#ea580c', dash: '2 5', width: 2 },
+    zigbee: { colour: '#65a30d', dash: '2 5', width: 2 },
+    zwave: { colour: '#0284c7', dash: '2 5', width: 2 },
+    bluetooth: { colour: '#2563eb', dash: '1 5', width: 2 },
+    serial: { colour: '#78716c', dash: '6 3', width: 2 }
 };
 function linkInk(medium, { band = null, passthrough = false } = {}, wifiInk = wifiMapColours()) {
     const base = LINK_INK[medium] || LINK_INK.utp;
@@ -1123,6 +1140,8 @@ function drawCanvas() {
     });
 
     const reach = state.settings.traceMode && state.selectedId && state.selectedType === 'node' ? calculateReachability(state.selectedId) : null;
+    // "What if this fails?" (js/whatif.js): asked again for the drawing as it is now.
+    if (window.TopoWhatIf) TopoWhatIf.refresh();
     // One findings pass for the whole render: the badges below and the alert
     // panel at the end read the same verdicts (js/diagnostics.js).
     const diag = currentDiagnosis();
@@ -1213,8 +1232,12 @@ function drawCanvas() {
             if (addsToSelection(event) || selectMoreTap(event)) toggleSelected('link', link.id); else select(link.id, 'link');
         });
         if (qm && !qm.links.has(link.id)) line.classList.add('q-dim');
+        // A back-up way out (link.uplink): broken long, whatever it is made of.
+        if (link.uplink === 'backup' && !reach) { line.setAttribute('stroke-dasharray', '12 5 3 5'); line.classList.add('uplink-backup'); }
         if (window.TopoTraceTarget && TopoTraceTarget.linkOnPath(link.id)) line.classList.add('tt-path-link');
         else if (window.TopoTraceTarget && TopoTraceTarget.lit()) line.classList.add('tt-off-link');
+        const wiLink = window.TopoWhatIf ? TopoWhatIf.linkClass(link) : '';
+        if (wiLink) line.classList.add(wiLink);
         const flow = reach && reach.reachableLinks.has(link.id) ? drawTraceFlow(line, link.id, medium) : null;
         // Who is responsible for the run, on hover, when Settings says so.
         if (state.settings.providerHover === true && linkProviders(link).length) {
@@ -1233,7 +1256,7 @@ function drawCanvas() {
         // A radio or a tunnel is no cable: its stored cable facts are kept but
         // not shown (Review-Packs/Topo-wifi.md), and a wireless link carries
         // its band instead, as a chip on its line (below).
-        const cableLabel = medium === 'wireless' || medium === 'vpn' ? '' : cableOf(link, 'label').trim();
+        const cableLabel = medium === 'wireless' || isOffNetMedium(medium) ? '' : cableOf(link, 'label').trim();
         if (cableLabel) {
             chipAvoidNodes();
             const { x: cx, y: cy, box } = cableLabelPlace(geo, cableLabel, chipAvoid);
@@ -1466,6 +1489,7 @@ function drawCanvas() {
             const tracing = TopoTraceTarget.armed();
             if (tracing) classes = classes.replace('cursor-grab active:cursor-grabbing', 'cursor-crosshair') + (TopoTraceTarget.isArmed(node.id) ? ' tt-arm' : '');
         }
+        if (window.TopoWhatIf) classes += TopoWhatIf.nodeClass(node.id, inFold);
         g.setAttribute('class', classes);
         // Retired (js/assets.js): still in the register, no longer on the
         // network. An attribute, not a class, because it is a fact about the
@@ -1500,7 +1524,8 @@ function drawCanvas() {
 
         const iconG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         iconG.setAttribute('transform', 'translate(-12, -14)');
-        iconG.appendChild(canvasIcon(node.type));
+        // Its own picture in place of its kind's (node.icon, v21, D442).
+        iconG.appendChild(node.icon ? ownIconImage(node.icon) : canvasIcon(node.type));
         iconG.style.pointerEvents = 'none'; g.appendChild(iconG);
 
         const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -2537,6 +2562,8 @@ function renderSidebarData(node) {
     }
     // Where it is plugged in (js/locate.js), redrawn with the NICs it reads.
     if (typeof renderLocate === 'function') renderLocate(node);
+    // Its ways in and its own picture (js/reach.js).
+    if (window.TopoReach) TopoReach.render(node);
     // What it held before (js/trail.js), against the values it holds now.
     if (typeof renderHistoryFields === 'function') renderHistoryFields(node);
     // The Vendor field's MAC hint (js/assets.js): a NIC cleared, deleted,
@@ -2852,7 +2879,8 @@ function renderLinkPorts(link) {
     const panel = document.getElementById('linkPortProps');
     const body = document.getElementById('linkPortBody');
     const src = getNode(link.source), tgt = getNode(link.target);
-    if (!src || !tgt) { panel.classList.add('hidden'); return; }
+    // A link that carries no IP takes no port: there is none to pick.
+    if (!src || !tgt || isNonIpMedium(link.medium)) { panel.classList.add('hidden'); return; }
 
     body.innerHTML = '';
     // Both ends' VLANs, read-only, once either end records any: a mismatch
@@ -3314,6 +3342,7 @@ function selectNow(id, type) {
         const node = getNode(id); if (!node) return;
         nameInput.value = node.name || ''; nameInput.disabled = false; generalProps.classList.remove('hidden'); linkProps.classList.add('hidden');
         if (document.getElementById('linkMediumProps')) document.getElementById('linkMediumProps').classList.add('hidden');
+        if (document.getElementById('linkUplinkProps')) document.getElementById('linkUplinkProps').classList.add('hidden');
         document.getElementById('linkPortProps').classList.add('hidden');
         document.getElementById('propOs').value = node.os || ''; document.getElementById('propPorts').value = node.ports || '';
         document.getElementById('propNotes').value = node.notes || '';
@@ -3352,12 +3381,14 @@ function selectNow(id, type) {
         nameInput.value = t('Note link'); nameInput.disabled = true;
         netProps.classList.add('hidden'); generalProps.classList.add('hidden'); linkProps.classList.add('hidden');
         if (document.getElementById('linkMediumProps')) document.getElementById('linkMediumProps').classList.add('hidden');
+        if (document.getElementById('linkUplinkProps')) document.getElementById('linkUplinkProps').classList.add('hidden');
         document.getElementById('linkPortProps').classList.add('hidden');
         jumpGwBtn.classList.add('hidden');
     } else if (type === 'annotation') {
         nameInput.value = t('Text note'); nameInput.disabled = true;
         netProps.classList.add('hidden'); generalProps.classList.add('hidden'); linkProps.classList.add('hidden');
         if (document.getElementById('linkMediumProps')) document.getElementById('linkMediumProps').classList.add('hidden');
+        if (document.getElementById('linkUplinkProps')) document.getElementById('linkUplinkProps').classList.add('hidden');
         document.getElementById('linkPortProps').classList.add('hidden');
         jumpGwBtn.classList.add('hidden');
     } else if (type === 'link') {
@@ -3382,7 +3413,7 @@ function selectNow(id, type) {
             renderLinkWifi(link);
             renderLinkProviderPicker(link);
             const m = effectiveMedium(link);
-            document.getElementById('printLabelBtn').classList.toggle('hidden', m === 'wireless' || m === 'vpn');
+            document.getElementById('printLabelBtn').classList.toggle('hidden', m === 'wireless' || isOffNetMedium(m));
         };
         linkFacts();
 
@@ -3390,7 +3421,23 @@ function selectNow(id, type) {
         linkMediumProps.classList.remove('hidden');
         // As drawn: a link onto a radio is wireless though it never said so.
         document.getElementById('propMedium').value = effectiveMedium(link);
-        document.getElementById('propMedium').onchange = (e) => { link.medium = e.target.value; save(); renderCanvasOnly(); renderLinkPorts(link); linkFacts(); };
+        document.getElementById('propMedium').onchange = (e) => {
+            link.medium = e.target.value;
+            // No IP travels over it: it lets go of the ports it held (v21, D441).
+            if (isNonIpMedium(link.medium)) { link.sourceIface = null; link.targetIface = null; }
+            else bindLink(link);
+            save(); renderCanvasOnly(); renderLinkPorts(link); linkFacts(); wayOut();
+        };
+        // Its part in the way out (link.uplink, v21, D443): offered on a
+        // link into a cloud that is the outside, not another of our sites.
+        const wayOut = () => {
+            const outside = [getNode(link.source), getNode(link.target)].some((n) => n && n.type === 'cloud' && !n.siteRef);
+            document.getElementById('linkUplinkProps').classList.toggle('hidden', !outside || isNonIpMedium(link.medium));
+            const pick = document.getElementById('propUplink');
+            pick.value = link.uplink || '';
+            pick.onchange = () => { const v = asUplink(pick.value); if (v) link.uplink = v; else delete link.uplink; save(); renderCanvasOnly(); };
+        };
+        wayOut();
     }
     // The device's diagnosis after the drawing, from the drawing's own.
     const drawn = renderCanvasOnly();

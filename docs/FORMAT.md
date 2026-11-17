@@ -1,8 +1,8 @@
-# The Topo file format (document version 20)
+# The Topo file format (document version 21)
 
 This is the published description of the files Topo writes and reads, for
 anyone writing another tool that reads or produces them. The machine-readable
-schema is [`schema/topo-v20.json`](../schema/topo-v20.json) (JSON Schema 2020-12),
+schema is [`schema/topo-v21.json`](../schema/topo-v21.json) (JSON Schema 2020-12),
 and a server backup is described by [`schema/topo-backup-v1.json`](../schema/topo-backup-v1.json).
 Every sample network, built-in block, migrated old document and importer result
 is checked against the schema by `tests/suites/formatschema.js`, and a new field
@@ -16,14 +16,14 @@ is right and this page is a bug.
 - Plain JSON, UTF-8, saved with the extension `.json`. The media type is
   `application/vnd.carino.topo+json`.
 - The first key is `"$schema"`, the address of the schema for the document
-  version it was written at: `https://topo.carino.systems/schema/topo-v20.json`.
+  version it was written at: `https://topo.carino.systems/schema/topo-v21.json`.
   Readers ignore it, and nothing fetches it. A file without it still opens.
 - File names are `topo_<organization>_<site>_<date>[_<kind>].json`, each part
   lower case, accents folded, other scripts kept, `_` inside a part turned into
   `-`, empty parts left out (`topo_acme_casa-roma_2026-11-09.json`). `network`
   stands in when there is nothing, `networks` for a binder naming no single
   organization. A browser's ` (1)` suffix is not part of the name.
-- The document carries its version in `v` (20 here). A reader migrates an
+- The document carries its version in `v` (21 here). A reader migrates an
   older one on opening (section 10). A document from a newer Topo is opened
   read-only and is never re-saved by an older build, because saving it would
   drop what the newer build added.
@@ -35,8 +35,8 @@ Three outer shapes, recognised by `kind`:
 **One network** (Back up this network):
 
 ```json
-{ "$schema": "https://topo.carino.systems/schema/topo-v20.json",
-  "kind": "nettopology", "version": 1, "name": "Casa Roma", "doc": { "v": 20, "nodes": [], "links": [] } }
+{ "$schema": "https://topo.carino.systems/schema/topo-v21.json",
+  "kind": "nettopology", "version": 1, "name": "Casa Roma", "doc": { "v": 21, "nodes": [], "links": [] } }
 ```
 
 `version` is the envelope's own version (1). `name` is the network's name in the
@@ -97,6 +97,7 @@ empty one is not written), except `nodes` and `links`.
 | `groups` | Buildings, floors, rooms, racks and other groups. |
 | `wifi` | Wi-Fi networks. |
 | `providers` | Who is responsible for what (at most 100). |
+| `lists` | Address lists (v21, at most 64): names for sets of addresses and what each may not reach. See below. |
 | `watch` | Watched addresses (v20, at most 64): addresses checked beside the devices. |
 | `accepted` | Findings accepted with a reason: `{ check, scope, nodeIds, linkIds, reason, until }`. |
 | `pinned` | Findings pinned with a note: `{ check, scope, nodeIds, linkIds, note }`. |
@@ -151,6 +152,8 @@ custom column (`columns` and a device's `extra`) for data of your own.
 | `checks` | | Answer checks (v19, below): what a PC that monitors asks this device. |
 | `target` | | Availability target in percent (v19), above 0 and below 100, such as `99.5`. |
 | `outage` | | `"record"` (v20): an outage of its checks is Record only: recorded and reported, but no issue, no banner and no alarm. Absent: it raises an issue. |
+| `icon` | | The device's own picture (v21), drawn in place of its type's icon: a base64 `data:` address of an SVG, PNG, WebP or JPEG, at most 32768 characters. Topo only ever draws it as an image. |
+| `access` | | How the device is reached (v21): at most 8 of `{ kind, port, user, tls, path }`. `kind` is `web`, `ssh`, `rdp`, `vnc` or `telnet`; `port` 1 to 65535 (absent: the kind's own); `user` a user name; `tls` (`true`: https) and `path` (from `/`) for `web` only. Never a password or a key. |
 
 ### Answer checks (`nodes[].checks`, v19)
 
@@ -210,10 +213,11 @@ three or more as a range (`10,11,20-23`).
 | `source`, `target` | Device ids. |
 | `sourceIface`, `targetIface` | Interface ids on each end (a port is `p<n>`). Absent: not bound to an interface. |
 | `attachment` | How it attaches (`passthrough`, or absent). |
-| `medium` | `utp`, `fiber`, `wireless`, `powerline` or `vpn`. Absent: guessed. |
+| `medium` | `utp`, `fiber`, `wireless`, `powerline` or `vpn`; and (v21) `thread`, `zigbee`, `zwave`, `bluetooth` or `serial`, over which no IP travels. Absent: guessed. |
 | `cable` | `{ label, length, color, via }`. `length` is `"2.5 m"` or `"8 ft"` (other text is kept as written); `via` what it runs through. |
 | `wifi` | A wireless association: `{ ssid: Wi-Fi id, band, signal (dBm, −100 to 0) }`. |
 | `providers` | Provider ids. |
+| `uplink` | `primary` or `backup` (v21): the cable's part in the way out to the internet. Absent: nothing is said. |
 
 ### Subnets (`networks`)
 
@@ -273,6 +277,23 @@ or its id when two share it), `provider`, `raise_issue` (`true` or `false`),
 `{ id: "c<n>", name, kind }`, at most 40, names unique in any case. `kind` is
 `number`, `date` or `yesno`; absent is text. A device's `extra` holds its values
 by column id: text, a number, `YYYY-MM-DD`, or true/false.
+
+### Address lists (`lists`, v21)
+
+A record of what a firewall is set to do. Topo reads and writes no firewall.
+
+| Key | Meaning |
+|---|---|
+| `id` | Stable id, `al` and a number. |
+| `name` | What the list is ("Cameras"). Required: a list with no name is dropped. |
+| `members` | At most 128 addresses and subnets as text (`192.168.1.20`, `10.0.20.0/24`, IPv6 too). A subnet stands for every address in it. Anything else is dropped. |
+| `blocked` | Ids of the lists this one may not reach. |
+| `allowed` | Ids of the lists it is recorded as allowed to reach: an exception to a block when a device is in both a blocked and an allowed list. |
+| `notes` | Free text. |
+
+A device is in a list when one of its addresses is a member or lies in a member
+subnet. A rule lives on the list the traffic comes from. A reference to a list the
+document lacks, or to the list itself, is dropped on reading.
 
 ## 4. Ids
 
@@ -430,18 +451,19 @@ reviewed.
 | 18 | Provider lists (`provider: "pv_1"` becomes `providers: ["pv_1"]`); problem reports. |
 | 19 | The log's `decision` entries: an owner's answer on a provider's visit; a device's answer checks (`checks`) and availability target (`target`); a provider's `target` and `targetHours`; outages (`kind: "outage"` incidents) and their `incident` events; a visit's `monitoring` section. Nothing converts: a v18 document only changes its `v`. |
 | 20 | Watched addresses (`watch`); a device's `outage` (Record only); an incident's `watchIds` and an outage's `recordOnly`. Nothing converts: a v19 document only changes its `v`. |
+| 21 | Five kinds of link that carry no IP (`thread`, `zigbee`, `zwave`, `bluetooth`, `serial`); a cable's `uplink`; a device's `icon` and `access`; the address lists (`lists`). Nothing converts: a v20 document only changes its `v`. |
 
 ## 11. Writing files for Topo
 
-- Write `$schema` first and `v: 20`. Leave out what you do not know; do not
+- Write `$schema` first and `v: 21`. Leave out what you do not know; do not
   write empty strings for absent facts where the table says "omitted".
 - Give every record an id, and make references by id. If your records have
   stable keys of their own, use them (prefixed with your tool's name) so a
   second import updates the first.
 - Addresses always carry their prefix length.
 - Never put passwords or keys in any field: a network file travels.
-- Validate against `schema/topo-v20.json`. Topo reads anything the schema
+- Validate against `schema/topo-v21.json`. Topo reads anything the schema
   allows, and a file it opens is what it will save back, so a key the schema
   does not list is dropped.
 - A newer version of this format will have a new schema address
-  (`topo-v20.json`); Topo opens a newer document read-only.
+  (`topo-v21.json`); Topo opens a newer document read-only.

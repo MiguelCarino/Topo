@@ -47,6 +47,8 @@ const C = window.TopoServerCrypto;
 const T = () => window.TopoServer;
 const Y = () => window.TopoServerSync;
 const _m = {
+    planSent: new Map(), planning: false, planTimer: 0, download: null,   // a monitor with no screen (D457): what was sent it; tests take the file
+
     invoke: null,        // tests: stands in for window.__TAURI__.core.invoke
     sites: new Map(),    // siteId -> what was read of it
     loading: new Map(),  // siteId -> the load running
@@ -90,7 +92,8 @@ function siteState(siteId) {
 // The roster line that names u, newest first (a revoked monitor's issues
 // are still checked against the roster that named it).
 const lineOf = (t, u) => { for (let i = t.rosters.length - 1; i >= 0; i--) { const m = C.rosterMember(t.rosters[i], u); if (m) return m; } return null; };
-const KIND_ROLES = { status: ['monitor'], issue: ['monitor'], act: ['owner', 'provider'], quiet: ['owner'] };
+// plan: the checks an owner's browser sends a monitor with no screen (D457); read by that monitor, passed over here.
+const KIND_ROLES = { status: ['monitor'], issue: ['monitor'], act: ['owner', 'provider'], quiet: ['owner'], plan: ['owner'] };
 
 // One record checked and opened. -> { ok, kind, id, author, role, email, payload } or { ok: false, why }.
 async function openOne(siteId, t, x) {
@@ -198,6 +201,7 @@ function afterLoad(siteId) {
     renderBanner();
     notifyStale(siteId);
     renderSiteMonitorSettings();
+    pushPlans(siteId).catch((e) => console.warn('Topo: the checks could not be sent to the monitor with no screen:', e));
 }
 
 // An outage of this site whose record lacks an act the document holds:
@@ -459,6 +463,11 @@ function maybeRefresh() {
     }
     if (siteId && Date.now() - siteState(siteId).loadedAt > RELOAD_MS && !_m.loading.get(siteId)) { refresh(); return; }
     renderBanner();
+    // The document may have changed: a monitor with no screen gets its checks again, a moment later, once.
+    if (siteId && isOwnerOf(siteId) && [...siteState(siteId).status.values()].some((o) => o.payload && o.payload.wantsPlan === true)) {
+        clearTimeout(_m.planTimer);
+        _m.planTimer = setTimeout(() => { pushPlans(siteId).catch(() => {}); }, PLAN_DELAY_MS);
+    }
 }
 
 // ---- Statistics (D161, D162) ----
@@ -582,6 +591,7 @@ function assigned(node, c, link) {
 
 const keyWords = (k) => (k === 'keychain' ? t('Its key is in this PC\'s keychain.') : t('This PC has no keychain service: its key is in a file only you can read.'));
 function renderSiteMonitorSettings() {
+    renderHeadlessSettings();
     const box = el('setSiteMon');
     if (!box) return;
     const siteId = siteOfOpen();
@@ -646,6 +656,149 @@ async function onSiteMonClick(e) {
     }
 }
 
+// ---- A monitor with no screen (docs/SCOPE.md D455-D457, step 9k; desktop/monitor) ----
+// topo-monitor is the app's monitor with no window, run as a service on a
+// box at the site. It has no page, so two things the page does for a
+// monitoring PC travel another way:
+//   - enrolling: the box prints its public keys as one line (`topo-monitor
+//     request`); an owner pastes it here; this page registers the monitor,
+//     gives it access as it does for a PC, and downloads the enrolment file
+//     the box takes (`topo-monitor enroll`): the server's address, the
+//     monitor's id and credential, and the roster this page trusts. The
+//     file holds that credential (nothing of any person's), so the box
+//     deletes it once read.
+//   - its checks: the box says in its status that it wants them
+//     (wantsPlan, with the hash of the ones it has). An owner's page with
+//     the network open works them out (monitorPlan, js/checks.js), and when
+//     they differ sends them as "plan" records sealed with the site key, in
+//     parts the server takes. The box keeps the last ones, so it goes on
+//     with no browser open. The server reads none of it.
+const REQUEST_PREFIX = 'topo-monitor-request:';
+const ENROLMENT_KIND = 'topo-monitor-enrolment';
+const PLAN_PART_CHARS = 60000;      // one record's body is at most 128 KB on the server, sealed and in base64
+const PLAN_PARTS_MAX = 64;          // as desktop/monitor/src/parts.rs
+const PLAN_AGAIN_MS = 3 * 60000;    // the same checks are not sent again sooner: the box says what it has once a minute
+const PLAN_DELAY_MS = 1500;
+function parseRequest(line) {
+    const s = String(line || '').trim();
+    if (!s.startsWith(REQUEST_PREFIX)) return null;
+    try {
+        const v = JSON.parse(C.fromUtf8(C.unb64u(s.slice(REQUEST_PREFIX.length).trim())));
+        if (!v || v.v !== 1 || typeof v.encPub !== 'string' || typeof v.sigPub !== 'string' || !v.encPub || !v.sigPub) return null;
+        return { name: String(v.name || '').trim().slice(0, 120) || t('Monitor'), encPub: v.encPub, sigPub: v.sigPub };
+    } catch (e) { return null; }
+}
+// -> the enrolment file's content. A step that fails after the server made
+// the monitor takes it away again, as turnOn does.
+async function enrolHeadless(siteId, line, groups = []) {
+    const req = parseRequest(line);
+    if (!req) throw new Error(t('That is not the line topo-monitor request prints. Copy the whole line, from topo-monitor-request: to its end.'));
+    if (!isOwnerOf(siteId)) throw new Error(t('Only an owner can add a monitor.'));
+    const me = T().me();
+    const network = state.libraryId;
+    if (!network) throw new Error(t('Keep this network in My networks first: the monitor checks a kept network.'));
+    const res = await T().api('POST', `/api/sites/${siteId}/monitors`, { name: req.name, encPub: req.encPub, sigPub: req.sigPub });
+    const mid = res.monitor.id;
+    try {
+        await Y().grant(siteId, [mid], { checked: true, history: false });
+        const tr = await Y().walkRosters(siteId);
+        const roster = tr.rosters[tr.rosters.length - 1];
+        const file = { v: 1, kind: ENROLMENT_KIND, origin: T().origin(), site: siteId, monitor: mid, name: req.name, by: me.email, token: res.token, roster, groups, network };
+        await load(siteId);
+        return file;
+    } catch (e) {
+        try { await Y().removeMember(siteId, mid); } catch (e2) { console.warn('Topo: the half-made monitor could not be taken away:', e2); }
+        throw e;
+    }
+}
+async function planHash(items) {
+    const d = new Uint8Array(await crypto.subtle.digest('SHA-256', C.utf8(JSON.stringify(items))));
+    return [...d.slice(0, 16)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+// The items in parts, each small enough for one record. -> null when there are more than the box takes.
+function planParts(items) {
+    const parts = [[]];
+    let size = 0;
+    for (const it of items) {
+        const n = JSON.stringify(it).length + 1;
+        if (size + n > PLAN_PART_CHARS && parts[parts.length - 1].length) { parts.push([]); size = 0; }
+        parts[parts.length - 1].push(it);
+        size += n;
+    }
+    return parts.length > PLAN_PARTS_MAX ? null : parts;
+}
+// Sends each monitor that asks for them the open network's checks, when
+// they are not the ones it has. -> how many monitors were sent a plan.
+async function pushPlans(siteId) {
+    if (!siteId || !isOwnerOf(siteId) || siteOfOpen() !== siteId || !window.TopoChecks || _m.planning) return 0;
+    const s = siteState(siteId);
+    const K = T().keys(), me = T().me();
+    const want = [...s.status.values()].filter((o) => o.payload && o.payload.wantsPlan === true && s.monitors.some((m) => m.id === o.author));
+    if (!K || !me || !want.length) return 0;
+    _m.planning = true;
+    let sent = 0;
+    try {
+        for (const o of want) {
+            const mid = o.author;
+            const groups = (Array.isArray(o.payload.groups) ? o.payload.groups : []).filter((g) => typeof g === 'string');
+            const networkName = (typeof docDisplayName === 'function' && docDisplayName()) || '';
+            const plan = TopoChecks.monitorPlan({ nodes: state.nodes, links: state.links, groups: state.groups, watch: state.watch },
+                { me: null, networkId: state.libraryId, networkName, assigned: (n, c) => assigned(n, c, { enrolled: true, monitor: mid, groups }) });
+            const hash = await planHash(plan.items);
+            if (hash === o.payload.planHash) { _m.planSent.delete(mid); continue; }
+            const was = _m.planSent.get(mid);
+            if (was && was.hash === hash && Date.now() - was.at < PLAN_AGAIN_MS) continue;
+            const parts = planParts(plan.items);
+            if (!parts) { console.warn('Topo: more checks than a monitor with no screen takes.'); continue; }
+            const tr = await Y().walkRosters(siteId);
+            const last = tr.rosters[tr.rosters.length - 1];
+            const epoch = last ? last.epoch : 1;
+            const key = await Y().siteKey(siteId, epoch);
+            const rev = Math.max(Date.now(), (was ? was.rev : 0) + 1);
+            for (let i = 0; i < parts.length; i++) {
+                const payload = { v: 1, monitor: mid, by: me.id, rev, hash, i, n: parts.length, networkName: String(networkName).slice(0, 200), items: parts[i] };
+                const rec = await C.sealRecord({ site: siteId, kind: 'plan', id: `${mid}|${me.id}|${i}`.slice(0, 160), epoch, author: me.id, at: rev }, key, K.uSig, C.utf8(JSON.stringify(payload)));
+                await T().api('POST', `/api/sites/${siteId}/records`, rec);
+            }
+            _m.planSent.set(mid, { hash, at: Date.now(), rev });
+            sent++;
+        }
+    } finally { _m.planning = false; }
+    return sent;
+}
+function renderHeadlessSettings() {
+    const sec = el('setHeadlessSec');
+    if (!sec) return;
+    const siteId = siteOfOpen();
+    sec.hidden = !(serverOn() && siteId && isOwnerOf(siteId));
+}
+function saveEnrolment(file) {
+    const text = JSON.stringify(file, null, 2);
+    const name = `topo-monitor-${String(file.name || 'box').replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(0, 40) || 'box'}.json`;
+    if (_m.download) { _m.download(name, text); return name; }
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return name;
+}
+async function onHeadlessClick() {
+    const siteId = siteOfOpen();
+    const box = el('setHeadlessLine'), st = el('setHeadlessStatus'), go = el('setHeadlessGo');
+    if (!siteId || !box || go.disabled) return;
+    go.disabled = true;
+    try {
+        const file = await enrolHeadless(siteId, box.value);
+        const name = saveEnrolment(file);
+        box.value = '';
+        st.textContent = t('"{name}" is now a monitor of this site. Give the file {file} to the box (topo-monitor enroll), then delete it: it holds the monitor\'s credential. Owners see it in the members list and can revoke it.', { name: file.name, file: name });
+    } catch (err) {
+        st.textContent = t('The monitor could not be added: {error}', { error: String(err && err.message || err) });
+    }
+    go.disabled = false;
+}
+
 // ---- The members list: monitors (D147, D149) ----
 // "Monitor: PC name (turned on by X on date)", and when it last reported.
 function memberMonitorText(siteId, userId) {
@@ -702,7 +855,7 @@ window.addEventListener('topo:ready', () => {
     listen();
     linkInfo().then(() => renderSiteMonitorSettings());
     setInterval(() => { if (siteOfOpen()) refresh(); }, RELOAD_MS);
-    document.addEventListener('click', (e) => { if (e.target && /^setSiteMon(On|Off)$/.test(e.target.id)) onSiteMonClick(e); });
+    document.addEventListener('click', (e) => { if (e.target && /^setSiteMon(On|Off)$/.test(e.target.id)) onSiteMonClick(e); else if (e.target && e.target.id === 'setHeadlessGo') onHeadlessClick(); });
     const ev = window.__TAURI__ && window.__TAURI__.event;
     if (ev && typeof ev.listen === 'function') ev.listen('topo-monitor-link', () => linkInfo().then(renderSiteMonitorSettings)).catch(() => {});
 });
@@ -711,6 +864,7 @@ window.renderSiteMonitorSettings = renderSiteMonitorSettings;
 window.TopoMonitors = {
     state: _m, hasHost, siteState, openOne, load, refresh, issueRecords, actInScope, pushAct, relayAct, pushQuiet, siteQuiet, folded, mayFold, isOwnerOf,
     serverStatusesOf, combinedStatus, splitOf, splitText, openIssues, staleMonitors, renderBanner, stats, availability, setStatsDays,
+    parseRequest, enrolHeadless, pushPlans, planParts, planHash, renderHeadlessSettings, onHeadlessClick,
     linkInfo, turnOn, turnOff, assigned, maybeRefresh, renderSiteMonitorSettings, memberMonitorText, loadMonitors, backupIssues, siteOfOpen, onEvent
 };
 })();

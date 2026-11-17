@@ -4835,6 +4835,287 @@ Stop after each phase and report the counts and failures as they are.
   (v20), the release note, and the browser pass at 360, 390 and 1280 in both
   themes.
 
+## 9. Time, reach and live state (step 9)
+
+Written 2026-11-17, not built. It began as a review of UniFi Network 11
+(blog.ui.com, 12 October 2026: a topology that can be stepped back in time,
+custom device icons, Thread and Matter devices in the topology, network
+lists, failover policies, multi-site policies) against what Topo has. The
+owner, on the review: "Add these features. Also, I want to note that I want
+to allow live monitoring. I guess clientside only will allow domain
+monitoring give it cannot ping, just do ICMP connections. (same as
+ping.carino.systems), desktop/server versions could, and I also want to
+allow SSH/RDP connections."
+
+What does not come over, because it needs a gateway in the path of the
+traffic: live traffic flows, the telemetry engine, VLAN capacity,
+application-based routing, Matter pairing, threat signatures.
+
+### Decisions
+
+Proposed on 2026-11-17 and read by the owner the same day: "I agree with
+everything except the domain monitoring on web client", which D447 now
+records.
+
+- **D438. What would go dark.** Pick a device, a cable or an uplink and
+  press **What if this fails?**: the map dims everything that would lose its
+  way to the internet (or to a device named as the target), and the rail
+  lists them by group. (Built: a bar over the map lists them, as the
+  trace's answer is shown.) It is the monitors' kind of walk over the
+  cables (`monitorChains`, `js/checks.js`), from the way out and not from
+  each device, run in the page on the drawing
+  alone, so it works on the website with nothing monitored. Two cables to
+  the same place, a bond, a ring through a managed switch and a second
+  uplink are ways round and are honoured. Nothing is written to the
+  document. No format change.
+- **D439. The map at an earlier time.** A **History** control on the map
+  steps through the saved points of this network, oldest to newest: its
+  restore points (`js/restore.js`, up to 20), the versions on a Topo server
+  (`/revs`, up to 500 bodies) and any back-up file dropped onto it. At each
+  point the map is drawn as it was, read-only, with what was added since the
+  point before in green, what was removed drawn as a ghost and what changed
+  ringed, from `docChanges` (`js/changes.js`), which the merge already
+  trusts. **Compare with now** shows the same difference against the open
+  network, and the report gains a "What changed since" section. Any two
+  files can be compared, whoever made the equipment; UniFi's steps through
+  one controller's own devices only. Needs one new read: an old server
+  revision opened as a document (today only headers are listed). No format
+  change.
+- **D440. One format step for the rest (v21).** Everything below that the
+  file must hold arrives in a single version, so a network is not migrated
+  five times: the new cable kinds (D441), a device's own icon (D442), an
+  uplink's role (D443), address lists (D444) and the ways to reach a device
+  (D446). A v20 document only changes its `v`. The bump follows D403's
+  checklist.
+- **D441. Devices that have no address.** New cable kinds beside utp,
+  fiber, wireless, powerline and vpn: `thread`, `zigbee`, `zwave`,
+  `bluetooth` and `serial`. A device joined to the network only by one of
+  them (a sensor, a lock, a bulb, a console port) is drawn as any other but
+  is asked for no address, gateway or DNS and raises none of the findings
+  about them; the device it hangs off is its hub or border router, which is
+  where its reachability ends for a trace. The Simple view's words: "talks
+  to the hub by Zigbee". Pairing codes and network keys are secrets and have
+  no field.
+- **D442. A device's own icon.** A device can carry a picture in place of
+  its kind's icon: an SVG or a small raster, chosen from a file or, on a
+  phone, taken with the camera. It is scaled to 96 px and kept in the
+  document as data, at most 24 KB each and 1 MB a network, so a share link
+  and a back-up carry it. An SVG is sanitised to shapes and colours (no
+  script, no links, no outside reference). The kind stays what it was:
+  findings, the table and Tidy go by kind, not by picture. A full-size photo
+  of the real box is a different thing and is left out: it would not fit a
+  share link.
+- **D443. Primary and back-up uplinks.** A cable (or a wireless link, such
+  as a phone's hotspot) from a router to the outside can say it is the
+  **primary** or a **back-up** way out. The map marks a back-up with a
+  dashed arrow. A router with one way out raises an advice, never a fault:
+  "One way out to the internet. Nothing takes over if Fibra Norte stops."
+  D438 treats a back-up as a way round. Topo fails nothing over; it records
+  what the equipment is set to do.
+- **D444. Address lists, and who may reach whom.** A network can name lists
+  of addresses, subnets and other lists ("Cameras", "Guests"), and say,
+  between any two lists or subnets, **allowed**, **blocked** or nothing.
+  "Does A reach B?" then stops at a blocked pair and names the rule, and the
+  report prints the table. It documents the firewall; it does not read or
+  write one. The importers that already read a firewall's export (MikroTik,
+  UniFi) fill it where the export has it.
+- **D445. Sites that disagree.** A binder gains checks across its networks:
+  the same subnet at two sites joined by a VPN or a site link (a real
+  fault: they cannot route to each other), the same VLAN number under
+  different names, the same name on different numbers, and two sites'
+  devices sharing a name. Today the estate report lists a shared subnet as
+  a fact (`estateSubnets`); these are findings, shown on the estate report
+  and on each site involved.
+- **D446. Open a device.** A device lists how it is reached: web (http or
+  https), SSH, RDP, VNC and Telnet, each with a port and, if wanted, a user
+  name. Passwords and keys are never asked for or kept (the rule since v1).
+  Each is a button on the device:
+  - on the website, a link the computer's own client answers (`ssh://`,
+    `vnc://`, the web address), and for RDP a small `.rdp` file, since few
+    systems answer `rdp://`;
+  - in the desktop app, the system's client is started (OpenSSH in a
+    terminal, Remote Desktop, the default browser); today the app passes
+    only http, https, mailto and tel outside.
+  A terminal inside Topo is not in this step: it would put Topo between the
+  person and their credentials.
+- **D447. No monitoring in the browser; a link to Ping.** Proposed first
+  as a timed `fetch` with `no-cors`, as ping.carino.systems does. Dropped.
+  The owner asked which way to offer it; the answer given: it reaches only
+  public https addresses (from an https page the browser blocks plain http,
+  and with it the devices on a local network), it cannot tell a healthy
+  answer from an error page, it needs `connect-src https:` where the page
+  today can contact only itself and the release check, and switched on by
+  default it would make a browser contact whatever addresses a network
+  someone sent holds. The owner: "agreed". Instead a watched address
+  offers **Check in Ping ↗**, which opens ping.carino.systems with the
+  address filled in, as Open in Netplan ↗ does: a link the person clicks,
+  not a request Topo makes. The CSP is unchanged. Monitoring stays in the
+  desktop app and the headless monitor (D448).
+- **D448. Live state from somewhere that can ping.** The desktop app
+  already checks with real ICMP and thirteen other protocols
+  (`desktop/src-tauri/src/checks.rs`) and the map shows what it reports. A
+  Topo server probes nothing, and cannot: it holds a site only as
+  ciphertext and does not know an address in it. Two ways to monitor with
+  no desktop open: (a) a small headless monitor, the desktop app's checks
+  with no window, signed in to the server as a monitor like any PC, run as
+  a service beside the server or on a box at the site; (b) the server
+  itself probing, which means giving it the addresses in the clear and ends
+  the promise that the server cannot read a network. (a) was proposed and
+  the owner agreed.
+- **D449. Topo stays out of the connection (owner, 2026-11-17).** Asked
+  whether Topo should pack its own SSH, RDP and VNC clients, or serve them
+  from a Topo server (a relay with the client in the page, or the server
+  speaking the protocol), the owner chose neither: "keep going with the
+  current non invasive settings". D446 stands: Topo starts the computer's
+  own program and never sees a password. An edition that sits on the
+  network and holds credentials is a separate product, not scoped here.
+  What is done instead is D450 to D453: make sure the computer has a
+  program to start.
+- **D450. Which program answers each way in.** The table the buttons, the
+  desktop app and the catalogue entries all follow. "Built in" means
+  nothing is installed.
+
+  | Way in | Windows | macOS | Linux |
+  |---|---|---|---|
+  | Web | the browser | the browser | the browser |
+  | SSH | OpenSSH (built in since Windows 10 1809), else PuTTY | Terminal (built in) | OpenSSH, in the desktop's terminal |
+  | Remote Desktop | Remote Desktop Connection (built in) | Windows App | Remmina, else KRDC, GNOME Connections or FreeRDP |
+  | VNC | TigerVNC or another viewer | Screen Sharing (built in) | Remmina, else KRDC, GNOME Connections or TigerVNC |
+  | Telnet | the Telnet client (a Windows feature, off as shipped), else PuTTY | `telnet` is no longer shipped | `telnet`, in the desktop's terminal |
+
+  A browser does not say whether anything answers `ssh://` or `vnc://`,
+  and on Windows as a rule nothing does: there the website's SSH and VNC
+  buttons do nothing until a program that takes those links is installed.
+  That is the gap D451 and D452 close.
+- **D451. The website links to the catalogue; it does not look.** A page
+  cannot see what is installed, and Topo does not probe for it. Under a
+  device's ways in (any besides the web page) one link, **Need a program
+  for these? ↗**, opens software.carino.systems searched for the programs
+  of D450 (`?search=remote-access`, the catalogue's own shareable search).
+  It is a link the person clicks, as Check in Ping ↗ and Open in Netplan ↗
+  are: Topo asks software.carino.systems nothing and the CSP is unchanged.
+  The catalogue gives the link and the install command for each system; the
+  person runs it. The offline zip shows the same link (it needs a
+  connection, and says where it goes).
+- **D452. The desktop app looks, starts, and says what is missing.** The
+  app can do what a page cannot:
+  - **It looks** for the programs of D450 on this computer: a name on the
+    PATH or in the few folders they install to. No program is run to look
+    and nothing is asked of the network.
+  - **It starts** the one found, with the device's address, port and user
+    name as separate arguments, never through a shell. The address must be
+    an IP address, the port a number and the user name plain characters, or
+    nothing is started. SSH and Telnet open in the desktop's terminal.
+    Remote Desktop on Windows and macOS is a `.rdp` file in the temporary
+    folder handed to the system's client, as on the website.
+  - **When none is found** the button says so ("No VNC program on this
+    computer") and its link opens the catalogue searched for that kind
+    (`?search=vnc-client`, `rdp-client`, `ssh-client`, `telnet-client`) in
+    the default browser.
+  - **It installs nothing.** Installing needs an administrator and a
+    package manager, which is not Topo's to run. The catalogue's command is
+    one copy away.
+  This is also the desktop half of 9g (D446).
+- **D453. The catalogue carries the programs.** software.carino.systems
+  (the SoftwareCatalog repo) gains entries for the programs of D450 that it
+  lacks, under IT and DevOps, each with its install ids per system and the
+  hidden keywords the links above search for: `remoteaccess` on all of
+  them, and `sshclient`, `rdpclient`, `vncclient`, `telnetclient` by what
+  each does. No change to the catalogue's code: `?search=` and whole-token
+  keywords exist. Each new link is run through its `tools/linkcheck.py`.
+- **D454. One command for a technician's PC (not built).** SimpleSetup
+  (setup.carino.systems) could carry a group that installs the programs of
+  D450 for the system it runs on, and the catalogue's link could offer it.
+  Left out of this step: it is a change to a third repo and its install
+  lists, and D451 to D453 already get a person to each program.
+- **D455. The headless monitor is its own program, from the app's files.**
+  `topo-monitor` (`desktop/monitor`, its own crate) takes the app's checks,
+  schedule, issues, statistics, crypto, transport and link to the server
+  by path from `desktop/src-tauri/src`: one copy of the code, two programs.
+  It has no Tauri and no window system, so it builds and runs on a box
+  with no desktop. Commands: `request`, `enroll FILE`, `run`, `status`,
+  `forget`. Its files are in one folder readable by its user only; the
+  device keys and the server's credential are in a file there, since a box
+  with no session has no keychain.
+- **D456. Enrolling with no page on the box.** The app's page makes a
+  PC's keys and enrols it in one go. The box has no page, so:
+  `topo-monitor request` makes the keys and prints one line (its name and
+  the two public keys, nothing secret); an owner pastes it in Settings,
+  Monitoring, **A monitor with no screen** (the website too); the page
+  registers the monitor and gives it access as it does a PC, and downloads
+  an enrolment file (the server's address, the monitor's id and
+  credential, the roster the page trusts, the network); `topo-monitor
+  enroll FILE` checks that the roster names this box's own signing key,
+  asks the server once, keeps it and deletes the file. An enrolment made
+  for another box's keys is refused. A self-signed server: `enroll` prints
+  the certificate's fingerprint to compare with the one the server's
+  Settings shows, and takes it with `--pin`.
+- **D457. Its checks travel through the server, sealed.** The page works
+  the checks out from the document (`monitorPlan`, js/checks.js) and hands
+  them to the app in the same window. The box has no page and no document
+  model, so: it says in its status that it wants them (`wantsPlan`, with
+  the hash of the ones it has and its groups); an owner's page with the
+  network open works them out for that monitor and, when they differ,
+  sends them as records of a new kind, `plan`, sealed with the site key
+  and signed by the owner like a quiet window, in parts of at most 60,000
+  characters (the server takes 128 KB a record; at most 64 parts). The
+  box takes a plan when all its parts are here and it is newer, and keeps
+  it, so it goes on with no browser open. Only an owner may write one; a
+  monitoring PC passes them over. The server reads none of it: a check's
+  address is ciphertext to it, as before. Server: the kind allowed for
+  owners, migration 0007 (the table made again for the new kind, its
+  counter carried so a reader's "after n" never goes back), and plans
+  left out of the backups (they are made again by any owner's browser).
+- **D458. What the box does not do.** No alarm card and no notification
+  (nobody is there): an outage reaches people through the server, as a
+  monitoring PC's does, and their acts and quiet windows come back the
+  same way. It checks from where it stands and is not looked for on the
+  map, so a device's chain starts at its router. It probes nothing it was
+  not given: no scan, no discovery.
+- **D459. Running it.** `desktop/monitor/topo-monitor.service` is a
+  systemd unit for one user, with no administrator. Not built: a Windows
+  service, a macOS launch agent, a container image, packages, and its
+  place in the release workflow.
+- **D460. Until an owner opens the network, it checks nothing.** The first
+  checks come from an owner's browser, and so does every change to them. A
+  site nobody opens keeps its last checks. Having the box work them out
+  itself would mean the document model in Rust; having the server do it
+  would mean the server reading the network. Neither was chosen.
+
+### Phases
+
+- **9a. What would go dark** (D438). No format change.
+- **9b. The map at an earlier time** (D439). No format change; one new read
+  on the server client.
+- **9c. Format v21** (D440): the schema, the migration step, FORMAT.md, the
+  four version tests. Nothing visible.
+- **9d. Devices with no address** (D441).
+- **9e. A device's own icon** (D442).
+- **9f. Uplinks** (D443).
+- **9g. Open a device** (D446): the website first, then the desktop app.
+- **9h. Address lists** (D444).
+- **9i. Sites that disagree** (D445).
+- **9j. Check in Ping ↗** (D447).
+- **9k. The headless monitor** (D448).
+- **9l. The programs a way in needs, on the website** (D450, D451, D453):
+  the link under a device's ways in, and the catalogue's entries.
+- **9m. The desktop app starts them** (D452, and 9g's desktop half): the
+  two commands, the buttons, the missing-program link.
+
+### Also worth having (not in the phases yet)
+
+- **What is on the wire and not on the map.** The desktop app reads the
+  neighbour table of the subnet it is on (and, where a switch answers,
+  LLDP) and lists addresses that answer and are in no document, and
+  documented devices that never answer. Documentation drift is the thing a
+  hand-drawn map gets wrong first.
+- **Wake a device.** Wake-on-LAN from the desktop app for a device with a
+  MAC address.
+- **Response time on the map.** The statistics the monitors keep, as a
+  small line on a selected device and a slow-link tint on the map.
+- **Maintenance windows.** An outage expected in advance (today it can be
+  marked expected only once it has happened).
+
 ## Order
 
 1. Fix A and B, add restore points (no format change).
@@ -4847,6 +5128,8 @@ Stop after each phase and report the counts and failures as they are.
    (section 7: merge fixes first, the welcome last).
 8. The provider loop, links back, watched addresses and connections
    (section 8: links back first).
+9. Time, reach and live state (section 9: what would go dark first, the
+   format step before anything the file must hold).
 
 ## Status
 
@@ -5446,3 +5729,102 @@ Stop after each phase and report the counts and failures as they are.
     wrote down". The release note and the build: D424.
     The browser pass: every phase's pass (8a, 8b-8c, 8d, 8f, 8h) rerun on
     the finished tree at 360, 390 and 1280 in Gold and Colourful.
+- [ ] 9. Time, reach and live state (section 9). Scope written 2026-11-17:
+  D438-D448, agreed by the owner the same day (D447 as the link to Ping).
+  - [x] 9a. What would go dark (2026-11-17; D438). `js/whatif.js`, the X
+    key, `tests/suites/whatif.js`. The answer is in a bar over the map, not
+    in the rail.
+  - [x] 9b. The map at an earlier time (2026-11-17; D439), in part.
+    `js/history.js`, Export → History…, `tests/suites/maphistory.js`. Built:
+    restore points, the copies that left this browser, a file compared
+    with, and Now; the marks on a picture of the point (not the open
+    network swapped); against the point before or against now; and the
+    versions on a Topo server (`revisionAt` in `js/serversync.js`, step 7h
+    of `tests/server-e2e.mjs` against the real binary). Not built: a new
+    report section, since the report already prints
+    the changes since the last back-up (`changesSection`, `js/changes.js`).
+    History is a dialog, not a control on the map.
+  - [x] 9c. Format v21 (2026-11-17; D440), in part. `schema/topo-v21.json`,
+    the 20 to 21 step, FORMAT.md, `tests/suites/formatv21.js`. In it: the
+    five kinds of link that carry no IP (D441), a cable's `uplink` (D443),
+    a device's `icon` (D442) and `access` (D446). Not in it: the address
+    lists (D444), which went into v21 with 9h, below, once their reader,
+    merge and comparison existed. The new facts are not in the spreadsheet (as a device's
+    answer checks are not). No sealed-link round trip was added: the suite
+    checks the saved text read back and saved again.
+  - [x] 9d. Devices with no address (2026-11-17; D441). The five kinds in
+    the link's picker and the table; `isOffNetMedium` wherever a VPN
+    tunnel was already left out of a walk (binding, VLAN and loop walks,
+    rack cabling, uplinks, cable facts, labels); `isOffIpDevice`;
+    `tests/suites/nonip.js`. No new device kinds were added to the palette
+    (a sensor is an IoT device, a console a custom node), and the Simple
+    view has no sentence of its own for them yet beyond the kind's name.
+  - [x] 9e. A device's own icon (2026-11-17; D442). `js/reach.js`,
+    `ownIconImage` in `js/ui.js`. An SVG is not rewritten ("sanitised to
+    shapes and colours"): it is only ever drawn through an image element,
+    where its script cannot run and it can fetch nothing, which is the
+    stronger guarantee. The phone's camera comes from the system's own
+    file chooser, not a button of Topo's.
+  - [x] 9f. Uplinks (2026-11-17; D443). `link.uplink` in the cable's
+    panel, `uplinkFindings` in `js/diagnostics.js`. A back-up is drawn
+    with a long broken line, not an arrow. The advice about a single way
+    out is given only once that line is marked: unmarked, it fired on
+    every sample network and on any home with one line, which is most.
+  - [x] 9g. Open a device (2026-11-17; D446), the website. `js/reach.js`.
+    The desktop half is 9m, below. `tests/suites/reach.js` covers 9e to
+    9g, 9l and 9m's page side.
+  - [x] 9l. The programs a way in needs, on the website (2026-11-17;
+    D449-D451, D453). **Need a program for these? ↗** under a device's
+    buttons (`programsLink` in `js/reach.js`), to
+    software.carino.systems/?search=remote-access. In the SoftwareCatalog
+    repo, six entries (OpenSSH, PuTTY, Remmina, TigerVNC, FreeRDP, Windows
+    App) with the keywords the links search for; its `validate.py` passes
+    and the six links answered. Its whole `linkcheck.py` was not run. The
+    install ids were written from memory and not tried on each system.
+  - [x] 9m. The desktop app starts them (2026-11-17; D452).
+    `desktop/src-tauri/src/reach.rs`: `reach_clients` and `reach_open`,
+    the plans for the three systems as plain functions with their tests
+    (`cargo test reach`). The page's buttons call them and a kind with no
+    program links to the catalogue. Built and tested on Linux (debug); no
+    program was started by a test, and the running app was not driven in
+    a desktop session. The Windows and macOS halves (the new console, the
+    folders looked in, `open -a`) were not compiled or run here.
+  - [x] 9k. The headless monitor (2026-11-17; D448, D455-D460).
+    `desktop/monitor` (`src/main.rs`, `src/parts.rs`, the unit file); in
+    the app's shared files only `monitorlink.rs` changed (two methods with
+    defaults on `Host`, the status's extra fields, the `plan` kind read).
+    The page: `enrolHeadless`, `pushPlans` and the Settings section in
+    `js/monitors.js`, `tests/suites/headlessmon.js`. The server: `plan`
+    in `tcrypto/record.go` and `api/monitors.go`, migration
+    `0007_plan_records.sql` with its test, plans left out of backups.
+    Proven with the real programs: step 15l of `tests/server-e2e.mjs`
+    runs `topo-monitor request`, enrols it from a page, `enroll`, `run`,
+    and sees it take sealed checks and report a device answering.
+    Not done: a release build (only debug was built), Windows and macOS
+    (not compiled), a run longer than the test's two minutes, ICMP itself
+    (the test's check is TCP), a real device, and installing the unit.
+    A revoked monitor's plan records stay on the server until the site's
+    record cap pushes them out (at most 64 a monitor and owner).
+  - [x] 9j. Check in Ping ↗ (2026-11-17; D447). `pingLinkOf` in
+    `js/watch.js`, `tests/suites/pinglink.js`; and in the Ping repo,
+    `js/arrive.js` reads `#host=` into the targets and takes it off the
+    address (`tests/arrive.test.mjs`). Ping had no way to be handed an
+    address before.
+  - [x] 9i. Sites that disagree (2026-11-17; D445). `estateChecks` in
+    `js/report.js`, printed in the estate report under Between sites and
+    counted on its cover; `tests/suites/estatechecks.js`. Two sites'
+    devices sharing a name is left out (every site has a "Router"); an
+    asset tag at two sites is checked in its place. Not shown in each
+    site's own Findings tab: that would have the open network read the
+    other cards on every drawing.
+  - [x] 9h. Address lists (2026-11-17; D444). `doc.lists` in v21 (it had
+    not been released, so no v22): "Address lists" in `js/model.js`, the
+    save, load, compare and merge wiring as the watched addresses have it,
+    `schema/topo-v21.json`, FORMAT.md; `js/lists.js` (Export → Address
+    lists…); `listBlockBetween` in the trace's answer; the report's table;
+    `tests/suites/lists.js`. One list in the document, not two: a rule
+    lives on the list the traffic comes from (`blocked`, `allowed`), so
+    "between any two lists or subnets" is a list of one subnet. The
+    MikroTik and UniFi importers fill them (`addressLists` in
+    `js/importers/common.js`, `tests/suites/import-lists.js`), from
+    hand-written exports: no real controller's export was at hand.

@@ -29,7 +29,7 @@ type Record struct {
 }
 
 // RecordKinds are the kinds a record may be.
-var RecordKinds = map[string]bool{"status": true, "issue": true, "act": true, "quiet": true, "stats": true}
+var RecordKinds = map[string]bool{"status": true, "issue": true, "act": true, "quiet": true, "stats": true, "plan": true}
 
 var recordIDRe = regexp.MustCompile(`^[A-Za-z0-9_|:.-]{1,160}$`)
 

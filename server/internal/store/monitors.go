@@ -199,7 +199,10 @@ func PutRecord(ctx context.Context, q Q, r *Record) (int64, error) {
 func RecordsSince(ctx context.Context, q Q, site string, since int64, unfoldedOnly bool, limit int) ([]Record, error) {
 	query := "SELECT n, site_id, kind, id, author, epoch, at, received, folded, record FROM site_records WHERE site_id = ? AND n > ?"
 	if unfoldedOnly {
-		query += " AND folded = 0 AND kind <> 'status'"
+		// A status is a monitor's latest only, and a plan (D457) is its
+		// working copy of the checks, made again by any owner's browser:
+		// neither is a fact a backup must carry.
+		query += " AND folded = 0 AND kind NOT IN ('status', 'plan')"
 	}
 	query += " ORDER BY n LIMIT ?"
 	rows, err := q.QueryContext(ctx, query, site, since, limit)

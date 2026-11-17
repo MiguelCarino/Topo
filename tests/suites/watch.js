@@ -77,7 +77,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     replaceDocument({ v: DOC_VERSION, nodes: [N('a', 'pc')], links: [] });
     ok('none: no key, as a v19 document', serializeDoc().watch === undefined && !JSON.stringify(serializeDoc()).includes('watch'));
     const m19 = migrateDoc({ v: 19, nodes: [], links: [] });
-    ok('a v19 document migrates to v20 with nothing to convert', DOC_VERSION === 20 && m19.doc.v === 20 && m19.from === 19 && !m19.newer && !('watch' in m19.doc));
+    ok('a v19 document migrates to v21 with nothing to convert', DOC_VERSION === 21 && m19.doc.v === 21 && m19.from === 19 && !m19.newer && !('watch' in m19.doc));
     const inc = normalizeIncident({ id: 'inabc1234567', at: 1, status: 'open', symptom: 'other', nodeIds: [], watchIds: ['wa1', 'gone'], kind: 'outage', recordOnly: true, outages: [{ from: 5 }] },
       { nodes: [], watch: [{ id: 'wa1' }] });
     ok('an incident names watched addresses; an outage says Record only', show(inc.watchIds) === '["wa1"]' && inc.recordOnly === true, show(inc));

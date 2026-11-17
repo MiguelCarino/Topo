@@ -533,6 +533,6 @@ window.TopoServer = {
     refreshMe, refreshSites, site, requestCode, verifyCode, verifyCodeOnly, signInWithLink, signOut, forgetHere, ensureKeys, setUpKeys, resetKeys,
     startLink, cancelLink, linkRequests, approveLink, denyLink, recover, newRecoveryKey, ownBundle, myRecord,
     pins, pinPerson, personKeys, patchMe, startEvents, stopEvents, handleEvent, deviceLabel,
-    ready: () => S.status === 'ready', me: () => S.me, keys: () => S.keys
+    ready: () => S.status === 'ready', me: () => S.me, keys: () => S.keys, origin
 };
 })();

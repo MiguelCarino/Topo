@@ -583,7 +583,7 @@ function effectiveMedium(link, src, tgt) {
 // A cable owns its port; a radio, a tunnel and a bridge do not.
 function isExclusiveLink(link) {
     const medium = effectiveMedium(link);
-    if (medium === 'wireless' || medium === 'vpn') return false;
+    if (medium === 'wireless' || isOffNetMedium(medium)) return false;
     return link.attachment !== 'bridged';
 }
 
@@ -725,6 +725,7 @@ function bindLink(link) {
     const src = getNode(link.source), tgt = getNode(link.target);
     if (!src || !tgt) return link;
     const medium = effectiveMedium(link, src, tgt);
+    if (isNonIpMedium(medium)) return link;   // no IP travels over it: it takes no port (v21, D441)
     if (!link.sourceIface) link.sourceIface = autoPickIface(src, tgt, { excludeLinkId: link.id, medium });
     if (!link.targetIface) link.targetIface = autoPickIface(tgt, src, { excludeLinkId: link.id, medium });
     return link;
@@ -774,8 +775,26 @@ const PARALLEL_BOW = 34;
 // Trace-flow animation per medium; see the keyframes in <style>. FLOW_DASH mirrors
 // each class's stroke-dasharray as an attribute: exported SVG/PNG carries no
 // stylesheet, so without it a traced link rasterises as a plain solid line.
-const FLOW_CLASS = { utp: 'flow-utp', fiber: 'flow-fiber', wireless: 'flow-wireless', powerline: 'flow-powerline', vpn: 'flow-vpn' };
-const FLOW_DASH = { utp: '7 5', fiber: '22 8', wireless: 'none', powerline: '9 3 2 3 2 3', vpn: '12 4 2 4' };
+// v21 (D441) adds the kinds that carry no IP: Thread, Zigbee, Z-Wave and
+// Bluetooth move as a radio link does, a serial line as a cable.
+const FLOW_CLASS = { utp: 'flow-utp', fiber: 'flow-fiber', wireless: 'flow-wireless', powerline: 'flow-powerline', vpn: 'flow-vpn',
+    thread: 'flow-wireless', zigbee: 'flow-wireless', zwave: 'flow-wireless', bluetooth: 'flow-wireless', serial: 'flow-utp' };
+const FLOW_DASH = { utp: '7 5', fiber: '22 8', wireless: 'none', powerline: '9 3 2 3 2 3', vpn: '12 4 2 4',
+    thread: 'none', zigbee: 'none', zwave: 'none', bluetooth: 'none', serial: '7 5' };
+// The kinds of link no IP address travels over (document v21, D441).
+const NONIP_MEDIA = ['thread', 'zigbee', 'zwave', 'bluetooth', 'serial'];
+const isNonIpMedium = (m) => NONIP_MEDIA.includes(m);
+// A link the network's own walks leave out: a VPN tunnel (it rides whatever
+// is underneath) and a link that carries no IP (frames, VLANs, cabling and
+// ports are not its business).
+const isOffNetMedium = (m) => m === 'vpn' || isNonIpMedium(m);
+// A device joined to the network only by links that carry no IP: a sensor on
+// its hub, a console on a serial line. It has no address to ask for.
+function isOffIpDevice(node) {
+    if (!node) return false;
+    const at = linksAtNode(node.id).filter((l) => l.source !== l.target);
+    return at.length > 0 && at.every((l) => isNonIpMedium(l.medium)) && !getValidIps(node).length;
+}
 // A wireless link at rest is dashed 4 4; one on 6 GHz is a finer 2 3 of the
 // same purple, so the band reads off the line itself (js/ui.js). Traced, every
 // radio link drops its dash for the ))) arcs, as before.
@@ -952,7 +971,7 @@ function l2DomainOf(originId) {
         seen.add(currentId);
 
         linksAtNode(currentId).forEach((link) => {
-            if (effectiveMedium(link) === 'vpn') return; // overlay, not physical adjacency
+            if (isOffNetMedium(effectiveMedium(link))) return; // overlay, or no IP: not physical adjacency
             const nextNodeId = link.source === currentId ? link.target : link.source;
             const next = getNode(nextNodeId);
             if (!next) return;
@@ -1674,6 +1693,49 @@ const checkPortOf = (c) => (c && (c.port || (c.tls === 'implicit' && CHECK_TLS_P
 // What an outage does (v20, D373): a device raises an issue unless it says
 // 'record'; a watched address only records unless it says 'raise'.
 const asNodeOutage = (v) => (v === 'record' ? 'record' : undefined);
+// ---- Document v21 (docs/SCOPE.md step 9c, D440): three small facts ----
+// A cable's part in the way out (D443): the primary uplink or a back-up one.
+// Absent: nothing is said. Topo fails nothing over; it records what the
+// equipment is set to do.
+const asUplink = (v) => (v === 'primary' || v === 'backup' ? v : undefined);
+// A device's own picture in place of its kind's icon (D442): an image kept in
+// the document as a data: address, so a share link and a back-up carry it.
+// Only the four kinds a browser draws as an image, base64, and at most
+// ICON_MAX characters (about 24 KB of picture); anything else is dropped. It
+// is only ever drawn as an image, never put into the page as markup, so an
+// SVG's script cannot run.
+const ICON_MAX = 32768;
+const ICON_RE = /^data:image\/(?:svg\+xml|png|webp|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/;
+const asIcon = (v) => (typeof v === 'string' && v.length <= ICON_MAX && ICON_RE.test(v) ? v : undefined);
+// How a device is reached (D446): a list of at most ACCESS_MAX ways, each
+//   kind   'web', 'ssh', 'rdp', 'vnc' or 'telnet'
+//   port   1 to 65535; absent: the kind's own (ACCESS_PORTS)
+//   user   a user name to hand to the client, never a password
+//   tls    web only: true for https
+//   path   web only: where on the device, from "/"
+// Passwords and keys have no field, as everywhere in the document.
+const ACCESS_KINDS = ['web', 'ssh', 'rdp', 'vnc', 'telnet'];
+const ACCESS_PORTS = { web: 80, ssh: 22, rdp: 3389, vnc: 5900, telnet: 23 };
+const ACCESS_MAX = 8;
+function asAccess(v) {
+    if (!Array.isArray(v)) return undefined;
+    const out = [];
+    v.forEach((a) => {
+        if (!a || typeof a !== 'object' || Array.isArray(a) || !ACCESS_KINDS.includes(a.kind) || out.length >= ACCESS_MAX) return;
+        const one = { kind: a.kind };
+        const port = typeof a.port === 'string' && /^\d+$/.test(a.port.trim()) ? Number(a.port) : a.port;
+        if (Number.isInteger(port) && port >= 1 && port <= 65535) one.port = port;
+        const user = typeof a.user === 'string' ? a.user.trim() : '';
+        if (user && user.length <= 64 && /^[^\s:@/\\'"<>]+$/.test(user)) one.user = user;
+        if (a.kind === 'web') {
+            if (a.tls === true) one.tls = true;
+            const path = typeof a.path === 'string' ? a.path.trim() : '';
+            if (path && path.length <= 200 && path[0] === '/' && !/\s/.test(path)) one.path = path;
+        }
+        out.push(one);
+    });
+    return out.length ? out : undefined;
+}
 const asWatchOutage = (v) => (v === 'raise' ? 'raise' : undefined);
 const nodeRecordsOnly = (n) => !!n && n.outage === 'record';
 const watchRecordsOnly = (w) => !!w && w.outage !== 'raise';
@@ -1876,7 +1938,12 @@ const NODE_FIELDS = [
     // v20 (D373): what an outage of its checks does. Absent: Raise an issue
     // (as before); 'record': Record only (no issue, no banner, no alarm; the
     // outage is still recorded and reported, marked "recorded only").
-    { key: 'outage', kind: 'raw', label: 'When it is not answering', read: asNodeOutage, write: asNodeOutage }
+    { key: 'outage', kind: 'raw', label: 'When it is not answering', read: asNodeOutage, write: asNodeOutage },
+    // v21 (D442, D446), after everything older so a device without them
+    // serializes as before. Not in the spreadsheet: a picture is no cell,
+    // and the ways in are edited on the device.
+    { key: 'icon', kind: 'raw', label: 'Own icon', read: asIcon, write: asIcon },
+    { key: 'access', kind: 'raw', label: 'Reached by', read: asAccess, write: asAccess }
 ];
 
 // A cable's own facts (link.cable, plan section 4): the label on both ends of
@@ -1971,7 +2038,7 @@ const LINK_FIELDS = [
     { key: 'target', kind: 'raw', label: 'To', csv: 'to_device', table: 'show' },
     { key: 'attachment', kind: 'raw', label: 'Attachment', csv: 'attachment' },
     { key: 'medium', kind: 'raw', label: 'Medium', csv: 'medium', bulk: true, table: 'edit',
-      // The five media the canvas can draw (FLOW_CLASS); unset is "guess".
+      // The media the canvas can draw (FLOW_CLASS); unset is "guess".
       validate: (v) => isBlank(v) || Object.prototype.hasOwnProperty.call(FLOW_CLASS, v) },
     // Optional on load: links from older diagrams carry no interface refs, and
     // autoBindLinks() fills them in once every node is loaded. Held as null,
@@ -1989,7 +2056,9 @@ const LINK_FIELDS = [
     // The providers responsible for the run (document v15, a list since
     // v18): the carrier of a fibre circuit, the ISP of the line into the modem.
     { key: 'providers', kind: 'raw', label: 'Providers', read: asProviderRefs, write: asProviderRefs, csv: 'provider', bulk: true,
-      toText: (v) => providerRefsText(v) }
+      toText: (v) => providerRefsText(v) },
+    // v21 (D443): its part in the way out, 'primary' or 'backup'.
+    { key: 'uplink', kind: 'raw', label: 'Way out', read: asUplink, write: asUplink }
 ];
 
 const fieldRead = (f) => f.read || FIELD_KINDS[f.kind].read;
@@ -2331,7 +2400,7 @@ function vlansPass(e, v) {
 function vlanPath(fromId, v, toId) {
     if (fromId === toId) return { ok: true };
     const hop = (link, curId) => {
-        if (link.source === link.target || effectiveMedium(link) === 'vpn') return null;
+        if (link.source === link.target || isOffNetMedium(effectiveMedium(link))) return null;
         const farId = link.source === curId ? link.target : link.source;
         const far = getNode(farId);
         if (!far || isRetired(far)) return null;
@@ -2376,7 +2445,7 @@ function vlanPath(fromId, v, toId) {
     // Failing that, the first link on the shortest VLAN-blind path that
     // does not carry v.
     const back = (link, curId) => {
-        if (link.source === link.target || effectiveMedium(link) === 'vpn') return null;
+        if (link.source === link.target || isOffNetMedium(effectiveMedium(link))) return null;
         const farId = link.source === curId ? link.target : link.source;
         const far = getNode(farId);
         if (!far || isRetired(far)) return null;
@@ -4249,7 +4318,7 @@ function rackCableLinksNow(rack, links, nodes) {
         const s = byId.get(l.source), d = byId.get(l.target);
         if (!s || !d || !(inRack(s) || inRack(d))) return false;
         const medium = effectiveMedium(l, s, d);
-        return medium !== 'wireless' && medium !== 'vpn' && !onOwnHost(s, d);
+        return medium !== 'wireless' && !isOffNetMedium(medium) && !onOwnHost(s, d);
     });
 }
 
@@ -4489,7 +4558,7 @@ function locatePathNow(node, nodes, links, groups, live, pass) {
         const far = other(l, from);
         if (!far || kin(from, far) || far === node || hosts.includes(far)) return false;
         const medium = mediumOf(l);
-        if (medium === 'vpn') return false;
+        if (isOffNetMedium(medium)) return false;
         return upFrom(l, from, far, medium);
     };
     // uplinkOf's pick; an AP's cable before its radio links, as from an AP
@@ -4515,7 +4584,7 @@ function locatePathNow(node, nodes, links, groups, live, pass) {
         // the root router): the second is no missing cable.
         const any = [node, ...hosts].some((n) => linksOf(n).some((l) => {
             const far = l.source !== l.target && other(l, n);
-            return !!far && !kin(n, far) && mediumOf(l) !== 'vpn';
+            return !!far && !kin(n, far) && !isOffNetMedium(mediumOf(l));
         }));
         gap(any ? 'noUplink' : 'noCable', -1, -1, root);
     }
@@ -4619,7 +4688,7 @@ function locatePathNow(node, nodes, links, groups, live, pass) {
         const far = other(l, n);
         if (!far || kin(n, far)) return false;
         const medium = mediumOf(l);
-        if (medium === 'vpn') return false;
+        if (isOffNetMedium(medium)) return false;
         if (medium === 'wireless') {
             if (wiredOnly) return false;
             const e = wifiLinkEnds(l, ...ends(l));
@@ -5229,6 +5298,99 @@ function normalizeWatch(list, ctx = {}) {
 }
 // Save: no key when there are none (a v19 document's shape).
 const serializeWatch = (list) => (list && list.length ? list.map((w) => writeFields(WATCH_FIELDS, w)) : undefined);
+// ---- Address lists (document v21, docs/SCOPE.md D444, step 9h) ----
+// Names for sets of addresses, as a firewall has them ("Cameras", "Guests",
+// "Servers"), and what each may not reach. It documents the firewall; Topo
+// reads and writes none. doc.lists, at most LIST_MAX, each:
+//   id        'al' and a number, stable
+//   name      what it is
+//   members   addresses and subnets ("192.168.1.20", "10.0.20.0/24"), at
+//             most LIST_MEMBERS_MAX; a subnet stands for every address in it
+//   blocked   the lists this one may not reach, by id: "Does A reach B?"
+//             stops there and names the two lists
+//   allowed   the lists it is recorded as allowed to reach, by id: said in
+//             the report, and an exception to a block when both hold
+//   notes     free text
+// A rule lives on the list traffic comes from, so there is one new list in
+// the document and not two. A device is in a list when one of its addresses
+// is a member or lies in a member subnet. Not on the map, not in the
+// findings, not in the spreadsheet.
+const LIST_MAX = 64;
+const LIST_MEMBERS_MAX = 128;
+const LIST_NAME_MAX = 80;
+// One member: an address or a subnet, written the way the document writes
+// addresses. Anything else is dropped.
+function asListMember(v) {
+    const s = typeof v === 'string' ? v.trim() : '';
+    if (!s || s.length > 64) return undefined;
+    if (isIpText(s)) return s;
+    return /\//.test(s) && parseValidCIDR(s) ? s : undefined;
+}
+function asListMembers(v) {
+    if (!Array.isArray(v)) return undefined;
+    const out = [];
+    v.forEach((m) => { const x = asListMember(m); if (x && !out.includes(x) && out.length < LIST_MEMBERS_MAX) out.push(x); });
+    return out.length ? out : undefined;
+}
+function asListRefs(v) {
+    if (!Array.isArray(v)) return undefined;
+    const out = [];
+    v.forEach((r) => { const x = asGroupRef(r); if (x && !out.includes(x) && out.length < LIST_MAX) out.push(x); });
+    return out.length ? out : undefined;
+}
+const LIST_FIELDS = [
+    { key: 'id', kind: 'raw', read: (v) => asGroupRef(v) || nextId('al'), label: 'ID' },
+    { key: 'name', kind: 'raw', read: providerLine(LIST_NAME_MAX), write: providerLine(LIST_NAME_MAX), label: 'Name' },
+    { key: 'members', kind: 'raw', read: asListMembers, write: asListMembers, label: 'Addresses' },
+    { key: 'blocked', kind: 'raw', read: asListRefs, write: asListRefs, label: 'May not reach' },
+    { key: 'allowed', kind: 'raw', read: asListRefs, write: asListRefs, label: 'May reach' },
+    { key: 'notes', kind: 'raw', read: providerNotes, write: providerNotes, label: 'Notes' }
+];
+// Load: coerced, one per id, a name required, at most LIST_MAX; a rule that
+// names a list the document lacks, or the list itself, is dropped.
+function normalizeLists(list) {
+    const out = keepIdsUnique((Array.isArray(list) ? list : [])
+        .filter((l) => l && typeof l === 'object' && !Array.isArray(l))
+        .map((l) => readFields(LIST_FIELDS, l))
+        .filter((l) => !!l.name)
+        .slice(0, LIST_MAX), 'al');
+    const ids = new Set(out.map((l) => l.id));
+    out.forEach((l) => ['blocked', 'allowed'].forEach((k) => {
+        if (!l[k]) return;
+        const kept = l[k].filter((id) => id !== l.id && ids.has(id));
+        if (kept.length) l[k] = kept; else delete l[k];
+    }));
+    return out;
+}
+// Save: no key when there are none (a v20 document's shape).
+const serializeLists = (list) => (list && list.length ? list.map((l) => writeFields(LIST_FIELDS, l)) : undefined);
+const listLabel = (l) => (l && (l.name || l.id)) || '';
+const listById = (id, lists = state.lists) => (lists || []).find((l) => l.id === id) || null;
+// The lists a device is in: by any of its addresses.
+function listsHolding(node, lists = state.lists) {
+    const ips = getValidIps(node);
+    if (!ips.length) return [];
+    return (lists || []).filter((l) => (l.members || []).some((m) => {
+        if (m.includes('/')) { const p = parseValidCIDR(m); return !!p && ips.some((x) => ipInParsed(x.ip, p)); }
+        return ips.some((x) => x.ip.toString() === m);
+    }));
+}
+// What the lists say about traffic from one device to another:
+// -> { from, to } (two lists) when a list holding the first may not reach a
+// list holding the second and no list holding the first is recorded as
+// allowed to; null when they say nothing against it.
+function listBlockBetween(a, b, lists = state.lists) {
+    if (!lists || !lists.length || !a || !b) return null;
+    const from = listsHolding(a, lists), to = listsHolding(b, lists);
+    if (!from.length || !to.length) return null;
+    const toIds = new Set(to.map((l) => l.id));
+    if (from.some((l) => (l.allowed || []).some((id) => toIds.has(id)))) return null;
+    for (const l of from) {
+        const hit = (l.blocked || []).find((id) => toIds.has(id));
+        if (hit) return { from: l, to: listById(hit, lists) };
+    }
+    return null;
+}
 const makeWatch = (fields) => readFields(WATCH_FIELDS, Object.assign({ id: nextId('wa') }, fields));
 const watchById = (id, list = state.watch) => (id ? (list || []).find((w) => w.id === id) || null : null);
 // What a watched address is called: its name, else its address.
@@ -5631,6 +5793,20 @@ function normalizeSearchRefs(searches = state.searches, columns = state.columns)
 //                   convert. A v18
 //                   build would drop them, so it opens a v19 document
 //                   read-only.
+//   v 20            the watched addresses (doc.watch), a device's `outage`
+//                   (Record only), an incident's `watchIds` and an outage's
+//                   `recordOnly` (step 8d, D371-D374). Nothing to convert.
+//   v 21            step 9c (docs/SCOPE.md D440): five more kinds of link,
+//                   the ones no IP travels over (thread, zigbee, zwave,
+//                   bluetooth, serial; D441), a cable's part in the way out
+//                   (link.uplink, D443), a device's own picture (node.icon,
+//                   D442), how it is reached (node.access, D446) and the
+//                   address lists with what each may not reach (doc.lists,
+//                   D444, "Address lists" above).
+//                   Nothing to convert: a document from before has none of
+//                   them and writes no key. A v20 build would drop the
+//                   three keys and refuse the five kinds, so it opens a v21
+//                   document read-only.
 //
 // A document with a higher `v` was written by a newer Topo. Its unknown fields
 // cannot be kept — the serializer is an allowlist, and that is a privacy rule,
@@ -6451,7 +6627,7 @@ function decisionLogEntry({ id, at, visits, incidentId, providerId, provider, vi
     return normalizeLogEntry({ id, at, kind: 'decision', visits, incidentId, providerId, provider, visitBy, by, result, outcome, note, file, summary });
 }
 
-const DOC_VERSION = 20;
+const DOC_VERSION = 21;
 
 // ---- What a Topo file says it is ----
 // Every .json Topo writes (a network's back-up, a binder) opens with a
@@ -6486,7 +6662,7 @@ function withTopoSchema(payload) {
 const DOC_VERSION_RE = /^\s*[1-9]\d*\s*$/;
 const isDocShape = (doc) => !!doc && typeof doc === 'object' && !Array.isArray(doc)
     && (doc.v === undefined || (Number.isInteger(doc.v) && doc.v >= 1) || (typeof doc.v === 'string' && DOC_VERSION_RE.test(doc.v)))
-    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations', 'columns', 'pinned', 'accepted', 'searches', 'log', 'prior', 'incidents'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
+    && ['nodes', 'links', 'networks', 'groups', 'wifi', 'annotations', 'columns', 'pinned', 'accepted', 'searches', 'log', 'prior', 'incidents', 'watch', 'lists'].every((k) => doc[k] === undefined || Array.isArray(doc[k]));
 
 // A version written as text ("14", a hand-edited file) is that version.
 const docVersionOf = (doc) => {
@@ -6658,7 +6834,13 @@ const MIGRATIONS = [
     // (doc.watch), a device's `outage` (Record only), an incident's
     // `watchIds` and an outage's `recordOnly`. A v19 document has none of
     // them: nothing to convert. Older builds open a v20 document read-only.
-    { from: 19, to: 20, run: (doc) => ({ ...doc, v: 20 }) }
+    { from: 19, to: 20, run: (doc) => ({ ...doc, v: 20 }) },
+    // v21 (step 9c, docs/SCOPE.md D440): the kinds of link that carry no IP,
+    // a cable's `uplink`, a device's `icon` and `access`, and the address
+    // lists (doc.lists, added in 9h before v21 was released). A v20 document has
+    // none of them: nothing to convert. Older builds open a v21 document
+    // read-only.
+    { from: 20, to: 21, run: (doc) => ({ ...doc, v: 21 }) }
 ];
 
 // The v2 interface zone flags of `src`, put back on the same node as written.

@@ -55,6 +55,7 @@ function render(force) {
     list.innerHTML = all.length ? all.map((w) => rowHtml(w, ro)).join('')
         : `<p class="rail-none">${escapeHtml(t('No watched addresses. Add one to check an address that is not on the map: the internet provider\'s gateway, a public resolver, a cloud service.'))}</p>`;
 }
+const pingLinkOf = (address) => `https://ping.carino.systems/#host=${encodeURIComponent(String(address || ''))}`;
 function rowHtml(w, ro) {
     const h = TC().watchHolder(w);
     const lk = TC().holderLook(h);
@@ -69,6 +70,10 @@ function rowHtml(w, ro) {
     if (worst) x += `<div class="net-line ck-now ck-now-${TC().look(worst)}">${escapeHtml(TC().nowText(worst, h))}</div>`;
     x += '<div class="net-actions">';
     x += `<button type="button" class="link-btn" data-wact="edit" data-wt="${id}">${escapeHtml(t(ro ? 'Open' : 'Edit'))}</button>`;
+    // Check in Ping (docs/SCOPE.md D447): a link the person clicks, with the
+    // address after the hash, where no server sees it. Topo itself asks
+    // nothing of the address: the page's CSP could not, and that stays so.
+    x += `<a class="link-btn wt-ping" href="${escapeHtml(pingLinkOf(w.address))}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(t('Opens ping.carino.systems with this address filled in. Topo itself contacts nothing.'))}">${escapeHtml(t('Check in Ping ↗'))}</a>`;
     if (!ro) {
         x += `<button type="button" class="link-btn" data-wact="map" data-wt="${id}"${isIpText(w.address) ? '' : ` disabled title="${escapeHtml(t('A device holds addresses, not host names.'))}"`}>${escapeHtml(t('Add to the map'))}</button>`;
     }

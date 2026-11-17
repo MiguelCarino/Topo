@@ -29,6 +29,9 @@ function kindOf(r) {
     if ('port_table' in r || ('type' in r && /^(usw|uap|ugw|udm|uxg|ubb|uck)$/.test(r.type) && 'mac' in r)) return 'device';
     if ('ip_subnet' in r || ('purpose' in r && ('vlan_enabled' in r || 'dhcpd_enabled' in r || 'wan_type' in r))) return 'network';
     if ('wpa_mode' in r || 'x_passphrase' in r || ('security' in r && ('hide_ssid' in r || 'networkconf_id' in r || 'wlan_band' in r))) return 'wlan';
+    // rest/firewallgroup and rest/firewallrule: the address groups, and the rules between two of them.
+    if ('group_type' in r && 'group_members' in r) return 'fwgroup';
+    if ('ruleset' in r && 'action' in r && ('src_firewallgroup_ids' in r || 'dst_firewallgroup_ids' in r)) return 'fwrule';
     if ('is_wired' in r || 'sw_mac' in r || 'ap_mac' in r || ('oui' in r && 'mac' in r && ('hostname' in r || 'first_seen' in r || 'last_seen' in r))) return 'client';
     return '';
 }
@@ -97,7 +100,7 @@ const DEVICE_TYPE = { ugw: 'router', udm: 'router', uxg: 'router', usw: 'switch'
 function parse(files) {
     const b = C.builder();
     const warnings = [], notes = [];
-    const all = { device: [], client: [], network: [], wlan: [] };
+    const all = { device: [], client: [], network: [], wlan: [], fwgroup: [], fwrule: [] };
     let secrets = 0;
     files.forEach((f) => {
         const vals = C.parseJsonValues(f.text);
@@ -258,7 +261,26 @@ function parse(files) {
     b.doc.nodes.forEach((n) => n.interfaces.forEach((i) => { delete i._idx; }));
     b.stats.secrets += secrets;
     b.notes(notes);
-    return { doc: b.finish(), warnings, notes, name: '', parts: b.partList() };
+    const doc = b.finish();
+    // The firewall's address groups as address lists (doc.lists, D444). Port
+    // groups are not addresses; a rule counts when it runs between one
+    // address group and another and is enabled.
+    const groups = all.fwgroup.filter(({ r }) => /address-group$/.test(String(r.group_type)) && r.name)
+        .map(({ r }) => ({ key: String(r._id || r.name), name: r.name, members: Array.isArray(r.group_members) ? r.group_members : [] }));
+    if (groups.length) {
+        const addr = new Set(groups.map((g) => g.key));
+        const rules = [];
+        all.fwrule.forEach(({ r }) => {
+            if (r.enabled === false) return;
+            const action = lc(r.action) === 'accept' ? 'allow' : /^(drop|reject)$/.test(lc(r.action)) ? 'block' : '';
+            if (!action) return;
+            (r.src_firewallgroup_ids || []).filter((id) => addr.has(String(id))).forEach((from) =>
+                (r.dst_firewallgroup_ids || []).filter((id) => addr.has(String(id))).forEach((to) => rules.push({ from: String(from), to: String(to), action })));
+        });
+        const al = C.addressLists(groups, rules);
+        if (al.lists.length) doc.lists = al.lists;
+    }
+    return { doc, warnings, notes, name: '', parts: b.partList() };
 }
 const importer = { id: 'unifi', label: 'UniFi', family: 'unifi', multi: true, detect, parse };
 if (window.TopoImporters) TopoImporters.register(importer);

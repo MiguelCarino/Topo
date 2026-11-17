@@ -530,7 +530,41 @@ function maskBits(mask) {
     return bits.indexOf('0') < 0 ? 32 : bits.indexOf('0');
 }
 
+// A firewall's address lists as the document's (doc.lists, "Address lists"
+// in js/model.js; docs/SCOPE.md D444): `groups` are { key, name, members }
+// (the source's own key, a name, addresses and subnets as text), `rules` are
+// { from, to, action } between two keys, 'block' or 'allow'. Members that
+// are not an address or a subnet (a range, a host name) are left out, and
+// counted in `skipped`; a rule that names a group not given is dropped. The
+// ids are al1, al2… in the order given, so the same export gives the same
+// lists. -> { lists, skipped }.
+function importedAddressLists(groups, rules) {
+    const byKey = new Map();
+    let skipped = 0;
+    const lists = [];
+    (groups || []).forEach((g) => {
+        const name = String(g.name || '').trim();
+        if (!name || byKey.has(g.key)) return;
+        const raw = [...new Set((g.members || []).map((m) => String(m == null ? '' : m).trim()).filter(Boolean))];
+        const members = (typeof asListMembers === 'function' ? asListMembers(raw) : raw) || [];
+        skipped += raw.length - members.length;
+        const list = { id: `al${lists.length + 1}`, name: name.slice(0, 80) };
+        if (members.length) list.members = members;
+        byKey.set(g.key, list);
+        lists.push(list);
+    });
+    (rules || []).forEach((r) => {
+        const from = byKey.get(r.from), to = byKey.get(r.to);
+        if (!from || !to || from === to) return;
+        const k = r.action === 'allow' ? 'allowed' : 'blocked';
+        if (!from[k]) from[k] = [];
+        if (!from[k].includes(to.id)) from[k].push(to.id);
+    });
+    return { lists, skipped };
+}
+
 window.TopoImportCommon = {
+    addressLists: importedAddressLists,
     SECRET_KEY_RE, isSecretKey, decodeText, looksBinary, parseJsonValues, csvTable, headerKey, macText, cidrText,
     idMaker, sourceTag, layout, finish, countDoc, issue, typeFromWords, groupKindFromWords, colorName, colorHex,
     isIp, builder, withoutNodes, dateColumn, aliasedTable, maskBits

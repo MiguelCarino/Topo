@@ -134,7 +134,8 @@ function serializeReportMeta(meta) {
 const NODE_TYPE_NAMES = Object.fromEntries(paletteDefs.map((d) => [d.type, d.name]));
 const typeName = (type) => NODE_TYPE_NAMES[type] || type || 'Unknown';
 
-const MEDIUM_NAMES = { utp: 'UTP copper', fiber: 'Fibre optic', wireless: 'Wireless', powerline: 'Powerline', vpn: 'VPN tunnel' };
+const MEDIUM_NAMES = { utp: 'UTP copper', fiber: 'Fibre optic', wireless: 'Wireless', powerline: 'Powerline', vpn: 'VPN tunnel',
+    thread: 'Thread', zigbee: 'Zigbee', zwave: 'Z-Wave', bluetooth: 'Bluetooth', serial: 'Serial line' };
 const mediumName = (m) => MEDIUM_NAMES[m] || m || 'Unspecified';
 
 const SEVERITY_NAMES = { bad: 'Critical', warn: 'Advisory', info: 'Info' };
@@ -1239,6 +1240,9 @@ function reportModelNow(searchIds) {
         racks,
         connections,
         subnets,
+        // The address lists and what each may not reach (js/model.js, D444).
+        lists: (state.lists || []).map((l) => ({ name: listLabel(l), members: (l.members || []).slice(), devices: state.nodes.filter((n) => listsHolding(n, [l]).length).map((n) => n.name || n.id),
+            blocked: (l.blocked || []).map((id) => listLabel(listById(id))).filter(Boolean), allowed: (l.allowed || []).map((id) => listLabel(listById(id))).filter(Boolean) })),
         portMaps: reportPortMaps(),
         // One row per VLAN, printed only once a trunk is recorded (reportVlans).
         vlans: reportVlans(),
@@ -1275,10 +1279,12 @@ function reportModelNow(searchIds) {
 // and the estate report cannot disagree by construction.
 //
 // The one thing this document can show that a single-site report structurally
-// cannot is a subnet used in two buildings. It is printed as a FACT with a
-// count and no severity — never as a finding — because topologyFindings() has
-// no cross-site check, and a report that graded it would be asserting something
-// the Diagnostics panel can never confirm.
+// cannot is what two sites say side by side. A subnet used in two buildings
+// is printed as a FACT with a count and no severity, because whether it is a
+// conflict depends on whether the two are routed together. Where the
+// documents do record that (a cloud at one site that stands for the other),
+// and for the few other things two sites can contradict each other on, it is
+// graded: estateChecks below (docs/SCOPE.md D445).
 
 // A stable per-site anchor for the index links. Entry ids are minted locally
 // and are already id-safe, but a binder that arrived from elsewhere is not
@@ -1296,7 +1302,11 @@ function binderSiteModels(entries) {
             // has a date invented for it, so comparing sheets against the cover
             // on model.meta printed today's date on every site — a value none of
             // them recorded, contradicting the cover of the same deliverable.
-            return Object.assign(base, { model, meta: model.meta, rawMeta: (e.doc && e.doc.report) || {}, counts: model.counts, siteRefs: withDoc(e.doc, () => state.nodes.filter((n) => n.siteRef).map((n) => ({ from: n.name, ref: n.siteRef }))) });
+            return Object.assign(base, { model, meta: model.meta, rawMeta: (e.doc && e.doc.report) || {}, counts: model.counts,
+                // The declared VLANs and the asset tags, for the checks between sites (estateChecks).
+                vlans: withDoc(e.doc, () => (state.networks || []).filter((n) => Number.isInteger(n.vlan)).map((n) => ({ vlan: n.vlan, name: String(n.name || '') }))),
+                tags: withDoc(e.doc, () => state.nodes.filter((n) => n.assetTag && !isRetired(n)).map((n) => ({ tag: String(n.assetTag), name: n.name || n.id }))),
+                siteRefs: withDoc(e.doc, () => state.nodes.filter((n) => n.siteRef).map((n) => ({ from: n.name, ref: n.siteRef }))) });
         } catch (err) {
             // A stored document too old or too broken to model still gets a
             // sheet: leaving it out silently would understate the estate.
@@ -1317,6 +1327,78 @@ function estateFindingRows(sites) {
     });
     return rows.sort((a, b) => (a.level === b.level
         ? (a.site === b.site ? a.seq - b.seq : a.site.localeCompare(b.site))
+        : (a.level === 'bad' ? -1 : 1)));
+}
+
+// What only the estate can say (docs/SCOPE.md step 9i, D445): findings that
+// need two sites side by side. They are graded, where the shared-subnet table
+// above is not, because each rests on something the documents do record:
+//   - a private subnet used at two sites that are JOINED (a cloud at one that
+//     stands for the other, siteRef): the two cannot route to each other on
+//     it. Unjoined sites sharing a subnet stay a fact in the table below;
+//   - a VLAN number that goes by different names at different sites, and a
+//     VLAN name on different numbers: a trunk between them, or a technician
+//     moving between them, will meet the wrong network;
+//   - an asset tag on two devices at different sites: a register's tag names
+//     one thing.
+// Two sites' devices sharing a name is NOT one of them: every site has a
+// "Router" and a "Switch 1", and a note on each would be noise.
+// -> rows as a site's findings are ({ level, site, subject, check, detail }),
+// worst first, then by subject: the same binder gives the same rows tomorrow.
+function estateChecks(sites) {
+    const rows = [];
+    const live = sites.filter((s) => s.model);
+    const byId = new Map(live.map((s) => [s.id, s]));
+    const both = (a, b) => [a.name, b.name].sort((x, y) => x.localeCompare(y)).join(' · ');
+    // Joined pairs, each once, with the cloud that says so.
+    const joined = new Map();
+    live.forEach((s) => (s.siteRefs || []).forEach((r) => {
+        const far = r.ref && r.ref.id && byId.get(r.ref.id);
+        if (!far || far === s) return;
+        const key = [s.id, far.id].sort().join('\u0000');
+        if (!joined.has(key)) joined.set(key, { a: s, b: far, via: r.from });
+    }));
+    joined.forEach(({ a, b, via }) => {
+        const there = new Set(b.model.subnets.filter((x) => x.isPrivate).map((x) => x.network));
+        a.model.subnets.filter((x) => x.isPrivate && there.has(x.network)).forEach((x) => rows.push({ level: 'bad', site: both(a, b), subject: x.network, check: t('Joined sites'),
+            detail: t('{network} is used at both {a} and {b}, which are joined ({via}). Devices on it at one site cannot reach the other.', { network: x.network, a: a.name, b: b.name, via: via || t('a site link') }) }));
+    });
+    // VLANs by number and by name.
+    const byVlan = new Map(), byName = new Map();
+    live.forEach((s) => (s.vlans || []).forEach((v) => {
+        if (!byVlan.has(v.vlan)) byVlan.set(v.vlan, []);
+        byVlan.get(v.vlan).push({ site: s.name, name: v.name });
+        const key = v.name.trim().toLowerCase();
+        if (!key) return;
+        if (!byName.has(key)) byName.set(key, []);
+        byName.get(key).push({ site: s.name, name: v.name, vlan: v.vlan });
+    }));
+    const said = (list, of) => list.map((x) => `${of(x)} (${x.site})`).join(', ');
+    byVlan.forEach((list, vlan) => {
+        const named = list.filter((x) => x.name.trim());
+        if (new Set(named.map((x) => x.name.trim().toLowerCase())).size < 2 || new Set(named.map((x) => x.site)).size < 2) return;
+        rows.push({ level: 'warn', site: [...new Set(named.map((x) => x.site))].sort((x, y) => x.localeCompare(y)).join(' · '), subject: `VLAN ${vlan}`, check: t('VLAN names'),
+            detail: t('VLAN {vlan} goes by different names: {names}.', { vlan, names: said(named, (x) => x.name) }) });
+    });
+    byName.forEach((list) => {
+        if (new Set(list.map((x) => x.vlan)).size < 2 || new Set(list.map((x) => x.site)).size < 2) return;
+        rows.push({ level: 'warn', site: [...new Set(list.map((x) => x.site))].sort((x, y) => x.localeCompare(y)).join(' · '), subject: list[0].name, check: t('VLAN numbers'),
+            detail: t('"{name}" is on different VLAN numbers: {numbers}.', { name: list[0].name, numbers: said(list, (x) => x.vlan) }) });
+    });
+    // Asset tags.
+    const byTag = new Map();
+    live.forEach((s) => (s.tags || []).forEach((x) => {
+        const key = x.tag.trim().toLowerCase();
+        if (!key) return;
+        if (!byTag.has(key)) byTag.set(key, []);
+        byTag.get(key).push({ site: s.name, tag: x.tag, name: x.name });
+    }));
+    byTag.forEach((list) => {
+        if (new Set(list.map((x) => x.site)).size < 2) return;
+        rows.push({ level: 'warn', site: [...new Set(list.map((x) => x.site))].sort((x, y) => x.localeCompare(y)).join(' · '), subject: list[0].tag, check: t('Asset tag'),
+            detail: t('Asset tag {tag} is on more than one device: {devices}.', { tag: list[0].tag, devices: said(list, (x) => x.name) }) });
+    });
+    return rows.sort((a, b) => (a.level === b.level ? String(a.check).localeCompare(String(b.check)) || String(a.subject).localeCompare(String(b.subject), undefined, { numeric: true }) || a.site.localeCompare(b.site)
         : (a.level === 'bad' ? -1 : 1)));
 }
 
@@ -1405,9 +1487,10 @@ function binderModel(entries, estateMeta) {
     const sites = binderSiteModels(entries);
     const findings = estateFindingRows(sites);
     const subnets = estateSubnets(sites);
+    const across = estateChecks(sites);
     return {
         meta: normalizeReportMeta(estateMeta),
-        sites, findings, subnets,
+        sites, findings, subnets, across,
         graph: estateGraph(sites),
         counts: {
             sites: sites.length,
@@ -1417,8 +1500,10 @@ function binderModel(entries, estateMeta) {
             // buildings is one network, and a total that double-counted it would
             // contradict the table directly underneath.
             subnets: subnets.length,
-            critical: findings.filter((f) => f.level === 'bad').length,
-            advisory: findings.filter((f) => f.level === 'warn').length,
+            // The cover counts what is printed under it: each site's findings and those between sites.
+            critical: findings.filter((f) => f.level === 'bad').length + across.filter((f) => f.level === 'bad').length,
+            advisory: findings.filter((f) => f.level === 'warn').length + across.filter((f) => f.level === 'warn').length,
+            across: across.length
         },
     };
 }
@@ -1941,6 +2026,24 @@ function wifiSection(w) {
 // A declared network prints its name, VLAN, purpose, gateway, DNS and DHCP
 // under its address; one only implied by the addressing says so, since
 // nobody has said what it is for.
+// The address lists, under Addressing: printed only when there are some.
+function listsSection(lists) {
+    if (!lists || !lists.length) return '';
+    const cut = (names, n) => (names.length > n ? names.slice(0, n).concat([t('+{n} more', { n: names.length - n })]) : names).join(', ');
+    const rows = lists.map((l) => `<tr>
+        <td><b>${escapeHtml(l.name)}</b></td>
+        <td class="mono">${escapeHtml(cut(l.members, 12)) || '—'}</td>
+        <td>${escapeHtml(cut(l.devices, 8)) || '—'}</td>
+        <td>${escapeHtml(l.blocked.join(', ')) || '—'}</td>
+        <td>${escapeHtml(l.allowed.join(', ')) || '—'}</td>
+    </tr>`).join('');
+    return `
+    <h3 class="rep-lists">${escapeHtml(t('Address lists'))}</h3>
+    <table>
+        <thead><tr><th>${t('Name')}</th><th>${t('Addresses and subnets')}</th><th>${t('Devices')}</th><th>${t('May not reach')}</th><th>${t('May reach')}</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+    <p class="muted">${escapeHtml(t('As recorded here, not as read from a firewall.'))}</p>`;
+}
 function subnetsSection(subnets) {
     if (!subnets.length) return `<p class="muted">${escapeHtml(t('No addressing recorded.'))}</p>`;
     const muted = (text) => `<span class="muted">${escapeHtml(text)}</span>`;
@@ -2613,7 +2716,7 @@ ${sec.wifi && model.wifi ? `
     ${wifiSection(model.wifi)}
 ` : ''}
 ${sec.addressing ? `    <h2>${escapeHtml(t('Addressing'))}</h2>
-    ${subnetsSection(model.subnets)}` : ''}
+    ${subnetsSection(model.subnets)}${listsSection(model.lists)}` : ''}
 ${sec.vlans && (model.vlans || []).length ? `
     <h2>VLANs</h2>
     ${vlansSection(model.vlans)}
@@ -2759,7 +2862,10 @@ function binderCoverSheet(binder, sec = reportSections()) {
 
 ${sec.findings ? `    <h2>${escapeHtml(t('Findings across the estate'))}</h2>
     ${findingsSection(binder.findings, { site: true })}
-
+${binder.across && binder.across.length ? `    <h3 class="est-across">${escapeHtml(t('Between sites'))}</h3>
+    <p class="muted">${escapeHtml(t('What only two sites side by side can show. A subnet shared by sites that are not joined is listed under Estate addressing, as a fact.'))}</p>
+    ${findingsSection(binder.across, { site: true })}
+` : ''}
 ` : ''}${sec.addressing ? `    <h2>${escapeHtml(t('Estate addressing'))}</h2>
     ${estateSubnetsSection(binder.subnets)}
 

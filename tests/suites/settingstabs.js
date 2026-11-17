@@ -61,14 +61,14 @@ window.addEventListener('load', () => { setTimeout(async () => {
       general: ['setMapHead', 'setReportHead', 'setHistoryHead', 'setReporterHead'],
       lock: ['setLockHead'],
       server: ['setDcHead', 'setDsHead'],
-      monitor: ['setMonHead'],
+      monitor: ['setMonHead', 'setHeadlessHead'],
       backup: ['setBackupHead'],
       setup: ['setWelcomeHead', 'setTcHead'],
     };
     ok('the sections in their tabs, in order (D361)', KEYS.every((k) => [...panel(k).children].map((s) => s.querySelector('.set-head').id).join() === GROUPS[k].join()),
       KEYS.map((k) => k + ':' + [...panel(k).children].map((s) => s.querySelector('.set-head') && s.querySelector('.set-head').id).join('/')).join(' '));
     const secs = [...el('settingsDialog').querySelectorAll('.set-sec')];
-    ok('every section is in a panel, none left loose', secs.length === 11 && secs.every((s) => s.parentElement.classList.contains('set-panel')), String(secs.length));
+    ok('every section is in a panel, none left loose', secs.length === 12 && secs.every((s) => s.parentElement.classList.contains('set-panel')), String(secs.length));
     const CONTROLS = ['setProviderHover', 'setSubnetZones', 'setMapInk', 'setEngineer', 'setReportSummary', 'setReportTechnical', 'setTrailRecording', 'setTrailSimple',
       'setReporterName', 'setReporterPhone', 'setReporterEmail', 'setLockAfter', 'setLockCustom', 'setLockPinSet', 'setLockNow', 'setLockNoteOk',
       'setBackupDirPick', 'setBackupDirAuto', 'setTcAdd', 'setMonOn', 'setMonQuiet', 'setMonKeep', 'setSiteMonOn', 'setAlarmOn', 'setAlarmTest',

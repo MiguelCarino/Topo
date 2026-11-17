@@ -347,7 +347,7 @@ window.FakeTopoServer = function (opts = {}) {
         }
         if (rest === '/records' && method === 'POST') {
             if (mem.role !== 'owner' && mem.role !== 'provider') return err(403, 'forbidden');
-            if (!['act', 'quiet'].includes(body.kind) || body.author !== me.id) return err(403, 'forbidden');
+            if (!(['act', 'quiet'].includes(body.kind) || (body.kind === 'plan' && mem.role === 'owner')) || body.author !== me.id) return err(403, 'forbidden');
             fake.recordPosts = (fake.recordPosts || 0) + 1;
             return fake.putRecord(s, body);
         }

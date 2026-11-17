@@ -47,12 +47,12 @@ const MERGE_DELTA_MS = 250;
 const MERGE_VALUE_MAX = 160;
 // The kinds as the review names them: one, and the filter's many.
 const MERGE_KIND_ONE = {
-    nodes: 'Device', links: 'Cable', networks: 'Subnet', groups: 'Group', wifi: 'Wi-Fi network', providers: 'Provider', watch: 'Watched address', incidents: 'Problem report',
+    nodes: 'Device', links: 'Cable', networks: 'Subnet', groups: 'Group', wifi: 'Wi-Fi network', providers: 'Provider', watch: 'Watched address', lists: 'Address list', incidents: 'Problem report',
     annotations: 'Note', searches: 'Saved search', columns: 'Custom column', accepted: 'Accepted finding', pinned: 'Pinned finding',
     report: 'Report header', expectedLife: 'Expected life by type', tableView: 'Table view', ifaces: 'Interface'
 };
 const MERGE_KIND_MANY = {
-    nodes: 'Devices', links: 'Cables', networks: 'Subnets', groups: 'Groups', wifi: 'Wi-Fi networks', providers: 'Providers', watch: 'Watched addresses', incidents: 'Problem reports',
+    nodes: 'Devices', links: 'Cables', networks: 'Subnets', groups: 'Groups', wifi: 'Wi-Fi networks', providers: 'Providers', watch: 'Watched addresses', lists: 'Address lists', incidents: 'Problem reports',
     annotations: 'Notes', searches: 'Saved searches', columns: 'Custom columns', accepted: 'Accepted findings', pinned: 'Pinned findings',
     report: 'Report header', expectedLife: 'Expected life by type', tableView: 'Table view'
 };
@@ -77,6 +77,7 @@ const MERGE_REF_FIELDS = {
     groups: { parent: 'groups', providers: 'providers' },
     wifi: { network: 'networks' },
     watch: { via: 'nodes', group: 'groups', providers: 'providers' },
+    lists: { blocked: 'lists', allowed: 'lists' },
     incidents: { nodeIds: 'nodes', groupId: 'groups', watchIds: 'watch', routedTo: 'providers' }
 };
 // Labels for fields no descriptor list names.
@@ -113,6 +114,7 @@ function mergeFieldSet(kind) {
         wifi: typeof WIFI_FIELDS !== 'undefined' ? WIFI_FIELDS : null,
         providers: typeof PROVIDER_FIELDS !== 'undefined' ? PROVIDER_FIELDS : null,
         watch: typeof WATCH_FIELDS !== 'undefined' ? WATCH_FIELDS : null,
+        lists: typeof LIST_FIELDS !== 'undefined' ? LIST_FIELDS : null,
         searches: typeof SEARCH_FIELDS !== 'undefined' ? SEARCH_FIELDS : null,
         report: typeof REPORT_FIELDS !== 'undefined' ? REPORT_FIELDS : null
     };
