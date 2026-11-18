@@ -189,7 +189,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // ---- Another tab ----
     if (typeof BroadcastChannel === 'function') {
       const otherTab = new BroadcastChannel(LIBRARY_DB);
-      const until = async (cond) => { for (let i = 0; i < 40 && !cond(); i++) await tick(); return cond(); };
+      // Up to a second, in 10 ms steps, as tests/suites/revisions.js waits on
+      // its channel: another tab's message comes through the browser, not
+      // this page's timers, and forty 0 ms ticks were sometimes over before
+      // it arrived on a busy CI runner.
+      const until = async (cond) => { for (let i = 0; i < 100 && !cond(); i++) await wait(10); return cond(); };
       openLanding(false);
       sNext.disk.set('fromB', J(card('fromB', 'Added in another tab', 50)));
       otherTab.postMessage({ ids: ['fromB'] });
