@@ -205,7 +205,9 @@ window.addEventListener('load', () => { setTimeout(async () => {
     ok('centred in the view', near(at.x, midSel.x, 1e-6) && near(at.y, midSel.y, 1e-6), json([at, midSel]));
     state.camera.zoom = 1; applyCamera();
     centreOnNodes([getNode('a'), getNode('c')]);
-    const fitZ = Math.min((vb.width - 120) / 3000, (vb.height - 120) / 2000);
+    // Fitted to the view as it is now (vSel, shortened by the selection
+    // bar), not the full one measured before anything was selected (vb).
+    const fitZ = Math.min((vSel.width - 120) / 3000, (vSel.height - 120) / 2000);
     ok('and out, as far as it takes, for one that does not', near(state.camera.zoom, Math.max(0.1, fitZ), 1e-9) && state.camera.zoom < 0.7, json([state.camera.zoom, fitZ]));
     // Devices added under the document bar are off what is seen: the map is
     // refitted (addDevices, js/add.js), as for ones off the canvas.
