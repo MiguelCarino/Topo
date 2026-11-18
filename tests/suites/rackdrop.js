@@ -58,10 +58,15 @@ window.addEventListener('load', () => { setTimeout(async () => {
   const mid = (e) => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
   const ptr = (type, target, x, y, extra = {}) => target.dispatchEvent(new PointerEvent(type, Object.assign({ bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, pointerId: 9, pointerType: 'mouse', isPrimary: true }, extra)));
   // Press on `from`, move to (x, y) in two steps, and (unless held) let go.
+  // `y` may be a function, aimed again before the second step: the first can
+  // pass under the units' pane, which scrolls it a step (rvEdgeScroll), so a
+  // unit measured before it is no longer where it was.
   const drag = (from, x, y, hold, extra) => {
     const [x0, y0] = mid(from);
+    const aim = () => (typeof y === 'function' ? y() : y);
     ptr('pointerdown', from, x0, y0, extra);
-    ptr('pointermove', window, (x0 + x) / 2, (y0 + y) / 2, extra);
+    ptr('pointermove', window, (x0 + x) / 2, (y0 + aim()) / 2, extra);
+    y = aim();
     ptr('pointermove', window, x, y, extra);
     if (!hold) ptr('pointerup', window, x, y, extra);
   };
@@ -119,7 +124,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
     // unit near its edge scrolls it as a drag in should (rvBringDrag), so the
     // unit under it would no longer be U40 by the release.
     { const m = view().querySelector('.rk-main'), r = m.getBoundingClientRect(); m.scrollTop += yOf('front', 40) - (r.top + r.height / 2); }
-    drag(row('far'), xOf('front'), yOf('front', 40), true);
+    drag(row('far'), xOf('front'), () => yOf('front', 40), true);
     ok('over taken units, the outline is refused', ghost('front') && ghost('front').classList.contains('rk-refused'));
     ptr('pointerup', window, xOf('front'), yOf('front', 40));
     ok('let go, nothing is written', getNode('far').group === 'rk2' && place('far') === '3+1f' && _undoStack.length === undoAt);
