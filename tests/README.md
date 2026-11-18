@@ -3,8 +3,12 @@
     ./tests/run.sh            # every suite
     ./tests/run.sh wifi wave  # named suites
 
-Needs `chromium-browser` on PATH (override with `CHROME=...`). No npm, no build
-step — the app is static files and the tests run it as the browser would.
+Needs `chromium-browser` on PATH (override with `CHROME=...`). Current
+Chrome's headless mode does not keep `--virtual-time-budget`; Playwright's
+`chrome-headless-shell` does, and is what CI uses (`.github/workflows/tests.yml`):
+`CHROME="$(find ~/.cache/ms-playwright ~/Library/Caches/ms-playwright -name chrome-headless-shell -type f 2>/dev/null | head -1)" ./tests/run.sh`.
+
+No build step: the app is static files and the tests run it as the browser would.
 
 ## How it works
 
