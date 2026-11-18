@@ -74,7 +74,13 @@ window.addEventListener('load', () => { setTimeout(async () => {
     el('rackBody').style.flex = '0 0 1000px';
     renderRackView(true);
     const before = state.links.length, depth = _undoStack.length;
-    box('sw').scrollIntoView({ block: 'center' });
+    // The switches brought up to just under the pane's top band, by
+    // scrolling the pane alone. Not scrollIntoView: that also scrolls the
+    // map's container, and centres them in the window, which on a window this
+    // size puts them past the rack's own room at its foot and under the
+    // document bar floating there (css/app.css, .topo-docbar).
+    const bringUp = () => { const p = rvPane(), pr = p.getBoundingClientRect(); p.scrollTop += box('sw').getBoundingClientRect().top - (pr.top + 48); };
+    bringUp();
     clearToast();
     let seen = drag(port('sw', 'p5'), port('sw2', 'p7'));
     const made = state.links[state.links.length - 1];
@@ -125,11 +131,11 @@ window.addEventListener('load', () => { setTimeout(async () => {
     renderRackView(true);
     // Selecting may open the rail's drawer over the rack again on this narrow
     // window, and the earlier toasts may still be up: shut the drawer, and
-    // bring the two switches back into the middle of the pane, so the port
-    // aimed at is the element under the finger whatever ran before.
+    // bring the two switches back up in the pane, so the port aimed at is
+    // the element under the finger whatever ran before.
     if (ws.classList.contains('drawer-open')) document.querySelector('[data-ws-toggle]').click();
     clearToast();
-    box('sw').scrollIntoView({ block: 'center' });
+    bringUp();
     // A timer, not two animation frames: under the runner's virtual clock a
     // headless page does not always draw a frame before the budget runs out,
     // and a wait on one then never ends (the suite reported nothing about
