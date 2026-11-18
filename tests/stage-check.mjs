@@ -66,7 +66,10 @@ try {
   ok('and the report previews\' PDF engine with the html2canvas it loads on the first PDF',
      ['carino-pdf.js', 'carino-html2canvas.js'].every((f) => wf.includes(f)));
   const kb = wf.reduce((n, f) => n + statSync(join(web, f)).size, 0) / 1024;
-  ok('about 4 MB', kb > 2500 && kb < 8000, `${Math.round(kb)} KB`);
+  // A guard against staging something that is not the app (or losing half of
+  // it), not a budget: the app was about 4 MB at step 5 and is about 8 MB
+  // since step 9, 1.7 MB of it the four languages.
+  ok('about 8 MB', kb > 4000 && kb < 12000,`${Math.round(kb)} KB`);
 
   // ---- 3: a made-up source tree ----
   const fake = (name, html, drop = [], opts = {}) => {
