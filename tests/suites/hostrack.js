@@ -211,11 +211,17 @@ window.addEventListener('load', () => { setTimeout(async () => {
     [cx, cy] = mid(chip('vm2'));
     ptr('pointerdown', chip('vm2'), cx, cy);
     ptr('pointermove', window, cx, cy + 12);
-    const pr = pane.getBoundingClientRect();
-    ptr('pointermove', window, cx, pr.bottom - 8);
+    // Held at the pane's left edge, beside the units: the band scrolls
+    // wherever the pointer is across, and a box scrolled up under the
+    // pointer would take the chip when let go (as it should), which is not
+    // what is held here.
+    const pr = pane.getBoundingClientRect(), hx = pr.left + 2, hy = pr.bottom - 8;
+    ptr('pointermove', window, hx, hy);
     await new Promise((r) => setTimeout(r, 400));
     ok('a chip held at the foot of the pane scrolls it', pane.scrollTop > st0, `${st0} -> ${pane.scrollTop}`);
-    ptr('pointerup', window, cx, pr.bottom - 8);
+    const under = document.elementFromPoint(hx, hy);
+    ok('(held where no box is)', !!under && !under.closest('.rk-dev'), under && String(under.className));
+    ptr('pointerup', window, hx, hy);
     const st1 = pane.scrollTop;
     await new Promise((r) => setTimeout(r, 150));
     ok('and stops when let go', pane.scrollTop === st1 && getNode('vm2').host === 'hv');
