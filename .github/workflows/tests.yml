@@ -1,0 +1,72 @@
+# Tests: every pull request, and every push to main.
+#
+# main is production: GitHub Pages publishes it to topo.carino.systems as soon
+# as it moves, and every release is tagged from it. So a change goes on its
+# own branch, a pull request runs these checks, and it is merged only when
+# they pass (docs/SCOPE.md D463).
+#
+#   web     the stage check, then every suite in tests/suites (tests/run.sh)
+#           in Playwright's headless Chromium, which keeps the old headless
+#           mode run.sh needs (--dump-dom with --virtual-time-budget); the
+#           @realtime and @touch suites run on Playwright itself.
+#   server  the Go server's own tests, with the app's files staged into it
+#           the way desktop/sidecar.sh does before a build.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web suites
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Stage check
+        run: node tests/stage-check.mjs
+
+      - name: Playwright and its Chromium
+        working-directory: tests
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          shell="$(find ~/.cache/ms-playwright -path '*chromium_headless_shell-*' -name chrome-headless-shell -type f | head -1)"
+          [ -n "$shell" ] || { echo "::error::no chrome-headless-shell from Playwright"; exit 1; }
+          CHROME="$shell" ./tests/run.sh
+
+  server:
+    name: Server
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Go tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./desktop/stage.sh server/web/dist
+          touch server/web/dist/.gitkeep
+          cd server && go test ./...

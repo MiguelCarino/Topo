@@ -5106,6 +5106,33 @@ records.
   manager, an installer) is not built. On the runner the program's own
   tests run, not the shared files' (those run with the app). The Arm exe is
   cross-built, so it is packed and never run. Not signed.
+- **D463. Versions are year.month.patch, and main is production
+  (2026-11-17).** The standard for every Carino project that ships a file.
+  `v26.11.0` is the first release of November 2026 and `v26.11.1` the next
+  one that month, whether a planned release or a hotfix; the year is two
+  digits and nothing has a leading zero, because an MSI allows
+  255.255.65535 at most. A version says how old a copy is at a glance,
+  which matters for an app that sits offline on a comms-room PC, and nobody
+  has to count releases: the month gives the number. 0.0.3 is the last 0.x
+  release; 0.0.4 was never published and ships as 26.11.0. The Builds
+  workflow takes a tag `v<YY>.<M>.<P>` and refuses anything else; a manual
+  run with no tag builds the next release of this month (one more than the
+  highest published patch, or .0) and keeps filling that draft until it is
+  published. The older YY.M.RUN drafts (v26.11.6, v26.11.19) are not
+  releases and are never published.
+
+  Branches: `main` is the only long-lived branch and it is production
+  (GitHub Pages publishes it, and every release is tagged from it). A change
+  goes on a short branch (`feature/...`, `fix/...`), a pull request runs
+  `.github/workflows/tests.yml` (the stage check, every suite in
+  Playwright's headless Chromium, the Go server's tests), and it is merged
+  when they pass, then the branch is deleted. A release is a tag on main. A
+  hotfix for a release while main holds unreleased work is a branch from
+  that release's tag, tagged there (`v26.11.1`) and merged back into main.
+  No develop, release or staging branches: for one maintainer they only
+  add a second merge and drift, and Pages serves one branch; the draft
+  release is the staging step for the apps.
+
 - **D460. Until an owner opens the network, it checks nothing.** The first
   checks come from an owner's browser, and so does every change to them. A
   site nobody opens keeps its last checks. Having the box work them out
