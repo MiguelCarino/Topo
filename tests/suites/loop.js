@@ -140,7 +140,12 @@ window.addEventListener('load', async () => {
     const fresh = state.docId === K && !isKept() && !libraryEntry(K);
     PM.enterProviderMode(incId);
     const sessionOf = () => { try { return JSON.parse(sessionStorage.getItem('topo_provider_' + K) || 'null'); } catch (e) { return null; } };
-    const arrivalHeld = await until(() => !!(sessionOf() || {}).arrivalJson);
+    // Only a link's arrival puts the copy received into the session
+    // (enterProviderMode, js/providermode.js): a link for a report already
+    // visited is no arrival, so there is nothing to wait for, and waiting
+    // out the 10 s cost the suite the runner's 45 s budget.
+    const viaLink = !!(PM.state.session && PM.state.session.viaLink);
+    const arrivalHeld = viaLink && await until(() => !!(sessionOf() || {}).arrivalJson);
     // A reload: this tab's revisions are gone, only the session holds the copy received.
     RV.releaseRevisionStore(); RV._reset(); await RV.openRevisionStore(revAdapter);
     const storeMiss = !(await findBase([PM.state.session.arrivalRev]));
