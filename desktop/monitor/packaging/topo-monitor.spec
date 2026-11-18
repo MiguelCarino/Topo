@@ -25,7 +25,10 @@ systemctl enable --now topo-monitor.
 install -D -m 0755 %{topo_src}/topo-monitor %{buildroot}%{_bindir}/topo-monitor
 install -D -m 0644 %{topo_src}/topo-monitor.service %{buildroot}/usr/lib/systemd/system/topo-monitor.service
 install -D -m 0644 %{topo_src}/topo-monitor.sysusers %{buildroot}/usr/lib/sysusers.d/topo-monitor.conf
-install -d -m 0700 %{buildroot}%{_sharedstatedir}/topo-monitor
+# The path itself, not %{_sharedstatedir}: that macro is /var/lib on Fedora
+# and /usr/com where rpm keeps its own default (Debian and Ubuntu, where
+# the release is built), and the unit and the program look in /var/lib.
+install -d -m 0700 %{buildroot}/var/lib/topo-monitor
 install -D -m 0644 %{topo_src}/README.txt %{buildroot}%{_docdir}/topo-monitor/README.txt
 install -D -m 0644 %{topo_src}/LICENSE %{buildroot}%{_licensedir}/topo-monitor/LICENSE
 
@@ -58,6 +61,6 @@ exit 0
 %{_bindir}/topo-monitor
 /usr/lib/systemd/system/topo-monitor.service
 /usr/lib/sysusers.d/topo-monitor.conf
-%dir %attr(0700,topo-monitor,topo-monitor) %{_sharedstatedir}/topo-monitor
+%dir %attr(0700,topo-monitor,topo-monitor) /var/lib/topo-monitor
 %doc %{_docdir}/topo-monitor/README.txt
 %license %{_licensedir}/topo-monitor/LICENSE

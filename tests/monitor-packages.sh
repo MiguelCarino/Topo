@@ -32,6 +32,20 @@ unit_ok() {
         && grep -q '^CapabilityBoundingSet=$' "$1" && ! grep -q '^DynamicUser' "$1"
 }
 
+# systemd-analyze verify on a unit file: what it says about this unit must be
+# nothing. It also loads the machine's other units and reports their faults
+# (a build runner has some), so only the lines naming this file count; and
+# the user and group are not on this machine, nor the folder the unit waits
+# for, which is said and is no fault. What is left is printed.
+unit_verifies() {
+    local out left
+    out="$(systemd-analyze verify "$1" "$2" 2>&1)"
+    left="$(printf '%s\n' "$out" | grep -F "$(basename "$2")" | grep -v 'Unknown user\|Unknown group\|Failed to\|not found')"
+    [ -z "$left" ] && return 0
+    printf '       %s\n' "$left" | head -5
+    return 1
+}
+
 # ---- tar.gz ----
 t "tar: the file is there" test -f "$TAR"
 tfiles="$(tar -tvzf "$TAR" 2>/dev/null)"
@@ -47,7 +61,7 @@ t "tar: the README says how to enrol" grep -q 'topo-monitor enroll FILE' "$work/
 t "tar: the user unit runs it from ~/.local/bin" grep -q '^ExecStart=%h/.local/bin/topo-monitor run$' "$work/tar/$top/topo-monitor.user.service"
 if command -v systemd-analyze >/dev/null; then
     sed "s|^ExecStart=%h/.local/bin/topo-monitor|ExecStart=$work/tar/$top/topo-monitor|" "$work/tar/$top/topo-monitor.user.service" > "$work/topo-monitor-user.service"
-    t "tar: systemd-analyze verify accepts the user unit" bash -c 'out="$(systemd-analyze verify --user "$1" 2>&1)"; ! printf "%s" "$out" | grep -v "topo-monitor-user.service: Failed to\|Unit .* not found" | grep -q .' _ "$work/topo-monitor-user.service"
+    t "tar: systemd-analyze verify accepts the user unit" unit_verifies --user "$work/topo-monitor-user.service"
 fi
 # Packed twice from the same files, the archive is the same bytes.
 t "tar: no time of packing inside (the same files give the same archive)" bash -c '[ "$(TZ=UTC tar -tvzf "$1" | awk "{print \$4}" | sort -u)" = "2020-01-01" ]' _ "$TAR"
@@ -85,7 +99,7 @@ else
     t "rpm: the unit runs it as topo-monitor from /var/lib/topo-monitor, once enrolled, with no privilege" unit_ok "$unit"
     if command -v systemd-analyze >/dev/null; then
         sed "s|^ExecStart=/usr/bin/topo-monitor|ExecStart=$work/rpm/usr/bin/topo-monitor|" "$unit" > "$work/topo-monitor.service"
-        t "rpm: systemd-analyze verify accepts the unit" bash -c 'out="$(systemd-analyze verify "$1" 2>&1)"; ! printf "%s" "$out" | grep -v "Unknown user\|Unknown group\|topo-monitor.service: Failed to" | grep -q .' _ "$work/topo-monitor.service"
+        t "rpm: systemd-analyze verify accepts the unit" unit_verifies --system "$work/topo-monitor.service"
     fi
     t "rpm: the binary inside runs and says its version" runs "$work/rpm/usr/bin/topo-monitor"
     t "rpm: the same binary as the tar.gz" cmp -s "$work/rpm/usr/bin/topo-monitor" "$work/tar/$top/topo-monitor"
