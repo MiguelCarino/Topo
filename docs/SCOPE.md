@@ -5093,6 +5093,19 @@ records.
   Ubuntu 22.04 for a low floor). The release workflow gains a job that
   builds, checks and uploads them for x64 and Arm into the same draft.
   Nothing is signed. Not built: Windows, macOS, a container image.
+- **D462. A Windows build of the box (2026-11-17).** The same program for
+  Windows, as `topo-monitor-V-windows-ARCH.zip` (x64 and Arm): the exe, a
+  README and the licence, packed and checked by
+  `desktop/monitor/packaging/build-windows.ps1` on a Windows runner, since
+  this project's Linux machine has no Windows toolchain. The program needed
+  no change: its files go to `%LOCALAPPDATA%\topo-monitor`, and the checks
+  are the desktop app's, which already run on Windows. It is a
+  command-line program, not a Windows service: it runs while its window or
+  the task that started it does, and the README gives a scheduled task for
+  starting it with Windows. A real service (answering the service control
+  manager, an installer) is not built. On the runner the program's own
+  tests run, not the shared files' (those run with the app). The Arm exe is
+  cross-built, so it is packed and never run. Not signed.
 - **D460. Until an owner opens the network, it checks nothing.** The first
   checks come from an owner's browser, and so does every change to them. A
   site nobody opens keeps its last checks. Having the box work them out

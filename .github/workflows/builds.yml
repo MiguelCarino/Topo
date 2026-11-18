@@ -49,6 +49,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       skip: ${{ steps.existing.outputs.skip }}
       matrix: ${{ steps.platforms.outputs.matrix }}
+      monitor_matrix: ${{ steps.platforms.outputs.monitor_matrix }}
     steps:
       - uses: actions/checkout@v7
 
@@ -101,6 +102,18 @@ jobs:
           m=$(jq -c --arg p "$PLATFORMS" '[.[] | select($p == "all" or .arch == $p)]' <<< "$all")
           echo "Building: $(jq -r '[.[].name] | join(", ")' <<< "$m")"
           echo "matrix=$m" >> "$GITHUB_OUTPUT"
+          # topo-monitor (the job below): Linux on its own architecture, and
+          # Windows, whose Arm exe is cross-built on the x64 runner as the
+          # app's is (so it is built and packed, never run).
+          mon='[
+            {"name":"linux-x64","arch":"x64","pkg":"amd64","os":"ubuntu-22.04","target":"","args":"","run":true},
+            {"name":"linux-arm64","arch":"arm64","pkg":"arm64","os":"ubuntu-22.04-arm","target":"","args":"","run":true},
+            {"name":"windows-x64","arch":"x64","pkg":"x64","os":"windows-latest","target":"","args":"","run":true},
+            {"name":"windows-arm64","arch":"arm64","pkg":"arm64","os":"windows-latest","target":"aarch64-pc-windows-msvc","args":"--target aarch64-pc-windows-msvc","run":false}
+          ]'
+          mm=$(jq -c --arg p "$PLATFORMS" '[.[] | select($p == "all" or .arch == $p)]' <<< "$mon")
+          echo "Monitor: $(jq -r '[.[].name] | join(", ")' <<< "$mm")"
+          echo "monitor_matrix=$mm" >> "$GITHUB_OUTPUT"
 
       - name: Existing release for the tag
         id: existing
@@ -290,12 +303,12 @@ jobs:
           $setup = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           pwsh -File tests/desktop-installer-windows.ps1 -Setup $setup.FullName
 
-  # topo-monitor (desktop/monitor, docs/SCOPE.md D461): the site monitor with
-  # no screen, for Linux, as a tar.gz, an rpm and a deb into the same draft.
-  # It has no window system, so it needs none of the desktop job's packages.
-  # Each binary is built on its own architecture (a Rust binary is packed
-  # where it was built) and on 22.04, for the lowest glibc. A dispatch's
-  # x64 or Arm half builds only that one.
+  # topo-monitor (desktop/monitor, docs/SCOPE.md D461, D462): the site
+  # monitor with no screen, into the same draft. For Linux a tar.gz, an rpm
+  # and a deb; for Windows a zip. It has no window system, so it needs none
+  # of the desktop job's packages. A Linux binary is built on its own
+  # architecture (it is packed where it was built) and on 22.04, for the
+  # lowest glibc. A dispatch's x64 or Arm half builds only that half.
   monitor:
     name: Monitor ${{ matrix.name }}
     needs: release
@@ -303,49 +316,104 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((inputs.platforms || 'all') == 'x64' && '[{"name":"linux-x64","arch":"amd64","os":"ubuntu-22.04"}]' || ((inputs.platforms || 'all') == 'arm64' && '[{"name":"linux-arm64","arch":"arm64","os":"ubuntu-22.04-arm"}]' || '[{"name":"linux-x64","arch":"amd64","os":"ubuntu-22.04"},{"name":"linux-arm64","arch":"arm64","os":"ubuntu-22.04-arm"}]')) }}
+        include: ${{ fromJSON(needs.release.outputs.monitor_matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Check out with LF line endings
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - uses: actions/checkout@v7
 
+      # ring builds its Arm assembly on Windows with clang, as for the app.
+      - name: clang for ring on Windows Arm
+        if: matrix.name == 'windows-arm64'
+        shell: pwsh
+        run: |
+          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & "C:\Program Files\LLVM\bin\clang.exe" --version
+
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'desktop/monitor -> target'
           key: monitor-${{ matrix.name }}
 
+      # ---- Linux: the tar.gz, the rpm and the deb ----
       - name: Packaging tools
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential rpm cpio binutils
 
       # The crates are fetched here (the Makefile's own flags build offline).
       - name: Tests
+        if: runner.os == 'Linux'
         working-directory: desktop/monitor
         run: make test CARGOFLAGS=-j4
 
       - name: Packages, built and checked
+        if: runner.os == 'Linux'
         working-directory: desktop/monitor
         env:
           V: ${{ needs.release.outputs.version }}
-          ARCH: ${{ matrix.arch }}
+          ARCH: ${{ matrix.pkg }}
         run: make packages-test VERSION="$V" ARCH="$ARCH" CARGOFLAGS=-j4
+
+      # ---- Windows: the zip ----
+      # The program's own tests (its commands, its files, the checks it is
+      # sent). The app's shared files are tested where the app is; several of
+      # theirs open sockets a Windows runner answers differently.
+      - name: Tests (Windows)
+        if: runner.os == 'Windows' && matrix.run
+        working-directory: desktop/monitor
+        shell: bash
+        run: |
+          cargo test -j4 -- --skip checks:: --skip client:: --skip issues:: --skip monitor:: --skip monitorlink:: --skip servercrypto:: --skip stats::
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        working-directory: desktop/monitor
+        shell: bash
+        env:
+          TOPO_MONITOR_VERSION: ${{ needs.release.outputs.version }}
+          ARGS: ${{ matrix.args }}
+        run: cargo build --release -j4 $ARGS
+
+      - name: Zip, packed and checked (Windows)
+        if: runner.os == 'Windows'
+        working-directory: desktop/monitor
+        shell: pwsh
+        env:
+          V: ${{ needs.release.outputs.version }}
+          ARCH: ${{ matrix.pkg }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          $exe = if ($env:TARGET) { "target/$($env:TARGET)/release/topo-monitor.exe" } else { "target/release/topo-monitor.exe" }
+          ./packaging/build-windows.ps1 -Version $env:V -Arch $env:ARCH -Exe $exe
 
       # Into the draft the first job made; a re-run replaces what it uploaded.
       - name: Upload to the draft release
         uses: actions/github-script@v9
         env:
           RELEASE_ID: ${{ needs.release.outputs.release_id }}
+          WANT: ${{ runner.os == 'Windows' && '1' || '3' }}
         with:
           script: |
             const fs = require('fs');
             const path = require('path');
             const repo = { owner: context.repo.owner, repo: context.repo.repo };
             const release_id = Number(process.env.RELEASE_ID);
+            const want = Number(process.env.WANT);
             const dir = 'desktop/monitor/dist';
-            const files = fs.readdirSync(dir).filter((f) => /^topo-monitor[-_].*\.(tar\.gz|rpm|deb)$/.test(f));
-            if (files.length !== 3) core.setFailed(`expected a tar.gz, an rpm and a deb in ${dir}, found: ${files.join(', ') || 'none'}`);
+            const files = fs.readdirSync(dir).filter((f) => /^topo-monitor[-_].*\.(tar\.gz|rpm|deb|zip)$/.test(f));
+            if (files.length !== want) { core.setFailed(`expected ${want} package(s) in ${dir}, found: ${files.join(', ') || 'none'}`); return; }
             const assets = await github.paginate(github.rest.repos.listReleaseAssets, { ...repo, release_id, per_page: 100 });
             for (const name of files) {
               for (const a of assets.filter((x) => x.name === name)) {

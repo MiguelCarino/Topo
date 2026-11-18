@@ -1348,6 +1348,11 @@ service does not start, so enabling it early does no harm.
 From the `.tar.gz`, one user can run it with no administrator: its README
 says how (`~/.local/bin`, a user unit, `loginctl enable-linger`).
 
+On Windows it is a `.zip` holding `topo-monitor.exe`: the same commands,
+its files in `%LOCALAPPDATA%\topo-monitor` of the user who runs it. It is
+not a Windows service; the README inside gives a scheduled task that starts
+it with Windows.
+
 The unit gives the program no privilege. Ping is sent as an unprivileged
 ICMP echo, which Linux allows when the service's group is inside
 `net.ipv4.ping_group_range` (wide open on current systemd distributions);

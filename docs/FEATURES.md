@@ -300,7 +300,8 @@ Every page signed in to the server, the website included, sees the monitors' wor
 - **What it never does.** It asks for no device's password, scans nothing and discovers nothing: it asks the devices it was given whether they answer. It shows no alarm (nobody is there); outages reach people through the server.
 - **Its files** are in one folder only its user can read, its key among them, since a box with no session has no keychain. `topo-monitor forget` removes them; an owner revokes it in the members list like any monitor.
 - **Packages.** Each release carries it for Linux (x64 and Arm) as a `.tar.gz`, an `.rpm` and a `.deb`. The rpm and deb install a service that runs as its own user and starts only once the box is enrolled; the tar.gz is for one user with no administrator (docs/SERVER.md, "A monitor with no screen"). Not signed.
-- Built and run on Linux. Windows and macOS are not built.
+- **Windows.** Each release also carries it as a `.zip` for Windows (x64 and Arm): a command-line program, not a Windows service. Its README says how to start it with Windows through a scheduled task. Its files are in `%LOCALAPPDATA%\topo-monitor`.
+- Built and run on Linux; the Windows build is made and checked on a Windows build machine. macOS is not built here.
 
 ## Monitoring report
 
