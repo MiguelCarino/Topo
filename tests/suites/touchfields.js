@@ -68,7 +68,15 @@ window.addEventListener('load', () => { setTimeout(async () => {
     const cs = getComputedStyle(e);
     const c = document.createElement('canvas').getContext('2d');
     c.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-    return c.measureText(text).width + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+    return c.measureText(text).width;
+  };
+  // The width a field's text has: its box less its borders and padding,
+  // from the box itself. Not clientWidth: Chromium 159 leaves a text input's
+  // padding out of it (a 92px box with 1px borders and 4px padding says 82,
+  // not 90), so padding added to the text would be counted twice.
+  const room = (e) => {
+    const cs = getComputedStyle(e), px = (k) => parseFloat(cs[k]) || 0;
+    return e.getBoundingClientRect().width - px('borderLeftWidth') - px('borderRightWidth') - px('paddingLeft') - px('paddingRight');
   };
 
   // The device panel's widest values, set without events so nothing is
@@ -173,7 +181,7 @@ window.addEventListener('load', () => { setTimeout(async () => {
       await settle();
       surface('a switch\'s panel', rail);
       const vl = [...rail.querySelectorAll('.port-attr-vlan')].filter((e) => shown(e) && !e.value && e.placeholder);
-      const cut = vl.filter((e) => textW(e, e.placeholder) > e.clientWidth + 0.5).map((e) => e.placeholder + ' ' + Math.round(textW(e, e.placeholder)) + '/' + e.clientWidth);
+      const cut = vl.filter((e) => textW(e, e.placeholder) > room(e) + 0.5).map((e) => e.placeholder + ' ' + Math.round(textW(e, e.placeholder)) + '/' + Math.round(room(e)));
       ok('a port\'s VLAN box shows its hint whole', vl.length > 0 && !cut.length, vl.length + ' ' + cut.slice(0, 3).join(', '));
     }
 
